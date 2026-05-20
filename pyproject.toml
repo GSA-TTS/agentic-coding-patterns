@@ -3,7 +3,7 @@ name = "agentic-coding-patterns-validation"
 version = "0.1.0"
 description = "Validation helpers for the agentic-coding-patterns repository"
 requires-python = ">=3.12"
-license = {text = "CC0-1.0"}
+license = "CC0-1.0"
 dependencies = [
     "PyYAML==6.0.3",
     "jsonschema==4.26.0",
@@ -16,6 +16,13 @@ dev = [
     "ruff==0.15.12",
     "pre-commit==4.6.0",
 ]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["scripts"]
 
 [tool.ruff]
 line-length = 100
