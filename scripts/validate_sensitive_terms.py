@@ -24,7 +24,6 @@ SENSITIVE_PATTERNS = [
     (r"(?:api_key|apikey)\s*=\s*['\"]?[^'\"\\s]{16,}", "API key"),
     (r"(?:token|auth_token)\s*=\s*['\"]?[^'\"\\s]{16,}", "Auth token"),
     (r"secret\s*=\s*['\"]?[^'\"\\s]{16,}", "Secret value"),
-
     # Sensitive content markers
     (r"\.gov\s+internal-only", "Internal-only government content"),
     (r"\bCUI\b", "Controlled Unclassified Information marker"),
@@ -34,9 +33,7 @@ SENSITIVE_PATTERNS = [
 ]
 
 # File extensions to scan
-SCANNABLE_EXTENSIONS = {
-    ".md", ".py", ".json", ".jsonc", ".yaml", ".yml", ".toml", ".txt", ".sh"
-}
+SCANNABLE_EXTENSIONS = {".md", ".py", ".json", ".jsonc", ".yaml", ".yml", ".toml", ".txt", ".sh"}
 
 # Paths to skip
 SKIP_PATHS = {".git", "__pycache__", "venv", "env", ".venv", "node_modules"}
@@ -69,8 +66,9 @@ def scan_file(path: Path) -> list[tuple[int, str, str]]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Scan for sensitive terms")
-    parser.add_argument("--root", type=Path, default=Path.cwd(),
-                        help="Repository root (default: current directory)")
+    parser.add_argument(
+        "--root", type=Path, default=Path.cwd(), help="Repository root (default: current directory)"
+    )
     args = parser.parse_args()
 
     root = args.root

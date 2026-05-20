@@ -59,13 +59,15 @@ def find_patterns(root: Path) -> dict[str, list[dict]]:
 
             if frontmatter:
                 rel_path = skill_file.relative_to(root)
-                patterns[pattern_type].append({
-                    "path": str(rel_path),
-                    "id": frontmatter.get("id", "unknown"),
-                    "title": frontmatter.get("title", "Untitled"),
-                    "type": frontmatter.get("type", pattern_type),
-                    "status": frontmatter.get("status", "experimental"),
-                })
+                patterns[pattern_type].append(
+                    {
+                        "path": str(rel_path),
+                        "id": frontmatter.get("id", "unknown"),
+                        "title": frontmatter.get("title", "Untitled"),
+                        "type": frontmatter.get("type", pattern_type),
+                        "status": frontmatter.get("status", "experimental"),
+                    }
+                )
 
         # Also check for AGENTS.md in agents/
         if dir_name == "agents":
@@ -75,13 +77,15 @@ def find_patterns(root: Path) -> dict[str, list[dict]]:
 
                 if frontmatter:
                     rel_path = agents_file.relative_to(root)
-                    patterns[pattern_type].append({
-                        "path": str(rel_path),
-                        "id": frontmatter.get("id", "unknown"),
-                        "title": frontmatter.get("title", "Untitled"),
-                        "type": "agent",
-                        "status": frontmatter.get("status", "experimental"),
-                    })
+                    patterns[pattern_type].append(
+                        {
+                            "path": str(rel_path),
+                            "id": frontmatter.get("id", "unknown"),
+                            "title": frontmatter.get("title", "Untitled"),
+                            "type": "agent",
+                            "status": frontmatter.get("status", "experimental"),
+                        }
+                    )
 
     return patterns
 
@@ -112,8 +116,9 @@ def generate_index(root: Path) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generate INDEX.yaml")
-    parser.add_argument("--check", action="store_true",
-                        help="Check if INDEX.yaml is up to date (don't write)")
+    parser.add_argument(
+        "--check", action="store_true", help="Check if INDEX.yaml is up to date (don't write)"
+    )
     args = parser.parse_args()
 
     root = Path.cwd()

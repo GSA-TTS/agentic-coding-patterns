@@ -2,22 +2,24 @@
 name = "agentic-coding-patterns-validation"
 version = "0.1.0"
 description = "Validation helpers for the agentic-coding-patterns repository"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = {text = "CC0-1.0"}
 dependencies = [
-    "PyYAML>=6.0.0",
-    "jsonschema>=4.20.0",
+    "PyYAML==6.0.3",
+    "jsonschema==4.26.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.4.0",
-    "ruff>=0.1.0",
+    "pytest==9.0.3",
+    "pytest-cov==6.0.0",
+    "ruff==0.15.12",
+    "pre-commit==4.6.0",
 ]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]

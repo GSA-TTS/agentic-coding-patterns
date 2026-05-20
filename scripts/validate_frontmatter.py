@@ -71,8 +71,9 @@ def validate_file(file_path: Path, schema: dict[str, Any]) -> tuple[bool, list[s
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate pattern frontmatter")
-    parser.add_argument("--root", type=Path, default=Path.cwd(),
-                        help="Repository root (default: current directory)")
+    parser.add_argument(
+        "--root", type=Path, default=Path.cwd(), help="Repository root (default: current directory)"
+    )
     args = parser.parse_args()
 
     root = args.root
