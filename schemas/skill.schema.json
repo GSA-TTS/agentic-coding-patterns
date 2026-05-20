@@ -1,0 +1,204 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gsa-tts.github.io/agentic-coding-patterns/schemas/skill.schema.json",
+  "title": "Agentic Coding Pattern Schema",
+  "description": "Schema for validating agentic coding patterns (skills, prompts, workflows, lessons)",
+  "type": "object",
+  "required": [
+    "id",
+    "version",
+    "title",
+    "type",
+    "status",
+    "owners",
+    "primary_personas",
+    "requires",
+    "output",
+    "quality_gates"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique pattern identifier in kebab-case",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "version": {
+      "type": "string",
+      "description": "Semantic version (MAJOR.MINOR.PATCH)",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+    },
+    "title": {
+      "type": "string",
+      "description": "Human-readable title",
+      "minLength": 3,
+      "maxLength": 100
+    },
+    "type": {
+      "type": "string",
+      "description": "Pattern type classification",
+      "enum": ["skill", "prompt", "workflow", "agent", "lesson"]
+    },
+    "status": {
+      "type": "string",
+      "description": "Pattern lifecycle status",
+      "enum": ["experimental", "recommended", "deprecated"]
+    },
+    "owners": {
+      "type": "array",
+      "description": "GitHub handles or teams responsible",
+      "items": {"type": "string"},
+      "minItems": 1
+    },
+    "primary_personas": {
+      "type": "array",
+      "description": "Target audience personas",
+      "items": {"type": "string"},
+      "minItems": 1
+    },
+    "requires": {
+      "type": "object",
+      "description": "Pattern dependencies",
+      "required": ["anchors"],
+      "properties": {
+        "anchors": {
+          "type": "array",
+          "description": "Anchor patterns to prepend (always loaded first)",
+          "items": {"type": "string"},
+          "default": []
+        },
+        "skills": {
+          "type": "array",
+          "description": "Skills that can be invoked during execution",
+          "items": {"type": "string"},
+          "default": []
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "description": "Output format and contract",
+      "required": ["format", "contract"],
+      "properties": {
+        "format": {
+          "type": "string",
+          "enum": ["markdown", "json", "yaml", "text", "unknown"],
+          "default": "markdown"
+        },
+        "contract": {
+          "type": "object",
+          "required": ["required_sections", "prohibited_content"],
+          "properties": {
+            "required_sections": {
+              "type": "array",
+              "items": {"type": "string"}
+            },
+            "prohibited_content": {
+              "type": "array",
+              "items": {"type": "string"},
+              "minItems": 1
+            },
+            "max_length": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      }
+    },
+    "quality_gates": {
+      "type": "object",
+      "description": "Quality requirements for output",
+      "required": ["readability_max_grade", "citations_required"],
+      "properties": {
+        "readability_max_grade": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 18
+        },
+        "citations_required": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "portability": {
+      "type": "object",
+      "description": "Platform compatibility flags",
+      "properties": {
+        "opencode": {"type": "boolean", "default": true},
+        "cursor": {"type": "boolean", "default": true},
+        "claude_projects": {"type": "boolean", "default": true},
+        "chatgpt": {"type": "boolean", "default": true},
+        "generic_llm": {"type": "boolean", "default": true}
+      }
+    },
+    "triggers": {
+      "type": "array",
+      "description": "Keywords suggesting pattern use",
+      "items": {"type": "string"}
+    },
+    "tags": {
+      "type": "array",
+      "description": "Keywords for discoverability",
+      "items": {"type": "string"}
+    },
+    "scope": {
+      "type": "object",
+      "properties": {
+        "intended_use": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "exclusions": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "compliance": {
+      "type": "object",
+      "properties": {
+        "frameworks": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "nist_controls": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z]{2}-\\d+.*$"
+          }
+        }
+      }
+    },
+    "deprecated": {
+      "type": "object",
+      "required": ["as_of", "reason"],
+      "properties": {
+        "as_of": {"type": "string", "format": "date"},
+        "replaces_with": {"type": "string"},
+        "reason": {"type": "string"},
+        "migration_notes": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "changelog": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["version", "date", "summary"],
+        "properties": {
+          "version": {"type": "string"},
+          "date": {"type": "string", "format": "date"},
+          "change_type": {
+            "type": "string",
+            "enum": ["major", "minor", "patch"]
+          },
+          "summary": {"type": "string"}
+        }
+      }
+    }
+  }
+}

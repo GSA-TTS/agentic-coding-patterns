@@ -1,0 +1,82 @@
+schema_version: '1.0'
+generated: '2026-05-20'
+repo: GSA-TTS/agentic-coding-patterns
+description: Community patterns for agentic coding
+patterns:
+  skills:
+  - path: skills/documentation-review/SKILL.md
+    id: documentation-review
+    title: Documentation Review
+    type: skill
+    status: experimental
+  - path: skills/dependency-analysis/SKILL.md
+    id: dependency-analysis
+    title: Dependency Security Analysis
+    type: skill
+    status: experimental
+  - path: skills/test-generation/SKILL.md
+    id: test-generation
+    title: Test Case Generation
+    type: skill
+    status: experimental
+  - path: skills/secure-code-review/SKILL.md
+    id: secure-code-review
+    title: Secure Code Review
+    type: skill
+    status: experimental
+  prompts:
+  - path: prompts/review/qa-round/SKILL.md
+    id: qa-round
+    title: QA Round Review
+    type: prompt
+    status: experimental
+  - path: prompts/planning/implementation-plan/SKILL.md
+    id: implementation-plan
+    title: Implementation Plan Generator
+    type: prompt
+    status: experimental
+  - path: prompts/security/safe-code-review/SKILL.md
+    id: safe-code-review
+    title: Security-Focused Code Review
+    type: prompt
+    status: experimental
+  agents:
+  - path: agents/documentation/AGENTS.md
+    id: documentation-agent
+    title: Documentation Agent Instructions
+    type: agent
+    status: experimental
+  - path: agents/general/AGENTS.md
+    id: general-agent
+    title: General Agent Instructions
+    type: agent
+    status: experimental
+  - path: agents/security-review/AGENTS.md
+    id: security-review-agent
+    title: Security Review Agent Instructions
+    type: agent
+    status: experimental
+  workflows:
+  - path: workflows/issue-to-merge-request/SKILL.md
+    id: issue-to-merge-request
+    title: Issue to Merge Request Workflow
+    type: workflow
+    status: experimental
+  - path: workflows/qa-round/SKILL.md
+    id: qa-workflow
+    title: QA Round Workflow
+    type: workflow
+    status: experimental
+  lessons:
+  - path: lessons-learned/example-agentic-session/SKILL.md
+    id: example-agentic-session
+    title: Example Agentic Coding Session
+    type: lesson
+    status: experimental
+stats:
+  total_patterns: 13
+  skills: 4
+  prompts: 3
+  agents: 3
+  workflows: 2
+  lessons: 1
