@@ -1,0 +1,26 @@
+# Gitleaks repository-specific configuration
+# https://github.com/gitleaks/gitleaks
+
+[allowlist]
+description = "Allow example API keys in documentation"
+
+# Documented example secrets (educational purposes)
+# These are fake keys used to show what NOT to do
+regexes = [
+  '''msk_live_abc123''',       # docs/getting-started.md:163 - Example bad practice
+  '''msk_live_abcd1234xyz''',  # docs/safety-guidance.md:120 - Example bad practice
+]
+
+# Documentation paths with educational examples
+paths = [
+  '''docs/getting-started\.md''',
+  '''docs/safety-guidance\.md''',
+]
+
+# Patterns that explain security issues need example secrets
+# These are clearly marked as "NEVER do this" examples
+stopwords = [
+  '''# NEVER hardcode''',
+  '''NEVER hardcode''',
+  '''Example bad practice''',
+]
