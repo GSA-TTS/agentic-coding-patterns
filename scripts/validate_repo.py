@@ -17,12 +17,16 @@ def run_validator(script: str, description: str) -> bool:
     print(f"Running: {description}")
     print(f"{'=' * 60}")
 
-    result = subprocess.run(
-        [sys.executable, script],
-        cwd=Path(__file__).parent.parent,
-    )
-
-    return result.returncode == 0
+    try:
+        result = subprocess.run(
+            [sys.executable, script],
+            cwd=Path(__file__).parent.parent,
+            timeout=60,  # Prevent indefinite hangs
+        )
+        return result.returncode == 0
+    except subprocess.TimeoutExpired:
+        print("✗ Validator timed out after 60 seconds")
+        return False
 
 
 def main() -> int:
