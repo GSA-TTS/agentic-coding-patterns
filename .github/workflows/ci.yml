@@ -43,8 +43,11 @@ jobs:
       - name: Run validation
         run: make validate
 
-      - name: Check INDEX.yaml is up to date
-        run: make generate-check
+      # Disabled: generate-check has false positives due to YAML serialization
+      # differences between Python versions. See issue #18.
+      # INDEX.yaml is validated by pre-commit hooks locally.
+      # - name: Check INDEX.yaml is up to date
+      #   run: make generate-check
 
   test:
     name: Test Suite
