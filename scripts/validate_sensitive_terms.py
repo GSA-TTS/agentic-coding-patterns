@@ -62,18 +62,18 @@ def is_safe_context(line: str) -> bool:
     # Negative documentation patterns (what NOT to include)
     safe_patterns = [
         r"^\s*\d+\.\s+no ",  # Numbered lists: "4. No secrets, PII, or CUI"
-        r"^no ",             # Direct negation
-        r"^❌ ",             # Prohibited marker
-        r"^\s*-\s*❌",       # Bullet with prohibited marker
-        r"do not include",   # Instruction to avoid
-        r"never include",    # Strong negation
-        r"prohibited",       # Prohibited content lists
-        r"^\|\s*\w+",        # Markdown table cells (all table rows)
-        r"minimum prohibited content",           # Documentation of prohibited items
-        r"^\s*-\s*\[ \]",    # Checklist items
+        r"^no ",  # Direct negation
+        r"^❌ ",  # Prohibited marker
+        r"^\s*-\s*❌",  # Bullet with prohibited marker
+        r"do not include",  # Instruction to avoid
+        r"never include",  # Strong negation
+        r"prohibited",  # Prohibited content lists
+        r"^\|\s*\w+",  # Markdown table cells (all table rows)
+        r"minimum prohibited content",  # Documentation of prohibited items
+        r"^\s*-\s*\[ \]",  # Checklist items
         r"^\s*-\s+(customer data|cui,|pii,)",  # Bullet lists of prohibited items
-        r"\(r\".*\"",        # Regex pattern definitions (code)
-        r"^\s*(#|if|r\")",   # Python comments, conditionals, raw strings (code)
+        r"\(r\".*\"",  # Regex pattern definitions (code)
+        r"^\s*(#|if|r\")",  # Python comments, conditionals, raw strings (code)
         r"actual user data",  # Documentation about what not to use
         r"data breach.*exposure",  # Security incident examples
     ]
