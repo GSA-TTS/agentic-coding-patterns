@@ -32,7 +32,7 @@ The **agentic coding workspace** consists of three complementary GSA-TTS reposit
 │   - SBX execution setup         │
 │   - USAi endpoint config        │
 │   - Credential injection        │
-│   - FIPS Low (pilot scope)      │
+│   - FIPS Low (local dev)        │
 └─────────────────────────────────┘
 ```
 
@@ -171,7 +171,7 @@ If you find patterns diverging between repos:
 |------------|------------|------------|-------|
 | Playbook | Moderate | ATO-ready guidance | Full SDLC |
 | Patterns | N/A (public) | Public patterns | Reusable patterns |
-| Quickstart | Low | Pre-ATO (pilot) | Local dev only |
+| Quickstart | Low | Pre-ATO (development) | Local dev only |
 
 **When working across repos:** Default to **FIPS Moderate** constraints unless explicitly scoped to local development.
 

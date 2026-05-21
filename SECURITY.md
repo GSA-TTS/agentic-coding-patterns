@@ -1,37 +1,66 @@
 # Security Policy
 
-## Reporting Security Issues
+## Scope
 
-**Do not report security vulnerabilities through public GitHub issues.**
+This repository is part of the **Agentic Coding Capability Assessment** — an internal GSA initiative. It contains community-contributed patterns, prompts, skills, and lessons learned for agentic coding practices.
 
-If you discover a security vulnerability in a pattern or in the repository infrastructure:
+> **Note:** Patterns are informational and not authoritative GSA policy. Review and test all content before production use.
 
-1. **For pattern content issues:** Email security@gsa.gov with:
-   - Description of the issue
-   - Steps to reproduce
-   - Potential impact
-   - Suggested fix (if you have one)
+## Reporting and Fixing Security Issues
 
-2. **For repository infrastructure issues:** Follow the same process
+This is an **internal assessment repository** with trusted contributors. The appropriate response to most issues is to fix them directly.
 
-We will acknowledge receipt within 3 business days and provide a more detailed response within 7 business days.
+### For Pattern Content Issues
+
+If you discover a security issue in a pattern (unsafe practices, potential for harm, missing warnings):
+
+1. **Submit a PR to fix it** — This is the preferred approach for internal repos
+2. **Open an issue** if you're unsure how to fix it or want to discuss first
+3. **Ask in the agentic-coding Slack channel** if you have questions or need help coordinating
+
+Include:
+- Which pattern is affected
+- Description of the security concern
+- Potential impact
+- Suggested fix (if you have one)
+
+### For Repository Infrastructure Issues
+
+If you find a security issue with the repository infrastructure (validation scripts, CI/CD, dependencies):
+
+1. **Submit a PR to fix it** — You have access, so fix it directly when possible
+2. **Open an issue** to track the problem if you need help or it requires discussion
+3. **Contact channel admins** if you're unsure about the right approach
+
+Since this is an internal repository, formal security advisories are not required. Use your judgment — if something seems sensitive, discuss with channel admins before posting details publicly.
+
+### For GSA Platform Issues (Outside This Repo)
+
+For security concerns related to GSA systems or infrastructure outside the scope of this repository:
+
+- **Follow your normal GSA security reporting processes**
+- **Submit a ticket** or **email GSA security** as appropriate for your organization
+
+These repos are for the assessment — platform and infrastructure security follows standard GSA procedures.
 
 ## Security Best Practices for Patterns
 
 All patterns in this repository MUST:
 
 ### 1. No Sensitive Data
-- ❌ No secrets, API keys, tokens, passwords
-- ❌ No PII (Personally Identifiable Information)
-- ❌ No CUI (Controlled Unclassified Information)
-- ❌ No internal URLs or hostnames
-- ❌ No customer data
+
+Patterns must never include:
+- ❌ Secrets, API keys, tokens, passwords
+- ❌ PII (Personally Identifiable Information)
+- ❌ CUI (Controlled Unclassified Information)
+- ❌ Internal URLs or hostnames
+- ❌ Customer data or production data
 
 ### 2. Placeholder Use
-- ✅ Use `<YOUR_API_KEY>` style placeholders
-- ✅ Use `example.com` for domains
-- ✅ Use `user@example.com` for emails
-- ✅ Document what values should replace placeholders
+- Use `<YOUR_API_KEY>` style placeholders
+- Use `example.com` for domains
+- Use `user@example.com` for emails
+- Document what values should replace placeholders
 
 ### 3. Input Validation Guidance
 Patterns that accept user input MUST:
@@ -59,25 +88,13 @@ All contributions are automatically scanned for:
 - Sensitive terms (via `scripts/validate_sensitive_terms.py`)
 - Schema compliance (via `scripts/validate_frontmatter.py`)
 
-Note: These are hygiene checks, not comprehensive secret scanners. Use dedicated tools (gitleaks, truffleHog) for production.
+Run `make validate` before submitting contributions.
 
 ## Pattern Review
 
-Patterns marked `experimental` require self-review.
-Patterns promoted to `recommended` require peer review with security focus.
-
-## Responsible Disclosure
-
-If a pattern contains a security issue:
-1. **Do not create a public issue**
-2. Follow the reporting process above
-3. We will work with you to address the issue
-4. Credit will be given for responsible disclosure
-
-## Updates
-
-This policy may be updated. Check back periodically or watch the repository for changes.
+- Patterns marked `experimental` require self-review
+- Patterns promoted to `recommended` require peer review with security focus
 
 ---
 
-**Last Updated:** 2026-05-20
+**Last Updated:** 2026-05-21

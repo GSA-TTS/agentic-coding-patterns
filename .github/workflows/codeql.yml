@@ -12,6 +12,8 @@ jobs:
   analyze:
     name: Analyze Python Code
     runs-on: ubuntu-latest
+    # Continue even if SARIF upload fails (Code Security may not be enabled)
+    continue-on-error: true
     permissions:
       security-events: write
       contents: read
