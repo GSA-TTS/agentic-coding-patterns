@@ -68,10 +68,29 @@ make generate
 
 ### For Users
 
+**Human users:**
 1. Browse available patterns in `INDEX.yaml` or by directory
 2. Copy pattern directory to your project
 3. Adapt frontmatter and content to your needs
 4. Review and test before production use
+
+**AI agents:**
+1. Parse `INDEX.yaml` for pattern discovery (see [AI Agent Guide](docs/AI-AGENT-GUIDE.md))
+2. Filter patterns by `type`, `status`, `tags`, and `portability` flags
+3. Read frontmatter to understand input/output contracts
+4. Validate against `prohibited_content` before using
+
+**INDEX.yaml structure:**
+```yaml
+schema_version: "1.0"
+repo: GSA-TTS/agentic-coding-patterns
+patterns:
+  skills: [{id, path, title, status, type}, ...]
+  prompts: [...]
+  agents: [...]
+stats:
+  total_patterns: 13
+```
 
 ## Content Status Levels
 
