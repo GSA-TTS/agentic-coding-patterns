@@ -67,6 +67,7 @@ def is_safe_context(line: str) -> bool:
         r"^\s*-\s*❌",  # Bullet with prohibited marker
         r"do not include",  # Instruction to avoid
         r"never include",  # Strong negation
+        r"never allow",  # Strong prohibition
         r"prohibited",  # Prohibited content lists
         r"^\|\s*\w+",  # Markdown table cells (all table rows)
         r"minimum prohibited content",  # Documentation of prohibited items
@@ -76,6 +77,7 @@ def is_safe_context(line: str) -> bool:
         r"^\s*(#|if|r\")",  # Python comments, conditionals, raw strings (code)
         r"actual user data",  # Documentation about what not to use
         r"data breach.*exposure",  # Security incident examples
+        r"(personally identifiable information)",  # Full phrase explanation
     ]
 
     return any(re.search(pattern, line_lower) for pattern in safe_patterns)
