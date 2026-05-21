@@ -140,6 +140,12 @@ def main() -> int:
         if existing_data != index_data:
             print("✗ INDEX.yaml is out of date")
             print("  Run: make generate")
+            print("\n  Debug: Differences detected")
+            print(f"  Existing keys: {set(existing_data.keys())}")
+            print(f"  Generated keys: {set(index_data.keys())}")
+            if set(existing_data.keys()) != set(index_data.keys()):
+                print(f"  Missing keys: {set(index_data.keys()) - set(existing_data.keys())}")
+                print(f"  Extra keys: {set(existing_data.keys()) - set(index_data.keys())}")
             return 1
 
         print("✓ INDEX.yaml is up to date")
