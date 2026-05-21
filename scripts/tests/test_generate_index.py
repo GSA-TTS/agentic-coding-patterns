@@ -1,6 +1,5 @@
 """Tests for generate_index.py"""
 
-
 import pytest
 
 from scripts.generate_index import extract_frontmatter, find_patterns, generate_index

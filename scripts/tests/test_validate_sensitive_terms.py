@@ -1,7 +1,5 @@
 """Tests for validate_sensitive_terms.py"""
 
-
-
 from scripts.validate_sensitive_terms import (
     is_safe_context,
     scan_file,
