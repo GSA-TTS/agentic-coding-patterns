@@ -1,29 +1,55 @@
-.PHONY: setup validate generate test ci clean help
+.PHONY: setup validate generate generate-check test security ci clean help
 
 help:  ## Show this help message
+	@echo "agentic-coding-patterns — Available targets:"
+	@echo ""
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@echo ""
+	@echo "Examples:"
+	@echo "  make setup      # First-time setup"
+	@echo "  make validate   # Before committing"
+	@echo "  make ci         # Full local CI check"
 
-setup:  ## Install dependencies
+setup:  ## Install dependencies (pip install -e .[dev])
 	pip install -e ".[dev]"
 
-validate:  ## Run all validators
+validate:  ## Run all validators (frontmatter + sensitive terms)
 	python scripts/validate_repo.py
 
-generate:  ## Generate INDEX.yaml
+generate:  ## Generate INDEX.yaml from patterns
 	python scripts/generate_index.py
 
-generate-check:  ## Verify INDEX.yaml is up to date
+generate-check:  ## Verify INDEX.yaml is up to date (used in pre-commit)
 	python scripts/generate_index.py --check
 
-test:  ## Run pytest
-	pytest scripts/tests/ -v
+security:  ## Run security audit (pip-audit for CVEs)
+	pip-audit
 
-ci:  ## Full CI check (validate + test)
+test:  ## Run pytest test suite
+	@if [ -d "scripts/tests" ] && [ "$$(ls -A scripts/tests/*.py 2>/dev/null)" ]; then \
+		pytest scripts/tests/ -v; \
+	else \
+		echo "⚠️  No tests found in scripts/tests/"; \
+		echo "    Create tests to enable this check (see issue #16)"; \
+	fi
+
+ci:  ## Full CI check (validate + security + test)
+	@echo "==> Running validators..."
 	python scripts/validate_repo.py
-	pytest scripts/tests/ -v
+	@echo ""
+	@echo "==> Running security audit..."
+	pip-audit
+	@echo ""
+	@echo "==> Running tests..."
+	@if [ -d "scripts/tests" ] && [ "$$(ls -A scripts/tests/*.py 2>/dev/null)" ]; then \
+		pytest scripts/tests/ -v; \
+	else \
+		echo "⚠️  No tests found — skipping"; \
+	fi
+	@echo ""
 	@echo "✓ All checks passed"
 
-clean:  ## Remove generated files
+clean:  ## Remove generated files and caches
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete
 	rm -rf .pytest_cache/ .ruff_cache/

@@ -40,6 +40,9 @@ jobs:
       - name: Ruff format check
         run: ruff format --check scripts/
 
+      - name: Security audit dependencies
+        run: pip-audit
+
       - name: Run validation
         run: make validate
 
