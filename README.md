@@ -46,15 +46,15 @@ Content here is a starting point for reuse and review. **It is not policy unless
 
 ```
 agentic-coding-patterns/
-├── 🛠️  skills/              # Reusable procedures (code review, testing, documentation)
-├── 💬 prompts/             # Standalone prompts for specific tasks
-├── 🤖 agents/              # Agent instruction patterns (AGENTS.md)
-├── 🔄 workflows/           # Multi-step end-to-end processes
-├── 📚 lessons-learned/     # Community experiences and retrospectives
-├── 📄 templates/           # Templates for creating new patterns
-├── 🔍 examples/            # Tool-specific integration examples
-├── 📐 schemas/             # JSON Schemas for validation
-└── 📖 docs/                # Documentation and guides
+├── skills/              # Reusable procedures (code review, testing, documentation)
+├── prompts/             # Standalone prompts for specific tasks
+├── agents/              # Agent instruction patterns (AGENTS.md)
+├── workflows/           # Multi-step end-to-end processes
+├── lessons-learned/     # Community experiences and retrospectives
+├── templates/           # Templates for creating new patterns
+├── examples/            # Tool-specific integration examples
+├── schemas/             # JSON Schemas for validation
+└── docs/                # Documentation and guides
 ```
 
 ## Quick Start
