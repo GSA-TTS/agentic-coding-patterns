@@ -8,7 +8,6 @@ Usage:
 
 import argparse
 import sys
-from datetime import datetime
 from pathlib import Path
 
 import yaml
@@ -99,7 +98,6 @@ def generate_index(root: Path) -> dict:
 
     return {
         "schema_version": "1.0",
-        "generated": datetime.utcnow().strftime("%Y-%m-%d"),
         "repo": "GSA-TTS/agentic-coding-patterns",
         "description": "Community patterns for agentic coding",
         "patterns": patterns,
