@@ -153,6 +153,7 @@ def main() -> int:
             print("  Run: make generate")
             # Deep comparison to find differences
             import json
+
             print("\n  Existing (normalized):")
             print(json.dumps(existing_normalized, indent=2, default=str)[:500])
             print("\n  Generated (normalized):")
