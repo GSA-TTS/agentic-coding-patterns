@@ -135,17 +135,22 @@ def main() -> int:
         existing_content = index_path.read_text()
         existing_data = yaml.safe_load(existing_content)
 
-        # Compare parsed data structures, not raw text
-        # This avoids false positives from formatting differences
-        if existing_data != index_data:
+        # Normalize both data structures for comparison
+        # YAML key ordering can differ between Python versions
+        def normalize(d):
+            """Recursively sort dict keys for consistent comparison."""
+            if isinstance(d, dict):
+                return {k: normalize(v) for k, v in sorted(d.items())}
+            elif isinstance(d, list):
+                return [normalize(item) for item in d]
+            return d
+
+        existing_normalized = normalize(existing_data)
+        generated_normalized = normalize(index_data)
+
+        if existing_normalized != generated_normalized:
             print("✗ INDEX.yaml is out of date")
             print("  Run: make generate")
-            print("\n  Debug: Differences detected")
-            print(f"  Existing keys: {set(existing_data.keys())}")
-            print(f"  Generated keys: {set(index_data.keys())}")
-            if set(existing_data.keys()) != set(index_data.keys()):
-                print(f"  Missing keys: {set(index_data.keys()) - set(existing_data.keys())}")
-                print(f"  Extra keys: {set(existing_data.keys()) - set(index_data.keys())}")
             return 1
 
         print("✓ INDEX.yaml is up to date")
