@@ -35,54 +35,170 @@ All new patterns start as `experimental`:
 
 ## Required Frontmatter Fields
 
-Every pattern MUST include valid YAML frontmatter. Here's the minimum:
+Every pattern MUST include valid YAML frontmatter. Use one of these three approaches depending on your needs:
+
+### Quick Start: Minimal Pattern (5 minutes)
+
+Start with just the essentials to get your pattern validated:
 
 ```yaml
 ---
-id: your-pattern-name              # kebab-case, never changes
-version: "1.0.0"                   # semantic versioning
-title: "Human Readable Title"
-type: skill                        # skill|prompt|workflow|agent|lesson
-status: experimental               # Start here!
+id: my-pattern-name                   # kebab-case, never changes
+version: "1.0.0"                      # semantic versioning
+title: "My Pattern Title"
+type: skill                           # skill|prompt|workflow|agent|lesson
+status: experimental                  # Start here!
 owners: ["@your-github-handle"]
-primary_personas: ["developers"]   # Who is this for?
+primary_personas: ["developers"]      # Who is this for?
 requires:
-  anchors: []                      # Dependencies (usually empty)
+  anchors: []                         # Dependencies (usually empty)
 output:
-  format: markdown                 # Output format
+  format: markdown
   contract:
     required_sections:
-      - "Summary"                  # Sections that must appear
-    prohibited_content:
-      - "Secrets"                  # MUST include these 4 minimum
+      - "Summary"                     # Sections that must appear
+    prohibited_content:               # MUST include these 4 minimum
+      - "Secrets"
       - "PII"
       - "CUI"
       - "Internal URLs"
 quality_gates:
-  readability_max_grade: 10        # Flesch-Kincaid grade level
-  citations_required: false        # true if making compliance claims
+  readability_max_grade: 10
+  citations_required: false
 ---
 ```
 
-## Recommended Frontmatter Fields
+**When to use:** First draft, exploring an idea, quick contribution
 
-Add these to make your pattern more discoverable and useful:
+### Recommended: Full Pattern (15 minutes)
+
+Add these fields to improve discoverability and usability:
 
 ```yaml
-triggers: ["code review", "security"]  # Keywords for discovery
-tags: ["security", "review", "python"]
+---
+id: my-pattern-name
+version: "1.0.0"
+title: "My Pattern Title"
+description: "One-line summary of what this does"
+type: skill
+status: experimental
+owners: ["@your-github-handle"]
+primary_personas: ["developers", "security-engineers"]
+
+# Discovery and categorization
+triggers: ["code review", "security", "automation"]
+tags: ["security", "python", "review"]
+
+# Tool compatibility
 portability:
   opencode: true
   cursor: true
   claude_projects: true
-  chatgpt: true
+  chatgpt: false
   generic_llm: true
+
+# Scope definition
 scope:
   intended_use:
-    - "Review code changes for security issues"
+    - "Review code for security vulnerabilities"
+    - "Automate security checks in CI/CD"
   exclusions:
     - "Not for compliance auditing"
+    - "Not a replacement for penetration testing"
+
+requires:
+  anchors: []
+
+output:
+  format: markdown
+  contract:
+    required_sections:
+      - "Summary"
+      - "Findings"
+    prohibited_content:
+      - "Secrets"
+      - "PII"
+      - "CUI"
+      - "Internal URLs"
+
+quality_gates:
+  readability_max_grade: 10
+  citations_required: false
+---
 ```
+
+**When to use:** Production-ready pattern, community contribution, tool integration
+
+### Complete: Advanced Pattern (30+ minutes)
+
+Add all optional fields for maximum functionality:
+
+```yaml
+---
+# ... all fields from "Recommended" plus:
+
+complexity_estimate:
+  setup_minutes: 5
+  execution_minutes: 30
+
+inputs:
+  - name: "code_files"
+    type: "file_list"
+    required: true
+  - name: "severity_threshold"
+    type: "string"
+    default: "medium"
+
+outputs:
+  - name: "findings_report"
+    type: "markdown"
+    description: "Security findings with recommendations"
+
+related_patterns:
+  - id: "test-generation"
+    relationship: "follows"
+  - id: "documentation-review"
+    relationship: "complements"
+
+changelog:
+  - version: "1.0.0"
+    date: "2026-05-21"
+    changes: "Initial release"
+---
+```
+
+**When to use:** Complex workflows, tool integration, production systems
+
+## Frontmatter Field Reference
+
+**Required fields:**
+- `id`: Unique identifier (kebab-case, never changes)
+- `version`: Semantic version (e.g., "1.0.0")
+- `title`: Human-readable name
+- `type`: Pattern type (skill|prompt|workflow|agent|lesson)
+- `status`: experimental|recommended|deprecated
+- `owners`: GitHub handles (e.g., ["@you"])
+- `primary_personas`: Target users (e.g., ["developers"])
+- `requires.anchors`: Dependencies (usually empty)
+- `output.format`: Output format (usually "markdown")
+- `output.contract.required_sections`: Must-have sections
+- `output.contract.prohibited_content`: Must NOT include (min: Secrets, PII, CUI, Internal URLs)
+- `quality_gates.readability_max_grade`: Max reading level (usually 10)
+- `quality_gates.citations_required`: Require citations? (usually false)
+
+**Recommended fields:**
+- `description`: One-line summary
+- `triggers`: Discovery keywords
+- `tags`: Categorization tags
+- `portability`: Tool compatibility flags
+- `scope.intended_use`: What it's for
+- `scope.exclusions`: What it's NOT for
+
+**Optional fields:**
+- `complexity_estimate`: Time estimates
+- `inputs`/`outputs`: Structured I/O definitions
+- `related_patterns`: Dependencies and relationships
+- `changelog`: Version history
 
 ## Pattern Structure (SKILL.md)
 
