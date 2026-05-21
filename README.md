@@ -4,6 +4,16 @@ Community-maintained patterns, prompts, skills, agent instructions, workflows, a
 
 > **Status:** Early development | **License:** CC0-1.0 | **Repo:** https://github.com/GSA-TTS/agentic-coding-patterns
 
+## Quick Reference
+
+| I want to... | Go to |
+|--------------|-------|
+| **Use a pattern** | Browse [INDEX.yaml](INDEX.yaml) or [skills/](skills/), [prompts/](prompts/), [workflows/](workflows/) |
+| **Contribute a pattern** | Read [CONTRIBUTING.md](CONTRIBUTING.md) → Copy [template](templates/) → Run `make validate` |
+| **Integrate with AI tools** | See [AI Agent Integration Guide](docs/AI-AGENT-GUIDE.md) |
+| **Report a security issue** | See [SECURITY.md](.github/SECURITY.md) |
+| **Run validation locally** | `make setup && make validate` |
+
 ## Purpose
 
 This repository provides reusable patterns for AI-assisted software development that complement:
@@ -36,15 +46,15 @@ Content here is a starting point for reuse and review. **It is not policy unless
 
 ```
 agentic-coding-patterns/
-├── skills/              # Reusable skills (SKILL.md format)
-├── prompts/             # Standalone prompts
-├── agents/              # Agent instruction patterns (AGENTS.md)
-├── workflows/           # Multi-step workflows
-├── lessons-learned/     # Community experiences
-├── templates/           # Templates for new content
-├── examples/            # Tool-specific examples
-├── schemas/             # JSON Schemas for validation
-└── docs/                # Documentation
+├── 🛠️  skills/              # Reusable procedures (code review, testing, documentation)
+├── 💬 prompts/             # Standalone prompts for specific tasks
+├── 🤖 agents/              # Agent instruction patterns (AGENTS.md)
+├── 🔄 workflows/           # Multi-step end-to-end processes
+├── 📚 lessons-learned/     # Community experiences and retrospectives
+├── 📄 templates/           # Templates for creating new patterns
+├── 🔍 examples/            # Tool-specific integration examples
+├── 📐 schemas/             # JSON Schemas for validation
+└── 📖 docs/                # Documentation and guides
 ```
 
 ## Quick Start
@@ -150,6 +160,14 @@ This repository is released under [CC0-1.0](LICENSE) (public domain). Content is
 - Browse [docs/](docs/) for guidance
 - File issues for improvements or questions
 - Review [docs/repository-ecosystem.md](docs/repository-ecosystem.md) for relationship to sibling repos
+
+## See Also
+
+- [Contributing Guide](CONTRIBUTING.md) — How to add patterns
+- [AI Agent Integration Guide](docs/AI-AGENT-GUIDE.md) — Programmatic pattern access
+- [Security Policy](.github/SECURITY.md) — Vulnerability reporting
+- [Playbook](https://github.com/GSA-TTS/agentic-coding-playbook) — Policy and compliance guidance
+- [Quickstart](https://github.com/GSA-TTS/agentic-coding-quickstart) — Execution environment setup
 
 ---
 

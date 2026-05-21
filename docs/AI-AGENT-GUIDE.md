@@ -800,6 +800,13 @@ This is a living document. If you encounter issues or have suggestions:
 2. Include "AI Agent Guide" in the title
 3. Describe your use case and what's unclear
 
+## See Also
+
+- [README](../README.md) — Human-friendly repository overview
+- [CONTRIBUTING](../CONTRIBUTING.md) — Pattern contribution guide
+- [Examples](../examples/) — Tool-specific integration examples (OpenCode, Cursor, Claude Projects)
+- [Templates](../templates/) — Pattern templates with frontmatter
+
 ---
 
 > **License:** CC0-1.0

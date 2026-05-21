@@ -440,6 +440,13 @@ This is a professional, respectful community. Be kind, be helpful, be patient.
 
 All contributions are released under [CC0-1.0](LICENSE) (public domain). By contributing, you agree to release your work under this license.
 
+## See Also
+
+- [README](README.md) — Repository overview and purpose
+- [AI Agent Integration Guide](docs/AI-AGENT-GUIDE.md) — For tool developers and automation
+- [Pattern Templates](templates/) — Starting points for new patterns
+- [Examples](examples/) — Tool-specific integration examples
+
 ---
 
 **Ready to contribute?** Copy a template from `templates/`, fill it in, and submit a PR!
