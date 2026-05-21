@@ -133,7 +133,11 @@ def main() -> int:
             return 1
 
         existing_content = index_path.read_text()
-        if existing_content.strip() != new_content.strip():
+        existing_data = yaml.safe_load(existing_content)
+
+        # Compare parsed data structures, not raw text
+        # This avoids false positives from formatting differences
+        if existing_data != index_data:
             print("✗ INDEX.yaml is out of date")
             print("  Run: make generate")
             return 1
