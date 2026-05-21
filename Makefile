@@ -1,4 +1,4 @@
-.PHONY: setup validate generate generate-check test security ci clean help
+.PHONY: setup validate generate generate-check test security ci clean search help
 
 help:  ## Show this help message
 	@echo "agentic-coding-patterns — Available targets:"
@@ -21,6 +21,18 @@ generate:  ## Generate INDEX.yaml from patterns
 
 generate-check:  ## Verify INDEX.yaml is up to date (used in pre-commit)
 	python scripts/generate_index.py --check
+
+search:  ## Search patterns (e.g., make search TAG=security)
+	@if [ -z "$(QUERY)" ] && [ -z "$(TAG)" ] && [ -z "$(STATUS)" ] && [ -z "$(PERSONA)" ] && [ -z "$(TOOL)" ]; then \
+		echo "Usage: make search [QUERY=text] [TAG=tag] [STATUS=status] [PERSONA=persona] [TOOL=tool]"; \
+		echo ""; \
+		echo "Examples:"; \
+		echo "  make search TAG=security"; \
+		echo "  make search STATUS=recommended"; \
+		echo "  make search QUERY='code review' TOOL=cursor"; \
+	else \
+		python scripts/search_patterns.py $(if $(QUERY),--query "$(QUERY)") $(if $(TAG),--tag $(TAG)) $(if $(STATUS),--status $(STATUS)) $(if $(PERSONA),--persona $(PERSONA)) $(if $(TOOL),--tool $(TOOL)); \
+	fi
 
 security:  ## Run security audit (pip-audit for CVEs)
 	pip-audit
