@@ -1,0 +1,153 @@
+name: New Prompt Pattern
+description: Submit a new standalone prompt pattern
+title: "[Prompt] "
+labels: ["prompt", "needs-review"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## New Prompt Pattern Submission
+
+        Thank you for contributing a prompt pattern! Prompts are standalone instructions for specific tasks.
+
+        Before submitting, please review:
+        - [CONTRIBUTING.md](../CONTRIBUTING.md) for full guidelines
+        - [Safety Guidance](../docs/safety-guidance.md) for prohibited content
+
+  - type: input
+    id: pattern_id
+    attributes:
+      label: Pattern ID
+      description: Unique identifier in kebab-case (e.g., "qa-round")
+      placeholder: "my-prompt-pattern"
+    validations:
+      required: true
+
+  - type: input
+    id: title
+    attributes:
+      label: Pattern Title
+      description: Human-readable title (3-100 characters)
+      placeholder: "QA Round Review"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: status
+    attributes:
+      label: Status
+      description: Pattern lifecycle status (new patterns should be "experimental")
+      options:
+        - experimental
+        - recommended
+        - deprecated
+      default: 0
+    validations:
+      required: true
+
+  - type: input
+    id: owners
+    attributes:
+      label: Owners
+      description: GitHub handles or teams (comma-separated)
+      placeholder: "@community"
+    validations:
+      required: true
+
+  - type: input
+    id: personas
+    attributes:
+      label: Primary Personas
+      description: Target audience (comma-separated)
+      placeholder: "developers, qa-engineers"
+    validations:
+      required: true
+
+  - type: textarea
+    id: prompt_text
+    attributes:
+      label: Prompt Text
+      description: The complete prompt instruction
+      placeholder: |
+        You are a QA reviewer. Review the following code for:
+        1. Correctness
+        2. Edge cases
+        3. Error handling
+        ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: triggers
+    attributes:
+      label: Trigger Keywords
+      description: Keywords suggesting when to use this prompt (comma-separated)
+      placeholder: "review, qa, quality, test, verify"
+    validations:
+      required: false
+
+  - type: textarea
+    id: prohibited_content
+    attributes:
+      label: Prohibited Content
+      description: What should NEVER appear in output (comma-separated)
+      placeholder: "Secrets, PII, CUI, Internal URLs, Customer Data"
+      value: "Secrets, PII, CUI, Internal URLs"
+    validations:
+      required: true
+
+  - type: textarea
+    id: required_sections
+    attributes:
+      label: Required Output Sections
+      description: Sections that MUST appear in output (comma-separated)
+      placeholder: "Summary, Findings"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: readability_grade
+    attributes:
+      label: Maximum Readability Grade
+      description: Plain language target (10 = high school sophomore)
+      options:
+        - "6"
+        - "8"
+        - "10"
+        - "12"
+        - "14"
+      default: 2
+    validations:
+      required: true
+
+  - type: textarea
+    id: examples
+    attributes:
+      label: Examples
+      description: Show input/output examples
+      placeholder: |
+        **Input:** Feature implementation with 3 functions
+        **Output:** 2 HIGH issues, 5 suggestions
+
+  - type: checkboxes
+    id: safety_checklist
+    attributes:
+      label: Safety Checklist
+      description: Verify your submission is safe
+      options:
+        - label: No secrets, API keys, tokens, or passwords included
+          required: true
+        - label: No PII (names, emails, SSNs, addresses)
+          required: true
+        - label: No CUI (Controlled Unclassified Information)
+          required: true
+        - label: No internal URLs, hostnames, or system paths
+          required: true
+        - label: Pattern defines prohibited_content in output contract
+          required: true
+
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: Additional Context
+      description: Any other information reviewers should know

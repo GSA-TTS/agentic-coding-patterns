@@ -11,10 +11,13 @@ regexes = [
   '''msk_live_abcd1234xyz''',  # docs/safety-guidance.md:120 - Example bad practice
 ]
 
-# Documentation paths with educational examples
+# Documentation paths with educational examples (docs + GitHub templates)
+# These files teach users about prohibited content via examples
 paths = [
   '''docs/getting-started\.md''',
   '''docs/safety-guidance\.md''',
+  '''.github/ISSUE_TEMPLATE/.*\.yml''',
+  '''.github/pull_request_template\.md''',
 ]
 
 # Patterns that explain security issues need example secrets

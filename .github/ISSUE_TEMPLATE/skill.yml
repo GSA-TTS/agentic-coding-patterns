@@ -1,0 +1,201 @@
+name: New Skill Pattern
+description: Submit a new reusable skill pattern
+title: "[Skill] "
+labels: ["skill", "needs-review"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## New Skill Pattern Submission
+
+        Thank you for contributing a skill pattern! Skills are reusable procedures that agents can invoke during tasks.
+
+        Before submitting, please review:
+        - [CONTRIBUTING.md](../CONTRIBUTING.md) for full guidelines
+        - [Safety Guidance](../docs/safety-guidance.md) for prohibited content
+        - [Skill Schema](../schemas/skill.schema.json) for required fields
+
+  - type: input
+    id: pattern_id
+    attributes:
+      label: Pattern ID
+      description: Unique identifier in kebab-case (e.g., "secure-code-review")
+      placeholder: "my-skill-pattern"
+    validations:
+      required: true
+
+  - type: input
+    id: title
+    attributes:
+      label: Pattern Title
+      description: Human-readable title (3-100 characters)
+      placeholder: "Secure Code Review"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: status
+    attributes:
+      label: Status
+      description: Pattern lifecycle status (new patterns should be "experimental")
+      options:
+        - experimental
+        - recommended
+        - deprecated
+      default: 0
+    validations:
+      required: true
+
+  - type: input
+    id: owners
+    attributes:
+      label: Owners
+      description: GitHub handles or teams (comma-separated, e.g., "@username, @org/team")
+      placeholder: "@community"
+    validations:
+      required: true
+
+  - type: input
+    id: personas
+    attributes:
+      label: Primary Personas
+      description: Target audience (comma-separated, e.g., "developers, security-engineers")
+      placeholder: "developers"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Brief 2-3 sentence summary of what this skill does
+      placeholder: |
+        This skill performs X by doing Y.
+        It helps developers accomplish Z.
+    validations:
+      required: true
+
+  - type: textarea
+    id: when_to_use
+    attributes:
+      label: When to Use
+      description: List scenarios where this skill is appropriate (bullet list)
+      placeholder: |
+        - When you need to X
+        - When existing pattern Y doesn't fit
+        - For projects with constraint Z
+    validations:
+      required: true
+
+  - type: textarea
+    id: procedure
+    attributes:
+      label: Procedure
+      description: Numbered steps the agent should follow
+      placeholder: |
+        1. Read the input specification
+        2. Analyze for security issues
+        3. Generate recommendations
+        4. Format output
+    validations:
+      required: true
+
+  - type: textarea
+    id: prohibited_content
+    attributes:
+      label: Prohibited Content
+      description: What should NEVER appear in output (comma-separated)
+      placeholder: "Secrets, PII, CUI, Internal URLs, Customer Data"
+      value: "Secrets, PII, CUI, Internal URLs"
+    validations:
+      required: true
+
+  - type: textarea
+    id: required_sections
+    attributes:
+      label: Required Output Sections
+      description: Sections that MUST appear in output (comma-separated)
+      placeholder: "Summary, Findings, Recommendations"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: readability_grade
+    attributes:
+      label: Maximum Readability Grade
+      description: Plain language target (10 = high school sophomore)
+      options:
+        - "6"
+        - "8"
+        - "10"
+        - "12"
+        - "14"
+      default: 2
+    validations:
+      required: true
+
+  - type: dropdown
+    id: citations_required
+    attributes:
+      label: Citations Required
+      description: Must output cite sources?
+      options:
+        - "Yes"
+        - "No"
+      default: 0
+    validations:
+      required: true
+
+  - type: textarea
+    id: examples
+    attributes:
+      label: Examples
+      description: Concrete examples of using this skill
+      placeholder: |
+        **Example 1:** Security review of authentication module
+        Input: src/auth.py
+        Output: 3 HIGH findings, 5 MEDIUM findings
+
+  - type: checkboxes
+    id: safety_checklist
+    attributes:
+      label: Safety Checklist
+      description: Verify your submission is safe
+      options:
+        - label: No secrets, API keys, tokens, or passwords included
+          required: true
+        - label: No PII (names, emails, SSNs, addresses)
+          required: true
+        - label: No CUI (Controlled Unclassified Information)
+          required: true
+        - label: No internal URLs, hostnames, or system paths
+          required: true
+        - label: No customer data or proprietary information
+          required: true
+        - label: Pattern defines prohibited_content in output contract
+          required: true
+
+  - type: checkboxes
+    id: quality_checklist
+    attributes:
+      label: Quality Checklist
+      description: Ensure pattern quality
+      options:
+        - label: Pattern tested with at least one real scenario
+          required: false
+        - label: Examples are concrete and realistic
+          required: false
+        - label: Plain language used (no unnecessary jargon)
+          required: false
+        - label: Prerequisites clearly stated
+          required: false
+
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: Additional Context
+      description: Any other information reviewers should know
+      placeholder: |
+        - Related to issue #123
+        - Supersedes pattern XYZ
+        - Inspired by project ABC

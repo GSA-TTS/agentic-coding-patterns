@@ -1,0 +1,164 @@
+name: New Lesson Learned
+description: Share a lesson learned from agentic coding experience
+title: "[Lesson] "
+labels: ["lesson", "needs-review"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## New Lesson Learned Submission
+
+        Thank you for sharing your experience! Lessons learned help the community avoid pitfalls and adopt best practices.
+
+        Before submitting, please review:
+        - [CONTRIBUTING.md](../CONTRIBUTING.md) for full guidelines
+        - [Safety Guidance](../docs/safety-guidance.md) for prohibited content
+
+  - type: input
+    id: pattern_id
+    attributes:
+      label: Pattern ID
+      description: Unique identifier in kebab-case (e.g., "avoid-circular-dependencies")
+      placeholder: "my-lesson"
+    validations:
+      required: true
+
+  - type: input
+    id: title
+    attributes:
+      label: Lesson Title
+      description: Human-readable title (3-100 characters)
+      placeholder: "Avoid Circular Pattern Dependencies"
+    validations:
+      required: true
+
+  - type: input
+    id: owners
+    attributes:
+      label: Submitter
+      description: Your GitHub handle
+      placeholder: "@username"
+    validations:
+      required: true
+
+  - type: input
+    id: personas
+    attributes:
+      label: Relevant Personas
+      description: Who should learn from this? (comma-separated)
+      placeholder: "developers, pattern-authors"
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: What was the situation?
+      placeholder: |
+        We were implementing a workflow that...
+        The agent was configured to...
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Encountered
+      description: What went wrong?
+      placeholder: |
+        The agent failed because...
+        We saw errors like...
+        This caused problems such as...
+    validations:
+      required: true
+
+  - type: textarea
+    id: root_cause
+    attributes:
+      label: Root Cause
+      description: Why did it happen?
+      placeholder: |
+        The underlying issue was...
+        This occurred because...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Solution Applied
+      description: How was it fixed?
+      placeholder: |
+        We resolved it by...
+        The fix involved...
+    validations:
+      required: true
+
+  - type: textarea
+    id: lesson
+    attributes:
+      label: Lesson Learned
+      description: What's the takeaway?
+      placeholder: |
+        Always X before Y
+        Avoid Z when W
+        Pattern authors should...
+    validations:
+      required: true
+
+  - type: textarea
+    id: recommendation
+    attributes:
+      label: Recommendation
+      description: What should others do?
+      placeholder: |
+        **Do:** X, Y, Z
+        **Don't:** A, B, C
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Impact Severity
+      description: How serious was this issue?
+      options:
+        - Low (minor inconvenience)
+        - Medium (significant rework required)
+        - High (project blocker or security issue)
+      default: 1
+    validations:
+      required: true
+
+  - type: input
+    id: tags
+    attributes:
+      label: Tags
+      description: Keywords for discoverability (comma-separated)
+      placeholder: "dependencies, validation, security"
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: safety_checklist
+    attributes:
+      label: Safety Checklist
+      description: Verify your submission is safe
+      options:
+        - label: No secrets, API keys, tokens, or passwords included
+          required: true
+        - label: No PII (names, emails, SSNs, addresses)
+          required: true
+        - label: No CUI (Controlled Unclassified Information)
+          required: true
+        - label: No internal URLs, hostnames, or system paths
+          required: true
+        - label: No customer data or proprietary information
+          required: true
+
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: Additional Context
+      description: Links, references, or other relevant information

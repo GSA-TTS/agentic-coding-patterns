@@ -1,0 +1,182 @@
+name: New Workflow Pattern
+description: Submit a new multi-step workflow pattern
+title: "[Workflow] "
+labels: ["workflow", "needs-review"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## New Workflow Pattern Submission
+
+        Thank you for contributing a workflow! Workflows orchestrate multiple skills or steps into a cohesive process.
+
+        Before submitting, please review:
+        - [CONTRIBUTING.md](../CONTRIBUTING.md) for full guidelines
+        - [Safety Guidance](../docs/safety-guidance.md) for prohibited content
+
+  - type: input
+    id: pattern_id
+    attributes:
+      label: Pattern ID
+      description: Unique identifier in kebab-case (e.g., "issue-to-merge")
+      placeholder: "my-workflow"
+    validations:
+      required: true
+
+  - type: input
+    id: title
+    attributes:
+      label: Pattern Title
+      description: Human-readable title (3-100 characters)
+      placeholder: "Issue to Merge Request"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: status
+    attributes:
+      label: Status
+      description: Pattern lifecycle status (new patterns should be "experimental")
+      options:
+        - experimental
+        - recommended
+        - deprecated
+      default: 0
+    validations:
+      required: true
+
+  - type: input
+    id: owners
+    attributes:
+      label: Owners
+      description: GitHub handles or teams (comma-separated)
+      placeholder: "@community"
+    validations:
+      required: true
+
+  - type: input
+    id: personas
+    attributes:
+      label: Primary Personas
+      description: Target audience (comma-separated)
+      placeholder: "developers, project-managers"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Workflow Description
+      description: What problem does this workflow solve?
+      placeholder: |
+        This workflow automates the process of...
+        It takes an issue and produces...
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Workflow Steps
+      description: High-level steps in the workflow
+      placeholder: |
+        1. Read issue requirements
+        2. Create implementation plan
+        3. Execute development tasks
+        4. Run validation
+        5. Create merge request
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Required Skills/Anchors
+      description: Skills or anchors this workflow depends on (comma-separated)
+      placeholder: "secure-code-review, test-generation"
+    validations:
+      required: false
+
+  - type: textarea
+    id: inputs
+    attributes:
+      label: Workflow Inputs
+      description: What inputs does this workflow need?
+      placeholder: |
+        - Issue URL or ID
+        - Repository path
+        - Branch name
+    validations:
+      required: true
+
+  - type: textarea
+    id: outputs
+    attributes:
+      label: Workflow Outputs
+      description: What does this workflow produce?
+      placeholder: |
+        - Implementation code
+        - Test suite
+        - Merge request URL
+    validations:
+      required: true
+
+  - type: textarea
+    id: prohibited_content
+    attributes:
+      label: Prohibited Content
+      description: What should NEVER appear in output (comma-separated)
+      placeholder: "Secrets, PII, CUI, Internal URLs, Customer Data"
+      value: "Secrets, PII, CUI, Internal URLs"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: readability_grade
+    attributes:
+      label: Maximum Readability Grade
+      description: Plain language target (10 = high school sophomore)
+      options:
+        - "6"
+        - "8"
+        - "10"
+        - "12"
+        - "14"
+      default: 2
+    validations:
+      required: true
+
+  - type: textarea
+    id: examples
+    attributes:
+      label: Examples
+      description: Show end-to-end workflow execution examples
+      placeholder: |
+        **Example:** Security feature implementation
+        Input: Issue #123 "Add rate limiting"
+        Output: PR #456 with implementation + tests
+
+  - type: checkboxes
+    id: safety_checklist
+    attributes:
+      label: Safety Checklist
+      description: Verify your submission is safe
+      options:
+        - label: No secrets, API keys, tokens, or passwords included
+          required: true
+        - label: No PII (names, emails, SSNs, addresses)
+          required: true
+        - label: No CUI (Controlled Unclassified Information)
+          required: true
+        - label: No internal URLs, hostnames, or system paths
+          required: true
+        - label: Workflow defines prohibited_content in output contract
+          required: true
+        - label: Each workflow step has clear acceptance criteria
+          required: false
+
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: Additional Context
+      description: Any other information reviewers should know

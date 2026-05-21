@@ -36,7 +36,17 @@ SENSITIVE_PATTERNS = [
 SCANNABLE_EXTENSIONS = {".md", ".py", ".json", ".jsonc", ".yaml", ".yml", ".toml", ".txt", ".sh"}
 
 # Paths to skip
-SKIP_PATHS = {".git", "__pycache__", "venv", "env", ".venv", "node_modules", "tests", "docs"}
+SKIP_PATHS = {
+    ".git",
+    "__pycache__",
+    "venv",
+    "env",
+    ".venv",
+    "node_modules",
+    "tests",
+    "docs",
+    ".github",
+}
 
 
 def should_scan_file(path: Path) -> bool:

@@ -1,0 +1,184 @@
+name: New Agent Instructions
+description: Submit new agent behavioral instructions (AGENTS.md)
+title: "[Agent] "
+labels: ["agent", "needs-review"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## New Agent Instructions Submission
+
+        Thank you for contributing agent instructions! Agent patterns define behavioral contracts for AI agents.
+
+        Before submitting, please review:
+        - [CONTRIBUTING.md](../CONTRIBUTING.md) for full guidelines
+        - [Safety Guidance](../docs/safety-guidance.md) for prohibited content
+        - [AI Agent Guide](../docs/AI-AGENT-GUIDE.md) for agent best practices
+
+  - type: input
+    id: pattern_id
+    attributes:
+      label: Pattern ID
+      description: Unique identifier in kebab-case (e.g., "security-review-agent")
+      placeholder: "my-agent-pattern"
+    validations:
+      required: true
+
+  - type: input
+    id: title
+    attributes:
+      label: Pattern Title
+      description: Human-readable title (3-100 characters)
+      placeholder: "Security Review Agent"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: status
+    attributes:
+      label: Status
+      description: Pattern lifecycle status (new patterns should be "experimental")
+      options:
+        - experimental
+        - recommended
+        - deprecated
+      default: 0
+    validations:
+      required: true
+
+  - type: input
+    id: owners
+    attributes:
+      label: Owners
+      description: GitHub handles or teams (comma-separated)
+      placeholder: "@community"
+    validations:
+      required: true
+
+  - type: input
+    id: personas
+    attributes:
+      label: Primary Personas
+      description: Who uses this agent? (comma-separated)
+      placeholder: "security-engineers, developers"
+    validations:
+      required: true
+
+  - type: textarea
+    id: agent_role
+    attributes:
+      label: Agent Role Description
+      description: What is this agent's primary role?
+      placeholder: |
+        You are a security-focused code reviewer.
+        You specialize in identifying vulnerabilities...
+    validations:
+      required: true
+
+  - type: textarea
+    id: behavioral_rules
+    attributes:
+      label: Behavioral Rules
+      description: What rules govern this agent's behavior?
+      placeholder: |
+        1. Always prioritize security over convenience
+        2. Flag potential vulnerabilities with severity ratings
+        3. Suggest remediation steps
+        4. Never execute untrusted code
+    validations:
+      required: true
+
+  - type: textarea
+    id: prohibited_actions
+    attributes:
+      label: Prohibited Actions
+      description: What should this agent NEVER do?
+      placeholder: |
+        - Execute arbitrary code
+        - Make security decisions without explanation
+        - Skip validation steps
+        - Bypass safety checks
+    validations:
+      required: true
+
+  - type: textarea
+    id: required_skills
+    attributes:
+      label: Required Skills
+      description: Skills this agent should have access to (comma-separated)
+      placeholder: "secure-code-review, dependency-analysis"
+    validations:
+      required: false
+
+  - type: textarea
+    id: prohibited_content
+    attributes:
+      label: Prohibited Output Content
+      description: What should NEVER appear in agent output (comma-separated)
+      placeholder: "Secrets, PII, CUI, Internal URLs, Customer Data"
+      value: "Secrets, PII, CUI, Internal URLs"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: readability_grade
+    attributes:
+      label: Maximum Readability Grade
+      description: Plain language target for agent output (10 = high school sophomore)
+      options:
+        - "6"
+        - "8"
+        - "10"
+        - "12"
+        - "14"
+      default: 2
+    validations:
+      required: true
+
+  - type: textarea
+    id: examples
+    attributes:
+      label: Examples
+      description: Show example interactions with this agent
+      placeholder: |
+        **Example 1:**
+        User: "Review auth.py for security issues"
+        Agent: [Performs security review following rules]
+
+  - type: checkboxes
+    id: safety_checklist
+    attributes:
+      label: Safety Checklist
+      description: Verify your submission is safe
+      options:
+        - label: No secrets, API keys, tokens, or passwords included
+          required: true
+        - label: No PII (names, emails, SSNs, addresses)
+          required: true
+        - label: No CUI (Controlled Unclassified Information)
+          required: true
+        - label: No internal URLs, hostnames, or system paths
+          required: true
+        - label: Agent instructions include prohibited_content rules
+          required: true
+        - label: Agent cannot be tricked into unsafe actions via prompt injection
+          required: false
+
+  - type: checkboxes
+    id: quality_checklist
+    attributes:
+      label: Quality Checklist
+      description: Ensure agent quality
+      options:
+        - label: Behavioral rules are clear and unambiguous
+          required: false
+        - label: Prohibited actions are explicitly listed
+          required: false
+        - label: Agent role is well-defined
+          required: false
+
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: Additional Context
+      description: Any other information reviewers should know
