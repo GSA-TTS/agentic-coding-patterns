@@ -151,6 +151,12 @@ def main() -> int:
         if existing_normalized != generated_normalized:
             print("✗ INDEX.yaml is out of date")
             print("  Run: make generate")
+            # Deep comparison to find differences
+            import json
+            print("\n  Existing (normalized):")
+            print(json.dumps(existing_normalized, indent=2, default=str)[:500])
+            print("\n  Generated (normalized):")
+            print(json.dumps(generated_normalized, indent=2, default=str)[:500])
             return 1
 
         print("✓ INDEX.yaml is up to date")
