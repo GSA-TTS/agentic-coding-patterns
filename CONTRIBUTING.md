@@ -1,6 +1,29 @@
 # Contributing to Agentic Coding Patterns
 
-Thank you for contributing! This repository is community-driven and welcomes patterns, prompts, skills, workflows, and lessons learned from practitioners.
+Thank you for contributing! This is the **community patterns repository** for agentic coding. We welcome patterns, prompts, skills, workflows, and lessons learned from practitioners.
+
+## Ecosystem Overview
+
+This repo is one of three in the agentic coding ecosystem:
+
+| Repo | Focus | Typical Contributions |
+|------|-------|----------------------|
+| **[Quickstart](https://github.com/GSA-TTS/agentic-coding-quickstart)** | Environment setup | SBX fixes, troubleshooting docs |
+| **[Playbook](https://github.com/GSA-TTS/agentic-coding-playbook)** | Standards & practices | Coding standards, skills, templates |
+| **[Patterns](https://github.com/GSA-TTS/agentic-coding-patterns)** (you are here) | Community sharing | Workflows, lessons learned, examples |
+
+**This is the place to share what you've learned.** Don't worry about getting it perfect — use `experimental` status and let the community provide feedback.
+
+## Getting Help
+
+- **Questions:** Ask in the agentic-coding Slack channel
+- **Bugs/improvements:** Open a GitHub issue or submit a PR
+- **Security issues:** See [SECURITY.md](SECURITY.md) — direct fixes preferred
+
+## Teams
+
+- **[@GSA-TTS/agentic-coding-team](https://github.com/orgs/GSA-TTS/teams/agentic-coding-team):** Team members — review, contribute, share patterns
+- **[@GSA-TTS/agentic-coding-admins](https://github.com/orgs/GSA-TTS/teams/agentic-coding-admins):** Repository administrators — merge, release, maintain
 
 ## Quick Start
 

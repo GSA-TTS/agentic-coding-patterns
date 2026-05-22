@@ -1,86 +1,77 @@
 # Security Policy
 
-## Supported Versions
+## Scope
 
-This repository contains community-contributed patterns and validation scripts for agentic coding practices. Security updates are applied to the current `main` branch only.
+This repository is part of the **Agentic Coding Capability Assessment** — an internal GSA initiative. It contains community-contributed patterns and validation scripts for agentic coding practices.
+
+> **Note:** Patterns are informational and not authoritative GSA policy. Review and test all content before production use.
 
 | Component | Supported |
 | --------- | --------- |
-| Validation scripts (scripts/*.py) | ✅ Current main branch |
-| Pattern content (skills/, prompts/, etc.) | ⚠️ Community-contributed, review before use |
-| CI/CD workflows | ✅ Current main branch |
+| Validation scripts (scripts/*.py) | Current main branch |
+| Pattern content (skills/, prompts/, etc.) | Community-contributed, review before use |
+| CI/CD workflows | Current main branch |
 
-## Reporting a Vulnerability
+## Reporting and Fixing Security Issues
 
-**Please do not report security vulnerabilities through public GitHub issues.**
+This is an **internal assessment repository** with trusted contributors. The appropriate response to most issues is to fix them directly.
 
-Instead, report security vulnerabilities via one of the following methods:
+### For Pattern Content Issues
 
-### For GSA/TTS Staff
-- **Email:** gsa-tts-vulnerability-reports@gsa.gov
-- **Subject:** `[SECURITY] agentic-coding-patterns: [brief description]`
+If you discover a security issue in a pattern (unsafe practices, potential for harm):
 
-### For External Security Researchers
-- **GitHub Security Advisories:** Use the "Security" tab → "Report a vulnerability" button
-- **Email:** vulnerability-reports@gsa.gov (if Security Advisories unavailable)
+1. **Submit a PR to fix it** — This is the preferred approach for internal repos
+2. **Open an issue** if you're unsure how to fix it or want to discuss first
+3. **Ask in the agentic-coding Slack channel** if you have questions
 
-### What to Include
+### For Repository Infrastructure Issues
 
-Please include the following information in your report:
+If you find a security issue with the repository infrastructure (validation scripts, CI/CD, dependencies):
 
-- **Description:** Clear description of the vulnerability
-- **Impact:** What an attacker could do with this vulnerability
-- **Reproduction:** Step-by-step instructions to reproduce
-- **Affected versions:** Which versions are affected (if known)
-- **Suggested fix:** If you have ideas for remediation
+1. **Submit a PR to fix it** — You have access, so fix it directly when possible
+2. **Open an issue** to track the problem if you need help or it requires discussion
+3. **Contact channel admins** if you're unsure about the right approach
 
-### Response Timeline
+Since this is an internal repository, formal security advisories are not required. Use your judgment — if something seems sensitive, discuss with channel admins before posting details publicly.
 
-- **Initial response:** Within 2 business days
-- **Status update:** Within 5 business days
-- **Fix timeline:** Varies based on severity (Critical: 7 days, High: 14 days, Medium: 30 days)
+### For GSA Platform Issues (Outside This Repo)
 
-## Scope
+For security concerns related to GSA systems or infrastructure outside the scope of this repository:
 
-### In Scope for Security Reports
+- **Follow your normal GSA security reporting processes**
+- **Submit a ticket** or **email GSA security** as appropriate for your organization
 
-Security concerns that **should** be reported:
+These repos are for the assessment — platform and infrastructure security follows standard GSA procedures.
 
-- **Validation scripts** - Vulnerabilities in Python scripts (command injection, path traversal, etc.)
-- **Dependency vulnerabilities** - CVEs in pinned dependencies (also caught by Dependabot)
-- **CI/CD security** - Workflow vulnerabilities, secret exposure, permission issues
-- **Secret exposure** - Accidentally committed secrets, API keys, credentials
-- **Malicious patterns** - Patterns that could harm users if followed
+## In Scope for Security Fixes
 
-### Out of Scope
+Issues that **should** be addressed:
+
+- **Validation scripts** — Vulnerabilities in Python scripts (command injection, path traversal, etc.)
+- **Dependency vulnerabilities** — CVEs in pinned dependencies (also caught by Dependabot)
+- **CI/CD security** — Workflow vulnerabilities, permission issues
+- **Secret exposure** — Accidentally committed secrets, API keys, credentials
+- **Unsafe patterns** — Patterns that could harm users if followed
+
+## Out of Scope
 
 Issues that are **not** security vulnerabilities:
 
-- **Pattern quality** - Patterns marked `experimental` are use-at-your-own-risk
-- **Pattern correctness** - Incorrect or outdated guidance (report as normal issues)
-- **Best practice deviations** - Non-security coding style issues
-- **Third-party tools** - Vulnerabilities in tools referenced by patterns (report to tool maintainers)
-- **Social engineering** - Attempts to trick maintainers into accepting malicious patterns
+- **Pattern quality** — Patterns marked `experimental` are use-at-your-own-risk
+- **Pattern correctness** — Incorrect or outdated content (report as normal issues)
+- **Best practice deviations** — Non-security coding style issues
+- **Third-party tools** — Vulnerabilities in tools referenced by patterns (report to tool maintainers)
 
 ## Security Best Practices for Contributors
 
 When contributing patterns:
 
-1. **Never include secrets** - No API keys, passwords, tokens, or credentials
-2. **Sanitize examples** - Replace real data with placeholders
-3. **Define prohibited content** - Use frontmatter `prohibited_content` field
-4. **Validate input handling** - If pattern processes user input, document sanitization
-5. **Review dependencies** - Check for CVEs before recommending libraries
-6. **Document security assumptions** - Be explicit about trust boundaries
-
-## Disclosure Policy
-
-We follow **coordinated disclosure** practices:
-
-- We ask security researchers to give us reasonable time to fix issues before public disclosure
-- We will acknowledge security researchers in release notes (unless they prefer anonymity)
-- We will publish security advisories for vulnerabilities that affect users
-- We will notify users of critical security updates via GitHub releases and notifications
+1. **Never include secrets** — No API keys, passwords, tokens, or credentials
+2. **Sanitize examples** — Replace real data with placeholders
+3. **Define prohibited content** — Use frontmatter `prohibited_content` field
+4. **Validate input handling** — If pattern processes user input, document sanitization
+5. **Review dependencies** — Check for CVEs before recommending libraries
+6. **Document security assumptions** — Be explicit about trust boundaries
 
 ## Security Features in This Repository
 
@@ -88,22 +79,15 @@ Current security controls:
 
 | Control | Status | Description |
 |---------|--------|-------------|
-| **Dependabot** | ✅ Active | Weekly dependency updates (Python & GitHub Actions) |
-| **pip-audit** | ✅ Active | CVE scanning in CI |
-| **Gitleaks** | ✅ Active | Pre-commit secret scanning |
-| **SHA-pinned Actions** | ✅ Enforced | All GitHub Actions use commit SHAs |
-| **Minimal permissions** | ✅ Enforced | CI runs with `contents: read` only |
-| **Input validation** | ✅ Implemented | Frontmatter schema validation |
-| **Subprocess hardening** | ✅ Implemented | Timeouts prevent hangs |
-
-## Security Contacts
-
-- **GSA TTS Security Team:** gsa-tts-vulnerability-reports@gsa.gov
-- **Repository Maintainers:** See [CODEOWNERS](.github/CODEOWNERS) (if present)
+| **Dependabot** | Active | Weekly dependency updates (Python & GitHub Actions) |
+| **pip-audit** | Active | CVE scanning in CI |
+| **Gitleaks** | Active | Pre-commit secret scanning |
+| **SHA-pinned Actions** | Enforced | All GitHub Actions use commit SHAs |
+| **Minimal permissions** | Enforced | CI runs with `contents: read` only |
+| **Input validation** | Implemented | Frontmatter schema validation |
 
 ## Additional Resources
 
-- [GSA Vulnerability Disclosure Policy](https://www.gsa.gov/technology/technology-products-services/it-security/vulnerability-disclosure-policy)
 - [NIST SP 800-53 Security Controls](https://csrc.nist.gov/publications/detail/sp/800-53/rev-5/final)
 - [OWASP Top 10](https://owasp.org/www-project-top-ten/)
 

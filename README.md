@@ -2,7 +2,21 @@
 
 Community-maintained patterns, prompts, skills, agent instructions, workflows, and lessons learned for responsible agentic coding.
 
-> **Status:** Early development | **License:** CC0-1.0 | **Repo:** https://github.com/GSA-TTS/agentic-coding-patterns
+> **Status:** Active development | **License:** CC0-1.0 | **Repo:** https://github.com/GSA-TTS/agentic-coding-patterns
+
+## Agentic Coding Ecosystem
+
+This repository is part of a three-repo ecosystem:
+
+| Repo | Purpose | When to Use |
+|------|---------|-------------|
+| **[Quickstart](https://github.com/GSA-TTS/agentic-coding-quickstart)** | Get running | First day setup, SBX + USAi config |
+| **[Playbook](https://github.com/GSA-TTS/agentic-coding-playbook)** | Do it right | Repo setup, standards, best practices |
+| **[Patterns](https://github.com/GSA-TTS/agentic-coding-patterns)** (you are here) | Share & learn | Community patterns, lessons learned |
+
+**This is the collaboration hub.** Share what's working, learn from others, and help build a community knowledge base.
+
+---
 
 ## Quick Reference
 
@@ -11,18 +25,18 @@ Community-maintained patterns, prompts, skills, agent instructions, workflows, a
 | **Use a pattern** | Browse [INDEX.yaml](INDEX.yaml) or [skills/](skills/), [prompts/](prompts/), [workflows/](workflows/) |
 | **Contribute a pattern** | Read [CONTRIBUTING.md](CONTRIBUTING.md) → Copy [template](templates/) → Run `make validate` |
 | **Integrate with AI tools** | See [AI Agent Integration Guide](docs/AI-AGENT-GUIDE.md) |
-| **Report a security issue** | See [SECURITY.md](.github/SECURITY.md) |
+| **Security issues** | See [SECURITY.md](SECURITY.md) — direct fixes preferred |
 | **Run validation locally** | `make setup && make validate` |
 
 ## Purpose
 
-This repository provides reusable patterns for AI-assisted software development that complement:
+This repository is a **community space** for sharing reusable patterns, workflows, and lessons learned.
 
-- **[agentic-coding-playbook](https://github.com/GSA-TTS/agentic-coding-playbook)**: Policy, standards, and compliance guidance (upstream)
-- **[agentic-coding-quickstart](https://github.com/GSA-TTS/agentic-coding-quickstart)**: Execution environment setup (downstream)
-- **agentic-coding-patterns**: Community patterns and examples (this repo)
+- **Behavioral standards** live in the [Playbook](https://github.com/GSA-TTS/agentic-coding-playbook) (don't duplicate them here)
+- **Environment setup** lives in the [Quickstart](https://github.com/GSA-TTS/agentic-coding-quickstart)
+- **Community patterns and lessons** live here
 
-Content here is a starting point for reuse and review. **It is not policy unless explicitly adopted** through your organization's governance process.
+Content here is a starting point for reuse and review — it's community knowledge sharing.
 
 ## What Belongs Here
 
@@ -169,18 +183,19 @@ This repository is released under [CC0-1.0](LICENSE) (public domain). Content is
 
 ## Getting Help
 
-- Browse [docs/](docs/) for guidance
-- File issues for improvements or questions
-- Review [docs/repository-ecosystem.md](docs/repository-ecosystem.md) for relationship to sibling repos
+- **Questions:** Ask in the agentic-coding Slack channel
+- **Browse docs:** See [docs/](docs/) for guides
+- **Improvement ideas:** Open an issue or submit a PR
+- **Relationship to other repos:** See [docs/repository-ecosystem.md](docs/repository-ecosystem.md)
 
 ## See Also
 
 - [Contributing Guide](CONTRIBUTING.md) — How to add patterns
 - [AI Agent Integration Guide](docs/AI-AGENT-GUIDE.md) — Programmatic pattern access
-- [Security Policy](.github/SECURITY.md) — Vulnerability reporting
-- [Playbook](https://github.com/GSA-TTS/agentic-coding-playbook) — Policy and compliance guidance
+- [Security Policy](SECURITY.md) — Direct fixes preferred
+- [Playbook](https://github.com/GSA-TTS/agentic-coding-playbook) — Standards and best practices
 - [Quickstart](https://github.com/GSA-TTS/agentic-coding-quickstart) — Execution environment setup
 
 ---
 
-> **Disclaimer:** Patterns are informational only and not authoritative policy. Review and test all content before production use. Each organization must tailor patterns to their specific requirements and risk tolerance.
+> **Note:** Review and test all patterns before production use. Tailor to your specific requirements.
