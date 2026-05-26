@@ -1,4 +1,4 @@
-.PHONY: setup validate generate generate-check test security ci clean search help
+.PHONY: setup validate generate generate-check test security ci clean search install-hooks help
 
 help:  ## Show this help message
 	@echo "agentic-coding-patterns — Available targets:"
@@ -6,12 +6,29 @@ help:  ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Examples:"
-	@echo "  make setup      # First-time setup"
-	@echo "  make validate   # Before committing"
-	@echo "  make ci         # Full local CI check"
+	@echo "  make setup         # First-time setup"
+	@echo "  make install-hooks # Install pre-commit hooks (opt-in)"
+	@echo "  make validate      # Before committing"
+	@echo "  make ci            # Full local CI check"
 
 setup:  ## Install dependencies (pip install -e .[dev])
 	pip install -e ".[dev]"
+
+install-hooks:  ## Install pre-commit hooks (opt-in for contributors)
+	@echo "Installing pre-commit hooks..."
+	@if git config --global --get core.hooksPath >/dev/null 2>&1; then \
+		echo "⚠️  Detected global core.hooksPath: $$(git config --global --get core.hooksPath)"; \
+		echo "    Setting repo-local core.hooksPath to empty to override..."; \
+		git config core.hooksPath ""; \
+		pre-commit install; \
+		echo "✓ Pre-commit hooks installed"; \
+		echo "  Note: Repo-local hooksPath set to override global"; \
+	else \
+		pre-commit install; \
+		echo "✓ Pre-commit hooks installed"; \
+	fi
+	@echo "  Hooks will run automatically on git commit"
+	@echo "  To skip hooks: git commit --no-verify"
 
 validate:  ## Run all validators (frontmatter + sensitive terms)
 	python scripts/validate_repo.py
@@ -45,7 +62,15 @@ test:  ## Run pytest test suite
 		echo "    Create tests to enable this check (see issue #16)"; \
 	fi
 
-ci:  ## Full CI check (validate + security + test)
+ci:  ## Full CI check (validate + security + test + pre-commit checks)
+	@echo "==> Running pre-commit checks (duplicates pre-commit hooks)..."
+	@if command -v pre-commit >/dev/null 2>&1; then \
+		pre-commit run --all-files; \
+	else \
+		echo "⚠️  pre-commit not installed, skipping hook checks"; \
+		echo "    Install with: pip install pre-commit"; \
+	fi
+	@echo ""
 	@echo "==> Running validators..."
 	python scripts/validate_repo.py
 	@echo ""

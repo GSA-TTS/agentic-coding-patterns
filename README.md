@@ -83,12 +83,17 @@ cd agentic-coding-patterns
 # Install dependencies
 make setup
 
+# Optional: Install pre-commit hooks (recommended for regular contributors)
+make install-hooks
+
 # Validate content
 make validate
 
 # Generate INDEX.yaml
 make generate
 ```
+
+**Note:** Pre-commit hooks are opt-in. Use `make install-hooks` to enable automatic checks on commit. CI enforces all checks regardless of local hook installation.
 
 ### For Users
 
