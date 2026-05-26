@@ -91,6 +91,9 @@ make validate
 
 # Generate INDEX.yaml
 make generate
+
+# Run tests with coverage report
+make coverage
 ```
 
 **Note:** Pre-commit hooks are opt-in. Use `make install-hooks` to enable automatic checks on commit. CI enforces all checks regardless of local hook installation.
