@@ -40,7 +40,7 @@ jobs:
           pip install -e ".[dev]"
 
       - name: Markdown lint
-        run: npx markdownlint-cli2
+        run: npx markdownlint-cli2 "**/*.md"
 
       - name: Ruff lint
         run: ruff check scripts/
