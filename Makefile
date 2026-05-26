@@ -1,4 +1,4 @@
-.PHONY: setup validate generate generate-check test security ci clean search install-hooks help
+.PHONY: setup validate generate generate-check test coverage security ci clean search install-hooks help
 
 help:  ## Show this help message
 	@echo "agentic-coding-patterns — Available targets:"
@@ -61,6 +61,12 @@ test:  ## Run pytest test suite
 		echo "⚠️  No tests found in scripts/tests/"; \
 		echo "    Create tests to enable this check (see issue #16)"; \
 	fi
+
+coverage:  ## Run tests with coverage report
+	PYTHONPATH=scripts python3 -m pytest scripts/tests/ \
+		--cov=scripts \
+		--cov-report=html \
+		--cov-report=term
 
 ci:  ## Full CI check (validate + security + test + pre-commit checks)
 	@echo "==> Running pre-commit checks (duplicates pre-commit hooks)..."
