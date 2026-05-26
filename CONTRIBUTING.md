@@ -329,6 +329,28 @@ make test          # Run tests (if you added test cases)
 
 All checks must pass before merge.
 
+### Pre-commit Hooks
+
+This repository uses pre-commit hooks to enforce quality and security standards:
+
+- **Gitleaks**: Detects hardcoded secrets (API keys, tokens, credentials)
+- **Ruff**: Python linting and formatting
+- **YAML/JSON validation**: Ensures configuration files are valid
+- **Trailing whitespace and EOF fixes**: Maintains clean formatting
+
+To install pre-commit hooks locally:
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+Hooks run automatically on `git commit`. To run manually:
+
+```bash
+pre-commit run --all-files
+```
+
 ## Adding Test Cases (Optional)
 
 For complex patterns, add `tests/test-cases.yml`:
