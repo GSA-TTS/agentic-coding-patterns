@@ -1,0 +1,4 @@
+# Markdownlint configuration
+# Disable rules that conflict with existing content style
+MD013: false  # Line length - existing content has long lines
+MD040: false  # Fenced code language - some examples don't specify language

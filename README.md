@@ -2,7 +2,7 @@
 
 Community-maintained patterns, prompts, skills, agent instructions, workflows, and lessons learned for responsible agentic coding.
 
-> **Status:** Active development | **License:** CC0-1.0 | **Repo:** https://github.com/GSA-TTS/agentic-coding-patterns
+> **Status:** Active development | **License:** CC0-1.0 | **Repo:** <https://github.com/GSA-TTS/agentic-coding-patterns>
 
 ## Agentic Coding Ecosystem
 
@@ -93,8 +93,10 @@ make generate
 ### For Users
 
 **Human users:**
+
 1. Browse available patterns in `INDEX.yaml` or by directory
 2. Use the pattern discovery CLI:
+
    ```bash
    # Search by tag
    python scripts/search_patterns.py --tag security
@@ -105,11 +107,13 @@ make generate
    # Combined filters
    python scripts/search_patterns.py --tag security --tool opencode
    ```
+
 3. Copy pattern directory to your project
 4. Adapt frontmatter and content to your needs
 5. Review and test before production use
 
 **AI agents:**
+
 1. Parse `INDEX.yaml` for pattern discovery (see [AI Agent Guide](docs/AI-AGENT-GUIDE.md))
 2. Use the CLI for filtering: `python scripts/search_patterns.py --json --tag <tag>`
 3. Filter patterns by `type`, `status`, `tags`, and `portability` flags
@@ -117,6 +121,7 @@ make generate
 5. Validate against `prohibited_content` before using
 
 **INDEX.yaml structure:**
+
 ```yaml
 schema_version: "1.0"
 repo: GSA-TTS/agentic-coding-patterns
@@ -143,6 +148,7 @@ stats:
 See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
 
 **Quick version:**
+
 1. Use a template from `templates/`
 2. Fill in frontmatter (all required fields)
 3. Write clear, reusable content
@@ -153,6 +159,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
 ## Safety Requirements
 
 All patterns MUST:
+
 - Define `prohibited_content` in frontmatter
 - Use placeholders for environment-specific values
 - Pass sensitive term scanning
@@ -171,6 +178,7 @@ make ci          # Full CI check
 ## Tool Compatibility
 
 Patterns track compatibility via `portability` frontmatter:
+
 - `opencode`: OpenCode SKILL.md format
 - `cursor`: Cursor .cursorrules
 - `claude_projects`: Claude Projects
@@ -199,3 +207,42 @@ This repository is released under [CC0-1.0](LICENSE) (public domain). Content is
 ---
 
 > **Note:** Review and test all patterns before production use. Tailor to your specific requirements.
+
+## Development Setup
+
+### Pre-commit Hooks
+
+This repository uses pre-commit hooks for code quality and security:
+
+```bash
+# Install pre-commit (if not already installed)
+pip install pre-commit
+
+# Install the git hook scripts
+pre-commit install
+pre-commit install --hook-type commit-msg
+
+# (Optional) Run against all files
+pre-commit run --all-files
+```
+
+**Hooks configured:**
+
+- **gitleaks** — Secret detection (critical for example code)
+- **ruff** — Python linting and formatting with security rules
+- **commitlint** — Conventional Commits validation
+- **markdownlint** — Markdown formatting
+- **zizmor** (optional) — GitHub Actions security scanning (auto-skips if not installed; install: `cargo install zizmor` or `brew install zizmor`)
+- **Pattern validation** — Frontmatter schema validation
+- **Basic hygiene** — YAML/JSON/TOML validation, trailing whitespace, etc.
+
+**Manual security scanning:**
+
+```bash
+# Run zizmor separately for comprehensive GitHub Actions security audit
+zizmor .github/workflows/
+```
+
+**Note:** zizmor will silently skip if not installed. Install from: <https://github.com/zizmorcore/zizmor>
+
+See `.pre-commit-config.yaml` for full configuration.
