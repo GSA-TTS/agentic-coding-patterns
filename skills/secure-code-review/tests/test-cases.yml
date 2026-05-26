@@ -1,0 +1,124 @@
+# Test cases for secure-code-review skill
+# Schema version: 1.0.0
+
+suite:
+  pattern_id: secure-code-review
+  pattern_version: "1.0.0"
+  description: "Tests for secure code review pattern"
+
+test_cases:
+  - id: sql-injection-detection
+    name: "Detects SQL injection vulnerability"
+    description: "Verifies pattern identifies SQL injection patterns in code"
+    input:
+      type: literal
+      content: |
+        # Security Analysis
+        
+        ## Vulnerabilities Found
+        
+        The code contains a SQL injection vulnerability:
+        
+        query = "SELECT * FROM users WHERE id = " + user_input
+        
+        This concatenates user input directly into the SQL query.
+        
+        ## Recommendation
+        
+        Use parameterized queries to prevent SQL injection.
+    assertions:
+      - type: contains
+        pattern: "SQL injection"
+        min_count: 1
+      - type: contains
+        pattern: "parameterized"
+        min_count: 1
+
+  - id: has-required-sections
+    name: "Output has required security review sections"
+    description: "Check that security reviews have standard sections"
+    input:
+      type: literal
+      content: |
+        # Security Code Review
+        
+        ## Summary
+        This review covers authentication and authorization logic.
+        
+        ## Vulnerabilities Found
+        No critical vulnerabilities detected.
+        
+        ## Recommendations
+        Consider adding rate limiting to prevent brute force attacks.
+    assertions:
+      - type: has_sections
+        sections:
+          - "Summary"
+          - "Vulnerabilities Found"
+          - "Recommendations"
+
+  - id: no-hardcoded-credentials
+    name: "Flags hardcoded credentials"
+    description: "Ensures the review identifies hardcoded secrets"
+    input:
+      type: literal
+      content: |
+        # Security Review
+        
+        ## Critical Issue
+        
+        Found hardcoded API key in configuration:
+        
+        api_key = "sk-1234567890abcdef"
+        
+        ## Recommendation
+        
+        Store credentials in environment variables or a secure vault.
+    assertions:
+      - type: contains
+        pattern: "hardcoded"
+        case_sensitive: false
+      - type: contains
+        pattern: "environment variable"
+        case_sensitive: false
+
+  - id: no-prohibited-patterns
+    name: "No prohibited phrases in security review"
+    description: "Ensure security reviews don't contain dismissive language"
+    input:
+      type: literal
+      content: |
+        # Security Review
+        
+        The authentication implementation follows OWASP guidelines.
+        Password hashing uses bcrypt with appropriate work factor.
+        Session tokens are securely generated and validated.
+    assertions:
+      - type: no_prohibited
+        patterns:
+          - "should be fine"
+          - "probably okay"
+          - "not a big deal"
+
+  - id: owasp-reference
+    name: "References OWASP security standards"
+    description: "Validates that reviews cite security best practices"
+    input:
+      type: literal
+      content: |
+        # Security Analysis
+        
+        ## Authentication Review
+        
+        The authentication implementation follows OWASP guidelines for
+        secure password storage (Source: OWASP Top 10).
+        
+        ## Input Validation
+        
+        All user inputs are validated and sanitized per OWASP recommendations.
+    assertions:
+      - type: has_pattern
+        patterns:
+          - "OWASP"
+          - "\\(Source:"
+        minimum_count: 2

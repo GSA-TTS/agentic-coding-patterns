@@ -62,12 +62,14 @@ test:  ## Run pytest test suite
 		echo "    Create tests to enable this check (see issue #16)"; \
 	fi
 
+test-cases:  ## Run pattern test cases (test-cases.yml validation)
+	python scripts/run_test_cases.py --verbose
+
 coverage:  ## Run tests with coverage report
 	PYTHONPATH=scripts python3 -m pytest scripts/tests/ \
 		--cov=scripts \
 		--cov-report=html \
 		--cov-report=term
-
 ci:  ## Full CI check (validate + security + test + pre-commit checks)
 	@echo "==> Running pre-commit checks (duplicates pre-commit hooks)..."
 	@if command -v pre-commit >/dev/null 2>&1; then \
