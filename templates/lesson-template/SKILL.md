@@ -56,19 +56,24 @@ Brief summary of the lesson (2-3 sentences). What was tried, what was learned, a
 ## Context
 
 ### Project/Task
+
 Describe what you were working on (anonymize if needed):
+
 - Type of project (e.g., web app, API, documentation)
 - Scale (e.g., small feature, large refactor)
 - Timeline (e.g., 2 days, 2 weeks)
 
 ### Tools Used
+
 - AI coding tool(s): [OpenCode, Claude, Copilot, Cursor, etc.]
 - Patterns/skills applied: [link to patterns if applicable]
 - Programming language/framework
 - Team size/composition
 
 ### Initial Goals
+
 What were you trying to accomplish?
+
 - Goal 1
 - Goal 2
 - Goal 3
@@ -76,18 +81,24 @@ What were you trying to accomplish?
 ## Approach
 
 ### What We Did
+
 Describe the approach taken:
+
 1. First step/decision
 2. Second step/decision
 3. Third step/decision
 
 ### Patterns Applied
+
 Link to specific patterns used:
+
 - [pattern-name](../../skills/pattern-name/SKILL.md) - How it was used
 - [pattern-name](../../prompts/category/pattern-name/SKILL.md) - How it was used
 
 ### Key Decisions
+
 Major decisions made during the work:
+
 - **Decision:** [What was decided]
   - **Rationale:** [Why]
   - **Outcome:** [What happened]
@@ -95,22 +106,28 @@ Major decisions made during the work:
 ## Outcomes
 
 ### What Worked Well ✅
+
 - Success 1 and why it worked
 - Success 2 and why it worked
 - Success 3 and why it worked
 
 ### What Didn't Work ❌
+
 - Challenge 1 and why it failed
 - Challenge 2 and why it failed
 - Challenge 3 and why it failed
 
 ### Unexpected Results
+
 Surprises (positive or negative):
+
 - Unexpected outcome 1
 - Unexpected outcome 2
 
 ### Metrics (if applicable)
+
 Quantitative results:
+
 - Time saved/spent: X hours
 - Code coverage: X%
 - Bugs introduced: X
@@ -119,6 +136,7 @@ Quantitative results:
 ## Learnings
 
 ### Key Takeaways
+
 1. **Learning 1:** [What you learned]
    - **Why it matters:** [Context]
    - **Applicability:** [When to apply this]
@@ -144,6 +162,7 @@ Based on this experience:
 ### What We'd Do Differently
 
 If starting over:
+
 1. Change 1 and why
 2. Change 2 and why
 3. Change 3 and why
@@ -151,19 +170,25 @@ If starting over:
 ## Recommendations
 
 ### For Similar Projects
+
 If you're working on something similar:
+
 - Do: [Recommendation]
 - Don't: [Anti-pattern to avoid]
 - Consider: [Trade-offs]
 
 ### For Tool Users
+
 Specific advice for [tool] users:
+
 - Tip 1
 - Tip 2
 - Gotcha to avoid
 
 ### For Pattern Authors
+
 Feedback for pattern maintainers:
+
 - Pattern X could be improved by...
 - New pattern needed for...
 - Documentation gap in...
@@ -171,13 +196,16 @@ Feedback for pattern maintainers:
 ## Applicability
 
 ### When This Lesson Applies
+
 - Project type: [characteristics]
 - Team size: [range]
 - Timeline: [duration]
 - Experience level: [required skill]
 
 ### When It Doesn't Apply
+
 This lesson may not be relevant if:
+
 - Different project type
 - Different tool/environment
 - Different constraints
@@ -185,13 +213,16 @@ This lesson may not be relevant if:
 ## Related Content
 
 ### Patterns Used
+
 - [pattern-name](../../skills/pattern-name/SKILL.md)
 - [pattern-name](../../prompts/category/pattern-name/SKILL.md)
 
 ### Similar Lessons
+
 - [lesson-name](../lesson-name/SKILL.md)
 
 ### Further Reading
+
 - External resource: [link]
 - Tool documentation: [link]
 

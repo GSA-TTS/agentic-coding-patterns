@@ -2,3 +2,8 @@
 # Disable rules that conflict with existing content style
 MD013: false  # Line length - existing content has long lines
 MD040: false  # Fenced code language - some examples don't specify language
+MD025: false  # Multiple top-level headings - SKILL.md files have multiple h1 (title + skill name)
+MD036: false  # Emphasis as heading - Used intentionally in some documents (e.g., OWASP categories)
+MD060: false  # Table column style - Manual table formatting variations acceptable
+MD024: false  # Duplicate headings - Used intentionally in long documents (e.g., multiple "See Also" sections)
+MD041: false  # First line heading - Fixture files may start with frontmatter

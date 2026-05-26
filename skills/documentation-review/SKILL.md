@@ -96,6 +96,7 @@ Verify all required sections are present:
 - [ ] Related content links
 
 **Missing sections indicate:**
+
 - Incomplete documentation
 - Gaps in user guidance
 
@@ -111,6 +112,7 @@ Cross-check documentation against implementation:
 - [ ] Feature flags/availability documented
 
 **Test critical paths:**
+
 ```bash
 # Run commands from docs to verify they work
 command-from-docs --option value
@@ -128,11 +130,13 @@ Assess readability (target: Grade 8-10 for technical docs):
 - [ ] Concrete examples over abstract explanations
 
 **Tools:**
+
 - Flesch-Kincaid readability score
 - Hemingway Editor
 - Vale (automated style/readability linter)
 
 **Example transformation:**
+
 ```markdown
 # ❌ Complex (Grade 14)
 "The utilization of parameterized queries is necessitated by the requirement to mitigate SQL injection vulnerabilities."
@@ -162,6 +166,7 @@ Check all links:
 - [ ] Anchor links (#section) resolve correctly
 
 **Automated check:**
+
 ```bash
 # Example with markdown-link-check
 markdown-link-check docs/**/*.md
@@ -178,6 +183,7 @@ Identify outdated content:
 - [ ] TODO or FIXME comments addressed
 
 **Red flags:**
+
 - References to versions >2 years old
 - Screenshots with old UI
 - Broken links to moved resources
@@ -208,11 +214,13 @@ After review, confirm:
 ### Example 1: Readability Improvement
 
 **Before (Grade 13):**
+
 ```markdown
 The implementation necessitates the utilization of environment variables for configuration management purposes, thereby facilitating the separation of configuration from codebase.
 ```
 
 **After (Grade 8):**
+
 ```markdown
 Use environment variables to configure the app. This keeps configuration separate from your code.
 ```
@@ -220,6 +228,7 @@ Use environment variables to configure the app. This keeps configuration separat
 ### Example 2: Broken Link Detection
 
 **Finding:**
+
 ```markdown
 See [API docs](https://old-domain.com/api) for details.
 ```
@@ -230,6 +239,7 @@ See [API docs](https://old-domain.com/api) for details.
 ### Example 3: Missing Context
 
 **Before:**
+
 ```markdown
 ## Installation
 
@@ -237,6 +247,7 @@ Run `npm install` to install dependencies.
 ```
 
 **Improved:**
+
 ```markdown
 ## Installation
 

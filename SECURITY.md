@@ -19,6 +19,7 @@ If you discover a security issue in a pattern (unsafe practices, potential for h
 3. **Ask in the agentic-coding Slack channel** if you have questions or need help coordinating
 
 Include:
+
 - Which pattern is affected
 - Description of the security concern
 - Potential impact
@@ -50,6 +51,7 @@ All patterns in this repository MUST:
 ### 1. No Sensitive Data
 
 Patterns must never include:
+
 - ❌ Secrets, API keys, tokens, passwords
 - ❌ PII (Personally Identifiable Information)
 - ❌ CUI (Controlled Unclassified Information)
@@ -57,19 +59,23 @@ Patterns must never include:
 - ❌ Customer data or production data
 
 ### 2. Placeholder Use
+
 - Use `<YOUR_API_KEY>` style placeholders
 - Use `example.com` for domains
 - Use `user@example.com` for emails
 - Document what values should replace placeholders
 
 ### 3. Input Validation Guidance
+
 Patterns that accept user input MUST:
+
 - Document input validation requirements
 - Include sanitization guidance
 - Warn about injection risks
 - Define input boundaries
 
 ### 4. Output Contract
+
 Every pattern MUST define `prohibited_content` in frontmatter:
 
 ```yaml
@@ -85,6 +91,7 @@ output:
 ## Validation
 
 All contributions are automatically scanned for:
+
 - Sensitive terms (via `scripts/validate_sensitive_terms.py`)
 - Schema compliance (via `scripts/validate_frontmatter.py`)
 

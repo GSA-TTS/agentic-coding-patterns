@@ -138,11 +138,13 @@ verify-command
 Show a concrete example of using this skill.
 
 **Input:**
+
 ```
 Example input
 ```
 
 **Output:**
+
 ```
 Expected output
 ```

@@ -74,15 +74,18 @@ Brief explanation of the workflow stages.
 **Goal:** What this phase accomplishes
 
 **Actions:**
+
 1. First action
 2. Second action
 3. Third action
 
 **Outputs:**
+
 - What this step produces
 - Artifacts created
 
 **Verification:**
+
 - [ ] Check 1
 - [ ] Check 2
 
@@ -95,16 +98,20 @@ Brief explanation of the workflow stages.
 **Goal:** What this phase accomplishes
 
 **Actions:**
+
 1. First action
 2. Second action
 
 **Inputs from previous step:**
+
 - What's needed from Step 1
 
 **Outputs:**
+
 - What this step produces
 
 **Verification:**
+
 - [ ] Check 1
 - [ ] Check 2
 
@@ -117,12 +124,15 @@ Brief explanation of the workflow stages.
 **Goal:** Final phase objective
 
 **Actions:**
+
 1. Final actions
 
 **Outputs:**
+
 - Final deliverables
 
 **Verification:**
+
 - [ ] Check 1
 - [ ] Check 2
 
@@ -140,14 +150,17 @@ Use this to verify the entire workflow:
 ## Example Walkthrough
 
 ### Scenario
+
 [Describe a concrete example]
 
 ### Execution
+
 **Step 1:** [What happened]
 **Step 2:** [What happened]
 **Step 3:** [What happened]
 
 ### Outcome
+
 [Final result achieved]
 
 ## Common Issues
@@ -160,14 +173,17 @@ Use this to verify the entire workflow:
 ## Variations
 
 ### Variation 1: [Use Case]
+
 Modify the workflow by [changes].
 
 ### Variation 2: [Use Case]
+
 For different context, adapt [steps].
 
 ## Exit Criteria
 
 The workflow is complete when:
+
 - [ ] All steps completed
 - [ ] Deliverables meet quality standards
 - [ ] Verification checks pass

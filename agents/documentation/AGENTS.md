@@ -55,11 +55,13 @@ clarity > completeness > accuracy > style
 ### 1. Plain Language
 
 **Target readability:**
+
 - Technical docs: Grade 10 or below
 - User-facing docs: Grade 8 or below
 - Error messages: Grade 6 or below
 
 **Plain language rules:**
+
 - Short sentences (average ≤20 words)
 - Active voice preferred
 - Common words over jargon
@@ -67,6 +69,7 @@ clarity > completeness > accuracy > style
 - One idea per paragraph
 
 **Example transformation:**
+
 ```markdown
 # ❌ Complex (Grade 14)
 "The instantiation of the configuration object necessitates
@@ -81,6 +84,7 @@ This lets you change settings without modifying code."
 ### 2. Structure
 
 **Required sections:**
+
 ```markdown
 # Title
 
@@ -112,6 +116,7 @@ Brief description (1-2 sentences)
 ### 3. Accuracy Verification
 
 **MUST verify:**
+
 - Code examples run without errors
 - Commands produce expected output
 - API endpoints exist and work
@@ -120,6 +125,7 @@ Brief description (1-2 sentences)
 - Links are not broken
 
 **Testing code examples:**
+
 ```bash
 # Extract code from docs
 grep -A 10 '```python' docs/guide.md > test_example.py
@@ -133,12 +139,14 @@ python test_example.py
 ### 4. Examples Over Abstractions
 
 **MUST include:**
+
 - Concrete examples for every concept
 - Real (or realistic) use cases
 - Expected input and output
 - Common variations
 
 **Example:**
+
 ```markdown
 # ❌ Abstract
 "The function accepts a configuration object."
@@ -163,26 +171,31 @@ Returns: `{'status': 'success', 'data': [...]}`"
 **WCAG 2.2 Level AA requirements:**
 
 **Headings:**
+
 - [ ] Logical hierarchy (H1 → H2 → H3)
 - [ ] No level skips
 - [ ] Descriptive text
 
 **Images:**
+
 - [ ] Alt text for all images
 - [ ] Diagrams described in text
 - [ ] No information conveyed by color alone
 
 **Links:**
+
 - [ ] Descriptive link text (not "click here")
 - [ ] Purpose clear from text
 - [ ] Broken links fixed
 
 **Code blocks:**
+
 - [ ] Language specified for syntax highlighting
 - [ ] Complex code explained
 - [ ] Output shown when helpful
 
 **Tables:**
+
 - [ ] Headers for rows/columns
 - [ ] Simple structure (no merged cells)
 - [ ] Readable without color
@@ -190,6 +203,7 @@ Returns: `{'status': 'success', 'data': [...]}`"
 ### 6. Maintenance
 
 **Check regularly:**
+
 - Last updated date (update when changed)
 - Deprecated features flagged
 - Version-specific content labeled
@@ -197,6 +211,7 @@ Returns: `{'status': 'success', 'data': [...]}`"
 - Dead links removed
 
 **Staleness indicators:**
+
 - References to versions >1 year old
 - Screenshots with old UI
 - Links to moved/deleted pages
@@ -205,12 +220,14 @@ Returns: `{'status': 'success', 'data': [...]}`"
 ### 7. No Assumptions
 
 **MUST document:**
+
 - Prerequisites explicitly
 - Step-by-step instructions
 - Expected outcomes
 - What to do when things go wrong
 
 **Don't assume:**
+
 - Readers know the system
 - Context is obvious
 - Steps are self-evident
@@ -219,21 +236,25 @@ Returns: `{'status': 'success', 'data': [...]}`"
 ## Documentation Types
 
 ### How-To Guide
+
 **Purpose:** Help user accomplish specific task
 **Structure:** Prerequisites → Steps → Verification
 **Tone:** Instructional, action-oriented
 
 ### Tutorial
+
 **Purpose:** Teach through hands-on experience
 **Structure:** Learning objectives → Building → Reflection
 **Tone:** Educational, supportive
 
 ### Reference
+
 **Purpose:** Provide complete information
 **Structure:** Organized by topic/API/command
 **Tone:** Technical, comprehensive
 
 ### Explanation
+
 **Purpose:** Clarify concepts and design decisions
 **Structure:** Context → Explanation → Implications
 **Tone:** Informative, insightful
@@ -286,6 +307,7 @@ Before publishing:
 ## Common Mistakes to Avoid
 
 **❌ Don't:**
+
 - Use passive voice excessively
 - Assume prior knowledge
 - Skip error cases
@@ -294,6 +316,7 @@ Before publishing:
 - Forget to update after code changes
 
 **✅ Do:**
+
 - Use active voice
 - Define terms on first use
 - Show error handling

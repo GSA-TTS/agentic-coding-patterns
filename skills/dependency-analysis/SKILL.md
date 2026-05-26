@@ -90,23 +90,27 @@ Analyze project dependencies to identify security vulnerabilities, license issue
 List all direct and transitive dependencies:
 
 **Python:**
+
 ```bash
 pip list
 pip show <package-name>  # Details including dependencies
 ```
 
 **Node.js:**
+
 ```bash
 npm list
 npm list --depth=0  # Direct dependencies only
 ```
 
 **Rust:**
+
 ```bash
 cargo tree
 ```
 
 **Go:**
+
 ```bash
 go list -m all
 ```
@@ -116,6 +120,7 @@ go list -m all
 Check for known security vulnerabilities:
 
 **Python:**
+
 ```bash
 # Using pip-audit
 pip install pip-audit
@@ -127,6 +132,7 @@ safety check
 ```
 
 **Node.js:**
+
 ```bash
 npm audit
 npm audit --json  # Machine-readable output
@@ -136,12 +142,14 @@ npm audit fix
 ```
 
 **Rust:**
+
 ```bash
 cargo install cargo-audit
 cargo audit
 ```
 
 **Go:**
+
 ```bash
 go install golang.org/x/vuln/cmd/govulncheck@latest
 govulncheck ./...
@@ -152,18 +160,21 @@ govulncheck ./...
 Verify all licenses are compatible with your project:
 
 **Python:**
+
 ```bash
 pip install pip-licenses
 pip-licenses --format=markdown
 ```
 
 **Node.js:**
+
 ```bash
 npm install -g license-checker
 license-checker --summary
 ```
 
 **Check for:**
+
 - [ ] GPL licenses (copyleft - may require source disclosure)
 - [ ] Permissive licenses (MIT, Apache, BSD - generally safe)
 - [ ] Proprietary/commercial licenses
@@ -174,21 +185,25 @@ license-checker --summary
 Identify dependencies with available updates:
 
 **Python:**
+
 ```bash
 pip list --outdated
 ```
 
 **Node.js:**
+
 ```bash
 npm outdated
 ```
 
 **Rust:**
+
 ```bash
 cargo outdated
 ```
 
 **Go:**
+
 ```bash
 go list -u -m all
 ```
@@ -205,6 +220,7 @@ Evaluate dependency trustworthiness:
 - [ ] **Scope creep:** Package does what it claims
 
 **Red flags:**
+
 - Recently created packages mimicking popular ones
 - Packages with no repository link
 - Obfuscated or minified source
@@ -216,6 +232,7 @@ Evaluate dependency trustworthiness:
 Check that versions are pinned:
 
 **Python (requirements.txt):**
+
 ```
 # ❌ Unpinned
 requests>=2.0
@@ -225,6 +242,7 @@ requests==2.31.0
 ```
 
 **Node.js (package.json):**
+
 ```json
 {
   "dependencies": {
@@ -235,6 +253,7 @@ requests==2.31.0
 ```
 
 Use lock files for reproducible builds:
+
 - `requirements.txt` + `pip freeze` (Python)
 - `package-lock.json` (Node.js)
 - `Cargo.lock` (Rust)
@@ -245,6 +264,7 @@ Use lock files for reproducible builds:
 Create a manifest of all dependencies:
 
 **Using CycloneDX:**
+
 ```bash
 # Python
 pip install cyclonedx-bom
@@ -271,6 +291,7 @@ After analysis, confirm:
 ### Example 1: Critical Vulnerability Found
 
 **Tool Output:**
+
 ```
 ┌───────────────┬──────────────────────────────────────────────────────┐
 │ High          │ Regular Expression Denial of Service                │
@@ -284,6 +305,7 @@ After analysis, confirm:
 ```
 
 **Remediation:**
+
 1. Update to fixed version: `npm update minimatch@3.0.5`
 2. Test application
 3. Commit updated package-lock.json
@@ -291,11 +313,13 @@ After analysis, confirm:
 ### Example 2: License Incompatibility
 
 **Finding:**
+
 - Package `gpl-library@1.0.0` uses GPL-3.0 license
 - Your project is MIT licensed
 - GPL requires derivative works to be GPL
 
 **Recommendation:**
+
 - Find MIT/Apache alternative
 - Or obtain legal approval for GPL use
 - Or isolate as separate service
@@ -303,16 +327,18 @@ After analysis, confirm:
 ### Example 3: Typosquatting Detection
 
 **Suspicious package:**
+
 - Name: `reqeusts` (note typo)
 - Created: 2 days ago
 - Downloads: 100
 - No repository link
 
 **Legitimate package:**
+
 - Name: `requests`
 - Created: 10 years ago
 - Downloads: 500M+
-- Repository: https://github.com/psf/requests
+- Repository: <https://github.com/psf/requests>
 
 **Action:** Remove typosquatted package, use legitimate one
 

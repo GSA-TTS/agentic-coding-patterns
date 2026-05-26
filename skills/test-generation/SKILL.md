@@ -98,16 +98,19 @@ Analyze the function/method to test:
 ### Step 2: Identify Test Categories
 
 **Happy path:**
+
 - Normal, expected inputs
 - Typical use cases
 
 **Edge cases:**
+
 - Boundary values (min/max, empty, null)
 - Special characters in strings
 - Zero, negative numbers
 - Very large inputs
 
 **Error cases:**
+
 - Invalid inputs
 - Missing required parameters
 - Type mismatches
@@ -118,6 +121,7 @@ Analyze the function/method to test:
 Follow the **Arrange-Act-Assert** pattern:
 
 **Python (pytest):**
+
 ```python
 def test_function_name_describes_what_is_tested():
     # Arrange: Set up test data
@@ -132,6 +136,7 @@ def test_function_name_describes_what_is_tested():
 ```
 
 **JavaScript (Jest):**
+
 ```javascript
 describe('functionUnderTest', () => {
   it('should return expected result for valid input', () => {
@@ -180,6 +185,7 @@ def test_validate_age_none():
 Isolate the code under test:
 
 **Python:**
+
 ```python
 from unittest.mock import Mock, patch
 
@@ -195,6 +201,7 @@ def test_fetch_user_data():
 ```
 
 **JavaScript:**
+
 ```javascript
 jest.mock('./api');
 import { fetchUser } from './api';
@@ -229,18 +236,21 @@ def test_invalid_input_returns_error_message():
 Identify untested code paths:
 
 **Python:**
+
 ```bash
 pytest --cov=mymodule --cov-report=html
 # Open htmlcov/index.html to see coverage report
 ```
 
 **JavaScript:**
+
 ```bash
 jest --coverage
 # Check coverage/lcov-report/index.html
 ```
 
 **Look for:**
+
 - Uncovered branches (if/else paths)
 - Exception handlers not tested
 - Edge cases missed
@@ -262,6 +272,7 @@ After generating tests:
 ### Example 1: String Validation Function
 
 **Code:**
+
 ```python
 def is_valid_email(email):
     if not email or '@' not in email:
@@ -271,6 +282,7 @@ def is_valid_email(email):
 ```
 
 **Generated Tests:**
+
 ```python
 def test_valid_email():
     assert is_valid_email('user@example.com') == True
@@ -299,6 +311,7 @@ def test_empty_domain():
 **Function:** `calculate_discount(price, percentage)`
 
 **Edge cases to test:**
+
 - Price = 0
 - Price < 0 (should error)
 - Percentage = 0
@@ -313,6 +326,7 @@ def test_empty_domain():
 **Bug:** Function crashes when input list is empty
 
 **Regression test:**
+
 ```python
 def test_process_empty_list_does_not_crash():
     # This would have failed before the bug fix

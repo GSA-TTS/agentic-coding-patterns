@@ -100,11 +100,13 @@ Provide your response with these sections:
 ## Usage Example
 
 ### Input
+
 ```
 Example user input
 ```
 
 ### Expected Output
+
 ```
 Example of what the prompt should generate
 ```
@@ -112,6 +114,7 @@ Example of what the prompt should generate
 ## Verification
 
 Check that the output:
+
 - [ ] Follows the required structure
 - [ ] Contains no prohibited content
 - [ ] Meets quality requirements
@@ -120,9 +123,11 @@ Check that the output:
 ## Variations
 
 ### Variation 1: [Use Case]
+
 Adapt the prompt by changing [specific part].
 
 ### Variation 2: [Use Case]
+
 For different context, modify [specific section].
 
 ## Related Patterns

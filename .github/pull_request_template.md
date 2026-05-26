@@ -3,7 +3,6 @@
 ## Summary
 <!-- Brief description of what this PR does (2-3 sentences) -->
 
-
 ## Type of Change
 <!-- Mark with an 'x' all that apply -->
 
@@ -27,7 +26,6 @@
 
 ## Motivation
 <!-- What problem does this solve? Why is this change needed? -->
-
 
 ## Testing
 <!-- How was this tested? -->
@@ -61,7 +59,7 @@
 <!-- Paste output of `make validate` -->
 
 ```
-$ make validate
+make validate
 
 ```
 
@@ -74,11 +72,11 @@ Relates to #
 ## Additional Context
 <!-- Any other information reviewers should know -->
 
-
 ## Reviewer Notes
 <!-- For reviewers: checklist of what to verify -->
 
 **Reviewers should verify:**
+
 - [ ] Frontmatter is valid and complete
 - [ ] Safety checklist items confirmed
 - [ ] Pattern is clear and actionable

@@ -51,7 +51,9 @@ quality_gates:
 ## Template-Specific Guidance
 
 ### skill-template
+
 Use for **procedures and how-to guides**:
+
 - Code review processes
 - Testing strategies
 - Documentation practices
@@ -60,7 +62,9 @@ Use for **procedures and how-to guides**:
 Structure: When to Use → Prerequisites → Procedure → Verification → Examples
 
 ### prompt-template
+
 Use for **standalone LLM prompts**:
+
 - Planning prompts
 - Code generation templates
 - Review checklists
@@ -69,7 +73,9 @@ Use for **standalone LLM prompts**:
 Structure: Context → Prompt Text → Usage Example → Verification
 
 ### workflow-template
+
 Use for **multi-step processes**:
+
 - Issue-to-PR workflows
 - Release processes
 - QA procedures
@@ -78,7 +84,9 @@ Use for **multi-step processes**:
 Structure: Overview → Multiple phases with inputs/outputs → Checklist → Examples
 
 ### lesson-template
+
 Use for **lessons learned**:
+
 - Project retrospectives
 - Tool evaluations
 - Pattern effectiveness

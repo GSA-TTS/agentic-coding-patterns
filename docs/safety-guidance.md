@@ -20,6 +20,7 @@ This repository contains **community patterns for AI-assisted coding**. While th
 | **Vulnerability details** | Responsible disclosure | Unfixed security flaws, exploit code |
 
 **Use placeholders instead:**
+
 - URLs: `https://example.com`, `https://api.example.com`
 - Emails: `user@example.com`
 - Names: `[Your Name]`, `[Project Name]`
@@ -30,6 +31,7 @@ This repository contains **community patterns for AI-assisted coding**. While th
 Patterns that accept user input MUST include safety guidance:
 
 ### 1. Define Input Boundaries
+
 ```markdown
 ## Input
 Provide the following:
@@ -44,6 +46,7 @@ Provide the following:
 ```
 
 ### 2. Use Input Delimiters
+
 When accepting untrusted input, use clear delimiters:
 
 ```markdown
@@ -57,6 +60,7 @@ Analyze this code:
 This helps AI agents distinguish pattern instructions from user data.
 
 ### 3. Warn About Prompt Injection
+
 For patterns that combine instructions with user input:
 
 ```markdown
@@ -72,6 +76,7 @@ Every pattern MUST define what outputs are allowed and forbidden.
 ### Required: prohibited_content
 
 In frontmatter:
+
 ```yaml
 output:
   format: markdown
@@ -90,6 +95,7 @@ output:
 ### Minimum Prohibited Content
 
 **Every pattern must prohibit at minimum:**
+
 1. Secrets (API keys, tokens, passwords)
 2. PII (names, emails, addresses)
 3. CUI (controlled information)
@@ -98,6 +104,7 @@ output:
 ### Additional Prohibitions (Pattern-Specific)
 
 Add based on pattern context:
+
 - **Code generation:** "Insecure code patterns", "Deprecated APIs"
 - **Security review:** "Actual exploit code", "Live vulnerability details"
 - **Documentation:** "Internal project names", "Customer references"
@@ -105,6 +112,7 @@ Add based on pattern context:
 ## Safe Examples
 
 ### ✅ Good: Placeholder Example
+
 ```python
 # Connect to API
 api_key = os.environ.get("API_KEY")  # Set via environment variable
@@ -115,12 +123,14 @@ response = requests.get(
 ```
 
 ### ❌ Bad: Real Credentials
+
 ```python
 # DON'T DO THIS
 api_key = "sk_live_abcd1234xyz"  # NEVER hardcode real keys
 ```
 
 ### ✅ Good: Anonymized User Data
+
 ```python
 # Example user data structure
 user = {
@@ -131,6 +141,7 @@ user = {
 ```
 
 ### ❌ Bad: Real User Data
+
 ```python
 # DON'T DO THIS
 user = {
@@ -144,6 +155,7 @@ user = {
 When creating test cases:
 
 ### ✅ Use Fake Data
+
 ```yaml
 test_cases:
   - id: api-call-test
@@ -156,25 +168,29 @@ test_cases:
 ```
 
 ### ❌ Never Use Real Data in Tests
+
 Don't include real credentials, URLs, or data in test files.
 
 ## Security Review Patterns
 
 Patterns that review code for security issues:
 
-### Do:
+### Do
+
 - Detect vulnerability patterns
 - Explain risks in general terms
 - Suggest remediation approaches
 - Link to public resources (OWASP, CWE)
 
-### Don't:
+### Don't
+
 - Provide working exploit code
 - Disclose unfixed vulnerabilities
 - Include actual malicious payloads
 - Give step-by-step attack instructions
 
 ### Example: Safe Security Guidance
+
 ```markdown
 **Finding:** Potential SQL injection vulnerability
 
@@ -187,6 +203,7 @@ cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
 ```
 
 **Reference:** OWASP SQL Injection Prevention Cheat Sheet
+
 ```
 
 ## Compliance Considerations

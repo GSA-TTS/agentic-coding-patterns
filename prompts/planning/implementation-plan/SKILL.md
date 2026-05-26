@@ -151,8 +151,10 @@ Provide your plan in this format:
 
 ### Dependency Graph
 ```
+
 T1 → T2 → T4
 T1 → T3 → T4
+
 ```
 
 ### Risks and Unknowns
@@ -167,6 +169,7 @@ T1 → T3 → T4
 ## Usage Example
 
 ### Input
+
 ```
 Feature: Add user authentication with OAuth2
 
@@ -177,6 +180,7 @@ Requirements:
 ```
 
 ### Expected Output
+
 ```markdown
 ### Overview
 Implement OAuth2 authentication with Google, session management, and role-based access control.
@@ -232,10 +236,12 @@ Implement OAuth2 authentication with Google, session management, and role-based 
 
 ### Dependency Graph
 ```
+
 T1 → T2 → T5
      T2 → T3 → T5
           T3 → T4 → T5
                     T5 → T6
+
 ```
 
 ### Risks and Unknowns
@@ -253,6 +259,7 @@ T1 → T2 → T5
 ## Verification
 
 Check that the output:
+
 - [ ] Tasks are granular (1-4 hours each)
 - [ ] Dependencies are explicit
 - [ ] Complexity is reasonable

@@ -66,10 +66,12 @@ When performing code reviews, use the [Secure Code Review](skills/secure-code-re
 ### Usage
 
 ```
+
 Human: Review this pull request for security issues
 Agent: I'll use the Secure Code Review skill to analyze the changes.
 
 [Loads and executes secure-code-review.md]
+
 ```
 ```
 

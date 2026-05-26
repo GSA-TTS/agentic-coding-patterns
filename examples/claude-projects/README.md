@@ -34,6 +34,7 @@ Claude Projects allow custom instructions that guide Claude's behavior. Patterns
 Convert procedural steps to guidance:
 
 **Pattern:**
+
 ```
 1. Read the specification
 2. Check for ambiguities
@@ -41,6 +42,7 @@ Convert procedural steps to guidance:
 ```
 
 **Claude:**
+
 ```
 You are a specification reviewer. When reviewing specs:
 - Look for ambiguous requirements

@@ -100,15 +100,18 @@ principle1 > principle2 > principle3 > principle4
 ### 1. First Practice Area
 
 **MUST:**
+
 - Required behavior 1
 - Required behavior 2
 - Required behavior 3
 
 **MUST NOT:**
+
 - Prohibited behavior 1
 - Prohibited behavior 2
 
 **Example:**
+
 ```bash
 # Good example
 command --correct-option
@@ -122,14 +125,17 @@ command --wrong-option
 ### 2. Second Practice Area
 
 **SHOULD:**
+
 - Recommended behavior 1
 - Recommended behavior 2
 
 **SHOULD NOT:**
+
 - Discouraged behavior 1
 - Discouraged behavior 2
 
 **When:**
+
 - Condition when this practice applies
 
 ### 3. Third Practice Area
@@ -137,6 +143,7 @@ command --wrong-option
 Describe another important practice area for this agent.
 
 **Steps:**
+
 1. First step in this practice
 2. Second step in this practice
 3. Verification step
@@ -146,6 +153,7 @@ Describe another important practice area for this agent.
 Before completing tasks, the agent MUST verify:
 
 ### Code Changes
+
 - [ ] First verification checkpoint
 - [ ] Second verification checkpoint
 - [ ] Third verification checkpoint
@@ -157,6 +165,7 @@ make test
 ```
 
 ### Documentation Changes
+
 - [ ] Documentation verification 1
 - [ ] Documentation verification 2
 
@@ -165,6 +174,7 @@ make test
 ### Input Handling
 
 The agent MUST:
+
 - Define how to handle user input safely
 - Validate input boundaries
 - Sanitize sensitive data
@@ -172,6 +182,7 @@ The agent MUST:
 ### Output Standards
 
 The agent MUST:
+
 - Follow output contract in frontmatter
 - Never include prohibited content
 - Format output consistently
@@ -179,6 +190,7 @@ The agent MUST:
 ### Error Handling
 
 The agent MUST:
+
 - Handle errors gracefully
 - Provide clear error messages
 - Never expose sensitive information in errors
@@ -186,14 +198,17 @@ The agent MUST:
 ## Tool Usage
 
 ### Required Tools
+
 - Tool 1 (with version if applicable)
 - Tool 2 (with version if applicable)
 
 ### Recommended Tools
+
 - Optional tool 1 — for what purpose
 - Optional tool 2 — for what purpose
 
 ### Tool Safety
+
 - How to use tools safely
 - What to avoid with tools
 - Verification commands
@@ -203,11 +218,13 @@ The agent MUST:
 When working with other agents or humans:
 
 **MUST:**
+
 - Clear handoff procedures
 - Document assumptions
 - Report blockers
 
 **Pattern:**
+
 1. Receive task
 2. Clarify requirements
 3. Execute work
@@ -221,16 +238,19 @@ When working with other agents or humans:
 Describe a typical scenario where this agent would be used.
 
 **Input:**
+
 ```
 Example task description
 ```
 
 **Agent Actions:**
+
 1. First action the agent takes
 2. Second action the agent takes
 3. Verification action
 
 **Output:**
+
 ```
 Expected output format
 ```

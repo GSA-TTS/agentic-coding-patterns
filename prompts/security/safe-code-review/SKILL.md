@@ -233,6 +233,7 @@ Instead, describe vulnerabilities conceptually and provide remediation.
 ## Usage Example
 
 ### Input
+
 ```python
 def get_user(username):
     query = f"SELECT * FROM users WHERE name = '{username}'"
@@ -245,6 +246,7 @@ def admin_panel(request):
 ```
 
 ### Expected Output
+
 ```markdown
 ### Summary
 **Files Reviewed**: 1
@@ -311,6 +313,7 @@ def admin_panel(request):
 2. **For F2**: Test admin access without proper authentication
 3. Run security scanner: `bandit -r .`
 4. Manual penetration test before deployment
+
 ```
 
 ## Verification

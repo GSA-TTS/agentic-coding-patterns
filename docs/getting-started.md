@@ -91,6 +91,7 @@ quality_gates:
 ```
 
 **Key fields:**
+
 - `id`: Never changes (kebab-case)
 - `status`: Start with `experimental`
 - `prohibited_content`: **Must include at minimum:** Secrets, PII, CUI, Internal URLs
@@ -143,25 +144,31 @@ make validate
 **Common validation errors and fixes:**
 
 ### Error: Missing required field
+
 ```
 ✗ skills/my-pattern/SKILL.md
   - Schema validation failed: 'title' is a required property
 ```
+
 **Fix:** Add the missing field to frontmatter.
 
 ### Error: Invalid YAML
+
 ```
 ✗ skills/my-pattern/SKILL.md
   - No valid YAML frontmatter found
 ```
+
 **Fix:** Check frontmatter has `---` before and after, proper indentation.
 
 ### Error: Sensitive terms detected
+
 ```
 ✗ skills/my-pattern/SKILL.md
   Line 42: API key detected
     api_key = "sk_live_abc123"
 ```
+
 **Fix:** Replace with placeholder: `api_key = os.environ.get("API_KEY")`
 
 ---
@@ -169,6 +176,7 @@ make validate
 ## Step 5: Submit PR
 
 ### Create Branch
+
 ```bash
 git checkout -b add-my-pattern-name
 git add skills/my-pattern-name/
@@ -180,6 +188,7 @@ Co-authored-by: [Your Name] <your.email@example.com>"
 ```
 
 ### Push and Create PR
+
 ```bash
 git push origin add-my-pattern-name
 gh pr create --title "feat(skills): add my-pattern-name" --body "$(cat <<EOF
@@ -208,6 +217,7 @@ EOF
 ```
 
 ### Wait for Review
+
 - Maintainers will perform safety check
 - Community may provide feedback
 - Address any comments
@@ -218,13 +228,16 @@ EOF
 ## Common Gotchas
 
 ### 1. Frontmatter Indentation
+
 **Wrong:**
+
 ```yaml
 requires:
 anchors: []
 ```
 
 **Right:**
+
 ```yaml
 requires:
   anchors: []
@@ -233,9 +246,11 @@ requires:
 YAML requires 2-space indentation for nested fields.
 
 ### 2. Forgetting `prohibited_content`
+
 Every pattern **must** define what content is forbidden in output.
 
 **Minimum:**
+
 ```yaml
 prohibited_content:
   - "Secrets"
@@ -245,12 +260,15 @@ prohibited_content:
 ```
 
 ### 3. Using Real Data in Examples
+
 **Wrong:**
+
 ```python
 email = "john.smith@agency.gov"
 ```
 
 **Right:**
+
 ```python
 email = "user@example.com"
 ```
@@ -258,6 +276,7 @@ email = "user@example.com"
 Always use placeholders.
 
 ### 4. Not Running Validation
+
 ```bash
 # Always run before committing
 make validate
@@ -266,6 +285,7 @@ make validate
 Don't skip this! CI will fail if validation doesn't pass.
 
 ### 5. Status Too High
+
 Start with `experimental`. Don't go straight to `recommended`.
 
 ---
@@ -273,17 +293,21 @@ Start with `experimental`. Don't go straight to `recommended`.
 ## Where to Get Help
 
 ### Documentation
+
 - [CONTRIBUTING.md](../CONTRIBUTING.md) - Full contribution guide
 - [safety-guidance.md](safety-guidance.md) - Safety requirements
 - [content-lifecycle.md](content-lifecycle.md) - Status lifecycle
 
 ### Community
+
 - **GitHub Discussions:** Ask questions, share experiences
 - **Issues:** Report problems or suggest improvements
 - **PR Comments:** Request feedback on your contribution
 
 ### Examples
+
 Look at existing patterns:
+
 - `skills/secure-code-review/` - Well-documented skill
 - `prompts/planning/implementation-plan/` - Clear prompt
 - `lessons-learned/example-agentic-session/` - Lesson format
@@ -293,19 +317,23 @@ Look at existing patterns:
 ## After Your First Contribution
 
 ### What's Next?
+
 1. **Watch for feedback** on your PR
 2. **Address comments** if reviewers suggest changes
 3. **Celebrate!** You've contributed to open source
 4. **Consider reviewing** other contributions
 
 ### Contributing Again?
+
 - You now know the process!
 - Try a different content type
 - Improve an existing pattern
 - Help review others' PRs
 
 ### Promoting to Recommended
+
 After your pattern is used successfully:
+
 1. Gather evidence (links, discussions, feedback)
 2. Add test cases (if applicable)
 3. Submit PR to change status to `recommended`
@@ -318,10 +346,13 @@ See [content-lifecycle.md](content-lifecycle.md) for details.
 ## Troubleshooting
 
 ### Validation Fails with "Command not found"
+
 **Fix:** Run `make setup` to install dependencies.
 
 ### Git Pre-Commit Hooks Fail
+
 **Fix:**
+
 ```bash
 # Bypass hooks if stuck
 git commit --no-verify
@@ -333,9 +364,11 @@ git commit
 ```
 
 ### Can't Push to Repository
+
 **Fix:** You don't have direct push access. Use PR workflow (above).
 
 ### Pattern Not Showing in INDEX.yaml
+
 **Fix:** Run `make generate` to regenerate INDEX.yaml (automated in CI).
 
 ---
@@ -370,6 +403,7 @@ gh pr create
 ## Success Criteria
 
 You're ready to contribute when you can:
+
 - [ ] Choose the right content type
 - [ ] Copy and customize a template
 - [ ] Fill required frontmatter fields

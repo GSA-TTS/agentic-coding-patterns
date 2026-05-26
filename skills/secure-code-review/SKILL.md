@@ -90,12 +90,14 @@ Perform security-focused code review to identify common vulnerabilities and secu
 Check all external inputs (user input, API calls, file reads, environment variables):
 
 **What to look for:**
+
 - [ ] All inputs are validated against allowlists (not denylists)
 - [ ] Input length limits enforced
 - [ ] Special characters handled safely
 - [ ] Type checking performed
 
 **Common issues:**
+
 ```python
 # ❌ Vulnerable - no validation
 user_input = request.GET['id']
@@ -110,15 +112,18 @@ cursor.execute(query, (user_id,))
 ### Step 2: Injection Vulnerability Check
 
 **SQL Injection:**
+
 - [ ] No string concatenation in SQL queries
 - [ ] Parameterized queries or ORM used
 - [ ] Input sanitized before database operations
 
 **Command Injection:**
+
 - [ ] No shell execution with user input
 - [ ] If shell needed, use safe APIs (e.g., `subprocess` with list args, not shell=True)
 
 **XSS (Cross-Site Scripting):**
+
 - [ ] Output encoding based on context (HTML, JavaScript, CSS, URL)
 - [ ] Content Security Policy headers set
 - [ ] User input not rendered as HTML without sanitization
@@ -126,6 +131,7 @@ cursor.execute(query, (user_id,))
 ### Step 3: Authentication and Authorization
 
 **Authentication:**
+
 - [ ] Passwords never stored in plaintext
 - [ ] Strong password hashing (bcrypt, Argon2, scrypt)
 - [ ] Multi-factor authentication supported
@@ -133,6 +139,7 @@ cursor.execute(query, (user_id,))
 - [ ] Tokens expire appropriately
 
 **Authorization:**
+
 - [ ] Access controls enforced server-side
 - [ ] Principle of least privilege applied
 - [ ] Authorization checked on every request
@@ -198,6 +205,7 @@ After review, confirm:
 ### Example 1: SQL Injection Detection
 
 **Code:**
+
 ```python
 def get_user(username):
     query = "SELECT * FROM users WHERE name = '" + username + "'"
@@ -205,6 +213,7 @@ def get_user(username):
 ```
 
 **Finding:**
+
 - **Issue:** SQL injection vulnerability
 - **Severity:** High
 - **Impact:** Attacker can read/modify database
@@ -219,11 +228,13 @@ def get_user(username):
 ### Example 2: XSS Prevention
 
 **Code:**
+
 ```javascript
 document.getElementById('message').innerHTML = userInput;
 ```
 
 **Finding:**
+
 - **Issue:** XSS vulnerability
 - **Severity:** High
 - **Impact:** Script injection, session hijacking

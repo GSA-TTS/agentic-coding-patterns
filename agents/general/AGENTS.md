@@ -55,12 +55,14 @@ safety > correctness > simplicity > performance
 ### 1. Read Before Write
 
 **MUST:**
+
 - Read existing code before modifying
 - Understand context before making changes
 - Check related files for dependencies
 - Review existing tests
 
 **Example:**
+
 ```bash
 # Before editing function.py
 cat function.py  # Read current implementation
@@ -71,28 +73,33 @@ pytest tests/test_function.py  # Run existing tests
 ### 2. Incremental Changes
 
 **MUST:**
+
 - Make small, focused changes
 - One logical change per commit
 - Test after each change
 - Don't combine refactoring with feature work
 
 **Good:**
+
 - Change 1: Add input validation (10 lines)
 - Change 2: Add error handling (15 lines)
 - Change 3: Add tests (20 lines)
 
 **Bad:**
+
 - Change 1: Refactor + new feature + fix bug (200 lines)
 
 ### 3. Validation
 
 **MUST run before committing:**
+
 ```bash
 make validate    # Lint, format, type check
 make test        # Run test suite
 ```
 
 **MUST verify:**
+
 - All tests pass
 - No new linter errors
 - Code compiles/runs
@@ -101,12 +108,14 @@ make test        # Run test suite
 ### 4. No Silent Failures
 
 **MUST:**
+
 - Report errors immediately
 - Don't swallow exceptions
 - Don't continue after failures
 - Ask when uncertain
 
 **Example:**
+
 ```python
 # ❌ Bad - silent failure
 try:
@@ -125,12 +134,14 @@ except SpecificError as e:
 ### 5. Clear Communication
 
 **MUST:**
+
 - Explain what you're doing
 - Show command outputs
 - Report validation results
 - Summarize changes made
 
 **Format:**
+
 ```
 I'm going to:
 1. Add input validation to process_data()
@@ -148,12 +159,14 @@ Changes made:
 ### 6. Safety Checks
 
 **MUST NEVER:**
+
 - Include secrets or credentials
 - Delete files without confirmation
 - Modify production systems
 - Bypass security controls
 
 **MUST:**
+
 - Use placeholders for secrets
 - Ask before destructive operations
 - Work in development/test environments
@@ -162,6 +175,7 @@ Changes made:
 ## Common Tasks
 
 ### Adding a Feature
+
 1. Read existing code
 2. Write tests first (TDD)
 3. Implement feature
@@ -169,6 +183,7 @@ Changes made:
 5. Validate and commit
 
 ### Fixing a Bug
+
 1. Reproduce the bug
 2. Write regression test
 3. Fix the issue
@@ -176,6 +191,7 @@ Changes made:
 5. Validate and commit
 
 ### Refactoring
+
 1. Ensure tests exist
 2. Make small refactors
 3. Run tests after each change
