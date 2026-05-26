@@ -32,7 +32,34 @@ This repo is one of three in the agentic coding ecosystem:
 3. **Fill in frontmatter** (all required fields)
 4. **Write your content** (clear and reusable)
 5. **Run validation**: `make validate`
-6. **Submit a PR** with the checklist completed
+6. **Optional: Install pre-commit hooks**: `make install-hooks` (recommended for regular contributors)
+7. **Submit a PR** with the checklist completed
+
+**Note:** Pre-commit hooks are opt-in to reduce friction for new contributors. If you plan to contribute regularly, `make install-hooks` will catch issues before commit. CI enforces all checks regardless of local hook installation.
+
+## Working in SBX Containers
+
+Many pattern contributors use the [Quickstart](https://github.com/GSA-TTS/agentic-coding-quickstart) SBX Docker environment. If you're working in an SBX container:
+
+**Typical workflow:**
+1. **Edit inside the container** — Your pattern files, code, and documentation
+2. **Install dependencies** — Run `make setup` inside the container (includes pip install for validation tools)
+3. **Validate your work** — Run `make ci` to check frontmatter, linting, and security scans
+4. **Commit from host or container:**
+   - **Option A (recommended):** Exit the container and commit from your host machine where git is already configured
+   - **Option B:** Configure git inside the container (name, email, GPG if used) and commit there
+
+**Why pre-commit hooks are optional:**
+- CI always validates your PR regardless of local hook installation
+- Container environments may not persist hook installations between sessions
+- Some contributors prefer to validate manually with `make ci` before committing
+
+**One-command validation:**
+```bash
+make ci    # Runs all pre-commit checks, tests, and validation
+```
+
+This gives you the same safety net as installing hooks, without requiring hook installation inside your container.
 
 ## Content Types
 
