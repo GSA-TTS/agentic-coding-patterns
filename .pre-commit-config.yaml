@@ -1,6 +1,11 @@
+# Pre-commit hooks for agentic-coding-patterns
+# Run: pre-commit install
+# All hooks pinned to commit SHAs for supply chain security (except local hooks)
+
 repos:
+  # Basic hygiene checks
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.5.0
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c  # v6.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
@@ -9,13 +14,53 @@ repos:
       - id: check-toml
       - id: check-added-large-files
         args: ['--maxkb=500']
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: mixed-line-ending
 
+  # Secret detection (CRITICAL - patterns may include example code)
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: ee6b38352380ce52369d16b7873093c4b8bf829b  # v8.24.3
+    hooks:
+      - id: gitleaks
+
+  # Python linting with security rules
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.1.9
+    rev: c60c980e561ed3e73101667fe8365c609d19a438  # v0.15.9
     hooks:
       - id: ruff
         args: ["--fix"]
+      - id: ruff-format
 
+  # Markdown linting
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.43.0
+    hooks:
+      - id: markdownlint
+        args: ["--fix"]
+
+  # Commit message validation
+  - repo: https://github.com/alessandrojcm/commitlint-pre-commit-hook
+    rev: v9.18.0
+    hooks:
+      - id: commitlint
+        stages: [commit-msg]
+        additional_dependencies: ["@commitlint/config-conventional"]
+
+  # GitHub Actions security scanning (optional - skips if zizmor not installed)
+  # Install: cargo install zizmor OR brew install zizmor
+  # Source: https://github.com/zizmorcore/zizmor
+  # Manual run: zizmor .github/workflows/
+  - repo: local
+    hooks:
+      - id: zizmor
+        name: zizmor - GitHub Actions security scanner
+        entry: bash -c 'command -v zizmor >/dev/null 2>&1 && zizmor "$@" || exit 0' --
+        language: system
+        files: ^\.github/workflows/.*\.ya?ml$
+        pass_filenames: true
+
+  # Pattern-specific validation (local hook)
   - repo: local
     hooks:
       - id: validate-patterns
