@@ -3,14 +3,11 @@
 Tests for run_test_cases.py test runner.
 """
 
-import tempfile
+# Import the module we're testing
+import sys
 from pathlib import Path
 
 import pytest
-import yaml
-
-# Import the module we're testing
-import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -181,9 +178,7 @@ class TestAssertionNotContains:
 
     def test_not_contains_case_insensitive(self):
         """Test case-insensitive not_contains."""
-        passed, _ = run_assertion_not_contains(
-            "Hello World", "hello", case_sensitive=False
-        )
+        passed, _ = run_assertion_not_contains("Hello World", "hello", case_sensitive=False)
         assert passed is False
 
 
@@ -205,9 +200,7 @@ More content
 
 Even more
 """
-        passed, error = run_assertion_has_sections(
-            content, ["First Section", "Second Section", "Third Section"]
-        )
+        passed, error = run_assertion_has_sections(content, ["First Section", "Second Section", "Third Section"])
         assert passed is True
         assert error is None
 
@@ -218,9 +211,7 @@ Even more
 
 Content
 """
-        passed, error = run_assertion_has_sections(
-            content, ["First Section", "Second Section"]
-        )
+        passed, error = run_assertion_has_sections(content, ["First Section", "Second Section"])
         assert passed is False
         assert "Missing required sections" in error
         assert "Second Section" in error
@@ -233,9 +224,7 @@ Content
 ### H3 Section
 #### H4 Section
 """
-        passed, _ = run_assertion_has_sections(
-            content, ["H1 Section", "H2 Section", "H3 Section", "H4 Section"]
-        )
+        passed, _ = run_assertion_has_sections(content, ["H1 Section", "H2 Section", "H3 Section", "H4 Section"])
         assert passed is True
 
 
@@ -245,27 +234,21 @@ class TestAssertionHasPattern:
     def test_has_pattern_found(self):
         """Test has_pattern when patterns are found."""
         content = "Email: test@example.com and another@test.org"
-        passed, error = run_assertion_has_pattern(
-            content, [r"\w+@\w+\.\w+"], minimum_count=2
-        )
+        passed, error = run_assertion_has_pattern(content, [r"\w+@\w+\.\w+"], minimum_count=2)
         assert passed is True
         assert error is None
 
     def test_has_pattern_insufficient_matches(self):
         """Test has_pattern when not enough matches."""
         content = "Only one match here: test@example.com"
-        passed, error = run_assertion_has_pattern(
-            content, [r"\w+@\w+\.\w+"], minimum_count=2
-        )
+        passed, error = run_assertion_has_pattern(content, [r"\w+@\w+\.\w+"], minimum_count=2)
         assert passed is False
         assert "Expected at least 2" in error
 
     def test_has_pattern_multiple_patterns(self):
         """Test has_pattern with multiple patterns."""
         content = "(Source: OWASP) and Verify: this claim"
-        passed, _ = run_assertion_has_pattern(
-            content, [r"\(Source:", r"Verify:"], minimum_count=2
-        )
+        passed, _ = run_assertion_has_pattern(content, [r"\(Source:", r"Verify:"], minimum_count=2)
         assert passed is True
 
 
@@ -275,18 +258,14 @@ class TestAssertionNoProhibited:
     def test_no_prohibited_clean(self):
         """Test no_prohibited when no patterns are found."""
         content = "This is clean content with no issues."
-        passed, error = run_assertion_no_prohibited(
-            content, [r"password=", r"api_key=", r"secret="]
-        )
+        passed, error = run_assertion_no_prohibited(content, [r"password=", r"api_key=", r"secret="])
         assert passed is True
         assert error is None
 
     def test_no_prohibited_found(self):
         """Test no_prohibited when prohibited patterns are found."""
         content = "Config: api_key=12345 and password=secret"
-        passed, error = run_assertion_no_prohibited(
-            content, [r"password=", r"api_key="]
-        )
+        passed, error = run_assertion_no_prohibited(content, [r"password=", r"api_key="])
         assert passed is False
         assert "prohibited patterns" in error
         assert "api_key=" in error
@@ -370,18 +349,81 @@ class TestRunTestCase:
         assert result.passed is True
         assert len(result.errors) == 0
 
-    def test_run_test_case_file_path_not_implemented(self):
-        """Test that file_path input type is not yet implemented."""
+    def test_run_test_case_file_path_valid(self, tmp_path):
+        """Test file_path input type with valid file."""
+        # Create test file
+        test_content = "Hello from file"
+        input_file = tmp_path / "input.txt"
+        input_file.write_text(test_content)
+
+        # Create test-cases.yml in same directory
+        test_file = tmp_path / "test-cases.yml"
+
         test_case = {
             "id": "test-4",
             "name": "Test 4",
-            "input": {"type": "file_path", "path": "test.txt"},
+            "input": {"type": "file_path", "path": "input.txt"},
+            "assertions": [{"type": "contains", "pattern": "Hello"}],
+        }
+
+        result = run_test_case(test_case, test_file_path=test_file)
+        assert result.passed is True
+        assert len(result.errors) == 0
+
+    def test_run_test_case_file_path_missing_file(self, tmp_path):
+        """Test file_path input type with missing file."""
+        test_file = tmp_path / "test-cases.yml"
+
+        test_case = {
+            "id": "test-5",
+            "name": "Test 5",
+            "input": {"type": "file_path", "path": "nonexistent.txt"},
             "assertions": [],
         }
 
-        result = run_test_case(test_case)
+        result = run_test_case(test_case, test_file_path=test_file)
         assert result.passed is False
-        assert "not yet implemented" in result.errors[0]
+        assert "not found" in result.errors[0]
+
+    def test_run_test_case_file_path_no_path_field(self, tmp_path):
+        """Test file_path input type without path field."""
+        test_file = tmp_path / "test-cases.yml"
+
+        test_case = {
+            "id": "test-6",
+            "name": "Test 6",
+            "input": {"type": "file_path"},
+            "assertions": [],
+        }
+
+        result = run_test_case(test_case, test_file_path=test_file)
+        assert result.passed is False
+        assert "requires 'path' field" in result.errors[0]
+
+    def test_run_test_case_file_path_relative_resolution(self, tmp_path):
+        """Test file_path resolves relative to test-cases.yml."""
+        # Create nested structure
+        test_dir = tmp_path / "tests"
+        fixtures_dir = test_dir / "fixtures"
+        fixtures_dir.mkdir(parents=True)
+
+        # Create fixture file
+        fixture_file = fixtures_dir / "data.txt"
+        fixture_file.write_text("Fixture content")
+
+        # Create test-cases.yml
+        test_file = test_dir / "test-cases.yml"
+
+        test_case = {
+            "id": "test-7",
+            "name": "Test 7",
+            "input": {"type": "file_path", "path": "fixtures/data.txt"},
+            "assertions": [{"type": "contains", "pattern": "Fixture"}],
+        }
+
+        result = run_test_case(test_case, test_file_path=test_file)
+        assert result.passed is True
+        assert len(result.errors) == 0
 
 
 class TestRunTestSuite:

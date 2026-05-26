@@ -106,13 +106,25 @@ input:
 
 ### File Path Input
 
-Use to load input from a file:
+Use to load input from a file relative to the test-cases.yml location:
 
 ```yaml
 input:
   type: file_path
-  path: tests/fixtures/sample-code.py
+  path: fixtures/sample-code.py
 ```
+
+**Path resolution:**
+
+- Paths are resolved relative to the directory containing test-cases.yml
+- For example, if test-cases.yml is in `skills/my-skill/tests/`, then path `fixtures/data.txt` resolves to `skills/my-skill/tests/fixtures/data.txt`
+- Absolute paths are supported but not recommended for portability
+
+**Use cases:**
+
+- Long code samples that are hard to maintain inline
+- Binary or complex file formats
+- Reusable test fixtures shared across multiple test cases
 
 ## Assertion Types
 
@@ -328,11 +340,35 @@ test_cases:
     name: "Contains code examples"
     input:
       type: file_path
-      path: tests/fixtures/api-doc.md
+      path: fixtures/api-doc.md
     assertions:
       - type: contains
         pattern: "```"
         min_count: 2
+```
+
+### Example 4: File Path Input with Vulnerable Code
+
+```yaml
+suite:
+  pattern_id: secure-code-review
+  pattern_version: "1.0.0"
+  description: "Security review tests with file input"
+
+test_cases:
+  - id: detect-sql-injection-in-file
+    name: "Detect SQL injection in sample code"
+    description: "Load vulnerable code from fixture and verify detection"
+    input:
+      type: file_path
+      path: fixtures/vulnerable.py
+    assertions:
+      - type: contains
+        pattern: "SQL injection"
+        case_sensitive: false
+      - type: contains
+        pattern: "parameterized"
+        case_sensitive: false
 ```
 
 ## Test Runner Usage
@@ -364,6 +400,7 @@ python scripts/run_test_cases.py --report
 ### 1. Test IDs
 
 Use descriptive kebab-case IDs:
+
 - ✅ `sql-injection-detection`
 - ✅ `readability-grade-8`
 - ❌ `test1`
@@ -379,11 +416,18 @@ input:
   type: literal
   content: "Short test input"
 
-# Good - long example
+# Good - long example in separate file
 input:
   type: file_path
-  path: tests/fixtures/long-document.md
+  path: fixtures/long-document.md
 ```
+
+**When to use file_path:**
+
+- Code samples longer than 20-30 lines
+- Test data that needs syntax highlighting in a proper file
+- Fixtures reused across multiple test cases
+- Binary or special format files
 
 ### 3. Assertion Specificity
 

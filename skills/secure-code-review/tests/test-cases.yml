@@ -122,3 +122,18 @@ test_cases:
           - "OWASP"
           - "\\(Source:"
         minimum_count: 2
+
+  - id: file-path-input-example
+    name: "Review sample code file with vulnerabilities"
+    description: "Tests file_path input type by loading vulnerable sample code"
+    input:
+      type: file_path
+      path: fixtures/sample-code.py
+    assertions:
+      - type: contains
+        pattern: "SQL injection"
+        case_sensitive: false
+      - type: contains
+        pattern: "def authenticate_user"
+      - type: contains
+        pattern: "api_key"

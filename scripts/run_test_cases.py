@@ -99,9 +99,7 @@ def run_assertion_contains(
     )
 
 
-def run_assertion_not_contains(
-    output: str, pattern: str, case_sensitive: bool = True
-) -> tuple[bool, str | None]:
+def run_assertion_not_contains(output: str, pattern: str, case_sensitive: bool = True) -> tuple[bool, str | None]:
     """
     Run 'not_contains' assertion.
 
@@ -148,9 +146,7 @@ def run_assertion_has_sections(output: str, sections: list[str]) -> tuple[bool, 
     return False, f"Missing required sections: {', '.join(missing_sections)}"
 
 
-def run_assertion_has_pattern(
-    output: str, patterns: list[str], minimum_count: int = 1
-) -> tuple[bool, str | None]:
+def run_assertion_has_pattern(output: str, patterns: list[str], minimum_count: int = 1) -> tuple[bool, str | None]:
     """
     Run 'has_pattern' assertion.
 
@@ -224,17 +220,13 @@ def run_assertion(assertion: dict[str, Any], output: str) -> tuple[bool, str | N
         )
 
     elif assertion_type == "not_contains":
-        return run_assertion_not_contains(
-            output, assertion["pattern"], assertion.get("case_sensitive", True)
-        )
+        return run_assertion_not_contains(output, assertion["pattern"], assertion.get("case_sensitive", True))
 
     elif assertion_type == "has_sections":
         return run_assertion_has_sections(output, assertion["sections"])
 
     elif assertion_type == "has_pattern":
-        return run_assertion_has_pattern(
-            output, assertion["patterns"], assertion.get("minimum_count", 1)
-        )
+        return run_assertion_has_pattern(output, assertion["patterns"], assertion.get("minimum_count", 1))
 
     elif assertion_type == "no_prohibited":
         return run_assertion_no_prohibited(output, assertion["patterns"])
@@ -247,12 +239,13 @@ def run_assertion(assertion: dict[str, Any], output: str) -> tuple[bool, str | N
         return False, f"Unknown assertion type: {assertion_type}"
 
 
-def run_test_case(test_case: dict[str, Any]) -> TestResult:
+def run_test_case(test_case: dict[str, Any], test_file_path: Path | None = None) -> TestResult:
     """
     Run a single test case.
 
     Args:
         test_case: Test case configuration dict
+        test_file_path: Path to test-cases.yml file for resolving relative paths
 
     Returns:
         TestResult with pass/fail status and errors
@@ -268,9 +261,28 @@ def run_test_case(test_case: dict[str, Any]) -> TestResult:
     if input_type == "literal":
         output = input_config.get("content", "")
     elif input_type == "file_path":
-        # TODO: Implement file path input loading
-        errors.append("Input type 'file_path' not yet implemented")
-        return TestResult(test_id=test_id, name=name, passed=False, errors=errors)
+        # Get path from input config
+        file_path_str = input_config.get("path")
+        if not file_path_str:
+            errors.append("file_path input requires 'path' field")
+            return TestResult(test_id=test_id, name=name, passed=False, errors=errors)
+
+        # Resolve relative to test-cases.yml location
+        if test_file_path:
+            test_dir = test_file_path.parent  # Directory containing test-cases.yml
+            file_path = test_dir / file_path_str
+        else:
+            file_path = Path(file_path_str)
+
+        # Read file
+        try:
+            output = file_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            errors.append(f"Input file not found: {file_path}")
+            return TestResult(test_id=test_id, name=name, passed=False, errors=errors)
+        except Exception as e:
+            errors.append(f"Failed to read input file: {e}")
+            return TestResult(test_id=test_id, name=name, passed=False, errors=errors)
     else:
         errors.append(f"Unknown input type: {input_type}")
         return TestResult(test_id=test_id, name=name, passed=False, errors=errors)
@@ -282,9 +294,7 @@ def run_test_case(test_case: dict[str, Any]) -> TestResult:
         if not passed:
             errors.append(f"Assertion {idx + 1}: {error}")
 
-    return TestResult(
-        test_id=test_id, name=name, passed=len(errors) == 0, errors=errors
-    )
+    return TestResult(test_id=test_id, name=name, passed=len(errors) == 0, errors=errors)
 
 
 def run_test_suite(file_path: Path, verbose: bool = False) -> SuiteResult:
@@ -318,13 +328,13 @@ def run_test_suite(file_path: Path, verbose: bool = False) -> SuiteResult:
     results: list[TestResult] = []
 
     if verbose:
-        print(f"\n{'='*70}")
+        print(f"\n{'=' * 70}")
         print(f"Running test suite: {pattern_id}")
         print(f"File: {file_path}")
-        print(f"{'='*70}")
+        print(f"{'=' * 70}")
 
     for test_case in test_cases:
-        result = run_test_case(test_case)
+        result = run_test_case(test_case, test_file_path=file_path)
         results.append(result)
 
         if verbose:
@@ -361,9 +371,7 @@ def print_summary(suite_results: list[SuiteResult]) -> None:
 
     for result in suite_results:
         status = "✓" if result.failed == 0 else "✗"
-        print(
-            f"{status} {result.pattern_id}: {result.passed}/{result.total} passed"
-        )
+        print(f"{status} {result.pattern_id}: {result.passed}/{result.total} passed")
 
     print("-" * 70)
     print(f"Suites:  {total_suites}")
