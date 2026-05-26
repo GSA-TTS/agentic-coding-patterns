@@ -206,15 +206,11 @@ class TestMatchesFilters:
         }
 
         # All match
-        result = matches_filters(
-            pattern, details, "security", "experimental", "developers", "opencode", None
-        )
+        result = matches_filters(pattern, details, "security", "experimental", "developers", "opencode", None)
         assert result is True
 
         # One doesn't match
-        result = matches_filters(
-            pattern, details, "testing", "experimental", "developers", "opencode", None
-        )
+        result = matches_filters(pattern, details, "testing", "experimental", "developers", "opencode", None)
         assert result is False
 
 

@@ -114,9 +114,7 @@ def generate_index(root: Path) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generate INDEX.yaml")
-    parser.add_argument(
-        "--check", action="store_true", help="Check if INDEX.yaml is up to date (don't write)"
-    )
+    parser.add_argument("--check", action="store_true", help="Check if INDEX.yaml is up to date (don't write)")
     args = parser.parse_args()
 
     root = Path.cwd()

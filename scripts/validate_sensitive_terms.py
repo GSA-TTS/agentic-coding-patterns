@@ -132,9 +132,7 @@ def is_safe_context(line: str) -> bool:
     return any(re.search(pattern, line_lower) for pattern in safe_patterns)
 
 
-def scan_file(
-    path: Path, strict: bool = False
-) -> tuple[list[tuple[int, str, str]], list[tuple[int, str, str]]]:
+def scan_file(path: Path, strict: bool = False) -> tuple[list[tuple[int, str, str]], list[tuple[int, str, str]]]:
     """
     Scan file for sensitive patterns.
 
@@ -173,9 +171,7 @@ def scan_file(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Scan for sensitive terms")
-    parser.add_argument(
-        "--root", type=Path, default=Path.cwd(), help="Repository root (default: current directory)"
-    )
+    parser.add_argument("--root", type=Path, default=Path.cwd(), help="Repository root (default: current directory)")
     parser.add_argument(
         "--strict",
         action="store_true",
