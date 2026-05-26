@@ -7,6 +7,7 @@
 This plan documents the bootstrap implementation of the agentic-coding-patterns repository based on analysis of `dsd/` and `agentic-coding-playbook/` repositories, adapted for community pattern contribution.
 
 **Key decisions:**
+
 - DSD schema as base (strict, federal-grade governance)
 - SKILL.md format with optional tests/ (hybrid approach)
 - Lean MVP scope (3-5 patterns per category)
@@ -34,6 +35,7 @@ agentic-coding-patterns/
 ### Frontmatter Schema
 
 Based on DSD SKILL_SCHEMA.yml v1.0.0 with full federal governance fields:
+
 - Required: id, version, title, type, status, owners, primary_personas, requires, output, quality_gates
 - Recommended: triggers, tags, portability, scope
 - Optional: compliance, changelog, deprecated
@@ -74,6 +76,7 @@ All examples use placeholders.
 ### ✅ Completed
 
 #### Infrastructure (7/7)
+
 - [x] Directory structure created
 - [x] .gitignore
 - [x] pyproject.toml (Python 3.11+, PyYAML, jsonschema, pytest, ruff)
@@ -83,6 +86,7 @@ All examples use placeholders.
 - [x] INDEX.yaml placeholder (generated via `make generate`)
 
 #### Validation (4/4)
+
 - [x] schemas/skill.schema.json (DSD-based, JSON Schema format)
 - [x] scripts/validate_frontmatter.py (JSON Schema validation)
 - [x] scripts/validate_sensitive_terms.py (Sensitive term scanning)
@@ -90,16 +94,19 @@ All examples use placeholders.
 - [x] scripts/generate_index.py (INDEX.yaml generator)
 
 #### Documentation (3/3)
+
 - [x] README.md (137 lines - repo positioning, quick start)
 - [x] AGENTS.md (375 lines - behavioral contract adapted from playbook)
 - [x] CONTRIBUTING.md (329 lines - contributor guide)
 
 #### Templates (1/5)
+
 - [x] templates/skill-template/SKILL.md
 
 ### 🚧 In Progress
 
 #### Templates (4 remaining)
+
 - [ ] templates/prompt-template/SKILL.md
 - [ ] templates/agent-template/AGENTS.md
 - [ ] templates/workflow-template/SKILL.md
@@ -108,6 +115,7 @@ All examples use placeholders.
 ### ⏳ Pending
 
 #### Starter Content (Lean MVP)
+
 - [ ] 4 skills: secure-code-review, documentation-review, dependency-analysis, test-generation
 - [ ] 3 prompts: implementation-plan, qa-round, safe-code-review
 - [ ] 3 agents: general, security-review, documentation
@@ -115,6 +123,7 @@ All examples use placeholders.
 - [ ] 1 lesson: example-agentic-session
 
 #### Documentation
+
 - [ ] docs/design-notes.md (what was adopted from dsd/)
 - [ ] docs/safety-guidance.md (security rules)
 - [ ] docs/repository-ecosystem.md (relationship to siblings)
@@ -123,6 +132,7 @@ All examples use placeholders.
 - [ ] docs/getting-started.md (quick start)
 
 #### GitHub Integration
+
 - [ ] .github/ISSUE_TEMPLATE/skill.md
 - [ ] .github/ISSUE_TEMPLATE/prompt.md
 - [ ] .github/ISSUE_TEMPLATE/workflow.md
@@ -131,17 +141,20 @@ All examples use placeholders.
 - [ ] .github/pull_request_template.md
 
 #### Examples
+
 - [ ] examples/opencode/README.md + opencode.example.jsonc
 - [ ] examples/claude-code/README.md
 - [ ] examples/copilot/README.md
 - [ ] examples/cursor/README.md
 
 #### Testing
+
 - [ ] scripts/tests/test_validators.py (pytest suite)
 
 ## GitHub Issues to Create
 
 ### Epic: Repository Bootstrap (#1)
+
 - #2: Complete remaining templates (4)
 - #3: Create starter skills (4)
 - #4: Create starter prompts (3)
@@ -150,6 +163,7 @@ All examples use placeholders.
 - #7: Create starter lesson (1)
 
 ### Epic: Documentation (#8)
+
 - #9: Write docs/design-notes.md
 - #10: Write docs/safety-guidance.md
 - #11: Write docs/repository-ecosystem.md
@@ -158,18 +172,22 @@ All examples use placeholders.
 - #14: Write docs/getting-started.md
 
 ### Epic: GitHub Integration (#15)
+
 - #16: Create issue templates (5)
 - #17: Create PR template
 - #18: Set up GitHub Actions CI
 
 ### Epic: Examples (#19)
+
 - #20: Create tool-specific examples (4 tools)
 
 ### Epic: Testing (#21)
+
 - #22: Add pytest test suite for validators
 - #23: Add test coverage for schema validation
 
 ### Epic: Future Enhancements (#24)
+
 - #25: Add skill test runner (DSD-style)
 - #26: Add multi-platform export (OpenCode, Cursor, Claude)
 - #27: Add markdown linting (Vale)
@@ -245,7 +263,7 @@ make clean              # Remove generated files
 ## References
 
 - DSD repository: Internal analysis completed
-- agentic-coding-playbook: https://github.com/GSA-TTS/agentic-coding-playbook
-- agentic-coding-quickstart: https://github.com/GSA-TTS/agentic-coding-quickstart
+- agentic-coding-playbook: <https://github.com/GSA-TTS/agentic-coding-playbook>
+- agentic-coding-quickstart: <https://github.com/GSA-TTS/agentic-coding-quickstart>
 - DSD SKILL_SCHEMA.yml: Adapted to schemas/skill.schema.json
 - Playbook AGENTS.md: Adapted to patterns repo context

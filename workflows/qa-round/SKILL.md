@@ -82,6 +82,7 @@ Systematic verification of code changes against acceptance criteria with clear p
 **Goal:** Understand what to test and set up environment
 
 **Actions:**
+
 1. Read PR/issue description
 2. Review acceptance criteria
 3. Identify test scenarios
@@ -99,11 +100,13 @@ make start
 ```
 
 **Outputs:**
+
 - Test environment ready
 - Test plan created
 - Acceptance criteria list
 
 **Verification:**
+
 - [ ] Environment running
 - [ ] Test data prepared
 - [ ] Access credentials work
@@ -117,12 +120,14 @@ make start
 
 **Actions:**
 For each acceptance criterion:
+
 1. Execute test steps
 2. Observe actual behavior
 3. Compare to expected behavior
 4. Document result (Pass/Fail)
 
 **Example:**
+
 ```
 AC1: User can reset password via email
 
@@ -139,11 +144,13 @@ Result: ✅ PASS - All steps work as expected
 ```
 
 **Outputs:**
+
 - Each AC marked Pass/Fail
 - Evidence captured (screenshots if applicable)
 - Notes on any issues
 
 **Verification:**
+
 - [ ] All ACs tested
 - [ ] Results documented
 - [ ] Evidence collected
@@ -159,6 +166,7 @@ Result: ✅ PASS - All steps work as expected
 **Actions:**
 
 **Automated tests:**
+
 ```bash
 # Unit tests
 make test
@@ -171,6 +179,7 @@ make coverage
 ```
 
 **Manual tests:**
+
 - Happy path testing
 - Edge case testing
 - Error handling verification
@@ -178,11 +187,13 @@ make coverage
 - Performance spot check
 
 **Outputs:**
+
 - Test results (pass/fail counts)
 - Coverage report
 - Performance metrics (if relevant)
 
 **Verification:**
+
 - [ ] All automated tests pass
 - [ ] Manual test scenarios complete
 - [ ] Coverage meets threshold (80%+)
@@ -198,6 +209,7 @@ make coverage
 
 **Actions:**
 For each bug:
+
 1. Create clear title
 2. Document reproduction steps
 3. Note expected vs actual behavior
@@ -205,6 +217,7 @@ For each bug:
 5. Capture evidence
 
 **Bug Report Template:**
+
 ```markdown
 ## Bug: [Brief Title]
 
@@ -232,11 +245,13 @@ For each bug:
 ```
 
 **Outputs:**
+
 - Bug reports created
 - Severity assessed
 - Evidence attached
 
 **Verification:**
+
 - [ ] All bugs documented
 - [ ] Reproduction steps clear
 - [ ] Severity accurate
@@ -249,12 +264,14 @@ For each bug:
 **Goal:** Verify existing functionality still works
 
 **Actions:**
+
 1. Identify features related to changes
 2. Test those features
 3. Run smoke test suite
 4. Check for unexpected side effects
 
 **Critical areas to check:**
+
 - Authentication/login
 - Data persistence
 - Core workflows
@@ -270,10 +287,12 @@ make test-regression
 ```
 
 **Outputs:**
+
 - Regression test results
 - List of any regressions found
 
 **Verification:**
+
 - [ ] Related features tested
 - [ ] Smoke tests pass
 - [ ] No regressions detected
@@ -286,6 +305,7 @@ make test-regression
 **Goal:** Make clear pass/fail decision
 
 **Actions:**
+
 1. Review all test results
 2. Assess bug severity
 3. Determine if blocking
@@ -302,12 +322,14 @@ make test-regression
 | High or Critical | ❌ REJECTED | Must fix before merge |
 
 **Outputs:**
+
 - Clear pass/fail decision
 - List of blocking issues (if any)
 - Follow-up issues created (if approved)
 - QA sign-off comment
 
 **Verification:**
+
 - [ ] Decision made
 - [ ] Rationale documented
 - [ ] Blocking issues listed
@@ -331,9 +353,11 @@ Track QA progress:
 ## Example Walkthrough
 
 ### Scenario
+
 **PR #78**: Password reset feature
 
 **Acceptance Criteria:**
+
 1. User can request reset via email
 2. Reset link expires after 1 hour
 3. Password complexity enforced
@@ -342,11 +366,13 @@ Track QA progress:
 ### Execution
 
 **Step 1: Preparation**
+
 - Checked out feature branch
 - Started local server
 - Prepared test email account
 
 **Step 2: AC Validation**
+
 | AC | Result | Notes |
 |----|--------|-------|
 | AC1: Request reset | ✅ | Email received in 3 seconds |
@@ -355,6 +381,7 @@ Track QA progress:
 | AC4: Auto-login | ✅ | Redirected to dashboard |
 
 **Step 3: Test Execution**
+
 - Automated: 47 tests pass, 0 fail
 - Coverage: 89%
 - Manual: All scenarios pass
@@ -363,18 +390,21 @@ Track QA progress:
 **Step 4: Bugs Found**
 
 **Bug B1: Multiple reset emails**
+
 - **Severity**: Medium
 - **Repro**: Click "Send Reset" rapidly 5 times
 - **Expected**: One email sent
 - **Actual**: 5 emails sent
 
 **Bug B2: Email service error shows 500**
+
 - **Severity**: Medium
 - **Repro**: Stop email service, request reset
 - **Expected**: Friendly error message
 - **Actual**: 500 error page
 
 **Step 5: Regression**
+
 - Existing login flow: ✅ Works
 - Password change (logged in): ✅ Works
 - Session management: ✅ No issues
@@ -384,6 +414,7 @@ Track QA progress:
 **Decision**: ⚠️ **APPROVED WITH NOTES**
 
 **Rationale**:
+
 - All acceptance criteria met
 - Both bugs are medium severity
 - Core functionality works
@@ -391,10 +422,12 @@ Track QA progress:
 - Bugs don't block user success
 
 **Follow-up issues created**:
+
 - Issue #79: Rate limit password reset endpoint
 - Issue #80: Improve email service error handling
 
 ### Outcome
+
 PR approved for merge with 2 follow-up issues for next sprint
 
 ## Common Issues
@@ -409,6 +442,7 @@ PR approved for merge with 2 follow-up issues for next sprint
 ## Exit Criteria
 
 QA round is complete when:
+
 - [ ] All acceptance criteria tested
 - [ ] Test suite executed
 - [ ] Bugs documented or none found

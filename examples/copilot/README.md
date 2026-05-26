@@ -69,6 +69,7 @@ Create `.vscode/settings.json` for project-specific Copilot configuration:
 ### From SKILL.md to Copilot Instructions
 
 **Pattern Structure:**
+
 ```markdown
 ## Procedure
 1. Read specification
@@ -78,6 +79,7 @@ Create `.vscode/settings.json` for project-specific Copilot configuration:
 ```
 
 **Copilot Format:**
+
 ```markdown
 When generating code:
 - Start with clear type signatures
@@ -114,26 +116,34 @@ def authenticate_user(username: str, password: str) -> bool:
 ## Best Practices
 
 ### 1. Concise Instructions
+
 Copilot instructions should be brief and actionable:
+
 - ✅ "Functions ≤50 lines"
 - ❌ "We believe in writing small functions because they are easier to test, understand, and maintain"
 
 ### 2. Security First
+
 Always include security guidelines:
+
 - No hardcoded secrets
 - Input validation required
 - Follow least privilege principle
 - Use secure defaults
 
 ### 3. Project-Specific Rules
+
 Add project conventions:
+
 - Naming conventions
 - Error handling patterns
 - Logging standards
 - Testing requirements
 
 ### 4. Update Regularly
+
 Review and update instructions as patterns evolve:
+
 - Quarterly review of guidelines
 - Add new patterns as needed
 - Remove deprecated practices

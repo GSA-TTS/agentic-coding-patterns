@@ -18,16 +18,19 @@ This repository uses a **tiered review model** based on pattern status. Experime
 ## Self-Review (Experimental)
 
 ### Requirements
+
 All contributors must complete self-review before submitting experimental patterns.
 
 ### Self-Review Checklist
 
 #### 1. Validation
+
 - [ ] `make validate` passes without errors
 - [ ] All required frontmatter fields present
 - [ ] Frontmatter follows schema (use template)
 
 #### 2. Safety
+
 - [ ] No secrets, API keys, tokens, passwords
 - [ ] No PII (names, emails, addresses)
 - [ ] No CUI or classified information
@@ -36,6 +39,7 @@ All contributors must complete self-review before submitting experimental patter
 - [ ] `prohibited_content` defined in frontmatter
 
 #### 3. Quality
+
 - [ ] Pattern has clear purpose (title + description)
 - [ ] Instructions are step-by-step
 - [ ] Examples are realistic
@@ -43,6 +47,7 @@ All contributors must complete self-review before submitting experimental patter
 - [ ] Readability Grade 10 or below (estimated)
 
 #### 4. Usability
+
 - [ ] Pattern is reusable (not project-specific)
 - [ ] Prerequisites are documented
 - [ ] Expected output is clear
@@ -51,9 +56,11 @@ All contributors must complete self-review before submitting experimental patter
 ### How to Perform Self-Review
 
 1. **Run validation:**
+
    ```bash
    make validate
    ```
+
    Fix any errors before proceeding.
 
 2. **Check for sensitive content:**
@@ -74,10 +81,13 @@ All contributors must complete self-review before submitting experimental patter
 ## Peer Review (Recommended)
 
 ### When Required
+
 Peer review is required for promotion from experimental to recommended status.
 
 ### Who Can Review
+
 Any contributor can peer review, except:
+
 - Pattern author
 - Co-authors
 
@@ -88,32 +98,38 @@ Any contributor can peer review, except:
 Reviewers should check everything in self-review PLUS:
 
 #### 1. Broader Applicability
+
 - [ ] Pattern works across different projects/contexts
 - [ ] Not tied to specific tools (unless explicitly tool-specific)
 - [ ] No assumptions about user's environment
 
 #### 2. Real-World Validation
+
 - [ ] Evidence of successful use (links, comments, discussions)
 - [ ] Multiple users or contexts
 - [ ] Positive community feedback
 
 #### 3. Comprehensive Documentation
+
 - [ ] "When to Use" section clear
 - [ ] "When NOT to Use" documented
 - [ ] Edge cases mentioned
 - [ ] Failure recovery documented
 
 #### 4. Testing (if applicable)
+
 - [ ] Test cases exist for complex patterns
 - [ ] `tests/test-cases.yml` is valid
 - [ ] Assertions are meaningful
 
 #### 5. Alignment with Playbook
+
 - [ ] Follows GSA/TTS coding standards (if applicable)
 - [ ] References playbook for policy (doesn't duplicate)
 - [ ] Security guidance is sound
 
 #### 6. Plain Language
+
 - [ ] Grade 10 reading level or below
 - [ ] Technical terms are defined
 - [ ] No unnecessary jargon
@@ -124,6 +140,7 @@ Reviewers should check everything in self-review PLUS:
 When ready to promote to recommended:
 
 1. **Create a PR** with status change:
+
    ```yaml
    status: experimental → recommended
    ```
@@ -162,12 +179,15 @@ As a reviewer:
 ## Maintainer Review
 
 ### When Maintainers Review
+
 Maintainers perform spot-checks on:
+
 - All experimental patterns (safety check)
 - All recommended pattern promotions (quality check)
 - Deprecated patterns (ensure migration guidance)
 
 ### What Maintainers Check
+
 - Repository health (no spam, no malicious content)
 - Safety compliance (no secrets, no sensitive data)
 - Alignment with repository mission
@@ -188,16 +208,19 @@ Maintainers perform spot-checks on:
 ## What Reviewers Should NOT Do
 
 ❌ **Don't gatekeep:**
+
 - Allow experimentation (experimental status is okay)
 - Don't require perfection
 - Focus on safety and clarity
 
 ❌ **Don't rewrite:**
+
 - Suggest improvements, don't impose style
 - Respect contributor voice
 - Offer alternatives, don't demand them
 
 ❌ **Don't be pedantic:**
+
 - Minor wording issues don't block approval
 - Focus on substance, not style
 - Use "nit:" prefix for non-blocking comments
@@ -205,11 +228,13 @@ Maintainers perform spot-checks on:
 ## Handling Disagreements
 
 ### Contributor and Reviewer Disagree
+
 1. Discuss in PR comments
 2. Seek third-party opinion (tag another contributor)
 3. Maintainer makes final call (rare)
 
 ### Pattern Quality Concerns After Merge
+
 1. File an issue (not a PR)
 2. Discuss improvements
 3. Contributor can submit follow-up PR
@@ -218,6 +243,7 @@ Maintainers perform spot-checks on:
 ## Review Automation
 
 The repository automatically checks:
+
 - ✅ Validation passes (`make validate`)
 - ✅ No sensitive terms detected
 - ✅ Frontmatter schema valid
@@ -228,20 +254,24 @@ The repository automatically checks:
 ## Questions About Review?
 
 ### "What if no one reviews my PR?"
+
 - Post in GitHub Discussions to request review
 - Tag contributors who work in related areas
 - Be patient (this is volunteer-driven)
 
 ### "Can I approve my own PR?"
+
 - No for recommended patterns
 - Maintainers can approve your experimental patterns if safe
 
 ### "What if a pattern is wrong after recommended status?"
+
 - File an issue
 - Contributor can fix in follow-up PR
 - If serious: Mark deprecated
 
 ### "How do I become a reviewer?"
+
 - Anyone can review!
 - Start by reviewing experimental → recommended PRs
 - Provide thoughtful, constructive feedback
@@ -250,6 +280,7 @@ The repository automatically checks:
 ## Review Templates
 
 ### Self-Review Comment
+
 ```markdown
 ## Self-Review Checklist
 
@@ -264,6 +295,7 @@ Ready for community review.
 ```
 
 ### Peer Review Approval
+
 ```markdown
 ## Peer Review
 

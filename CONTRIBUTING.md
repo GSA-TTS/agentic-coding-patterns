@@ -42,6 +42,7 @@ This repo is one of three in the agentic coding ecosystem:
 Many pattern contributors use the [Quickstart](https://github.com/GSA-TTS/agentic-coding-quickstart) SBX Docker environment. If you're working in an SBX container:
 
 **Typical workflow:**
+
 1. **Edit inside the container** — Your pattern files, code, and documentation
 2. **Install dependencies** — Run `make setup` inside the container (includes pip install for validation tools)
 3. **Validate your work** — Run `make ci` to check frontmatter, linting, and security scans
@@ -50,11 +51,13 @@ Many pattern contributors use the [Quickstart](https://github.com/GSA-TTS/agenti
    - **Option B:** Configure git inside the container (name, email, GPG if used) and commit there
 
 **Why pre-commit hooks are optional:**
+
 - CI always validates your PR regardless of local hook installation
 - Container environments may not persist hook installations between sessions
 - Some contributors prefer to validate manually with `make ci` before committing
 
 **One-command validation:**
+
 ```bash
 make ci    # Runs all pre-commit checks, tests, and validation
 ```
@@ -222,6 +225,7 @@ changelog:
 ## Frontmatter Field Reference
 
 **Required fields:**
+
 - `id`: Unique identifier (kebab-case, never changes)
 - `version`: Semantic version (e.g., "1.0.0")
 - `title`: Human-readable name
@@ -237,6 +241,7 @@ changelog:
 - `quality_gates.citations_required`: Require citations? (usually false)
 
 **Recommended fields:**
+
 - `description`: One-line summary
 - `triggers`: Discovery keywords
 - `tags`: Categorization tags
@@ -245,6 +250,7 @@ changelog:
 - `scope.exclusions`: What it's NOT for
 
 **Optional fields:**
+
 - `complexity_estimate`: Time estimates
 - `inputs`/`outputs`: Structured I/O definitions
 - `related_patterns`: Dependencies and relationships
@@ -307,6 +313,7 @@ Show a concrete example of using this pattern.
 ## Related Patterns
 
 - [other-pattern](../other-pattern/SKILL.md) - For related task
+
 ```
 
 ## Safety Requirements
@@ -440,6 +447,7 @@ Brief description of the pattern and what problem it solves.
 ## Style Guidelines
 
 ### Writing Style
+
 - **Plain language** preferred (Grade 10 or below)
 - **Define technical terms** on first use
 - **Short sentences** and paragraphs
@@ -447,12 +455,14 @@ Brief description of the pattern and what problem it solves.
 - **Examples** over abstract descriptions
 
 ### Code Examples
+
 - Use **syntax highlighting** with language tags
 - Include **comments** explaining what's happening
 - Show **expected output** when helpful
 - Use **placeholders** for secrets/env-specific values
 
 ### Markdown
+
 - Use **ATX-style headers** (`#` not underlines)
 - **One blank line** between sections
 - **Fenced code blocks** with language tags
@@ -476,6 +486,7 @@ Patterns can be promoted from `experimental` to `recommended` when:
 - Documentation is clear and complete
 
 To propose promotion, open an issue with:
+
 - Link to the pattern
 - Evidence of successful usage
 - Community feedback summary

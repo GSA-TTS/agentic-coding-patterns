@@ -57,12 +57,15 @@ This lesson documents a successful agentic coding session where multiple pattern
 ## Context
 
 ### Project/Task
+
 Describe what you were working on:
+
 - **Type of project:** Adding security control mappings to API documentation
 - **Scale:** Medium feature - 8 API endpoints needing NIST control documentation
 - **Timeline:** 1 day sprint
 
 ### Tools Used
+
 - **AI coding tool:** OpenCode with Claude-4.5-Sonnet
 - **Patterns applied:**
   - [implementation-plan](../../prompts/planning/implementation-plan/SKILL.md) - Initial planning
@@ -73,7 +76,9 @@ Describe what you were working on:
 - **Team:** Solo developer with AI assistant
 
 ### Initial Goals
+
 What we were trying to accomplish:
+
 - Add NIST 800-53 control mappings to existing API docs
 - Ensure security accuracy and completeness
 - Maintain readability for non-security personnel
@@ -82,18 +87,21 @@ What we were trying to accomplish:
 ## Approach
 
 ### What We Did
+
 1. **Planning phase:** Used implementation-plan prompt to break down work into 8 tasks (one per endpoint)
 2. **Execution phase:** Iteratively documented each endpoint with control mappings
 3. **Review phase:** Applied secure-code-review to validate mappings, then documentation-review for clarity
 4. **QA rounds:** Ran 2 qa-round cycles to catch edge cases
 
 ### Patterns Applied
+
 - **[implementation-plan](../../prompts/planning/implementation-plan/SKILL.md)** — Generated task breakdown and acceptance criteria upfront
 - **[secure-code-review](../../skills/secure-code-review/SKILL.md)** — Validated control mappings for technical accuracy
 - **[documentation-review](../../skills/documentation-review/SKILL.md)** — Checked readability and completeness
 - **[qa-round](../../prompts/review/qa-round/SKILL.md)** — Iterative verification after each endpoint group
 
 ### Key Decisions
+
 Major decisions made during the work:
 
 - **Decision:** Use implementation-plan before writing any docs
@@ -111,24 +119,30 @@ Major decisions made during the work:
 ## Outcomes
 
 ### What Worked Well ✅
+
 - **Implementation-plan upfront:** Having clear tasks and acceptance criteria prevented drift and provided a checklist
 - **Layered review approach:** secure-code-review → documentation-review → qa-round caught different classes of issues
 - **Incremental QA:** Running qa-round halfway through revealed a pattern error that would have affected all 8 endpoints
 - **Pattern reuse:** After reviewing 4 endpoints, extracted a template that accelerated the remaining 4
 
 ### What Didn't Work ❌
+
 - **Initial scope:** First implementation-plan was too detailed (12 tasks instead of 8), had to consolidate
 - **Over-reliance on secure-code-review:** Spent 20 minutes on first endpoint, realized some checks weren't relevant for docs
 - **No test cases for control mappings:** Validated manually instead of creating test-cases.yml (would have caught regression later)
 
 ### Unexpected Results
+
 Surprises during execution:
+
 - **Positive:** documentation-review suggested simplifying jargon, which improved readability score from Grade 12 → Grade 9
 - **Positive:** QA round identified 2 endpoints with duplicate control mappings (copy-paste error)
 - **Negative:** secure-code-review flagged false positives for placeholder code in examples (needed to exempt examples)
 
 ### Metrics
+
 Quantitative results:
+
 - **Time spent:** 6 hours (estimated 8 hours without patterns)
 - **Quality:** 0 security mapping errors in final peer review
 - **Readability:** Improved from Grade 12 to Grade 9
@@ -169,6 +183,7 @@ Based on this experience:
 ### What We'd Do Differently
 
 If starting over:
+
 1. **Simplify the initial plan:** Ask implementation-plan for 5-8 tasks max, not exhaustive breakdown
 2. **Create test cases upfront:** Use test-generation to create test-cases.yml for control mapping validation
 3. **Adapt patterns more aggressively:** Skip irrelevant secure-code-review steps instead of running everything
@@ -176,7 +191,9 @@ If starting over:
 ## Recommendations
 
 ### For Similar Projects
+
 If you're working on security documentation:
+
 - **Do:** Use implementation-plan to define clear acceptance criteria before starting
 - **Do:** Run QA rounds incrementally (every N items) to catch systematic errors
 - **Do:** Layer review patterns (correctness → clarity → completeness)
@@ -184,13 +201,17 @@ If you're working on security documentation:
 - **Consider:** Extracting templates after reviewing 2-3 examples (speeds up remaining work)
 
 ### For Tool Users
+
 Specific advice for OpenCode users:
+
 - **Tip:** Use `@pattern-name` to load patterns mid-session without restarting
 - **Tip:** Chain patterns explicitly: "First apply secure-code-review, then documentation-review"
 - **Gotcha:** Some patterns assume code context - adapt for documentation/config work
 
 ### For Pattern Authors
+
 Feedback for pattern maintainers:
+
 - **implementation-plan:** Could include a "simplify" option for high-level task lists
 - **secure-code-review:** Consider splitting into "code security" and "security documentation" variants
 - **qa-round:** Add guidance on when to run incrementally vs. at end
@@ -199,13 +220,16 @@ Feedback for pattern maintainers:
 ## Applicability
 
 ### When This Lesson Applies
+
 - **Project type:** Documentation, configuration, or repetitive coding tasks with security/compliance requirements
 - **Team size:** Solo or small team (1-3 people)
 - **Timeline:** Short sprint (1-3 days)
 - **Experience level:** Intermediate - comfortable with planning and review cycles
 
 ### When It Doesn't Apply
+
 This lesson may not be relevant if:
+
 - **Exploratory work:** Research or prototyping without clear requirements
 - **Emergency fixes:** Hotfixes where planning overhead outweighs benefits
 - **Large team:** Coordination overhead may require different patterns
@@ -214,16 +238,19 @@ This lesson may not be relevant if:
 ## Related Content
 
 ### Patterns Used
+
 - [implementation-plan](../../prompts/planning/implementation-plan/SKILL.md)
 - [secure-code-review](../../skills/secure-code-review/SKILL.md)
 - [documentation-review](../../skills/documentation-review/SKILL.md)
 - [qa-round](../../prompts/review/qa-round/SKILL.md)
 
 ### Similar Lessons
+
 - *Future lesson:* Agentic workflow for refactoring legacy code
 - *Future lesson:* Test-driven agentic development
 
 ### Further Reading
+
 - [NIST 800-53 Rev 5](https://csrc.nist.gov/publications/detail/sp/800-53/rev-5/final) - Security control catalog
 - [OpenCode documentation](https://opencode.ai/docs) - Tool-specific guidance
 

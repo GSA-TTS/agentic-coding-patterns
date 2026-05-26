@@ -101,6 +101,7 @@ experimental → recommended → deprecated
 **Default for new contributions:** `experimental`
 
 The agent SHOULD:
+
 - Use `experimental` status for all new patterns
 - Wait for community feedback before promoting to `recommended`
 - Never self-promote patterns to `recommended` status
@@ -112,6 +113,7 @@ The agent SHOULD:
 All pattern files MUST include valid YAML frontmatter per `schemas/skill.schema.json`.
 
 **Minimum required fields:**
+
 ```yaml
 ---
 id: pattern-name                      # kebab-case, immutable
@@ -135,6 +137,7 @@ quality_gates:
 ```
 
 **Recommended fields:**
+
 - `triggers`: Keywords for pattern discovery
 - `tags`: For categorization
 - `portability`: Tool compatibility flags
@@ -165,6 +168,7 @@ All patterns MUST define `prohibited_content` in frontmatter output contract.
 ### 6.1 Input Sanitization
 
 Patterns that accept user input MUST:
+
 - Define clear input boundaries
 - Include input validation guidance
 - Use delimiters like `--- USER INPUT START ---`
@@ -173,6 +177,7 @@ Patterns that accept user input MUST:
 ### 6.2 Output Contracts
 
 Every pattern MUST define:
+
 - `required_sections`: Sections expected in output
 - `prohibited_content`: Content that must never appear
 - `format`: Expected output format
@@ -216,6 +221,7 @@ make ci          # Full CI check
 ### 8.2 Validation Failures
 
 The agent MUST:
+
 - Stop on validation failure
 - Report the specific error
 - Not commit invalid patterns
@@ -230,6 +236,7 @@ The agent MUST:
 Patterns MAY depend on other patterns via `requires.anchors` or `requires.skills`.
 
 The agent MUST:
+
 - Verify referenced patterns exist
 - Document dependency relationships
 - Not create circular dependencies
@@ -243,6 +250,7 @@ For security controls, see [SECURITY-CONTROLS.md](https://github.com/GSA-TTS/age
 ```
 
 The agent MUST NOT:
+
 - Copy policy content from playbook
 - Make compliance claims without citing source
 - Duplicate standards that belong in playbook
@@ -275,6 +283,7 @@ test_cases:
 ```
 
 The agent SHOULD:
+
 - Create test cases for complex patterns
 - Run tests before marking patterns as `recommended`
 
@@ -296,6 +305,7 @@ All SKILL.md patterns SHOULD include:
 ### 11.2 Clarity Requirements
 
 Patterns SHOULD:
+
 - Use plain language (Grade 10 or below preferred)
 - Define technical terms
 - Include examples
@@ -314,6 +324,7 @@ When submitting patterns, the agent MUST:
 5. Explain what problem the pattern solves
 
 The agent MUST NOT:
+
 - Self-approve pull requests
 - Skip review for patterns marked `experimental`
 - Merge without passing CI
@@ -339,6 +350,7 @@ The agent MUST NEVER:
 Before completing any task, verify:
 
 ### Pattern Changes
+
 - [ ] `make validate` passes
 - [ ] Frontmatter includes all required fields
 - [ ] Status is `experimental` for new patterns
@@ -347,6 +359,7 @@ Before completing any task, verify:
 - [ ] Tool compatibility flags set if applicable
 
 ### Repository Changes
+
 - [ ] `Co-authored-by:` trailer in commit
 - [ ] INDEX.yaml regenerated if patterns changed
 - [ ] No internal URLs or references

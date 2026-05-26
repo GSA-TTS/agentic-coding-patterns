@@ -7,6 +7,7 @@ We are committed to providing a welcoming and inspiring community for all. We pl
 ## Our Standards
 
 ### Positive Behavior
+
 - Using welcoming and inclusive language
 - Being respectful of differing viewpoints and experiences
 - Gracefully accepting constructive criticism
@@ -14,6 +15,7 @@ We are committed to providing a welcoming and inspiring community for all. We pl
 - Showing empathy towards other community members
 
 ### Unacceptable Behavior
+
 - Trolling, insulting/derogatory comments, and personal or political attacks
 - Public or private harassment
 - Publishing others' private information without permission
@@ -21,7 +23,7 @@ We are committed to providing a welcoming and inspiring community for all. We pl
 
 ## Enforcement
 
-Instances of abusive, harassing, or otherwise unacceptable behavior may be reported by contacting the project team at security@gsa.gov. All complaints will be reviewed and investigated promptly and fairly.
+Instances of abusive, harassing, or otherwise unacceptable behavior may be reported by contacting the project team at <security@gsa.gov>. All complaints will be reviewed and investigated promptly and fairly.
 
 ## Attribution
 

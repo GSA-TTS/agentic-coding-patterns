@@ -61,7 +61,6 @@ security_patterns = [
 ]
 ```
 
-
 ### 3. Read Pattern Frontmatter
 
 Every pattern has structured frontmatter:
@@ -149,7 +148,6 @@ results = find_patterns_for_intent(
     index['patterns']['skills']
 )
 ```
-
 
 ### By Status Level
 
@@ -250,7 +248,6 @@ def validate_output(output_text, contract):
         'errors': errors
     }
 ```
-
 
 ## Integration Examples
 
@@ -358,7 +355,6 @@ def validate_readability(text, max_grade=10):
     return grade <= max_grade
 ```
 
-
 ## Best Practices
 
 ### 1. Cache Pattern Index
@@ -458,7 +454,6 @@ def safe_load_pattern(path):
     except ValueError as e:
         return {'error': str(e), 'path': path}
 ```
-
 
 ## Complete Example: Pattern Discovery System
 
@@ -585,7 +580,6 @@ if __name__ == '__main__':
         print()
 ```
 
-
 ## INDEX.yaml Schema Reference
 
 ```yaml
@@ -664,7 +658,6 @@ complexity_estimate:              # Time estimate
   setup_minutes: 5
   execution_minutes: 30
 ```
-
 
 ## Common Use Cases
 
@@ -764,7 +757,6 @@ def validate_frontmatter_schema(frontmatter):
         return False
 ```
 
-
 ### Output Doesn't Meet Contract
 
 ```python
@@ -796,7 +788,7 @@ def debug_output_validation(output, contract):
 
 This is a living document. If you encounter issues or have suggestions:
 
-1. File an issue: https://github.com/GSA-TTS/agentic-coding-patterns/issues
+1. File an issue: <https://github.com/GSA-TTS/agentic-coding-patterns/issues>
 2. Include "AI Agent Guide" in the title
 3. Describe your use case and what's unclear
 

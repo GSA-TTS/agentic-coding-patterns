@@ -56,6 +56,7 @@ See docs/adr/ for Architecture Decision Records using MADR format.
 ### From SKILL.md to Claude Instructions
 
 **Pattern (SKILL.md):**
+
 ```yaml
 ---
 name: secure-code-review
@@ -71,6 +72,7 @@ tier: critical
 ```
 
 **Claude Instructions:**
+
 ```markdown
 # Secure Code Review
 
@@ -191,6 +193,7 @@ repos:
 ### 1. Provide Context
 
 Give Claude access to relevant documentation:
+
 ```markdown
 # Context Files
 - docs/ARCHITECTURE.md
@@ -201,12 +204,14 @@ Give Claude access to relevant documentation:
 ### 2. Use Explicit Constraints
 
 Be specific about requirements:
+
 - ✅ "Functions must be ≤50 lines"
 - ❌ "Keep functions small"
 
 ### 3. Include Examples
 
 Show the desired output format:
+
 ```python
 # Example: Good function structure
 def calculate_discount(price: float, tier: str) -> float:
@@ -228,6 +233,7 @@ def calculate_discount(price: float, tier: str) -> float:
 ### 4. Reference ADRs
 
 Link to architectural decisions:
+
 ```markdown
 ## Architecture
 See ADR-0001 for database choice

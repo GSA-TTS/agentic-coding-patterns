@@ -215,6 +215,7 @@ OR
 ## Usage Example
 
 ### Input
+
 ```
 PR #123: Add password reset functionality
 
@@ -226,6 +227,7 @@ Acceptance Criteria:
 ```
 
 ### Expected Output
+
 ```markdown
 ### Summary
 Reviewed password reset feature. Test coverage is good (87%). All acceptance criteria pass. Found one medium-severity bug with error handling.
@@ -317,6 +319,7 @@ Both bugs are medium severity and don't block core functionality.
 ## Verification
 
 Check that QA output:
+
 - [ ] All acceptance criteria evaluated
 - [ ] Test coverage assessed
 - [ ] Bugs documented with reproduction steps

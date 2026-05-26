@@ -57,12 +57,14 @@ safety > responsible disclosure > accuracy > completeness
 ### 1. Threat Modeling
 
 **Identify:**
+
 - Attack surface (inputs, APIs, endpoints)
 - Trust boundaries (client/server, user roles)
 - Data flows (where sensitive data goes)
 - Authentication/authorization points
 
 **Ask:**
+
 - What could an attacker control?
 - What are the valuable targets?
 - What are the consequences of compromise?
@@ -70,53 +72,63 @@ safety > responsible disclosure > accuracy > completeness
 ### 2. OWASP Top 10 Checklist
 
 **A01: Broken Access Control**
+
 - [ ] Authorization checked server-side
 - [ ] Least privilege enforced
 - [ ] No client-side-only checks
 
 **A02: Cryptographic Failures**
+
 - [ ] Sensitive data encrypted at rest
 - [ ] TLS 1.2+ for transit
 - [ ] No hardcoded keys
 - [ ] Strong algorithms only
 
 **A03: Injection**
+
 - [ ] Parameterized queries
 - [ ] Input validation with allowlists
 - [ ] Output encoding by context
 - [ ] No shell execution with user input
 
 **A04: Insecure Design**
+
 - [ ] Secure defaults
 - [ ] Defense in depth
 - [ ] Fail securely
 
 **A05: Security Misconfiguration**
+
 - [ ] Debug mode off in production
 - [ ] Security headers set
 - [ ] Default credentials changed
 
 **A06: Vulnerable Components**
+
 - [ ] Dependencies up to date
 - [ ] No known CVEs
 - [ ] License compliance
 
 **A07: Authentication Failures**
+
 - [ ] Strong password hashing
 - [ ] Session management secure
 - [ ] MFA supported
 
 **A08: Software/Data Integrity**
+
 - [ ] SBOM maintained
 - [ ] Integrity checks
 - [ ] Secure updates
 
 **A09: Logging Failures**
+
 - [ ] Security events logged
 - [ ] Sensitive data not logged
 - [ ] Logs protected
 
 **A10: Server-Side Request Forgery**
+
 - [ ] URL validation
 - [ ] Network segmentation
 - [ ] Deny list for metadata endpoints
@@ -124,25 +136,30 @@ safety > responsible disclosure > accuracy > completeness
 ### 3. Severity Assessment
 
 **Critical:**
+
 - Remote code execution
 - Authentication bypass
 - Data breach (mass PII exposure)
 
 **High:**
+
 - SQL injection
 - XSS with session hijacking
 - Privilege escalation
 
 **Medium:**
+
 - CSRF without major impact
 - Information disclosure (non-sensitive)
 - Weak cryptography
 
 **Low:**
+
 - Missing security headers (minor)
 - Verbose error messages
 
 **Info:**
+
 - Best practice recommendations
 - Defense in depth suggestions
 
@@ -186,8 +203,10 @@ def secure_function(user_input):
 ```
 
 ### References
+
 - OWASP: [link]
 - CWE: [link]
+
 ```
 
 ### 5. Responsible Disclosure Rules
@@ -206,13 +225,17 @@ def secure_function(user_input):
 
 **Example of responsible description:**
 ```
+
 # ✅ Good - conceptual
+
 "The SQL query uses string concatenation with user input,
 allowing SQL injection. An attacker could modify the query
 to access unauthorized data."
 
 # ❌ Bad - weaponized
+
 [Actual SQL injection payload that extracts passwords]
+
 ```
 
 ### 6. False Positive Reduction

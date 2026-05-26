@@ -81,17 +81,20 @@ This workflow takes you from an issue description to a merged pull request with 
 **Goal:** Understand requirements and acceptance criteria
 
 **Actions:**
+
 1. Read issue thoroughly
 2. Identify acceptance criteria
 3. Clarify unknowns with issue author
 4. Verify issue is ready for work
 
 **Outputs:**
+
 - Clear understanding of requirements
 - List of acceptance criteria
 - Any assumptions documented
 
 **Verification:**
+
 - [ ] Requirements understood
 - [ ] Acceptance criteria identified
 - [ ] No blocking unknowns
@@ -106,17 +109,20 @@ This workflow takes you from an issue description to a merged pull request with 
 **Goal:** Break work into implementable tasks
 
 **Actions:**
+
 1. Use [implementation-plan prompt](../../prompts/planning/implementation-plan/SKILL.md)
 2. Break feature into tasks (T1, T2, T3...)
 3. Identify dependencies between tasks
 4. Estimate complexity per task
 
 **Outputs:**
+
 - Implementation plan with tasks
 - Dependency graph
 - Risk assessment
 
 **Verification:**
+
 - [ ] Tasks are granular (1-4 hours each)
 - [ ] Dependencies mapped
 - [ ] Risks identified
@@ -131,6 +137,7 @@ This workflow takes you from an issue description to a merged pull request with 
 **Goal:** Isolate work in feature branch
 
 **Actions:**
+
 ```bash
 # Update main branch
 git checkout main
@@ -144,10 +151,12 @@ git branch --show-current
 ```
 
 **Outputs:**
+
 - Feature branch created
 - Branch name follows convention
 
 **Verification:**
+
 - [ ] Branch created from latest main
 - [ ] Branch name descriptive
 - [ ] No uncommitted changes from main
@@ -159,12 +168,14 @@ git branch --show-current
 **Goal:** Implement tasks according to plan
 
 **Actions:**
+
 1. Work through tasks in dependency order
 2. Make small, focused commits
 3. Run tests after each task
 4. Keep changes reviewable
 
 **For each task:**
+
 ```bash
 # Implement task
 [write code]
@@ -182,11 +193,13 @@ Implements task TX from plan."
 ```
 
 **Outputs:**
+
 - Code implementing requirements
 - Tests for new functionality
 - Clear commit history
 
 **Verification:**
+
 - [ ] All planned tasks implemented
 - [ ] Tests pass locally
 - [ ] Code follows style guide
@@ -201,6 +214,7 @@ Implements task TX from plan."
 **Goal:** Verify implementation works correctly
 
 **Actions:**
+
 1. Run full test suite
 2. Test happy path manually
 3. Test error cases
@@ -218,11 +232,13 @@ make coverage
 ```
 
 **Outputs:**
+
 - All tests passing
 - Coverage adequate (>80% for new code)
 - Manual testing results
 
 **Verification:**
+
 - [ ] All tests pass
 - [ ] New tests added for new functionality
 - [ ] Coverage acceptable
@@ -237,6 +253,7 @@ make coverage
 **Goal:** Verify no security issues introduced
 
 **Actions:**
+
 1. Review code against [secure-code-review checklist](../../skills/secure-code-review/SKILL.md)
 2. Check for injection vulnerabilities
 3. Verify authentication/authorization
@@ -251,10 +268,12 @@ npm audit  # or pip-audit, cargo audit, etc.
 ```
 
 **Outputs:**
+
 - Security review completed
 - No critical vulnerabilities
 
 **Verification:**
+
 - [ ] Security review done
 - [ ] No SQL/command injection
 - [ ] No XSS vulnerabilities
@@ -269,6 +288,7 @@ npm audit  # or pip-audit, cargo audit, etc.
 **Goal:** Create comprehensive PR description
 
 **Actions:**
+
 1. Push branch to remote
 2. Create PR with complete description
 3. Add reviewers
@@ -283,6 +303,7 @@ gh pr create --title "feat: Brief description" --body "See template"
 ```
 
 **PR Description Template:**
+
 ```markdown
 ## Summary
 [Brief description of changes]
@@ -316,11 +337,13 @@ Closes #123
 ```
 
 **Outputs:**
+
 - PR created
 - Description complete
 - Reviewers assigned
 
 **Verification:**
+
 - [ ] PR title descriptive
 - [ ] Description complete
 - [ ] Issue linked
@@ -333,6 +356,7 @@ Closes #123
 **Goal:** Incorporate reviewer suggestions
 
 **Actions:**
+
 1. Read review comments
 2. Respond to questions
 3. Make requested changes
@@ -354,11 +378,13 @@ git push origin feature/issue-123-brief-description
 ```
 
 **Outputs:**
+
 - Review feedback addressed
 - Discussion resolved
 - Tests still passing
 
 **Verification:**
+
 - [ ] All comments addressed
 - [ ] Changes explained in responses
 - [ ] Tests still pass
@@ -371,16 +397,19 @@ git push origin feature/issue-123-brief-description
 **Goal:** Integrate changes into main branch
 
 **Actions:**
+
 1. Wait for approval
 2. Ensure CI passes
 3. Resolve any conflicts
 4. Merge PR
 
 **Outputs:**
+
 - PR merged
 - Feature branch can be deleted
 
 **Verification:**
+
 - [ ] Approved by required reviewers
 - [ ] CI passing
 - [ ] No conflicts
@@ -406,16 +435,19 @@ Use this to track progress:
 ## Example Walkthrough
 
 ### Scenario
+
 **Issue #45**: Add password strength indicator to registration form
 
 ### Execution
 
 **Step 1: Issue Analysis**
+
 - Requirement: Visual indicator showing password strength
 - Acceptance criteria: Shows weak/medium/strong, updates in real-time
 - Assumptions: Use existing validation library
 
 **Step 2: Planning**
+
 - T1: Add password strength calculation (Simple)
 - T2: Add UI indicator component (Medium)
 - T3: Connect component to input (Simple)
@@ -423,6 +455,7 @@ Use this to track progress:
 - T5: Update documentation (Simple)
 
 **Step 3-4: Implementation**
+
 ```bash
 git checkout -b feature/issue-45-password-strength
 # Implemented T1-T5
@@ -435,11 +468,13 @@ git log --oneline
 ```
 
 **Step 5: Testing**
+
 - All 15 tests pass
 - Coverage: 95%
 - Manual test: indicator updates as expected
 
 **Step 6: Security**
+
 - Password not logged or exposed
 - No XSS vulnerabilities in indicator
 - Client-side only (server validates separately)
@@ -448,11 +483,13 @@ git log --oneline
 PR #46 created with description, screenshots, checklist
 
 **Step 8-9: Review and Merge**
+
 - Reviewer suggested accessibility improvement
 - Added ARIA labels
 - Approved and merged
 
 ### Outcome
+
 Feature delivered, all tests passing, fully documented
 
 ## Common Issues
@@ -467,6 +504,7 @@ Feature delivered, all tests passing, fully documented
 ## Exit Criteria
 
 The workflow is complete when:
+
 - [ ] All acceptance criteria met
 - [ ] Tests passing in CI
 - [ ] Code reviewed and approved
