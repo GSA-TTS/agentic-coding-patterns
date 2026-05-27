@@ -444,6 +444,131 @@ Brief description of the pattern and what problem it solves.
 - [ ] Ready for community review
 ```
 
+## Commit Message Format
+
+We follow [Conventional Commits 1.0.0](https://www.conventionalcommits.org/) to maintain a clean, parseable git history. This standard enables automated changelog generation and makes it easier to understand what changed in each commit.
+
+### Format
+
+```
+<type>[optional scope]: <description>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+### Types for Patterns Repository
+
+| Type | Description | Example |
+|------|-------------|---------|
+| `feat` | New pattern or feature | `feat(skills): add code review pattern` |
+| `fix` | Bug fix in pattern or script | `fix(testing): correct assertion logic` |
+| `docs` | Documentation only | `docs: update pattern submission guidelines` |
+| `test` | Add or fix tests | `test: add test cases for secure-code-review` |
+| `chore` | Maintenance (deps, CI) | `chore(ci): add markdownlint validation` |
+| `refactor` | Code change (no behavior change) | `refactor(scripts): simplify validator logic` |
+| `style` | Formatting, whitespace | `style: fix markdown trailing whitespace` |
+
+### Scopes (Pattern-Specific)
+
+Use scopes that match the repository structure:
+
+- `skills` — Skill patterns in `skills/`
+- `prompts` — Prompt patterns in `prompts/`
+- `agents` — Agent patterns in `agents/`
+- `workflows` — Workflow patterns in `workflows/`
+- `lessons` — Lessons learned in `lessons-learned/`
+- `testing` — Test infrastructure
+- `ci` — CI/CD changes
+- `docs` — Documentation files
+
+### Examples
+
+✅ **Good:**
+
+```
+feat(skills): add dependency security analysis pattern
+
+Add pattern for analyzing dependency vulnerabilities using SBOM.
+Includes OWASP Dependency-Check integration and remediation steps.
+
+Closes #42
+```
+
+```
+fix(prompts): correct output contract in code-review prompt
+
+The prohibited_content list was missing "Internal URLs".
+Added to match repository safety requirements.
+```
+
+```
+docs: add commit message format guidance
+
+Helps community contributors understand Conventional Commits
+standard enforced by CI.
+
+Closes #61
+```
+
+❌ **Bad:**
+
+```
+new pattern
+```
+
+```
+Update README
+```
+
+```
+fix stuff
+```
+
+### Line Length
+
+- **First line (subject):** ≤72 characters (recommended), ≤100 characters (enforced by commitlint)
+- **Body lines:** ≤100 characters
+
+### Validation
+
+Check your commit message locally before pushing:
+
+```bash
+# Check the last commit
+npx commitlint --from=HEAD~1
+```
+
+### Pre-commit Hook (Optional)
+
+Automate validation with our pre-commit config:
+
+```bash
+# Install pre-commit (if not installed)
+pip install pre-commit
+
+# Install hooks
+pre-commit install --hook-type commit-msg
+
+# Your commits will now be validated automatically
+```
+
+The commitlint hook is already configured in `.pre-commit-config.yaml`.
+
+### AI Attribution
+
+If you used AI assistance (OpenCode, Cursor, Claude, ChatGPT, etc.) to create your contribution, include attribution in the commit message:
+
+```
+feat(skills): add terraform security scan pattern
+
+Pattern for scanning Terraform configurations for security issues
+using tfsec, Checkov, and AWS Security Hub integration.
+
+Co-authored-by: OpenCode Agent <agent@gsa.gov>
+```
+
 ## Style Guidelines
 
 ### Writing Style
