@@ -57,7 +57,7 @@ Reference the skill in your agent instructions:
 
 ### Available Skills
 
-When performing code reviews, use the [Secure Code Review](skills/secure-code-review.md) skill to:
+When performing code reviews, use the [Secure Code Review](../../skills/secure-code-review/SKILL.md) skill to:
 - Check for OWASP Top 10 vulnerabilities
 - Validate input sanitization
 - Review authentication/authorization
@@ -124,9 +124,9 @@ Combine multiple skills in a workflow:
 
 ## Pull Request Review Workflow
 
-1. Use [Secure Code Review](skills/secure-code-review.md) for security
-2. Use [Test Generation](skills/test-generation.md) for coverage
-3. Use [Documentation Review](skills/documentation-review.md) for docs
+1. Use [Secure Code Review](../../skills/secure-code-review/SKILL.md) for security
+2. Use [Test Generation](../../skills/test-generation/SKILL.md) for coverage
+3. Use [Documentation Review](../../skills/documentation-review/SKILL.md) for docs
 
 Aggregate findings and produce summary report.
 ```
