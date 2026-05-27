@@ -141,10 +141,8 @@ deprecated_date: "2026-05-15"
 
 This pattern is deprecated as of 2026-05-15.
 
-**Reason:** Superseded by [secure-code-review-v2](../secure-code-review-v2/SKILL.md)
+**Reason:** Superseded by [secure-code-review](../skills/secure-code-review/SKILL.md)
 which includes updated OWASP Top 10 2023 guidance.
-
-**Migration:** See [migration guide](./MIGRATION.md) for upgrade steps.
 ```
 
 ## Community Feedback Mechanism

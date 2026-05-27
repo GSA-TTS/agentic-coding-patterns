@@ -36,8 +36,8 @@ OpenCode automatically discovers skills in `.opencode/skills/`. You can also ref
 ```markdown
 ## Available Skills
 
-- [Secure Code Review](skills/secure-code-review.md)
-- [Documentation Review](skills/documentation-review.md)
+- [Secure Code Review](../../skills/secure-code-review/SKILL.md)
+- [Documentation Review](../../skills/documentation-review/SKILL.md)
 ```
 
 ## Pattern Adaptation

@@ -269,4 +269,4 @@ When multiple patterns apply, follow this priority order:
 - [Claude for VS Code Documentation](https://www.anthropic.com/claude-code)
 - [AI Agent Integration Guide](../../docs/AI-AGENT-GUIDE.md)
 - [Pattern Library](../../)
-- [Coding Practices](../../docs/CODING_PRACTICES.md)
+- [Coding Practices](../../../agentic-coding-playbook/docs/CODING_PRACTICES.md)
