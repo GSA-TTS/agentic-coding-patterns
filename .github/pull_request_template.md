@@ -34,6 +34,7 @@
 - [ ] Ran `make test` (if applicable)
 - [ ] Tested with at least one real scenario
 - [ ] Examples are concrete and realistic
+- [ ] Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/) format (see [CONTRIBUTING.md](../CONTRIBUTING.md#commit-message-format))
 
 ## Safety Checklist
 <!-- ALL items must be checked before submission -->
