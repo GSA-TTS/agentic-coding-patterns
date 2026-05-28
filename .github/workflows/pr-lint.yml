@@ -9,8 +9,7 @@ on:
 
 jobs:
   lint:
-    uses: GSA-TTS/agentic-coding-playbook/.github/workflows/reusable-pr-lint.yml@main
+    uses: GSA-TTS/agentic-coding-playbook/.github/workflows/reusable-pr-lint.yml@workflows/v1
     with:
       validate-commits: true
-    secrets:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    # Note: GITHUB_TOKEN is automatically inherited, no need to pass as secret
