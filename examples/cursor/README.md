@@ -16,7 +16,6 @@ python convert_to_cursorrules.py skills/secure-code-review/SKILL.md
 ## Example Conversions
 
 - [Documentation Review → .cursorrules](./documentation-review.cursorrules)
-- [Conversion Guide](./conversion-guide.md)
 
 ## Key Differences
 

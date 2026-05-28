@@ -16,7 +16,6 @@ Claude Projects allow custom instructions that guide Claude's behavior. Patterns
 ## Example Adaptations
 
 - [QA Round Review Instructions](./qa-round-instructions.txt)
-- [Conversion Guide](./conversion-guide.md)
 
 ## Format Differences
 
