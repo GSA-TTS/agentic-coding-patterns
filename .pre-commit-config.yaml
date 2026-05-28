@@ -28,14 +28,14 @@ repos:
 
   # Markdown linting
   - repo: https://github.com/igorshubovych/markdownlint-cli
-    rev: v0.43.0
+    rev: 0d9fcb51a54f3b750b911c054b4bd1a590f1b592  # v0.43.0
     hooks:
       - id: markdownlint
         args: ["--fix"]
 
   # Commit message validation
   - repo: https://github.com/alessandrojcm/commitlint-pre-commit-hook
-    rev: v9.18.0
+    rev: e5287c0c191ba3f845841baf7e5852b74ab81f8d  # v9.18.0
     hooks:
       - id: commitlint
         stages: [commit-msg]
