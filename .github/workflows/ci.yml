@@ -1,3 +1,6 @@
+# CI — Pattern Validation
+# Consumes reusable workflows from playbook where applicable
+
 name: CI — Pattern Validation
 
 on:
@@ -14,66 +17,28 @@ permissions:
   contents: read
 
 jobs:
-  validate:
-    name: Validation & Linting
+  # Python quality via reusable workflow
+  python:
+    uses: GSA-TTS/agentic-coding-playbook/.github/workflows/reusable-python-quality.yml@main
+    with:
+      python-version: '3.13'
+      scripts-path: 'scripts/'
+      run-tests: true
+      test-path: 'scripts/tests/'
+      run-pip-audit: true
+
+  # Python 3.12 compatibility check (additional matrix dimension)
+  python-compat:
+    name: Python 3.12 Compatibility
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python 3.12
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
-          python-version: ${{ matrix.python-version }}
-          cache: "pip"
-
-      - name: Set up Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: "22"
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
-      - name: Markdown lint
-        run: npx markdownlint-cli2 "**/*.md"
-
-      - name: Ruff lint
-        run: ruff check scripts/
-
-      - name: Ruff format check
-        run: ruff format --check scripts/
-
-      - name: Security audit dependencies
-        run: pip-audit
-
-      - name: Run validation
-        run: make validate
-
-      # Disabled: generate-check has false positives due to YAML serialization
-      # differences between Python versions. See issue #18.
-      # INDEX.yaml is validated by pre-commit hooks locally.
-      # - name: Check INDEX.yaml is up to date
-      #   run: make generate-check
-
-  test:
-    name: Test Suite
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.12", "3.13"]
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: "pip"
+          python-version: '3.12'
+          cache: 'pip'
 
       - name: Install dependencies
         run: |
@@ -85,6 +50,33 @@ jobs:
           if [ -d "scripts/tests" ] && [ "$(ls -A scripts/tests/*.py 2>/dev/null)" ]; then
             pytest scripts/tests/ -v
           else
-            echo "⚠️ No tests found in scripts/tests/ - skipping"
-            echo "Create tests to enable this check (see issue #16)"
+            echo "::notice::No tests found in scripts/tests/ - skipping"
           fi
+
+  # Markdown quality via reusable workflow
+  markdown:
+    uses: GSA-TTS/agentic-coding-playbook/.github/workflows/reusable-markdown-quality.yml@main
+    with:
+      run-link-check: true
+      continue-on-link-error: true
+
+  # Validation job (pattern-specific)
+  validate:
+    name: Pattern Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run validation
+        run: make validate
