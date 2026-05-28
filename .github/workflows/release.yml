@@ -1,0 +1,18 @@
+# Release - Consumes reusable workflow from playbook
+# See: https://github.com/GSA-TTS/agentic-coding-playbook/.github/workflows/reusable-release-please.yml
+
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  release:
+    uses: GSA-TTS/agentic-coding-playbook/.github/workflows/reusable-release-please.yml@main
+    with:
+      release-type: simple
+    secrets:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
