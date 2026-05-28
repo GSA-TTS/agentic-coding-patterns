@@ -198,6 +198,62 @@ def run_assertion_no_prohibited(output: str, patterns: list[str]) -> tuple[bool,
     return False, f"Found prohibited patterns: {', '.join(found_patterns)}"
 
 
+def run_assertion_readability_max(output: str, max_grade: float) -> tuple[bool, str | None]:
+    """
+    Run 'readability_max' assertion.
+
+    Checks that output text is at or below a specified Flesch-Kincaid grade level.
+    Uses a simple implementation without external dependencies.
+
+    Args:
+        output: The output text to check
+        max_grade: Maximum allowed Flesch-Kincaid grade level
+
+    Returns:
+        (passed, error_message)
+    """
+    # Handle empty or very short text
+    if not output or len(output.strip()) < 100:
+        return True, None  # Pass for very short text (can't meaningfully assess)
+
+    # Simple Flesch-Kincaid Grade Level calculation
+    # FK Grade = 0.39 * (words/sentences) + 11.8 * (syllables/words) - 15.59
+    text = output.strip()
+
+    # Count sentences (simple heuristic: . ! ? followed by space or end)
+    sentences = max(1, len(re.findall(r"[.!?]+(?:\s|$)", text)))
+
+    # Count words
+    words = re.findall(r"\b[a-zA-Z]+\b", text)
+    word_count = max(1, len(words))
+
+    # Count syllables (simple heuristic)
+    def count_syllables(word: str) -> int:
+        word = word.lower()
+        vowels = "aeiouy"
+        count = 0
+        prev_vowel = False
+        for char in word:
+            is_vowel = char in vowels
+            if is_vowel and not prev_vowel:
+                count += 1
+            prev_vowel = is_vowel
+        # Handle silent e
+        if word.endswith("e") and count > 1:
+            count -= 1
+        return max(1, count)
+
+    syllable_count = sum(count_syllables(w) for w in words)
+
+    # Calculate Flesch-Kincaid Grade Level
+    grade = 0.39 * (word_count / sentences) + 11.8 * (syllable_count / word_count) - 15.59
+
+    if grade <= max_grade:
+        return True, None
+
+    return False, f"Readability grade {grade:.1f} exceeds maximum {max_grade}"
+
+
 def run_assertion(assertion: dict[str, Any], output: str) -> tuple[bool, str | None]:
     """
     Run a single assertion against output.
@@ -232,8 +288,7 @@ def run_assertion(assertion: dict[str, Any], output: str) -> tuple[bool, str | N
         return run_assertion_no_prohibited(output, assertion["patterns"])
 
     elif assertion_type == "readability_max":
-        # TODO: Implement readability checking (requires textstat library)
-        return False, f"Assertion type '{assertion_type}' not yet implemented"
+        return run_assertion_readability_max(output, assertion.get("max_grade", 12))
 
     else:
         return False, f"Unknown assertion type: {assertion_type}"
