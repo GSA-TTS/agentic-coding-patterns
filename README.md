@@ -254,4 +254,3 @@ zizmor .github/workflows/
 **Note:** zizmor will silently skip if not installed. Install from: <https://github.com/zizmorcore/zizmor>
 
 See `.pre-commit-config.yaml` for full configuration.
-
