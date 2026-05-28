@@ -13,6 +13,7 @@ repos:
       - id: check-toml
       - id: check-added-large-files
         args: ['--maxkb=500']
+      - id: check-merge-conflict
 
   - repo: https://github.com/gitleaks/gitleaks
     rev: ee6b38352380ce52369d16b7873093c4b8bf829b  # v8.24.3
@@ -26,11 +27,11 @@ repos:
         args: ["--fix"]
       - id: ruff-format
 
-  # Markdown linting
-  - repo: https://github.com/igorshubovych/markdownlint-cli
-    rev: 0d9fcb51a54f3b750b911c054b4bd1a590f1b592  # v0.43.0
+  # Markdown linting (using markdownlint-cli2 for consistency with playbook)
+  - repo: https://github.com/DavidAnson/markdownlint-cli2
+    rev: d174eb7a8f35e05d4065c82d375ad84aa0b32352  # v0.17.2
     hooks:
-      - id: markdownlint
+      - id: markdownlint-cli2
         args: ["--fix"]
 
   # Commit message validation
