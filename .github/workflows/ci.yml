@@ -58,7 +58,7 @@ jobs:
     uses: GSA-TTS/agentic-coding-playbook/.github/workflows/reusable-markdown-quality.yml@main
     with:
       run-link-check: true
-      continue-on-link-error: true
+      continue-on-link-error: false
 
   # Validation job (pattern-specific)
   validate:

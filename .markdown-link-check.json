@@ -1,0 +1,37 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tcort/markdown-link-check/master/config.schema.json",
+  "ignorePatterns": [
+    {
+      "pattern": "^#"
+    },
+    {
+      "pattern": "^mailto:"
+    },
+    {
+      "pattern": "example\\.com"
+    },
+    {
+      "pattern": "localhost"
+    },
+    {
+      "pattern": "127\\.0\\.0\\.1"
+    },
+    {
+      "pattern": "your-org"
+    },
+    {
+      "pattern": "your-repo"
+    },
+    {
+      "pattern": "\\{\\{.*\\}\\}"
+    },
+    {
+      "pattern": "<[^>]+>"
+    }
+  ],
+  "replacementPatterns": [],
+  "retryOn429": true,
+  "retryCount": 3,
+  "fallbackRetryDelay": "30s",
+  "aliveStatusCodes": [200, 206, 301, 302, 307, 308]
+}
