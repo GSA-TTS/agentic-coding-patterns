@@ -293,12 +293,26 @@ class TestRunAssertion:
         assert passed is False
         assert "Unknown assertion type" in error
 
-    def test_run_assertion_readability_not_implemented(self):
-        """Test run_assertion with unimplemented readability check."""
-        assertion = {"type": "readability_max", "grade": 8}
-        passed, error = run_assertion(assertion, "content")
+    def test_run_assertion_readability_max_passes(self):
+        """Test run_assertion with readability_max check that passes."""
+        # Simple content should have low grade level (easy to read)
+        assertion = {"type": "readability_max", "max_grade": 12}
+        passed, error = run_assertion(assertion, "The cat sat on the mat. It was a nice day.")
+        assert passed is True
+        assert error is None
+
+    def test_run_assertion_readability_max_fails(self):
+        """Test run_assertion with readability_max check that fails."""
+        # Complex content with long words and sentences
+        assertion = {"type": "readability_max", "max_grade": 1}
+        complex_text = """
+        The implementation of sophisticated algorithmic methodologies necessitates
+        comprehensive understanding of computational complexity theory and its
+        multifaceted implications for software architecture optimization.
+        """
+        passed, error = run_assertion(assertion, complex_text)
         assert passed is False
-        assert "not yet implemented" in error
+        assert "exceeds maximum" in error
 
 
 class TestRunTestCase:
