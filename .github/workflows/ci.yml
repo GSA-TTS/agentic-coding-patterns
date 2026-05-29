@@ -19,7 +19,7 @@ permissions:
 jobs:
   # Python quality via reusable workflow
   python:
-    uses: GSA-TTS/agentic-coding-playbook/.github/workflows/reusable-python-quality.yml@main
+    uses: GSA-TTS/agentic-coding-playbook/.github/workflows/reusable-python-quality.yml@workflows/v1
     with:
       python-version: '3.13'
       scripts-path: 'scripts/'
@@ -31,6 +31,7 @@ jobs:
   python-compat:
     name: Python 3.12 Compatibility
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -55,7 +56,7 @@ jobs:
 
   # Markdown quality via reusable workflow
   markdown:
-    uses: GSA-TTS/agentic-coding-playbook/.github/workflows/reusable-markdown-quality.yml@main
+    uses: GSA-TTS/agentic-coding-playbook/.github/workflows/reusable-markdown-quality.yml@workflows/v1
     with:
       run-link-check: true
       continue-on-link-error: false
@@ -64,6 +65,7 @@ jobs:
   validate:
     name: Pattern Validation
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
