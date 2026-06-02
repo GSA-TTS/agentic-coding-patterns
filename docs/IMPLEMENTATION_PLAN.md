@@ -79,7 +79,7 @@ All examples use placeholders.
 
 - [x] Directory structure created
 - [x] .gitignore
-- [x] pyproject.toml (Python 3.11+, PyYAML, jsonschema, pytest, ruff)
+- [x] pyproject.toml (Python 3.12+, PyYAML, jsonschema, pytest, ruff)
 - [x] Makefile (setup, validate, generate, test, ci, clean)
 - [x] .pre-commit-config.yaml (trailing whitespace, yaml/json check, ruff, validation)
 - [x] LICENSE (CC0-1.0, already in place)
@@ -99,18 +99,42 @@ All examples use placeholders.
 - [x] AGENTS.md (375 lines - behavioral contract adapted from playbook)
 - [x] CONTRIBUTING.md (329 lines - contributor guide)
 
-#### Templates (1/5)
+#### Templates (5/5)
 
 - [x] templates/skill-template/SKILL.md
+- [x] templates/prompt-template/SKILL.md
+- [x] templates/agent-template/AGENTS.md
+- [x] templates/workflow-template/SKILL.md
+- [x] templates/lesson-template/SKILL.md
 
-### 🚧 In Progress
+### ✅ Previously Pending (Now Complete)
 
-#### Templates (4 remaining)
+#### Documentation (6/6)
 
-- [ ] templates/prompt-template/SKILL.md
-- [ ] templates/agent-template/AGENTS.md
-- [ ] templates/workflow-template/SKILL.md
-- [ ] templates/lesson-template/SKILL.md
+- [x] docs/design-notes.md (what was adopted from dsd/)
+- [x] docs/safety-guidance.md (security rules)
+- [x] docs/repository-ecosystem.md (relationship to siblings)
+- [x] docs/content-lifecycle.md (status transitions)
+- [x] docs/review-model.md (review expectations)
+- [x] docs/getting-started.md (quick start)
+
+#### GitHub Integration (7/7)
+
+- [x] .github/ISSUE_TEMPLATE/skill.yml
+- [x] .github/ISSUE_TEMPLATE/prompt.yml
+- [x] .github/ISSUE_TEMPLATE/workflow.yml
+- [x] .github/ISSUE_TEMPLATE/agent-instructions.yml
+- [x] .github/ISSUE_TEMPLATE/lesson-learned.yml
+- [x] .github/ISSUE_TEMPLATE/config.yml
+- [x] .github/pull_request_template.md
+
+#### Testing (5/5)
+
+- [x] scripts/tests/test_validate_frontmatter.py
+- [x] scripts/tests/test_validate_sensitive_terms.py
+- [x] scripts/tests/test_generate_index.py
+- [x] scripts/tests/test_search_patterns.py
+- [x] scripts/tests/test_run_test_cases.py
 
 ### ⏳ Pending
 
@@ -122,34 +146,7 @@ All examples use placeholders.
 - [ ] 2 workflows: issue-to-merge-request, qa-round
 - [ ] 1 lesson: example-agentic-session
 
-#### Documentation
-
-- [ ] docs/design-notes.md (what was adopted from dsd/)
-- [ ] docs/safety-guidance.md (security rules)
-- [ ] docs/repository-ecosystem.md (relationship to siblings)
-- [ ] docs/content-lifecycle.md (status transitions)
-- [ ] docs/review-model.md (review expectations)
-- [ ] docs/getting-started.md (quick start)
-
-#### GitHub Integration
-
-- [ ] .github/ISSUE_TEMPLATE/skill.md
-- [ ] .github/ISSUE_TEMPLATE/prompt.md
-- [ ] .github/ISSUE_TEMPLATE/workflow.md
-- [ ] .github/ISSUE_TEMPLATE/agent-instructions.md
-- [ ] .github/ISSUE_TEMPLATE/lesson-learned.md
-- [ ] .github/pull_request_template.md
-
 #### Examples
-
-- [ ] examples/opencode/README.md + opencode.example.jsonc
-- [ ] examples/claude-code/README.md
-- [ ] examples/copilot/README.md
-- [ ] examples/cursor/README.md
-
-#### Testing
-
-- [ ] scripts/tests/test_validators.py (pytest suite)
 
 ## GitHub Issues to Create
 
