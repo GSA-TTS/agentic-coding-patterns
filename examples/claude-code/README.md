@@ -184,7 +184,7 @@ repos:
     hooks:
       - id: pattern-validation
         name: Validate against patterns
-        entry: python scripts/validate_patterns.py
+        entry: python scripts/validate_repo.py
         language: system
 ```
 

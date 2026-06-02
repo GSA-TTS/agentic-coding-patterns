@@ -251,6 +251,6 @@ pre-commit run --all-files
 zizmor .github/workflows/
 ```
 
-**Note:** zizmor will silently skip if not installed. Install from: <https://github.com/zizmorcore/zizmor>
+**Note:** zizmor will silently skip if not installed. Install from: <https://github.com/woodruffw/zizmor>
 
 See `.pre-commit-config.yaml` for full configuration.
