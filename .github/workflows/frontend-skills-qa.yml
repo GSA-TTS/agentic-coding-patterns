@@ -1,0 +1,189 @@
+# Frontend Skills QA — Deterministic Tool Checks
+# Runs readability scoring and validates frontend skill markdown files
+# Triggered on PRs that modify frontend skills or examples
+#
+# Issue: #97
+
+name: Frontend Skills QA
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.agents/skills/frontend/**'
+      - 'examples/frontend/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.agents/skills/frontend/**'
+      - 'examples/frontend/**'
+
+concurrency:
+  group: frontend-qa-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  readability:
+    name: Readability Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      - name: Install textstat
+        run: pip install textstat
+
+      - name: Run readability checks
+        id: readability
+        run: |
+          echo "## Readability Analysis" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Find all markdown files in frontend skills
+          files=$(find .agents/skills/frontend -name '*.md' -type f | sort)
+          
+          passed=0
+          failed=0
+          results=""
+          
+          for file in $files; do
+            # Skip tools README (it's technical documentation)
+            if [[ "$file" == *"/tools/README.md" ]]; then
+              continue
+            fi
+            
+            # Run readability check with relaxed threshold for technical docs
+            # Grade 10 for SKILL.md files (technical), Grade 8 for content
+            if [[ "$file" == *"SKILL.md" ]]; then
+              threshold=10
+            else
+              threshold=8
+            fi
+            
+            output=$(python3 .agents/skills/frontend/tools/readability_score.py --json --threshold "$threshold" "$file" 2>&1) || true
+            
+            # Parse JSON result
+            grade=$(echo "$output" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['metrics']['fk_grade'])" 2>/dev/null || echo "N/A")
+            ease=$(echo "$output" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['metrics']['reading_ease'])" 2>/dev/null || echo "N/A")
+            passed_check=$(echo "$output" | python3 -c "import sys,json; d=json.load(sys.stdin); print('true' if d['evaluation']['passed'] else 'false')" 2>/dev/null || echo "false")
+            
+            if [[ "$passed_check" == "true" ]]; then
+              status="✅"
+              ((passed++))
+            else
+              status="⚠️"
+              ((failed++))
+            fi
+            
+            # Truncate path for display
+            short_path="${file#.agents/skills/frontend/}"
+            results="${results}| ${short_path} | ${grade} | ${ease} | ${status} |\n"
+          done
+          
+          # Write summary table
+          echo "| File | FK Grade | Reading Ease | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|----------|--------------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo -e "$results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Results:** ${passed} passed, ${failed} warnings" >> $GITHUB_STEP_SUMMARY
+          
+          # Note: We don't fail the build on readability warnings
+          # These are advisory for SKILL.md files (technical docs)
+          echo "readability_passed=$passed" >> $GITHUB_OUTPUT
+          echo "readability_failed=$failed" >> $GITHUB_OUTPUT
+
+      - name: Upload readability results
+        if: always()
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        with:
+          name: readability-results
+          path: |
+            .agents/skills/frontend/**/*.md
+          retention-days: 7
+
+  # Vale prose linting (optional, runs if vale is configured)
+  vale:
+    name: Vale Prose Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Only run if vale config exists
+    if: ${{ hashFiles('.agents/skills/frontend/tools/vale-frontend.ini') != '' }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Run Vale
+        uses: errata-ai/vale-action@d89dee975228ae261d22c15adcd03578634d429c # v2.2.0
+        continue-on-error: true  # Advisory only
+        with:
+          files: .agents/skills/frontend
+          config: .agents/skills/frontend/tools/vale-frontend.ini
+          reporter: github-check
+
+  # HTML validation for examples (when they exist)
+  html-validate:
+    name: HTML Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Only run if examples directory exists
+    if: ${{ hashFiles('examples/frontend/**/*.html') != '' }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '20'
+
+      - name: Install html-validate
+        run: npm install -g html-validate
+
+      - name: Run HTML validation
+        run: |
+          echo "## HTML Validation" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          html-validate "examples/frontend/**/*.html" >> $GITHUB_STEP_SUMMARY 2>&1 || {
+            echo "::warning::HTML validation found issues"
+            exit 0  # Don't fail build, advisory only
+          }
+
+  # Accessibility check for HTML examples
+  accessibility:
+    name: Accessibility Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Only run if examples directory exists
+    if: ${{ hashFiles('examples/frontend/**/*.html') != '' }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '20'
+
+      - name: Install axe-core CLI
+        run: npm install -g @axe-core/cli
+
+      - name: Run accessibility checks
+        run: |
+          echo "## Accessibility Check (axe-core)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          for file in examples/frontend/**/*.html; do
+            if [[ -f "$file" ]]; then
+              echo "### ${file}" >> $GITHUB_STEP_SUMMARY
+              axe "$file" --exit >> $GITHUB_STEP_SUMMARY 2>&1 || {
+                echo "::warning::Accessibility issues found in ${file}"
+              }
+            fi
+          done
