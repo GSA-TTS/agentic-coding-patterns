@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<!--
+  Example Input: Page with Accessibility Issues
+  
+  This page intentionally contains accessibility issues for testing:
+  1. Missing lang attribute on html
+  2. Missing skip link
+  3. Images without alt text
+  4. Skipped heading levels
+  5. Non-descriptive link text
+  6. Form inputs without labels
+  7. Low color contrast (noted in comments)
+  
+  Expected: axe-core should report multiple violations
+-->
+<head>
+  <meta charset="UTF-8">
+  <title>Test Page</title>
+</head>
+<body>
+  <!-- Missing skip link -->
+  
+  <header>
+    <div class="logo">
+      <!-- Issue: Image missing alt text -->
+      <img src="logo.png">
+    </div>
+    <nav>
+      <a href="/">Home</a>
+      <!-- Issue: Non-descriptive link text -->
+      <a href="/about">Click here</a>
+      <a href="/services">Read more</a>
+    </nav>
+  </header>
+  
+  <main>
+    <h1>Welcome</h1>
+    
+    <!-- Issue: Skipped heading level (h1 to h3) -->
+    <h3>Our Services</h3>
+    <p>We offer many services.</p>
+    
+    <!-- Issue: Another skipped heading -->
+    <h5>Contact Us</h5>
+    
+    <!-- Issue: Form inputs without labels -->
+    <form>
+      <input type="text" placeholder="Your name">
+      <input type="email" placeholder="Your email">
+      <textarea placeholder="Message"></textarea>
+      <button>Submit</button>
+    </form>
+    
+    <!-- Issue: Link opens in new window without warning -->
+    <p>Learn more on <a href="https://example.com" target="_blank">our partner site</a></p>
+    
+    <!-- Issue: Using color alone to convey meaning -->
+    <p>Required fields are shown in <span style="color: red">red</span>.</p>
+  </main>
+  
+  <footer>
+    <p>Contact us for more info</p>
+  </footer>
+</body>
+</html>
