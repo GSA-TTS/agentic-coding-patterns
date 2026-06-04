@@ -98,9 +98,71 @@ Identify what needs review:
 - [ ] CSS styles affecting visibility or contrast
 - [ ] JavaScript interactions
 
-### Step 2: Run Automated Checks
+### Step 2: Run Automated Accessibility Checks
 
-Check for common issues that can be detected automatically:
+Use deterministic tools to identify accessibility issues automatically:
+
+#### Option A: axe-core CLI (Recommended for HTML)
+
+```bash
+# Install
+npm install -g @axe-core/cli
+
+# Run on HTML file
+axe output.html --exit
+
+# Run on URL with Chrome
+axe https://example.gov --exit
+
+# JSON output for CI
+axe output.html --dir results/ --reporter json
+```
+
+**Exit Codes:** 0 = no violations, 1 = violations found
+
+#### Option B: Lighthouse Accessibility Audit
+
+```bash
+# Install
+npm install -g lighthouse
+
+# Run accessibility audit only
+lighthouse https://example.gov --only-categories=accessibility --output=json --output-path=./a11y-report.json
+
+# View score (0-100)
+cat a11y-report.json | jq '.categories.accessibility.score * 100'
+```
+
+#### Option C: pa11y (Good for CI Pipelines)
+
+```bash
+# Install
+npm install -g pa11y
+
+# Run with WCAG 2.1 AA standard
+pa11y --standard WCAG2AA output.html
+
+# JSON output
+pa11y --reporter json output.html > a11y-results.json
+```
+
+#### Option D: Vale Accessibility Rules
+
+```bash
+# With cloud-gov/style-management-service
+vale --config profiles/federal.vale.ini content.md
+```
+
+Vale checks for:
+- Color-alone meaning (WCAG 1.4.1)
+- Flashing content warnings (WCAG 2.3.1)  
+- Link text quality (WCAG 2.4.4)
+- Image descriptions (WCAG 1.4.5)
+- Mouse-only interaction warnings (WCAG 2.1.1)
+
+### Step 3: Manual Checks (Cannot Be Automated)
+
+Check for common issues that require human judgment:
 
 #### Heading Hierarchy
 
@@ -305,3 +367,14 @@ A human MUST:
 - [WebAIM WCAG 2 Checklist](https://webaim.org/standards/wcag/checklist)
 - [USWDS Accessibility Tests](https://designsystem.digital.gov/documentation/accessibility/)
 - [GSA Government-wide Section 508 Assessment](https://www.section508.gov/manage/annual-assessment/)
+
+## Deterministic Tools
+
+| Tool | Purpose | Standard | Install |
+|------|---------|----------|---------|
+| [axe-core](https://github.com/dequelabs/axe-core) | HTML accessibility testing | WCAG 2.1 AA | `npm i -g @axe-core/cli` |
+| [pa11y](https://pa11y.org/) | CI-friendly a11y testing | WCAG 2.1 AA | `npm i -g pa11y` |
+| [Lighthouse](https://developer.chrome.com/docs/lighthouse/) | Web quality audits | WCAG 2.1 AA | `npm i -g lighthouse` |
+| [Vale](https://vale.sh) | Prose accessibility rules | WCAG patterns | `brew install vale` |
+| [WebAIM Contrast Checker](https://webaim.org/resources/contrastchecker/) | Color contrast verification | WCAG AA/AAA | Web tool |
+| [html-validate](https://html-validate.org/) | Semantic HTML validation | W3C + a11y | `npm i -g html-validate` |

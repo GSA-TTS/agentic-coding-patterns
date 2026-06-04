@@ -97,14 +97,50 @@ Clarify who will read this content:
 - [ ] Subject matter experts (higher technical vocabulary acceptable)
 - [ ] Specific demographic (age, language proficiency)
 
-### Step 2: Run Readability Analysis
+### Step 2: Run Automated Readability Analysis
 
-Check readability metrics:
+Use deterministic tools to compute readability metrics:
 
-- **Flesch-Kincaid Grade Level** — Target: 8th grade or below for general public
-- **Sentence length** — Target: 15-20 words average
-- **Paragraph length** — Target: 3-5 sentences
-- **Passive voice frequency** — Target: <10% of sentences
+#### Option A: Using readability_score.py (Included)
+
+```bash
+# From the frontend skills directory
+python3 tools/readability_score.py content.md
+
+# JSON output for CI integration
+python3 tools/readability_score.py --json content.md
+
+# Example output:
+# Readability Analysis: content.md
+# --------------------------------------------------
+#   Flesch-Kincaid Grade: 7.2
+#   Flesch Reading Ease:  68.4
+#   Avg Sentence Length:  16.3
+#   Passive Voice:        5.2%
+# --------------------------------------------------
+# ✓ PASSED: Meets federal plain language targets
+```
+
+**Dependencies:** `pip install textstat`
+
+#### Option B: Using Vale with PlainLanguage Rules
+
+```bash
+# With cloud-gov/style-management-service
+vale --config profiles/documentation.vale.ini content.md
+```
+
+Vale checks for passive voice patterns, complex words, sentence length, jargon, and buried verbs automatically.
+
+#### Federal Plain Language Targets
+
+| Metric | Target | Source |
+|--------|--------|--------|
+| **Flesch-Kincaid Grade Level** | ≤8 (8th grade) | PlainLanguage.gov |
+| **Flesch Reading Ease** | ≥60 | Higher = easier to read |
+| **Sentence length** | 15-20 words average | Plain Writing Act |
+| **Paragraph length** | 3-5 sentences | Federal style guides |
+| **Passive voice frequency** | <10% of sentences | Federal style guides |
 
 ### Step 3: Check for Common Issues
 
@@ -312,3 +348,11 @@ A human MUST:
 - [18F Content Guide](https://content-guide.18f.gov/)
 - [Plain Language Action and Information Network (PLAIN)](https://www.plainlanguage.gov/about/program-history/)
 - [Plain Writing Act of 2010](https://www.gpo.gov/fdsys/pkg/PLAW-111publ274/pdf/PLAW-111publ274.pdf)
+
+## Deterministic Tools
+
+| Tool | Purpose | Install |
+|------|---------|---------|
+| [readability_score.py](../tools/readability_score.py) | FK Grade, Reading Ease, passive voice | `pip install textstat` |
+| [Vale](https://vale.sh) | Prose linting with PlainLanguage rules | `brew install vale` |
+| [cloud-gov/style-management-service](https://github.com/cloud-gov/style-management-service) | Full federal style checking | Clone repo |

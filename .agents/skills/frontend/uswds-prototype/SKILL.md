@@ -185,7 +185,22 @@ Produce the complete artifact with:
 
 ## Verification
 
-After generating, verify:
+After generating, verify with automated tools and manual checks:
+
+### Automated Validation
+
+```bash
+# HTML structure validation
+npx html-validate output.html
+
+# Accessibility check
+npx axe output.html --exit
+
+# If using Vale with USWDS rules
+vale --config profiles/uswds.vale.ini output.html
+```
+
+### Manual Checklist
 
 - [ ] HTML is valid and well-formed
 - [ ] Single `<h1>` element exists
@@ -319,3 +334,12 @@ A human MUST review and verify:
 - [USWDS Components](https://designsystem.digital.gov/components/)
 - [USWDS Page Templates](https://designsystem.digital.gov/templates/)
 - [Section 508 Testing](https://www.section508.gov/test/)
+
+## Deterministic Tools
+
+| Tool | Purpose | Install |
+|------|---------|---------|
+| [html-validate](https://html-validate.org/) | HTML structure + semantic validation | `npm i -g html-validate` |
+| [axe-core](https://github.com/dequelabs/axe-core) | Accessibility testing | `npm i -g @axe-core/cli` |
+| [Vale](https://vale.sh) | USWDS terminology + component rules | `brew install vale` |
+| [Nu Html Checker](https://validator.github.io/validator/) | W3C HTML validation | Java or Docker |
