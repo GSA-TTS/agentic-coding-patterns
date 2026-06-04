@@ -48,31 +48,59 @@ cat content.md | python3 readability_score.py -
 
 ### Vale (Prose Linter)
 
-For comprehensive plain language, accessibility, and USWDS checks, use [Vale](https://vale.sh) with cloud.gov style packs.
+For comprehensive plain language, accessibility, and USWDS checks, use [Vale](https://vale.sh).
 
 **Installation:**
 ```bash
 # macOS
 brew install vale
 
-# Linux
-curl -sfL https://install.goreleaser.com/github.com/errata-ai/vale.sh | sh
+# Linux (via package manager or binary)
+# See: https://vale.sh/docs/vale-cli/installation/
 
 # Windows
 choco install vale
 ```
 
-**With cloud.gov style-management-service:**
+**Quick Start (using included config):**
 ```bash
-git clone https://github.com/cloud-gov/style-management-service
-cd style-management-service
+cd .agents/skills/frontend/tools
 
-# Use PlainLanguage profile
-vale --config profiles/documentation.vale.ini /path/to/content
+# Download style packages (Google, proselint, write-good)
+vale sync
 
-# Use USWDS profile
-vale --config profiles/uswds.vale.ini /path/to/content
+# Run checks on frontend skills
+vale ../
+
+# Run checks on examples
+vale ../../../../examples/frontend/
 ```
+
+**With cloud.gov style-management-service (federal-specific rules):**
+```bash
+# Clone the full style pack repository
+git clone https://github.com/cloud-gov/style-management-service
+
+# Use PlainLanguage profile (18 style packs)
+vale --config style-management-service/profiles/documentation.vale.ini /path/to/content
+
+# Use USWDS profile (includes component terminology)
+vale --config style-management-service/profiles/uswds.vale.ini /path/to/content
+
+# Use Federal profile (strictest plain language rules)
+vale --config style-management-service/profiles/federal.vale.ini /path/to/content
+```
+
+**Available Style Packages:**
+
+| Package | Purpose | Source |
+|---------|---------|--------|
+| Google | Google developer documentation style | Vale Package Hub |
+| proselint | Prose linting for jargon, cliches | Vale Package Hub |
+| write-good | Passive voice, weasel words | Vale Package Hub |
+| PlainLanguage | Federal plain language rules | cloud-gov/style-management-service |
+| Accessibility | WCAG-related content patterns | cloud-gov/style-management-service |
+| USWDS | Design system terminology | cloud-gov/style-management-service |
 
 ### axe-core (Accessibility)
 
