@@ -195,6 +195,39 @@ If you find patterns diverging between repos:
 
 **When working across repos:** Default to **FIPS Moderate** constraints unless explicitly scoped to local development.
 
+## Cross-Repo Multi-Workspace Patterns
+
+When working with multiple repositories simultaneously, you can mount them into a single sandbox
+using Docker's `sbx` CLI. This enables workflows where an agent can reference one repo while
+editing another.
+
+### Common Cross-Repo Modes
+
+| Mode | Setup | Use Case |
+|------|-------|----------|
+| App + Playbook reference | Primary: app (rw), Secondary: playbook (ro) | Apply playbook standards to your project |
+| App + Patterns reference | Primary: app (rw), Secondary: patterns (ro) | Use skills and templates from patterns |
+| Frontend + Backend | Primary: one repo (rw), Secondary: other (ro) | Cross-repo code understanding |
+| Implementation + Docs | Primary: code (rw), Secondary: docs (ro) | Documentation-aware development |
+
+### Repository Ownership
+
+- **Quickstart** owns the detailed `sbx` CLI setup instructions
+- **Patterns** provides high-level guidance on when to use cross-repo workflows
+- **Playbook** defines standards that may be referenced from other repos
+
+For `sbx` command syntax and examples, see the
+[Multiple Workspaces](https://github.com/GSA-TTS/agentic-coding-quickstart/blob/main/docs/QUICKSTART_SBX.md#multiple-workspaces)
+section in the quickstart guide.
+
+### Security Best Practice
+
+When mounting reference repositories:
+
+- Use read-only mounts (`:ro` suffix) for repos you do not intend to edit
+- Only mount what the agent needs to see
+- Avoid mounting directories containing secrets or credentials
+
 ## Contribution Flow
 
 ### Contributing a New Pattern
