@@ -7,6 +7,11 @@ updates:
       interval: "weekly"
       day: "monday"
       time: "09:00"
+    # Wait before opening update PRs so freshly-published (possibly
+    # compromised) releases age out before we adopt them (zizmor
+    # dependabot-cooldown).
+    cooldown:
+      default-days: 5
     open-pull-requests-limit: 5
     labels:
       - "dependencies"
@@ -29,6 +34,8 @@ updates:
       interval: "weekly"
       day: "monday"
       time: "09:00"
+    cooldown:
+      default-days: 5
     open-pull-requests-limit: 3
     labels:
       - "dependencies"
