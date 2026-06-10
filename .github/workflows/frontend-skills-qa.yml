@@ -153,7 +153,10 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Run Vale
-        uses: errata-ai/vale-action@d89dee975228ae261d22c15adcd03578634d429c # v2
+        # The action moved from errata-ai/ to the canonical vale-cli/ org
+        # (same Vale maintainer, jdkato). Pinned to the 2.1.2 release commit,
+        # which is GPG-verified and Node 24 compatible. (Issue #117)
+        uses: vale-cli/vale-action@85f9f7f2c5f449ac0ae5b66662961bae3f77ca6a # 2.1.2
         continue-on-error: true  # Advisory only
         with:
           files: .agents/skills/frontend
