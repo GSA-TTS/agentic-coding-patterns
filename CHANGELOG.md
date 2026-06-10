@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.1.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.0.0...v1.1.0) (2026-06-10)
+
+
+### Features
+
+* **ci:** add frontend skills QA workflow ([#97](https://github.com/GSA-TTS/agentic-coding-patterns/issues/97)) ([001ad5a](https://github.com/GSA-TTS/agentic-coding-patterns/commit/001ad5a27fbe08d031e0754d382f06403758d938))
+* migrate skills/ to .agents/skills/ per Agent Skills standard ([#82](https://github.com/GSA-TTS/agentic-coding-patterns/issues/82)) ([4e7e888](https://github.com/GSA-TTS/agentic-coding-patterns/commit/4e7e888c6508dfe5f3f1f6e869da5371bdb7267e)), closes [#81](https://github.com/GSA-TTS/agentic-coding-patterns/issues/81)
+* **skills:** add deterministic tools for frontend skills ([a1e6fe9](https://github.com/GSA-TTS/agentic-coding-patterns/commit/a1e6fe93aba5ab73ea13822a68e60b06d10945f3))
+* **skills:** add USWDS-first federal frontend skills pack ([#95](https://github.com/GSA-TTS/agentic-coding-patterns/issues/95)) ([94887ff](https://github.com/GSA-TTS/agentic-coding-patterns/commit/94887ff6fd109ab700eb7f3f3a349f448d0cd1f9))
+* **skills:** expand P2 frontend skills ([#100](https://github.com/GSA-TTS/agentic-coding-patterns/issues/100), [#101](https://github.com/GSA-TTS/agentic-coding-patterns/issues/101)) ([cd97acd](https://github.com/GSA-TTS/agentic-coding-patterns/commit/cd97acd64ae0a7feb9ad01136dfcfcc59c6c0211))
+
+
+### Bug Fixes
+
+* **ci:** repair frontend-skills-qa startup failure and harden filename handling ([#118](https://github.com/GSA-TTS/agentic-coding-patterns/issues/118)) ([e88c4da](https://github.com/GSA-TTS/agentic-coding-patterns/commit/e88c4da15881a567c9e9d81bf9910a7ff1483971)), closes [#113](https://github.com/GSA-TTS/agentic-coding-patterns/issues/113)
+
 ## 1.0.0 (2026-05-28)
 
 
