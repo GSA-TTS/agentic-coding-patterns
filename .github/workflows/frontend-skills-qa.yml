@@ -26,6 +26,34 @@ permissions:
   contents: read
 
 jobs:
+  # Detect which optional toolchains apply. hashFiles() is NOT available in a
+  # job-level `if:` (only step-level), so gating jobs on file presence must be
+  # done via a detect job that exposes outputs. (Issue #113)
+  detect:
+    name: Detect Inputs
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      has_vale_config: ${{ steps.detect.outputs.has_vale_config }}
+      has_html_examples: ${{ steps.detect.outputs.has_html_examples }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Detect optional inputs
+        id: detect
+        run: |
+          if [[ -f .agents/skills/frontend/tools/vale-frontend.ini ]]; then
+            echo "has_vale_config=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_vale_config=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if find examples/frontend -name '*.html' -type f -print -quit 2>/dev/null | grep -q .; then
+            echo "has_html_examples=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_html_examples=false" >> "$GITHUB_OUTPUT"
+          fi
+
   readability:
     name: Readability Check
     runs-on: ubuntu-latest
@@ -45,22 +73,23 @@ jobs:
       - name: Run readability checks
         id: readability
         run: |
-          echo "## Readability Analysis" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## Readability Analysis"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
 
-          # Find all markdown files in frontend skills
-          files=$(find .agents/skills/frontend -name '*.md' -type f | sort)
-          
           passed=0
           failed=0
           results=""
-          
-          for file in $files; do
+
+          # Use -print0 / read -d '' so filenames with spaces or shell
+          # metacharacters cannot break the loop or argument boundaries. (Issue #114)
+          while IFS= read -r -d '' file; do
             # Skip tools README (it's technical documentation)
             if [[ "$file" == *"/tools/README.md" ]]; then
               continue
             fi
-            
+
             # Run readability check with relaxed threshold for technical docs
             # Grade 10 for SKILL.md files (technical), Grade 8 for content
             if [[ "$file" == *"SKILL.md" ]]; then
@@ -68,38 +97,41 @@ jobs:
             else
               threshold=8
             fi
-            
+
             output=$(python3 .agents/skills/frontend/tools/readability_score.py --json --threshold "$threshold" "$file" 2>&1) || true
-            
+
             # Parse JSON result
             grade=$(echo "$output" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['metrics']['fk_grade'])" 2>/dev/null || echo "N/A")
             ease=$(echo "$output" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['metrics']['reading_ease'])" 2>/dev/null || echo "N/A")
             passed_check=$(echo "$output" | python3 -c "import sys,json; d=json.load(sys.stdin); print('true' if d['evaluation']['passed'] else 'false')" 2>/dev/null || echo "false")
-            
+
             if [[ "$passed_check" == "true" ]]; then
-              status="✅"
+              status="PASS"
               ((passed++))
             else
-              status="⚠️"
+              status="WARN"
               ((failed++))
             fi
-            
+
             # Truncate path for display
             short_path="${file#.agents/skills/frontend/}"
-            results="${results}| ${short_path} | ${grade} | ${ease} | ${status} |\n"
-          done
-          
-          # Write summary table
-          echo "| File | FK Grade | Reading Ease | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|------|----------|--------------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo -e "$results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Results:** ${passed} passed, ${failed} warnings" >> $GITHUB_STEP_SUMMARY
-          
+            results="${results}| ${short_path} | ${grade} | ${ease} | ${status} |"$'\n'
+          done < <(find .agents/skills/frontend -name '*.md' -type f -print0 | sort -z)
+
+          # Write summary table (printf '%s' avoids backslash interpretation on
+          # untrusted filename-derived content). (Issue #114)
+          {
+            echo "| File | FK Grade | Reading Ease | Status |"
+            echo "|------|----------|--------------|--------|"
+            printf '%s' "$results"
+            echo ""
+            echo "**Results:** ${passed} passed, ${failed} warnings"
+          } >> "$GITHUB_STEP_SUMMARY"
+
           # Note: We don't fail the build on readability warnings
           # These are advisory for SKILL.md files (technical docs)
-          echo "readability_passed=$passed" >> $GITHUB_OUTPUT
-          echo "readability_failed=$failed" >> $GITHUB_OUTPUT
+          echo "readability_passed=$passed" >> "$GITHUB_OUTPUT"
+          echo "readability_failed=$failed" >> "$GITHUB_OUTPUT"
 
       - name: Upload readability results
         if: always()
@@ -115,13 +147,13 @@ jobs:
     name: Vale Prose Lint
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Only run if vale config exists
-    if: ${{ hashFiles('.agents/skills/frontend/tools/vale-frontend.ini') != '' }}
+    needs: detect
+    if: needs.detect.outputs.has_vale_config == 'true'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Run Vale
-        uses: errata-ai/vale-action@d89dee975228ae261d22c15adcd03578634d429c # v2.2.0
+        uses: errata-ai/vale-action@d89dee975228ae261d22c15adcd03578634d429c # v2
         continue-on-error: true  # Advisory only
         with:
           files: .agents/skills/frontend
@@ -133,8 +165,8 @@ jobs:
     name: HTML Validation
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Only run if examples directory exists
-    if: ${{ hashFiles('examples/frontend/**/*.html') != '' }}
+    needs: detect
+    if: needs.detect.outputs.has_html_examples == 'true'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -148,10 +180,12 @@ jobs:
 
       - name: Run HTML validation
         run: |
-          echo "## HTML Validation" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          html-validate "examples/frontend/**/*.html" >> $GITHUB_STEP_SUMMARY 2>&1 || {
+          {
+            echo "## HTML Validation"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          html-validate "examples/frontend/**/*.html" >> "$GITHUB_STEP_SUMMARY" 2>&1 || {
             echo "::warning::HTML validation found issues"
             exit 0  # Don't fail build, advisory only
           }
@@ -161,8 +195,8 @@ jobs:
     name: Accessibility Check
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Only run if examples directory exists
-    if: ${{ hashFiles('examples/frontend/**/*.html') != '' }}
+    needs: detect
+    if: needs.detect.outputs.has_html_examples == 'true'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -176,14 +210,17 @@ jobs:
 
       - name: Run accessibility checks
         run: |
-          echo "## Accessibility Check (axe-core)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          for file in examples/frontend/**/*.html; do
-            if [[ -f "$file" ]]; then
-              echo "### ${file}" >> $GITHUB_STEP_SUMMARY
-              axe "$file" --exit >> $GITHUB_STEP_SUMMARY 2>&1 || {
-                echo "::warning::Accessibility issues found in ${file}"
-              }
-            fi
-          done
+          {
+            echo "## Accessibility Check (axe-core)"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # -print0 / read -d '' guards against crafted filenames. (Issue #114)
+          while IFS= read -r -d '' file; do
+            {
+              echo "### ${file}"
+            } >> "$GITHUB_STEP_SUMMARY"
+            axe "$file" --exit >> "$GITHUB_STEP_SUMMARY" 2>&1 || {
+              echo "::warning::Accessibility issues found in ${file}"
+            }
+          done < <(find examples/frontend -name '*.html' -type f -print0)
