@@ -44,18 +44,11 @@ repos:
         # and the repo's exact-pinning policy (no floating ranges).
         additional_dependencies: ["@commitlint/config-conventional@19.8.1"]
 
-  # GitHub Actions security scanning (optional - skips if zizmor not installed)
-  # Install: cargo install zizmor OR brew install zizmor
-  # Source: https://github.com/zizmorcore/zizmor
-  # Manual run: zizmor .github/workflows/
-  - repo: local
-    hooks:
-      - id: zizmor
-        name: zizmor - GitHub Actions security scanner
-        entry: bash -c 'command -v zizmor >/dev/null 2>&1 && zizmor "$@" || exit 0' --
-        language: system
-        files: ^\.github/workflows/.*\.ya?ml$
-        pass_filenames: true
+  # NOTE: GitHub Actions security scanning (zizmor) runs in CI only —
+  # see .github/workflows/zizmor.yml. It is intentionally NOT a local
+  # pre-commit hook: the zizmor CLI hard-fails when GITHUB_TOKEN is set
+  # but empty (common in sandboxed shells), which made the local hook
+  # brittle. CI provides a valid token and scans on every workflow change.
 
   # Pattern-specific validation (local hook)
   - repo: local
@@ -63,5 +56,5 @@ repos:
       - id: validate-patterns
         name: Validate pattern frontmatter
         entry: python scripts/validate_repo.py
-        language: system
+        language: unsupported
         pass_filenames: false
