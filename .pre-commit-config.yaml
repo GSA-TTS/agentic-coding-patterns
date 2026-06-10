@@ -40,7 +40,9 @@ repos:
     hooks:
       - id: commitlint
         stages: [commit-msg]
-        additional_dependencies: ["@commitlint/config-conventional"]
+        # Pinned to the latest 19.x to match the hook's @commitlint/cli@^19
+        # and the repo's exact-pinning policy (no floating ranges).
+        additional_dependencies: ["@commitlint/config-conventional@19.8.1"]
 
   # GitHub Actions security scanning (optional - skips if zizmor not installed)
   # Install: cargo install zizmor OR brew install zizmor
