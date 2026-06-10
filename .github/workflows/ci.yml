@@ -1,5 +1,4 @@
 # CI — Pattern Validation
-# Consumes reusable workflows from playbook where applicable
 
 name: CI — Pattern Validation
 
@@ -17,17 +16,46 @@ permissions:
   contents: read
 
 jobs:
-  # Python quality via reusable workflow
+  # Python quality
   python:
-    uses: GSA-TTS/agentic-coding-playbook/.github/workflows/reusable-python-quality.yml@workflows/v1
-    with:
-      python-version: '3.13'
-      scripts-path: 'scripts/'
-      run-tests: true
-      test-path: 'scripts/tests/'
-      run-pip-audit: true
+    name: Python Lint & Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-  # Python 3.12 compatibility check (additional matrix dimension)
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Ruff lint
+        run: ruff check scripts/
+
+      - name: Ruff format check
+        run: ruff format --check scripts/
+
+      - name: Run tests
+        run: |
+          if [ -d "scripts/tests" ] && [ "$(ls -A scripts/tests/*.py 2>/dev/null)" ]; then
+            pytest scripts/tests/ -v
+          else
+            echo "::notice::No tests found in scripts/tests/ - skipping"
+          fi
+
+      - name: SCA vulnerability scan
+        run: |
+          pip install --upgrade pip
+          pip install pip-audit
+          pip-audit --skip-editable
+
+  # Python 3.12 compatibility check
   python-compat:
     name: Python 3.12 Compatibility
     runs-on: ubuntu-latest
@@ -54,12 +82,44 @@ jobs:
             echo "::notice::No tests found in scripts/tests/ - skipping"
           fi
 
-  # Markdown quality via reusable workflow
+  # Markdown quality with lockfile
   markdown:
-    uses: GSA-TTS/agentic-coding-playbook/.github/workflows/reusable-markdown-quality.yml@workflows/v1
-    with:
-      run-link-check: true
-      continue-on-link-error: false
+    name: Markdown Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: '.github/linters/package-lock.json'
+
+      - name: Install linter dependencies
+        working-directory: .github/linters
+        run: |
+          npm ci
+          npm audit --audit-level=high
+
+      - name: Run markdownlint
+        run: npx --prefix .github/linters markdownlint-cli2 "**/*.md" "#node_modules" "#.github/linters/node_modules"
+
+  # Link check
+  link-check:
+    name: Link Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true  # External URLs can be flaky
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: tcort/github-action-markdown-link-check@e7c7a18363c842693fadde5d41a3bd3573a7a225 # v1.1.2
+        with:
+          config-file: ".markdown-link-check.json"
+          use-quiet-mode: "yes"
+          folder-path: "."
 
   # Validation job (pattern-specific)
   validate:
