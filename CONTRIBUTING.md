@@ -535,8 +535,10 @@ fix stuff
 
 Conventional-commit format is enforced on the **pull request title** by a
 pinned GitHub Action (`amannn/action-semantic-pull-request`) — no local
-tooling required. **Squash-merge is preferred**, so your PR title becomes the
-squashed commit subject, which drives automated releases (release-please).
+tooling required. **Squash-merge is required** (the repo allows squash only;
+the branch ruleset enforces linear history and one code-owner review), so your
+PR title becomes the squashed commit subject, which drives automated releases
+(release-please).
 
 Keep the PR title in `type(scope): description` form (e.g.
 `feat(skills): add secure code review pattern`).

@@ -369,7 +369,7 @@ git commit
 
 ### Pattern Not Showing in INDEX.yaml
 
-**Fix:** Run `make generate` to regenerate INDEX.yaml (automated in CI).
+**Fix:** Run `make generate` to regenerate INDEX.yaml (verified locally via the `generate-index` pre-commit hook / `make generate-check`).
 
 ---
 

@@ -228,7 +228,6 @@ pip install pre-commit
 
 # Install the git hook scripts
 pre-commit install
-pre-commit install --hook-type commit-msg
 
 # (Optional) Run against all files
 pre-commit run --all-files
@@ -238,18 +237,19 @@ pre-commit run --all-files
 
 - **gitleaks** — Secret detection (critical for example code)
 - **ruff** — Python linting and formatting with security rules
-- **markdownlint** — Markdown formatting
-- **zizmor** (optional) — GitHub Actions security scanning (auto-skips if not installed; install: `cargo install zizmor` or `brew install zizmor`)
+- **markdownlint-cli2** — Markdown formatting
 - **Pattern validation** — Frontmatter schema validation
 - **Basic hygiene** — YAML/JSON/TOML validation, trailing whitespace, etc.
 
-**Manual security scanning:**
+**GitHub Actions security scanning (CI, not a local hook):**
+
+zizmor runs in CI via `.github/workflows/zizmor.yml` on workflow-file changes —
+it is intentionally not a local pre-commit hook. You can also run it manually:
 
 ```bash
-# Run zizmor separately for comprehensive GitHub Actions security audit
 zizmor .github/workflows/
 ```
 
-**Note:** zizmor will silently skip if not installed. Install from: <https://github.com/woodruffw/zizmor>
+Install locally (optional): `cargo install zizmor` or `brew install zizmor`.
 
 See `.pre-commit-config.yaml` for full configuration.
