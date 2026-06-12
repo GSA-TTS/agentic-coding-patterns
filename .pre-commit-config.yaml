@@ -34,15 +34,13 @@ repos:
       - id: markdownlint-cli2
         args: ["--fix"]
 
-  # Commit message validation
-  - repo: https://github.com/alessandrojcm/commitlint-pre-commit-hook
-    rev: e5287c0c191ba3f845841baf7e5852b74ab81f8d  # v9.18.0
-    hooks:
-      - id: commitlint
-        stages: [commit-msg]
-        # Pinned to the latest 19.x to match the hook's @commitlint/cli@^19
-        # and the repo's exact-pinning policy (no floating ranges).
-        additional_dependencies: ["@commitlint/config-conventional@19.8.1"]
+  # NOTE: Conventional-commit format is enforced at the PR-title level by the
+  # SHA-pinned amannn/action-semantic-pull-request Action (.github/workflows/
+  # pr-lint.yml), consistent with playbook + quickstart. We intentionally do
+  # NOT run a local commitlint pre-commit hook: it added a commitlint npm
+  # dependency tree only this repo carried, for a check the merge gate already
+  # performs. Squash-merge is preferred so the validated PR title becomes the
+  # commit subject release-please consumes. (Issue #124)
 
   # NOTE: GitHub Actions security scanning (zizmor) runs in CI only —
   # see .github/workflows/zizmor.yml. It is intentionally NOT a local

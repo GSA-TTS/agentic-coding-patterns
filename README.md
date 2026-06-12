@@ -238,7 +238,6 @@ pre-commit run --all-files
 
 - **gitleaks** — Secret detection (critical for example code)
 - **ruff** — Python linting and formatting with security rules
-- **commitlint** — Conventional Commits validation
 - **markdownlint** — Markdown formatting
 - **zizmor** (optional) — GitHub Actions security scanning (auto-skips if not installed; install: `cargo install zizmor` or `brew install zizmor`)
 - **Pattern validation** — Frontmatter schema validation

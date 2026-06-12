@@ -528,33 +528,18 @@ fix stuff
 
 ### Line Length
 
-- **First line (subject):** ≤72 characters (recommended), ≤100 characters (enforced by commitlint)
+- **First line (subject):** ≤72 characters (recommended)
 - **Body lines:** ≤100 characters
 
 ### Validation
 
-Check your commit message locally before pushing:
+Conventional-commit format is enforced on the **pull request title** by a
+pinned GitHub Action (`amannn/action-semantic-pull-request`) — no local
+tooling required. **Squash-merge is preferred**, so your PR title becomes the
+squashed commit subject, which drives automated releases (release-please).
 
-```bash
-# Check the last commit
-npx commitlint --from=HEAD~1
-```
-
-### Pre-commit Hook (Optional)
-
-Automate validation with our pre-commit config:
-
-```bash
-# Install pre-commit (if not installed)
-pip install pre-commit
-
-# Install hooks
-pre-commit install --hook-type commit-msg
-
-# Your commits will now be validated automatically
-```
-
-The commitlint hook is already configured in `.pre-commit-config.yaml`.
+Keep the PR title in `type(scope): description` form (e.g.
+`feat(skills): add secure code review pattern`).
 
 ### AI Attribution
 
