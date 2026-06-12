@@ -48,6 +48,9 @@ htmlcov/
 .env
 .env.local
 
+# Node
+node_modules/
+
 # OS
 Thumbs.db
 deleteme/

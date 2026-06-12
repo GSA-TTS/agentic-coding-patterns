@@ -23,6 +23,36 @@ patterns:
     title: Secure Code Review
     type: skill
     status: experimental
+  - path: skills/frontend/uswds-prototype/SKILL.md
+    id: uswds-prototype
+    title: USWDS Front-End Prototype
+    type: skill
+    status: experimental
+  - path: skills/frontend/uswds-landing-page/SKILL.md
+    id: uswds-landing-page
+    title: USWDS Service Landing Page
+    type: skill
+    status: experimental
+  - path: skills/frontend/plain-language-review/SKILL.md
+    id: plain-language-review
+    title: Federal Plain Language Review
+    type: skill
+    status: experimental
+  - path: skills/frontend/federal-service-blueprint/SKILL.md
+    id: federal-service-blueprint
+    title: Federal Service Blueprint
+    type: skill
+    status: experimental
+  - path: skills/frontend/accessibility-review/SKILL.md
+    id: accessibility-review
+    title: Federal Accessibility Review
+    type: skill
+    status: experimental
+  - path: skills/frontend/uswds-form-flow/SKILL.md
+    id: uswds-form-flow
+    title: USWDS Accessible Form Flow
+    type: skill
+    status: experimental
   prompts:
   - path: prompts/review/qa-round/SKILL.md
     id: qa-round
@@ -73,8 +103,8 @@ patterns:
     type: lesson
     status: experimental
 stats:
-  total_patterns: 13
-  skills: 4
+  total_patterns: 19
+  skills: 10
   prompts: 3
   agents: 3
   workflows: 2

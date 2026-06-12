@@ -187,7 +187,7 @@ jobs:
           node-version: '20'
 
       - name: Install html-validate
-        run: npm install -g html-validate
+        run: npm install -g html-validate@11.5.3
 
       - name: Run HTML validation
         run: |
@@ -219,7 +219,7 @@ jobs:
           node-version: '20'
 
       - name: Install axe-core CLI
-        run: npm install -g @axe-core/cli
+        run: npm install -g @axe-core/cli@4.11.3
 
       - name: Run accessibility checks
         run: |
