@@ -7,7 +7,7 @@ description: "Security-focused agent instructions for vulnerability identificati
 
 status: experimental
 owners:
-  - "@community"
+  - "@GSA-TTS/agentic-coding-team"
 
 primary_personas:
   - security

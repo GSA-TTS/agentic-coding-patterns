@@ -7,7 +7,7 @@ description: "Documentation-focused agent instructions for clear, accurate, and 
 
 status: experimental
 owners:
-  - "@community"
+  - "@GSA-TTS/agentic-coding-team"
 
 primary_personas:
   - documentation

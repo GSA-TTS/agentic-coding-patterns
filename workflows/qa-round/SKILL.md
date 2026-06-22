@@ -7,7 +7,7 @@ description: "Structured QA verification workflow from pre-check through sign-of
 
 status: experimental
 owners:
-  - "@community"
+  - "@GSA-TTS/agentic-coding-team"
 
 primary_personas:
   - testers

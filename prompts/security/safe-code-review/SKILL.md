@@ -7,7 +7,7 @@ description: "Prompt for identifying OWASP risks, injection vulnerabilities, and
 
 status: experimental
 owners:
-  - "@community"
+  - "@GSA-TTS/agentic-coding-team"
 
 primary_personas:
   - security

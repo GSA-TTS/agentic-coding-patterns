@@ -7,7 +7,7 @@ description: "Review front-end artifacts for Section 508 and WCAG 2.1 AA complia
 
 status: experimental
 owners:
-  - "@community"
+  - "@GSA-TTS/agentic-coding-team"
 
 primary_personas:
   - developers
@@ -155,7 +155,7 @@ vale --config profiles/federal.vale.ini content.md
 
 Vale checks for:
 - Color-alone meaning (WCAG 1.4.1)
-- Flashing content warnings (WCAG 2.3.1)  
+- Flashing content warnings (WCAG 2.3.1)
 - Link text quality (WCAG 2.4.4)
 - Image descriptions (WCAG 1.4.5)
 - Mouse-only interaction warnings (WCAG 2.1.1)

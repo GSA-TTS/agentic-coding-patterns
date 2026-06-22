@@ -121,7 +121,7 @@ version: "1.0.0"                      # semver
 title: "Pattern Title"
 type: skill                           # skill|prompt|workflow|agent|lesson
 status: experimental
-owners: ["@community"]
+owners: ["@GSA-TTS/agentic-coding-team"]
 primary_personas: ["developers"]
 requires:
   anchors: []

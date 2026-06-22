@@ -7,7 +7,7 @@ description: "General-purpose agent instructions for incremental, safe developme
 
 status: experimental
 owners:
-  - "@community"
+  - "@GSA-TTS/agentic-coding-team"
 
 primary_personas:
   - developers

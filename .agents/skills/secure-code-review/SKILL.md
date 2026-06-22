@@ -7,7 +7,7 @@ description: "Security-focused code review pattern covering OWASP Top 10 vulnera
 
 status: experimental
 owners:
-  - "@community"
+  - "@GSA-TTS/agentic-coding-team"
 
 primary_personas:
   - developers

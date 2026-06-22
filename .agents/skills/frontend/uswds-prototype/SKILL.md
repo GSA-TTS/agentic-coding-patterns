@@ -7,7 +7,7 @@ description: "Generate USWDS-aligned front-end prototypes with semantic HTML, ac
 
 status: experimental
 owners:
-  - "@community"
+  - "@GSA-TTS/agentic-coding-team"
 
 primary_personas:
   - developers
@@ -115,17 +115,17 @@ Create semantic HTML with:
 </head>
 <body>
   <a class="usa-skipnav" href="#main-content">Skip to main content</a>
-  
+
   <header class="usa-header usa-header--basic">
     <!-- Header content -->
   </header>
-  
+
   <main id="main-content">
     <div class="grid-container">
       <!-- Page content -->
     </div>
   </main>
-  
+
   <footer class="usa-footer">
     <!-- Footer content -->
   </footer>
@@ -228,7 +228,7 @@ vale --config profiles/uswds.vale.ini output.html
 </head>
 <body>
   <a class="usa-skipnav" href="#main-content">Skip to main content</a>
-  
+
   <header class="usa-header usa-header--basic">
     <div class="usa-nav-container">
       <div class="usa-navbar">
@@ -239,11 +239,11 @@ vale --config profiles/uswds.vale.ini output.html
       </div>
     </div>
   </header>
-  
+
   <main id="main-content">
     <div class="grid-container">
       <h1>How to Apply for Benefits</h1>
-      
+
       <!-- HUMAN REVIEW: Verify eligibility information is accurate -->
       <section>
         <h2>Who Can Apply</h2>
@@ -253,7 +253,7 @@ vale --config profiles/uswds.vale.ini output.html
           <li>Criterion 2</li>
         </ul>
       </section>
-      
+
       <section>
         <h2>What You'll Need</h2>
         <ul>
@@ -261,7 +261,7 @@ vale --config profiles/uswds.vale.ini output.html
           <li>Document 2</li>
         </ul>
       </section>
-      
+
       <section>
         <h2>How to Apply</h2>
         <ol>
@@ -269,13 +269,13 @@ vale --config profiles/uswds.vale.ini output.html
           <li>Step 2: Complete application</li>
           <li>Step 3: Submit and wait for response</li>
         </ol>
-        
+
         <!-- HUMAN REVIEW: Verify button destination -->
         <a class="usa-button" href="/apply">Start Your Application</a>
       </section>
     </div>
   </main>
-  
+
   <footer class="usa-footer usa-footer--slim">
     <div class="grid-container">
       <!-- HUMAN REVIEW: Add approved footer content -->

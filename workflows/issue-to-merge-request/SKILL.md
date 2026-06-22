@@ -7,7 +7,7 @@ description: "Complete development workflow from issue analysis to merged PR"
 
 status: experimental
 owners:
-  - "@community"
+  - "@GSA-TTS/agentic-coding-team"
 
 primary_personas:
   - developers

@@ -7,7 +7,7 @@ description: "Review documentation for quality, accuracy, completeness, and acce
 
 status: experimental
 owners:
-  - "@community"
+  - "@GSA-TTS/agentic-coding-team"
 
 primary_personas:
   - developers

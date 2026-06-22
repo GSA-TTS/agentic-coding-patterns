@@ -1,12 +1,15 @@
 # CODEOWNERS for agentic-coding-patterns
 # See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+#
+# Last matching pattern wins. The team owns the repo by default; the
+# admin-only overrides below take precedence for security-sensitive paths.
 
-# Security-sensitive files require admin review
+# Default: the team is responsible for all pattern content and docs
+*                           @GSA-TTS/agentic-coding-team
+
+# Security-sensitive files require admin review (override the default above)
 /.github/workflows/         @GSA-TTS/agentic-coding-admins
 /SECURITY.md                @GSA-TTS/agentic-coding-admins
 
 # Scripts contain validation logic
 /scripts/                   @GSA-TTS/agentic-coding-admins
-
-# Pattern definitions
-/patterns/                  @GSA-TTS/agentic-coding-team

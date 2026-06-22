@@ -7,7 +7,7 @@ description: "Plan federal digital service user flows, touchpoints, and requirem
 
 status: experimental
 owners:
-  - "@community"
+  - "@GSA-TTS/agentic-coding-team"
 
 primary_personas:
   - developers

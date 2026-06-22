@@ -7,7 +7,7 @@ description: "Analyze project dependencies for security vulnerabilities, license
 
 status: experimental
 owners:
-  - "@community"
+  - "@GSA-TTS/agentic-coding-team"
 
 primary_personas:
   - developers

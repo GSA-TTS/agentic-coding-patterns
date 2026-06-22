@@ -7,7 +7,7 @@ description: "Review content for federal plain language compliance following Pla
 
 status: experimental
 owners:
-  - "@community"
+  - "@GSA-TTS/agentic-coding-team"
 
 primary_personas:
   - developers
