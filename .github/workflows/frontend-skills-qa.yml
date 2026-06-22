@@ -60,6 +60,9 @@ jobs:
     name: Readability Check
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Readability is advisory for these technical SKILL docs (code/YAML/HTML
+    # score poorly on Flesch-Kincaid). Never block a PR on it. (Issue #131)
+    continue-on-error: true
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -111,10 +114,12 @@ jobs:
 
             if [[ "$passed_check" == "true" ]]; then
               status="PASS"
-              ((passed++))
+              # Avoid `((passed++))`: it returns exit 1 when the result is 0,
+              # which aborts the step under set -e. (Issue #131)
+              passed=$((passed + 1))
             else
               status="WARN"
-              ((failed++))
+              failed=$((failed + 1))
             fi
 
             # Truncate path for display
