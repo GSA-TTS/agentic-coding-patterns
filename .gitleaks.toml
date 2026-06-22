@@ -1,5 +1,18 @@
-# Gitleaks repository-specific configuration
+# Gitleaks Configuration for agentic-coding-patterns
 # https://github.com/gitleaks/gitleaks
+#
+# Named .gitleaks.toml so the pre-commit gitleaks hook auto-loads it
+# (gitleaks looks for .gitleaks.toml by default). Extends the default
+# ruleset and adds allowlists for intentional example/educational secrets.
+
+title = "Agentic Coding Patterns Gitleaks Config"
+
+# Minimum gitleaks version required for this config
+minVersion = "v8.25.0"
+
+[extend]
+# Use the default gitleaks rules as the base configuration
+useDefault = true
 
 [allowlist]
 description = "Allow example API keys in documentation"
