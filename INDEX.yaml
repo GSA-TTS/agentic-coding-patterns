@@ -8,6 +8,11 @@ patterns:
     title: Documentation Review
     type: skill
     status: experimental
+  - path: skills/over-engineering-review/SKILL.md
+    id: over-engineering-review
+    title: Over-Engineering Review
+    type: skill
+    status: experimental
   - path: skills/dependency-analysis/SKILL.md
     id: dependency-analysis
     title: Dependency Security Analysis
@@ -113,8 +118,8 @@ patterns:
     type: lesson
     status: experimental
 stats:
-  total_patterns: 21
-  skills: 12
+  total_patterns: 22
+  skills: 13
   prompts: 3
   agents: 3
   workflows: 2
