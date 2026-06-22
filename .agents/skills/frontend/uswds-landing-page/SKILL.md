@@ -7,7 +7,7 @@ description: "Generate service landing pages using USWDS hero, card, and content
 
 status: experimental
 owners:
-  - "@community"
+  - "@GSA-TTS/agentic-coding-team"
 
 primary_personas:
   - developers
@@ -121,7 +121,7 @@ Highlight key features with card components:
 <section class="usa-section">
   <div class="grid-container">
     <h2 class="font-heading-xl margin-y-0">Why Use This Service</h2>
-    
+
     <ul class="usa-card-group">
       <li class="usa-card tablet:grid-col-4">
         <div class="usa-card__container">
@@ -133,7 +133,7 @@ Highlight key features with card components:
           </div>
         </div>
       </li>
-      
+
       <li class="usa-card tablet:grid-col-4">
         <div class="usa-card__container">
           <div class="usa-card__header">
@@ -144,7 +144,7 @@ Highlight key features with card components:
           </div>
         </div>
       </li>
-      
+
       <li class="usa-card tablet:grid-col-4">
         <div class="usa-card__container">
           <div class="usa-card__header">
@@ -168,7 +168,7 @@ Show users how to get started:
 <section class="usa-section usa-section--light">
   <div class="grid-container">
     <h2 class="font-heading-xl margin-top-0">How It Works</h2>
-    
+
     <ol class="usa-process-list">
       <li class="usa-process-list__item">
         <h3 class="usa-process-list__heading">Step One</h3>
@@ -195,7 +195,7 @@ Address common questions:
 <section class="usa-section">
   <div class="grid-container">
     <h2 class="font-heading-xl margin-top-0">Frequently Asked Questions</h2>
-    
+
     <div class="usa-accordion usa-accordion--bordered">
       <h3 class="usa-accordion__heading">
         <button type="button" class="usa-accordion__button" aria-expanded="false" aria-controls="faq-1">
@@ -205,7 +205,7 @@ Address common questions:
       <div id="faq-1" class="usa-accordion__content usa-prose" hidden>
         <p>Answer to the question.</p>
       </div>
-      
+
       <h3 class="usa-accordion__heading">
         <button type="button" class="usa-accordion__button" aria-expanded="false" aria-controls="faq-2">
           Question two goes here?
@@ -234,24 +234,24 @@ Combine all sections:
 </head>
 <body>
   <a class="usa-skipnav" href="#main-content">Skip to main content</a>
-  
+
   <!-- Banner -->
   <section class="usa-banner" aria-label="Official website of the United States government">
     <!-- Official government banner content -->
   </section>
-  
+
   <!-- Header -->
   <header class="usa-header usa-header--basic">
     <!-- Navigation -->
   </header>
-  
+
   <main id="main-content">
     <!-- Hero Section -->
     <!-- Feature Cards -->
     <!-- Process Steps -->
     <!-- FAQ Section -->
   </main>
-  
+
   <!-- Footer -->
   <footer class="usa-footer usa-footer--slim">
     <!-- Footer content -->
@@ -289,7 +289,7 @@ Combine all sections:
 </head>
 <body>
   <a class="usa-skipnav" href="#main-content">Skip to main content</a>
-  
+
   <header class="usa-header usa-header--basic">
     <div class="usa-nav-container">
       <div class="usa-navbar">
@@ -300,7 +300,7 @@ Combine all sections:
       </div>
     </div>
   </header>
-  
+
   <main id="main-content">
     <!-- Hero -->
     <section class="usa-hero" aria-label="Introduction">
@@ -315,12 +315,12 @@ Combine all sections:
         </div>
       </div>
     </section>
-    
+
     <!-- Features -->
     <section class="usa-section">
       <div class="grid-container">
         <h2 class="font-heading-xl margin-y-0">Why Use This Service</h2>
-        
+
         <ul class="usa-card-group">
           <li class="usa-card tablet:grid-col-4">
             <div class="usa-card__container">
@@ -332,7 +332,7 @@ Combine all sections:
               </div>
             </div>
           </li>
-          
+
           <li class="usa-card tablet:grid-col-4">
             <div class="usa-card__container">
               <div class="usa-card__header">
@@ -343,7 +343,7 @@ Combine all sections:
               </div>
             </div>
           </li>
-          
+
           <li class="usa-card tablet:grid-col-4">
             <div class="usa-card__container">
               <div class="usa-card__header">
@@ -357,12 +357,12 @@ Combine all sections:
         </ul>
       </div>
     </section>
-    
+
     <!-- Process -->
     <section class="usa-section usa-section--light">
       <div class="grid-container">
         <h2 class="font-heading-xl margin-top-0">How to Apply</h2>
-        
+
         <ol class="usa-process-list">
           <li class="usa-process-list__item">
             <h3 class="usa-process-list__heading">Check your eligibility</h3>
@@ -377,12 +377,12 @@ Combine all sections:
             <p class="margin-top-05">Complete the online form and upload your documents.</p>
           </li>
         </ol>
-        
+
         <a class="usa-button usa-button--big" href="/apply">Start Your Application</a>
       </div>
     </section>
   </main>
-  
+
   <footer class="usa-footer usa-footer--slim">
     <div class="grid-container">
       <!-- HUMAN REVIEW: Add approved footer content -->

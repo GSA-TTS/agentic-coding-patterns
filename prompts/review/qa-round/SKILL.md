@@ -7,7 +7,7 @@ description: "Guide QA verification including test coverage, bug reproduction, a
 
 status: experimental
 owners:
-  - "@community"
+  - "@GSA-TTS/agentic-coding-team"
 
 primary_personas:
   - testers

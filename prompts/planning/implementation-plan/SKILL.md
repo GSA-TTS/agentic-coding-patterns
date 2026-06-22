@@ -7,7 +7,7 @@ description: "Generate structured implementation plans by breaking features into
 
 status: experimental
 owners:
-  - "@community"
+  - "@GSA-TTS/agentic-coding-team"
 
 primary_personas:
   - developers

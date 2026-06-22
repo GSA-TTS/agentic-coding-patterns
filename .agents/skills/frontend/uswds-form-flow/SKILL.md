@@ -7,7 +7,7 @@ description: "Generate accessible multi-step forms using USWDS patterns with pro
 
 status: experimental
 owners:
-  - "@community"
+  - "@GSA-TTS/agentic-coding-team"
 
 primary_personas:
   - developers
@@ -112,19 +112,19 @@ Use USWDS form components with proper structure:
 <form class="usa-form usa-form--large" action="/submit" method="post">
   <fieldset class="usa-fieldset">
     <legend class="usa-legend usa-legend--large">Section Title</legend>
-    
+
     <!-- Text input with label -->
     <label class="usa-label" for="first-name">
       First name <abbr title="required" class="usa-hint usa-hint--required">*</abbr>
     </label>
     <input class="usa-input" id="first-name" name="first-name" type="text" required>
-    
+
     <!-- Input with help text -->
     <label class="usa-label" for="ssn">
       Social Security Number (last 4 digits)
     </label>
     <span class="usa-hint" id="ssn-hint">For example: 1234</span>
-    <input class="usa-input usa-input--medium" id="ssn" name="ssn" 
+    <input class="usa-input usa-input--medium" id="ssn" name="ssn"
            type="text" pattern="[0-9]{4}" aria-describedby="ssn-hint">
   </fieldset>
 </form>
@@ -172,7 +172,7 @@ Include error message patterns:
 <span class="usa-error-message" id="email-error" role="alert">
   Enter a valid email address
 </span>
-<input class="usa-input usa-input--error" id="email" name="email" 
+<input class="usa-input usa-input--error" id="email" name="email"
        type="email" aria-describedby="email-error" required>
 
 <!-- Error summary at top of form -->
@@ -232,22 +232,22 @@ Produce the complete artifact with:
 <form class="usa-form" action="/contact" method="post">
   <fieldset class="usa-fieldset">
     <legend class="usa-legend">Contact Us</legend>
-    
+
     <label class="usa-label" for="name">
       Your name <abbr title="required" class="usa-hint usa-hint--required">*</abbr>
     </label>
     <input class="usa-input" id="name" name="name" type="text" required>
-    
+
     <label class="usa-label" for="email">
       Email address <abbr title="required" class="usa-hint usa-hint--required">*</abbr>
     </label>
     <input class="usa-input" id="email" name="email" type="email" required>
-    
+
     <label class="usa-label" for="message">
       Message <abbr title="required" class="usa-hint usa-hint--required">*</abbr>
     </label>
     <textarea class="usa-textarea" id="message" name="message" required></textarea>
-    
+
     <button type="submit" class="usa-button">Send Message</button>
   </fieldset>
 </form>

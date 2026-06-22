@@ -9,7 +9,7 @@ description: "Lessons from using agentic coding patterns for a security document
 # Status and ownership
 status: experimental
 owners:
-  - "@community"
+  - "@GSA-TTS/agentic-coding-team"
 
 # Audience
 primary_personas:

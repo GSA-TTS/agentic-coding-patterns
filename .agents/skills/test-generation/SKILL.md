@@ -7,7 +7,7 @@ description: "Generate unit tests, identify edge cases, and analyze test coverag
 
 status: experimental
 owners:
-  - "@community"
+  - "@GSA-TTS/agentic-coding-team"
 
 primary_personas:
   - developers
