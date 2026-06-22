@@ -49,11 +49,11 @@ globs:
   - "CONTRIBUTING.md"
   - "README.md"
   - "docs/**/*.md"
-  - "skills/*/SKILL.md"
-  - "prompts/*/SKILL.md"
-  - "agents/*/AGENTS.md"
-  - "workflows/*/SKILL.md"
-  - "lessons-learned/*/SKILL.md"
+  - "skills/**/SKILL.md"
+  - "prompts/**/SKILL.md"
+  - "agents/**/AGENTS.md"
+  - "workflows/**/SKILL.md"
+  - "lessons-learned/**/SKILL.md"
 
 # Ignore files
 ignores:
