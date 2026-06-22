@@ -23,6 +23,16 @@ patterns:
     title: Secure Code Review
     type: skill
     status: experimental
+  - path: skills/outreach/explainer-video/SKILL.md
+    id: explainer-video
+    title: Explainer Video (HTML to MP4)
+    type: skill
+    status: experimental
+  - path: skills/outreach/explainer-gif/SKILL.md
+    id: explainer-gif
+    title: Explainer GIF (Terminal Screencast)
+    type: skill
+    status: experimental
   - path: skills/frontend/uswds-prototype/SKILL.md
     id: uswds-prototype
     title: USWDS Front-End Prototype
@@ -103,8 +113,8 @@ patterns:
     type: lesson
     status: experimental
 stats:
-  total_patterns: 19
-  skills: 10
+  total_patterns: 21
+  skills: 12
   prompts: 3
   agents: 3
   workflows: 2
