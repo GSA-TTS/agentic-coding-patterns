@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.1](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.1.0...v1.1.1) (2026-06-22)
+
+
+### Bug Fixes
+
+* **ci:** Make Readability Check advisory-only so it can't block PRs ([#132](https://github.com/GSA-TTS/agentic-coding-patterns/issues/132)) ([b8ade77](https://github.com/GSA-TTS/agentic-coding-patterns/commit/b8ade774de3c6f99c3f0d93250805cb2abe0d61e))
+* gitleaks config auto-load + markdownlint depth-2 globs ([#138](https://github.com/GSA-TTS/agentic-coding-patterns/issues/138)) ([0397900](https://github.com/GSA-TTS/agentic-coding-patterns/commit/039790075b91cff135f9f5f5317288ad4d826040))
+
 ## [1.1.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.0.0...v1.1.0) (2026-06-10)
 
 
