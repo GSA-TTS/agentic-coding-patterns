@@ -595,12 +595,12 @@ patterns:
   lessons: []                   # Array of lesson patterns
 
 stats:
-  total_patterns: 13            # Total count
-  skills: 4                     # Count by type
-  prompts: 3
-  agents: 3
-  workflows: 2
-  lessons: 1
+  total_patterns: <N>           # Total count
+  skills: <N>                   # Count by type
+  prompts: <N>
+  agents: <N>
+  workflows: <N>
+  lessons: <N>
 ```
 
 ### Pattern Entry Schema

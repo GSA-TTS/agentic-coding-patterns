@@ -138,7 +138,7 @@ patterns:
   prompts: [...]
   agents: [...]
 stats:
-  total_patterns: 13
+  total_patterns: <N>
 ```
 
 ## Content Status Levels

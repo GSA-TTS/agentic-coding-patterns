@@ -56,7 +56,7 @@ security:  ## Run security audit (pip-audit for CVEs)
 
 test:  ## Run pytest test suite
 	@if [ -d "scripts/tests" ] && [ "$$(ls -A scripts/tests/*.py 2>/dev/null)" ]; then \
-		pytest scripts/tests/ -v; \
+		PYTHONPATH=scripts pytest scripts/tests/ -v; \
 	else \
 		echo "⚠️  No tests found in scripts/tests/"; \
 		echo "    Create tests to enable this check (see issue #16)"; \
@@ -87,7 +87,7 @@ ci:  ## Full CI check (validate + security + test + pre-commit checks)
 	@echo ""
 	@echo "==> Running tests..."
 	@if [ -d "scripts/tests" ] && [ "$$(ls -A scripts/tests/*.py 2>/dev/null)" ]; then \
-		pytest scripts/tests/ -v; \
+		PYTHONPATH=scripts pytest scripts/tests/ -v; \
 	else \
 		echo "⚠️  No tests found — skipping"; \
 	fi

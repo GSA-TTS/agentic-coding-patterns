@@ -34,7 +34,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      has_vale_config: ${{ steps.detect.outputs.has_vale_config }}
       has_html_examples: ${{ steps.detect.outputs.has_html_examples }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -44,12 +43,6 @@ jobs:
       - name: Detect optional inputs
         id: detect
         run: |
-          if [[ -f .agents/skills/frontend/tools/vale-frontend.ini ]]; then
-            echo "has_vale_config=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_vale_config=false" >> "$GITHUB_OUTPUT"
-          fi
-
           if find examples/frontend -name '*.html' -type f -print -quit 2>/dev/null | grep -q .; then
             echo "has_html_examples=true" >> "$GITHUB_OUTPUT"
           else
@@ -150,29 +143,6 @@ jobs:
           path: |
             .agents/skills/frontend/**/*.md
           retention-days: 7
-
-  # Vale prose linting (optional, runs if vale is configured)
-  vale:
-    name: Vale Prose Lint
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: detect
-    if: needs.detect.outputs.has_vale_config == 'true'
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-
-      - name: Run Vale
-        # The action moved from errata-ai/ to the canonical vale-cli/ org
-        # (same Vale maintainer, jdkato). Pinned to the 2.1.2 release commit,
-        # which is GPG-verified and Node 24 compatible. (Issue #117)
-        uses: vale-cli/vale-action@85f9f7f2c5f449ac0ae5b66662961bae3f77ca6a # 2.1.2
-        continue-on-error: true  # Advisory only
-        with:
-          files: .agents/skills/frontend
-          config: .agents/skills/frontend/tools/vale-frontend.ini
-          reporter: github-check
 
   # HTML validation for examples (when they exist)
   html-validate:

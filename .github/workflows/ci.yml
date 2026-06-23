@@ -107,7 +107,7 @@ jobs:
         working-directory: .github/linters
         run: |
           npm ci
-          npm audit --audit-level=high
+          npm audit --audit-level=moderate
 
       - name: Run markdownlint
         run: npx --prefix .github/linters markdownlint-cli2 "**/*.md" "#node_modules" "#.github/linters/node_modules" "#templates" "#CHANGELOG.md"
