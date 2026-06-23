@@ -29,6 +29,7 @@ regexes = [
 paths = [
   '''docs/getting-started\.md''',
   '''docs/safety-guidance\.md''',
+  '''docs/test-cases-schema\.md''',
   '''.github/ISSUE_TEMPLATE/.*\.yml''',
   '''.github/pull_request_template\.md''',
 ]

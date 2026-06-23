@@ -48,7 +48,11 @@ cat content.md | python3 readability_score.py -
 
 ### Vale (Prose Linter)
 
-For comprehensive plain language, accessibility, and USWDS checks, use [Vale](https://vale.sh).
+For comprehensive plain language, accessibility, and USWDS checks, you can
+optionally run [Vale](https://vale.sh) locally. This repository does **not**
+ship a Vale config and does not run Vale in CI — `readability_score.py` is the
+deterministic check used here. Vale is listed as an optional external tool a
+contributor or agent may bring to a frontend project.
 
 **Installation:**
 ```bash
@@ -62,18 +66,11 @@ brew install vale
 choco install vale
 ```
 
-**Quick Start (using included config):**
+**Bring your own config.** Vale needs a `.vale.ini`; create one scoped to your
+project (e.g. `BasedOnStyles = Google, proselint, write-good`), then:
 ```bash
-cd .agents/skills/frontend/tools
-
-# Download style packages (Google, proselint, write-good)
-vale sync
-
-# Run checks on frontend skills
-vale ../
-
-# Run checks on examples
-vale ../../../../examples/frontend/
+vale --config /path/to/your/.vale.ini sync   # download style packages
+vale --config /path/to/your/.vale.ini ./     # lint your content
 ```
 
 **With cloud.gov style-management-service (federal-specific rules):**
