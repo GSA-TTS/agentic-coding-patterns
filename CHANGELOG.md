@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.1.1...v1.2.0) (2026-06-23)
+
+
+### Features
+
+* **outreach:** Add explainer-video and explainer-gif skills + outreach category ([#141](https://github.com/GSA-TTS/agentic-coding-patterns/issues/141)) ([1497b8c](https://github.com/GSA-TTS/agentic-coding-patterns/commit/1497b8c0700522e9999c5a9ba1cbc93e4c4ef359))
+* **skills:** add over-engineering-review skill (ponytail-inspired) ([#140](https://github.com/GSA-TTS/agentic-coding-patterns/issues/140)) ([4209152](https://github.com/GSA-TTS/agentic-coding-patterns/commit/42091523cb4b91637dff437ea04e7b566f841300))
+
 ## [1.1.1](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.1.0...v1.1.1) (2026-06-22)
 
 
