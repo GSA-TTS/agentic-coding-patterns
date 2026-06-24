@@ -31,6 +31,9 @@ output:
       - "External CDN Links"
       - "Agency-Specific Branding"
 
+categories:
+  - "frontend"
+
 quality_gates:
   readability_max_grade: 10
   citations_required: false

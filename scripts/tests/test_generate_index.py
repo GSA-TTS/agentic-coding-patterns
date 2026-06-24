@@ -153,3 +153,29 @@ class TestGenerateIndex:
 
         assert index["schema_version"] == "1.0"
         assert all(len(patterns) == 0 for patterns in index["patterns"].values())
+
+
+class TestCategoryFacet:
+    """Tests for the categories facet (issue #151)."""
+
+    def test_facet_includes_full_vocab(self, tmp_path):
+        """Every controlled-vocab term appears in the facet, even if unused."""
+        from scripts.generate_index import CATEGORY_VOCAB
+
+        index = generate_index(tmp_path)
+        assert set(index["categories"].keys()) == set(CATEGORY_VOCAB)
+        # Empty repo -> every facet bucket empty.
+        assert all(v == [] for v in index["categories"].values())
+
+    def test_facet_maps_categories_to_ids(self, temp_repo):
+        """A skill's declared categories show up under the right facet buckets."""
+        # temp_repo's skill has no categories by default; add one and rebuild.
+        skill = temp_repo / "skills" / "test-skill" / "SKILL.md"
+        text = skill.read_text()
+        text = text.replace("status: experimental", "status: experimental\ncategories: [security, review]", 1)
+        skill.write_text(text)
+
+        index = generate_index(temp_repo)
+        assert "test-skill" in index["categories"]["security"]
+        assert "test-skill" in index["categories"]["review"]
+        assert index["categories"]["frontend"] == []

@@ -28,6 +28,9 @@ output:
       - "Real CUI"
       - "Internal URLs"
 
+categories:
+  - "testing"
+
 quality_gates:
   readability_max_grade: 10
   citations_required: false

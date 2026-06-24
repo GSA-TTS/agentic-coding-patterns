@@ -31,6 +31,10 @@ output:
       - "Internal URLs"
       - "External CDN Links"
 
+categories:
+  - "documentation"
+  - "supply-chain"
+
 quality_gates:
   readability_max_grade: 10
   citations_required: false

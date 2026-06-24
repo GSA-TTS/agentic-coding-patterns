@@ -1,10 +1,12 @@
 """Tests for validate_frontmatter.py"""
 
 import json
+from pathlib import Path
 
 import pytest
 
 from scripts.validate_frontmatter import (
+    check_security_governance,
     extract_frontmatter,
     find_pattern_files,
     load_schema,
@@ -191,7 +193,7 @@ class TestValidateFile:
         file_path = temp_repo / "test.md"
         file_path.write_text(valid_skill_content)
 
-        success, errors = validate_file(file_path, schema)
+        success, errors, _warnings = validate_file(file_path, schema)
 
         assert success is True
         assert errors == []
@@ -211,7 +213,7 @@ Content.
         file_path = temp_repo / "test.md"
         file_path.write_text(content)
 
-        success, errors = validate_file(file_path, schema)
+        success, errors, _warnings = validate_file(file_path, schema)
 
         assert success is False
         assert len(errors) > 0
@@ -225,7 +227,7 @@ Content.
         file_path = temp_repo / "test.md"
         file_path.write_text(invalid_schema_content)
 
-        success, errors = validate_file(file_path, schema)
+        success, errors, _warnings = validate_file(file_path, schema)
 
         assert success is False
         assert len(errors) > 0
@@ -237,7 +239,7 @@ Content.
 
         file_path = temp_repo / "nonexistent.md"
 
-        success, errors = validate_file(file_path, schema)
+        success, errors, _warnings = validate_file(file_path, schema)
 
         assert success is False
         assert "failed to read" in errors[0].lower()
@@ -250,7 +252,64 @@ Content.
         file_path = temp_repo / "test.md"
         file_path.write_text(missing_frontmatter_content)
 
-        success, errors = validate_file(file_path, schema)
+        success, errors, _warnings = validate_file(file_path, schema)
 
         assert success is False
         assert "no valid yaml frontmatter" in errors[0].lower()
+
+
+class TestSecurityGovernance:
+    """Tests for the categories-gated security-governance rules (#151 + recon S4)."""
+
+    def test_security_category_requires_governance_fields(self, tmp_path):
+        """categories:[security] without governance fields => error."""
+        fm = {
+            "id": "x",
+            "categories": ["security", "review"],
+            "tags": ["security"],
+        }
+        errors, warnings = check_security_governance(tmp_path / "x" / "SKILL.md", fm)
+        assert errors, "expected an error for missing governance fields"
+        assert "security-governance field" in errors[0]
+        assert warnings == []
+
+    def test_security_category_with_governance_passes(self, tmp_path):
+        """categories:[security] WITH all governance fields => no error/warning."""
+        fm = {
+            "id": "x",
+            "categories": ["security"],
+            "risk_tier": "moderate",
+            "human_review_required": True,
+            "allowed_tools": [],
+            "network_policy": "deny",
+            "write_policy": "deny",
+            "script_policy": "deny",
+        }
+        errors, warnings = check_security_governance(tmp_path / "x" / "SKILL.md", fm)
+        assert errors == []
+        assert warnings == []
+
+    def test_s4_heuristic_warns_on_unlabeled_security_skill(self, tmp_path):
+        """Security-relevant by tags but not self-labeled => warning, not error."""
+        fm = {"id": "x", "categories": ["review"], "tags": ["owasp", "vulnerability"]}
+        errors, warnings = check_security_governance(tmp_path / "x" / "SKILL.md", fm)
+        assert errors == []
+        assert warnings and "does not declare categories: [security]" in warnings[0]
+
+    def test_s4_heuristic_warns_on_security_path(self, tmp_path):
+        """Path under a security/ dir segment triggers the heuristic too."""
+        fm = {"id": "x", "categories": ["review"], "tags": []}
+        errors, warnings = check_security_governance(
+            Path("agents/security-review/AGENTS.md"), fm
+        )
+        assert errors == []
+        assert warnings and "path:security" in warnings[0]
+
+    def test_non_security_skill_no_warning(self, tmp_path):
+        """A genuinely non-security skill is silent."""
+        fm = {"id": "x", "categories": ["frontend"], "tags": ["uswds", "html"]}
+        errors, warnings = check_security_governance(
+            Path("frontend/uswds-prototype/SKILL.md"), fm
+        )
+        assert errors == []
+        assert warnings == []

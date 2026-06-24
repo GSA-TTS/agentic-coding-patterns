@@ -8,115 +8,232 @@ patterns:
     title: Documentation Review
     type: skill
     status: experimental
+    categories:
+    - documentation
+    - review
   - path: skills/over-engineering-review/SKILL.md
     id: over-engineering-review
     title: Over-Engineering Review
     type: skill
     status: experimental
+    categories:
+    - review
+    - development
   - path: skills/dependency-analysis/SKILL.md
     id: dependency-analysis
     title: Dependency Security Analysis
     type: skill
     status: experimental
+    categories:
+    - security
+    - dependencies
+    - supply-chain
   - path: skills/test-generation/SKILL.md
     id: test-generation
     title: Test Case Generation
     type: skill
     status: experimental
+    categories:
+    - testing
   - path: skills/secure-code-review/SKILL.md
     id: secure-code-review
     title: Secure Code Review
     type: skill
     status: experimental
+    categories:
+    - security
+    - review
   - path: skills/outreach/explainer-video/SKILL.md
     id: explainer-video
     title: Explainer Video (HTML to MP4)
     type: skill
     status: experimental
+    categories:
+    - documentation
+    - supply-chain
   - path: skills/outreach/explainer-gif/SKILL.md
     id: explainer-gif
     title: Explainer GIF (Terminal Screencast)
     type: skill
     status: experimental
+    categories:
+    - documentation
   - path: skills/frontend/uswds-prototype/SKILL.md
     id: uswds-prototype
     title: USWDS Front-End Prototype
     type: skill
     status: experimental
+    categories:
+    - frontend
   - path: skills/frontend/uswds-landing-page/SKILL.md
     id: uswds-landing-page
     title: USWDS Service Landing Page
     type: skill
     status: experimental
+    categories:
+    - frontend
   - path: skills/frontend/plain-language-review/SKILL.md
     id: plain-language-review
     title: Federal Plain Language Review
     type: skill
     status: experimental
+    categories:
+    - frontend
+    - documentation
+    - review
   - path: skills/frontend/federal-service-blueprint/SKILL.md
     id: federal-service-blueprint
     title: Federal Service Blueprint
     type: skill
     status: experimental
+    categories:
+    - frontend
+    - compliance
+    - documentation
   - path: skills/frontend/accessibility-review/SKILL.md
     id: accessibility-review
     title: Federal Accessibility Review
     type: skill
     status: experimental
+    categories:
+    - frontend
+    - review
+    - compliance
   - path: skills/frontend/uswds-form-flow/SKILL.md
     id: uswds-form-flow
     title: USWDS Accessible Form Flow
     type: skill
     status: experimental
+    categories:
+    - frontend
+    - compliance
   prompts:
   - path: prompts/review/qa-round/SKILL.md
     id: qa-round
     title: QA Round Review
     type: prompt
     status: experimental
+    categories:
+    - testing
+    - review
   - path: prompts/planning/implementation-plan/SKILL.md
     id: implementation-plan
     title: Implementation Plan Generator
     type: prompt
     status: experimental
+    categories:
+    - development
   - path: prompts/security/safe-code-review/SKILL.md
     id: safe-code-review
     title: Security-Focused Code Review
     type: prompt
     status: experimental
+    categories:
+    - security
+    - review
   agents:
   - path: agents/documentation/AGENTS.md
     id: documentation-agent
     title: Documentation Agent Instructions
     type: agent
     status: experimental
+    categories:
+    - documentation
   - path: agents/general/AGENTS.md
     id: general-agent
     title: General Agent Instructions
     type: agent
     status: experimental
+    categories:
+    - development
   - path: agents/security-review/AGENTS.md
     id: security-review-agent
     title: Security Review Agent Instructions
     type: agent
     status: experimental
+    categories:
+    - security
+    - review
   workflows:
   - path: workflows/issue-to-merge-request/SKILL.md
     id: issue-to-merge-request
     title: Issue to Merge Request Workflow
     type: workflow
     status: experimental
+    categories:
+    - development
+    - review
+    - testing
   - path: workflows/qa-round/SKILL.md
     id: qa-workflow
     title: QA Round Workflow
     type: workflow
     status: experimental
+    categories:
+    - testing
+    - review
   lessons:
   - path: lessons-learned/example-agentic-session/SKILL.md
     id: example-agentic-session
     title: Example Agentic Coding Session
     type: lesson
     status: experimental
+    categories:
+    - security
+    - documentation
+categories:
+  security:
+  - dependency-analysis
+  - example-agentic-session
+  - safe-code-review
+  - secure-code-review
+  - security-review-agent
+  development:
+  - general-agent
+  - implementation-plan
+  - issue-to-merge-request
+  - over-engineering-review
+  review:
+  - accessibility-review
+  - documentation-review
+  - issue-to-merge-request
+  - over-engineering-review
+  - plain-language-review
+  - qa-round
+  - qa-workflow
+  - safe-code-review
+  - secure-code-review
+  - security-review-agent
+  testing:
+  - issue-to-merge-request
+  - qa-round
+  - qa-workflow
+  - test-generation
+  documentation:
+  - documentation-agent
+  - documentation-review
+  - example-agentic-session
+  - explainer-gif
+  - explainer-video
+  - federal-service-blueprint
+  - plain-language-review
+  dependencies:
+  - dependency-analysis
+  supply-chain:
+  - dependency-analysis
+  - explainer-video
+  compliance:
+  - accessibility-review
+  - federal-service-blueprint
+  - uswds-form-flow
+  incident-response: []
+  frontend:
+  - accessibility-review
+  - federal-service-blueprint
+  - plain-language-review
+  - uswds-form-flow
+  - uswds-landing-page
+  - uswds-prototype
 stats:
   total_patterns: 22
   skills: 13

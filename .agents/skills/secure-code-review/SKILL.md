@@ -45,6 +45,17 @@ tags:
   - "owasp"
   - "vulnerabilities"
 
+categories:
+  - "security"
+  - "review"
+
+risk_tier: moderate
+human_review_required: true
+allowed_tools: []
+network_policy: deny
+write_policy: deny
+script_policy: deny
+
 portability:
   opencode: true
   cursor: true

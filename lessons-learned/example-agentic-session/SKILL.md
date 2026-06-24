@@ -43,6 +43,15 @@ quality_gates:
 
 # Recommended fields
 tags: ["documentation", "security", "multi-pattern", "success"]
+categories:
+  - "security"
+  - "documentation"
+risk_tier: low
+human_review_required: true
+allowed_tools: []
+network_policy: deny
+write_policy: deny
+script_policy: deny
 scope:
   intended_use:
     - "Learn from successful use of multiple patterns"

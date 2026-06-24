@@ -28,6 +28,10 @@ output:
       - "Real CUI"
       - "Internal URLs"
 
+categories:
+  - "documentation"
+  - "review"
+
 quality_gates:
   readability_max_grade: 10
   citations_required: false

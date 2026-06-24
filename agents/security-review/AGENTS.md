@@ -33,6 +33,17 @@ output:
 quality_gates:
   readability_max_grade: 10
   citations_required: false
+
+categories:
+  - "security"
+  - "review"
+
+risk_tier: moderate
+human_review_required: true
+allowed_tools: []
+network_policy: deny
+write_policy: deny
+script_policy: deny
 ---
 
 # Security Review Agent Instructions

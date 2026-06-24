@@ -22,6 +22,12 @@
       "description": "Unique pattern identifier in kebab-case",
       "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
     },
+    "description": {
+      "type": "string",
+      "description": "Short human-readable summary of the pattern (1-2 sentences)",
+      "minLength": 3,
+      "maxLength": 300
+    },
     "version": {
       "type": "string",
       "description": "Semantic version (MAJOR.MINOR.PATCH)",
@@ -141,6 +147,69 @@
       "type": "array",
       "description": "Keywords for discoverability",
       "items": {"type": "string"}
+    },
+    "categories": {
+      "type": "array",
+      "description": "Canonical taxonomy axis (closed controlled vocabulary). Multi-label; directories stay physical/organizational only.",
+      "items": {
+        "type": "string",
+        "enum": [
+          "security",
+          "development",
+          "review",
+          "testing",
+          "documentation",
+          "dependencies",
+          "supply-chain",
+          "compliance",
+          "incident-response",
+          "frontend"
+        ]
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "risk_tier": {
+      "type": "string",
+      "description": "Risk tier of the skill's actions (security-governance field; required for security skills via validator).",
+      "enum": ["low", "moderate", "high"]
+    },
+    "human_review_required": {
+      "type": "boolean",
+      "description": "When true, output of this skill must be reviewed by a human before action (security-governance field)."
+    },
+    "allowed_tools": {
+      "type": "array",
+      "description": "Allowlist of tools the skill may use; deny-by-default for anything not listed (security-governance field).",
+      "items": {"type": "string"}
+    },
+    "network_policy": {
+      "type": "string",
+      "description": "Network egress policy for the skill (security-governance field).",
+      "enum": ["deny", "allowlist", "allow"]
+    },
+    "write_policy": {
+      "type": "string",
+      "description": "Filesystem write policy for the skill (security-governance field).",
+      "enum": ["deny", "workspace", "allow"]
+    },
+    "script_policy": {
+      "type": "string",
+      "description": "Whether the skill may author or execute scripts (security-governance field).",
+      "enum": ["deny", "author-only", "allow"]
+    },
+    "source_inspiration": {
+      "type": "array",
+      "description": "Public sources used as INSPIRATION only (never copied). Each entry records the intake provenance (security-governance field).",
+      "items": {
+        "type": "object",
+        "required": ["url", "license", "intake_record"],
+        "properties": {
+          "url": {"type": "string"},
+          "license": {"type": "string"},
+          "intake_record": {"type": "string"}
+        }
+      }
     },
     "scope": {
       "type": "object",
