@@ -299,17 +299,13 @@ class TestSecurityGovernance:
     def test_s4_heuristic_warns_on_security_path(self, tmp_path):
         """Path under a security/ dir segment triggers the heuristic too."""
         fm = {"id": "x", "categories": ["review"], "tags": []}
-        errors, warnings = check_security_governance(
-            Path("agents/security-review/AGENTS.md"), fm
-        )
+        errors, warnings = check_security_governance(Path("agents/security-review/AGENTS.md"), fm)
         assert errors == []
         assert warnings and "path:security" in warnings[0]
 
     def test_non_security_skill_no_warning(self, tmp_path):
         """A genuinely non-security skill is silent."""
         fm = {"id": "x", "categories": ["frontend"], "tags": ["uswds", "html"]}
-        errors, warnings = check_security_governance(
-            Path("frontend/uswds-prototype/SKILL.md"), fm
-        )
+        errors, warnings = check_security_governance(Path("frontend/uswds-prototype/SKILL.md"), fm)
         assert errors == []
         assert warnings == []

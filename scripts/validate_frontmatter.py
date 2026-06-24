@@ -63,9 +63,7 @@ def _collect_signal_text(frontmatter: dict[str, Any]) -> set[str]:
     return tokens
 
 
-def check_security_governance(
-    file_path: Path, frontmatter: dict[str, Any]
-) -> tuple[list[str], list[str]]:
+def check_security_governance(file_path: Path, frontmatter: dict[str, Any]) -> tuple[list[str], list[str]]:
     """Apply the categories-gated security-governance rules.
 
     Returns (errors, warnings):
@@ -80,9 +78,7 @@ def check_security_governance(
     is_security = isinstance(categories, list) and "security" in categories
 
     if is_security:
-        missing = [
-            f for f in SECURITY_GOVERNANCE_FIELDS if frontmatter.get(f) is None
-        ]
+        missing = [f for f in SECURITY_GOVERNANCE_FIELDS if frontmatter.get(f) is None]
         if missing:
             errors.append(
                 "categories includes 'security' but missing required "
@@ -102,9 +98,7 @@ def check_security_governance(
     signals |= _collect_signal_text(frontmatter) & SECURITY_SIGNAL_KEYWORDS
     if signals:
         warnings.append(
-            "looks security-relevant ("
-            + ", ".join(sorted(signals))
-            + ") but does not declare categories: [security]; "
+            "looks security-relevant (" + ", ".join(sorted(signals)) + ") but does not declare categories: [security]; "
             "add it (and the security-governance fields) or confirm it is out of scope"
         )
 
