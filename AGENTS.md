@@ -1,6 +1,6 @@
 ---
 id: agentic-patterns-agent-rules
-version: "1.0.0"
+version: "1.1.0"
 title: "Agentic Coding Patterns — Agent Behavior Rules"
 description: "Behavioral contract for AI agents contributing to and using community patterns for agentic coding"
 type: agent
@@ -17,7 +17,7 @@ output:
 quality_gates:
   readability_max_grade: 10
   citations_required: false
-last_updated: "2026-05-20"
+last_updated: "2026-06-24"
 ---
 
 # AGENTS.md — Agentic Coding Patterns Repository
@@ -139,10 +139,65 @@ quality_gates:
 **Recommended fields:**
 
 - `triggers`: Keywords for pattern discovery
-- `tags`: For categorization
+- `tags`: Free-form keywords for discovery
 - `portability`: Tool compatibility flags
 - `scope.intended_use`: What the pattern is for
 - `scope.exclusions`: What NOT to use it for
+
+### 4.1 Categories Taxonomy
+
+`categories` is the **canonical taxonomy axis** — a closed, controlled
+vocabulary used for INDEX faceting and the security-governance gate. Directory
+location is physical/organizational only and does **not** determine taxonomy.
+A pattern may carry multiple categories (it is often both `development` and
+`review`).
+
+Controlled vocabulary (10 terms, closed enum — see `schemas/skill.schema.json`):
+
+```
+security, development, review, testing, documentation,
+dependencies, supply-chain, compliance, incident-response, frontend
+```
+
+`tags` stays free-form for discovery; `categories` is the controlled axis.
+
+### 4.2 Security-Governance Fields
+
+A **security skill** is any pattern that declares `categories: [security]`. Such
+patterns MUST also declare the security-governance fields, enforced by the
+validator (a missing field fails validation):
+
+```yaml
+categories: ["security", "review"]
+risk_tier: moderate            # low | moderate | high
+human_review_required: true    # always true for security skills
+allowed_tools: []              # deny-by-default allowlist
+network_policy: deny           # deny | allowlist | allow
+write_policy: deny             # deny | workspace | allow
+script_policy: deny            # deny | author-only | allow
+# source_inspiration: [...]    # optional; public sources used as inspiration only
+```
+
+These fields are **additive and optional at the schema level** (existing
+non-security patterns are unaffected) but **required for security skills** via
+the validator. The validator also emits an **advisory warning** when a pattern
+looks security-relevant (by path segment, tags, or triggers) but does not
+declare `categories: [security]`, so the gate cannot be dodged by omitting the
+label.
+
+The behavioral authority for security skills is the **playbook**
+[`AGENTS.md`](https://github.com/GSA-TTS/agentic-coding-playbook/blob/main/AGENTS.md);
+this repo references it and does not duplicate policy. See
+[`docs/security-skill-governance.md`](docs/security-skill-governance.md) for the
+full governance model.
+
+### 4.3 Public-Source Inspiration (No Copying)
+
+Patterns may be **inspired** by public skills, blogs, or tools, but MUST NOT copy
+scripts, prompt bodies, or full skill bodies from them. Each public source used
+as inspiration gets an intake record
+([`templates/security-skill-intake.md`](templates/security-skill-intake.md))
+referenced from the pattern's PR, and is recorded under `source_inspiration`.
 
 ---
 
@@ -392,6 +447,7 @@ make clean              # Remove generated files
 
 | Date | Version | Change |
 |------|---------|--------|
+| 2026-06-24 | 1.1.0 | Add §4.1 categories taxonomy, §4.2 security-governance fields, §4.3 public-source no-copy rule; reference playbook authority |
 | 2026-05-20 | 0.1.0 | Initial release for patterns repository |
 
 ---
