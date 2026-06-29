@@ -65,6 +65,7 @@ def find_patterns(root: Path) -> dict[str, list[dict]]:
                         "title": frontmatter.get("title", "Untitled"),
                         "type": frontmatter.get("type", pattern_type),
                         "status": frontmatter.get("status", "experimental"),
+                        "categories": frontmatter.get("categories", []),
                     }
                 )
 
@@ -83,10 +84,44 @@ def find_patterns(root: Path) -> dict[str, list[dict]]:
                             "title": frontmatter.get("title", "Untitled"),
                             "type": "agent",
                             "status": frontmatter.get("status", "experimental"),
+                            "categories": frontmatter.get("categories", []),
                         }
                     )
 
     return patterns
+
+
+# Closed controlled vocabulary for the categories facet (issue #151). Kept in sync
+# with schemas/skill.schema.json properties.categories.items.enum.
+CATEGORY_VOCAB = [
+    "security",
+    "development",
+    "review",
+    "testing",
+    "documentation",
+    "dependencies",
+    "supply-chain",
+    "compliance",
+    "incident-response",
+    "frontend",
+]
+
+
+def facet_by_category(patterns: dict[str, list[dict]]) -> dict[str, list[str]]:
+    """Build a category -> [pattern id] facet over all patterns.
+
+    Every term in the controlled vocabulary appears (empty list if unused) so the
+    facet is a stable, complete view of the taxonomy.
+    """
+    facets: dict[str, list[str]] = {term: [] for term in CATEGORY_VOCAB}
+    for items in patterns.values():
+        for item in items:
+            for cat in item.get("categories", []) or []:
+                if cat in facets:
+                    facets[cat].append(item["id"])
+    for term in facets:
+        facets[term].sort()
+    return facets
 
 
 def generate_index(root: Path) -> dict:
@@ -101,6 +136,7 @@ def generate_index(root: Path) -> dict:
         "repo": "GSA-TTS/agentic-coding-patterns",
         "description": "Community patterns for agentic coding",
         "patterns": patterns,
+        "categories": facet_by_category(patterns),
         "stats": {
             "total_patterns": total,
             "skills": len(patterns["skills"]),

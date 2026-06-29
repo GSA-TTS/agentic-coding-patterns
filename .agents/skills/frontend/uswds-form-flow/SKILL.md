@@ -29,6 +29,10 @@ output:
       - "Real CUI"
       - "Internal URLs"
 
+categories:
+  - "frontend"
+  - "compliance"
+
 quality_gates:
   readability_max_grade: 10
   citations_required: false
