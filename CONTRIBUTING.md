@@ -20,6 +20,50 @@ This repo is one of three in the agentic coding ecosystem:
 - **Bugs/improvements:** Open a GitHub issue or submit a PR
 - **Security issues:** See [SECURITY.md](SECURITY.md) — direct fixes preferred
 
+## Who Can Contribute
+
+This is a public repository, and we want it to be useful to everyone — but the
+two contribution paths have different requirements:
+
+| Path | Who | How it's enforced |
+|------|-----|-------------------|
+| **Issues** (bugs, ideas, questions, feedback) | **Anyone** | Open — no eligibility gate. Please do file issues! |
+| **Pull requests** (code/content changes) | **Federal employees and contractors** (GSA-TTS) | Merge requires review by [`@GSA-TTS/agentic-coding-team`](https://github.com/orgs/GSA-TTS/teams/agentic-coding-team) (a code-owner), enforced by branch rulesets. |
+
+**How this actually works (and what it does *not* verify).** Anyone may **open**
+a PR. A PR only **merges** after a member of the GSA-TTS `agentic-coding-team`
+(a code-owner) approves it and CI passes — enforced by branch rulesets. Team
+membership is granted administratively to federal employees and contractors, so
+the *merge* gate is the eligibility control.
+
+We do **not** cryptographically verify a contributor's identity or employment;
+the federal-eligibility expectation is **attested** (PR checkbox) and enforced
+through code-owner review, **not authenticated**. The honest summary: a
+non-eligible PR can be opened, but cannot be merged without a federal team
+member's approval.
+
+> Non-federal community members: the most valuable thing you can do here is
+> **open issues** — bug reports, pattern ideas, and lessons learned are very
+> welcome and have no eligibility requirement.
+
+### Commit signing (recommended, unenforced)
+
+We **recommend** signing your commits (the GitHub "Verified" badge) for
+authenticity. It is **not enforced** today — we are working to make signing setup
+easier and may move to requiring it later. See GitHub's
+[commit signature verification](https://docs.github.com/en/authentication/managing-commit-signature-verification)
+docs.
+
+### AI-assisted contributions
+
+This project dogfoods AI coding agents — **AI-assisted contributions are welcome
+and encouraged.** The full, canonical expectations live in the playbook's
+[**AI-Assisted Contribution Policy**](https://github.com/GSA-TTS/agentic-coding-playbook/blob/main/docs/AI-CONTRIBUTION-POLICY.md)
+(referenced here, not restated). The one thing to do up front: **disclose AI use
+in your PR description** (it's normalized and never counts against you). Everything
+else — human ownership, being able to explain your change, the same review/test/
+security bar, and the no-DCO/CC0 provenance model — is defined there.
+
 ## Teams
 
 - **[@GSA-TTS/agentic-coding-team](https://github.com/orgs/GSA-TTS/teams/agentic-coding-team):** Team members — review, contribute, share patterns
