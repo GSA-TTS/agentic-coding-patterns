@@ -1,6 +1,6 @@
 ---
 title: "Add an integrations/ area for tool/editor guides and portable configs"
-status: "accepted — implementation pending first integration"
+status: "accepted"
 date: "2026-06-30"
 decision_makers: ["William Zujkowski", "OpenCode Agent"]
 category: "repository-structure"
@@ -90,3 +90,9 @@ Conventions:
 
 - Indexing/validation of `integrations/` content can be folded into existing
   tooling incrementally; initial entries are plain Markdown + config files.
+
+## Implementation
+
+The first integration — `editors/zed/` (a portable `tasks.json` + setup guide,
+relocated from the quickstart repo where it was out of scope) — landed alongside
+this ADR, so the area is populated rather than hollow.
