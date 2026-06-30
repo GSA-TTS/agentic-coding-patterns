@@ -50,4 +50,4 @@ integrations/
 
 | Integration | Tool | Description |
 |-------------|------|-------------|
-| _(none yet)_ | | |
+| [editors/zed](editors/zed/) | Zed editor | One-click OpenCode-in-SBX launch + diagnostics via Zed's task runner; portable `tasks.json` + setup guide. |
