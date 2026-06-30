@@ -143,11 +143,14 @@ replace it. Where any conflict exists, the stricter expectation applies.
   normal review — not through this Code of Conduct's enforcement ladder. Reserve
   enforcement for *conduct*, not for contribution quality or scope.
 - **Accountability is about the artifact, not the person.** The contribution
-  policy asks contributors to be able to explain their changes. Inability to
-  explain a change is a **review outcome on the code** (the change isn't ready to
-  merge) — it is **never** a Code of Conduct matter or a judgment about the
-  contributor. Do not use an accountability or quality finding as a backdoor
-  conduct sanction.
+  policy asks contributors to be able to explain their changes. If a contributor
+  cannot explain a change, that is **feedback on the code** — the change simply
+  isn't ready to merge yet, and it is handled through normal code review. It is
+  **never** misconduct, never a judgment about the contributor as a person, and
+  it **cannot** be escalated through this Code of Conduct's enforcement ladder.
+  The enforcement ladder is reserved for *conduct*; quality, scope, and
+  "explain it" findings are out of its scope. Do not use an accountability or
+  quality finding as a backdoor conduct sanction.
 
 ## Attribution
 
