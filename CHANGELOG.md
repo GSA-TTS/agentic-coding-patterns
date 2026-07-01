@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.3.0...v1.4.0) (2026-07-01)
+
+
+### Features
+
+* **agents:** add sbx mixin kits for USAi provider, playbook, and zscaler cert ([#191](https://github.com/GSA-TTS/agentic-coding-patterns/issues/191)) ([598a57c](https://github.com/GSA-TTS/agentic-coding-patterns/commit/598a57cb9f5fd2e279046a5e740a7e9ea8173c71))
+
 ## [1.3.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.2.0...v1.3.0) (2026-06-30)
 
 
