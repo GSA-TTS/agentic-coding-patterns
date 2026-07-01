@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.2.0...v1.3.0) (2026-06-30)
+
+
+### Features
+
+* **schema:** adopt categories taxonomy + additive security-governance fields ([#151](https://github.com/GSA-TTS/agentic-coding-patterns/issues/151)) ([#185](https://github.com/GSA-TTS/agentic-coding-patterns/issues/185)) ([a2aa1ac](https://github.com/GSA-TTS/agentic-coding-patterns/commit/a2aa1ac808a929430d46dcab62d1d53854550bfb))
+
 ## [1.2.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.1.1...v1.2.0) (2026-06-23)
 
 
