@@ -1,0 +1,183 @@
+# Test cases for dependency-analysis skill
+# Schema version: 1.0.0
+#
+# input.content is an EXPECTED-OUTPUT fixture (a sample analysis report),
+# checked against the skill's output contract. `pattern` fields are REGEX.
+
+suite:
+  pattern_id: dependency-analysis
+  pattern_version: "1.1.0"
+  description: "Tests for dependency security analysis pattern (pre-add ladder, advisory checks, Action pinning, external-script and public-source gates)"
+
+test_cases:
+  - id: pre-add-ladder-rejects-unjustified
+    name: "Pre-add ladder deflects an unjustified new dependency"
+    description: "Verifies the report uses the ladder to reject a dep the stdlib/native capability already covers"
+    input:
+      type: literal
+      content: |
+        # Dependency Analysis
+
+        ## Summary
+        A request to add `left-pad` for string padding was evaluated against the pre-add decision ladder.
+
+        ## Findings
+        The language stdlib already provides native string padding (`str.rjust` / `padStart`).
+        No new dependency is justified.
+
+        ## Recommendations
+        Reject the add and use the native stdlib capability instead.
+    assertions:
+      - type: contains
+        pattern: "stdlib"
+        case_sensitive: false
+      - type: contains
+        pattern: "reject"
+        case_sensitive: false
+
+  - id: action-pinned-to-mutable-tag
+    name: "Flags a GitHub Action pinned to a mutable tag"
+    description: "Verifies the report flags a tag-pinned Action and recommends a SHA pin"
+    input:
+      type: literal
+      content: |
+        # Dependency Analysis
+
+        ## Summary
+        The workflow adds `actions/checkout@v4`, a mutable tag.
+
+        ## Findings
+        Actions must be pinned by full commit SHA, not a mutable tag or branch.
+
+        ## Recommendations
+        Pin the Action by its full commit SHA and record the version in a comment.
+    assertions:
+      - type: contains
+        pattern: "SHA"
+      - type: contains
+        pattern: "pin"
+        case_sensitive: false
+
+  - id: external-script-curl-sh
+    name: "Flags a curl | sh external-install pattern"
+    description: "Verifies the report flags piping a remote script into a shell"
+    input:
+      type: literal
+      content: |
+        # Dependency Analysis
+
+        ## Summary
+        An install step runs: curl -fsSL https://example.test/install.sh | sh
+
+        ## Findings
+        Caution: piping a remote script into a shell executes unreviewed code from a
+        mutable source. Treat this as an unvetted dependency.
+
+        ## Recommendations
+        Fetch, verify a checksum, human-review, then run explicitly.
+    assertions:
+      - type: contains
+        pattern: "curl -fsSL"
+      - type: contains
+        pattern: "shell"
+        case_sensitive: false
+      - type: contains
+        pattern: "Caution"
+
+  - id: known-advisory-osv-ghsa
+    name: "Flags a dependency with a known advisory / recommends OSV/GHSA check"
+    description: "Verifies the report checks OSV.dev and GHSA rather than relying on popularity"
+    input:
+      type: literal
+      content: |
+        # Dependency Analysis
+
+        ## Summary
+        The candidate package was checked against OSV.dev and the GitHub Advisory Database (GHSA).
+
+        ## Findings
+        GHSA lists a malware advisory for this package. Popularity does not prove safety.
+
+        ## Recommendations
+        Do not add the package; an OSV/GHSA advisory check is required before any add.
+    assertions:
+      - type: contains
+        pattern: "advisory"
+        case_sensitive: false
+      - type: contains
+        pattern: "GHSA"
+
+  - id: has-required-sections
+    name: "Output has required sections"
+    description: "Check that analysis reports carry the declared required sections"
+    input:
+      type: literal
+      content: |
+        # Dependency Analysis
+
+        ## Summary
+        Reviewed 12 dependencies and 3 GitHub Actions.
+
+        ## Findings
+        No critical vulnerabilities. One Action was pinned to a mutable tag.
+
+        ## Recommendations
+        Pin all Actions by full commit SHA.
+    assertions:
+      - type: has_sections
+        sections:
+          - "Summary"
+          - "Findings"
+          - "Recommendations"
+
+  - id: no-prohibited-secrets
+    name: "No real secrets or credentials in output"
+    description: "Ensure reports do not embed real secrets or credentials"
+    input:
+      type: literal
+      content: |
+        # Dependency Analysis
+
+        ## Summary
+        Secrets are loaded from environment variables or a secret manager, never inlined.
+
+        ## Findings
+        No hardcoded credentials detected in dependency manifests.
+
+        ## Recommendations
+        Continue loading secrets from a managed store.
+    assertions:
+      - type: no_prohibited
+        patterns:
+          - "sk-[A-Za-z0-9]{20,}"
+          - "AKIA[0-9A-Z]{16}"
+          - "-----BEGIN [A-Z ]*PRIVATE KEY-----"
+
+  - id: clean-dep-not-flagged
+    name: "A well-justified, SHA-pinned, advisory-clean dependency is not flagged"
+    description: "Verifies a properly-vetted add passes without a supply-chain flag"
+    input:
+      type: literal
+      content: |
+        # Dependency Analysis
+
+        ## Summary
+        The add of `cryptography` was justified: no stdlib or existing dependency covers
+        the required primitive. OSV.dev and GHSA show no open advisories.
+
+        ## Findings
+        The Action is pinned by full commit SHA. License is Apache-2.0 (compatible).
+        Version is exactly pinned in the lock file. No supply-chain concern.
+
+        ## Recommendations
+        Approved for human review with the recorded justification.
+    assertions:
+      - type: has_sections
+        sections:
+          - "Summary"
+          - "Findings"
+          - "Recommendations"
+      - type: no_prohibited
+        patterns:
+          - "curl [^\\n]*\\| *sh"
+          - "@v[0-9]"
