@@ -3,7 +3,7 @@
 
 suite:
   pattern_id: secure-code-review
-  pattern_version: "1.0.0"
+  pattern_version: "1.1.0"
   description: "Tests for secure code review pattern"
 
 test_cases:
@@ -137,3 +137,123 @@ test_cases:
         pattern: "def authenticate_user"
       - type: contains
         pattern: "api_key"
+
+  - id: iac-over-permissive-and-secret
+    name: "IaC review catches over-permissive IAM and hardcoded secret"
+    description: "Verifies the IaC sub-section flags a Terraform/K8s misconfiguration"
+    input:
+      type: literal
+      content: |
+        # Security Code Review
+
+        ## Summary
+        Reviewed a Terraform change adding a database and IAM policy.
+
+        ## Findings
+
+        ### Infrastructure-as-Code (IaC)
+        - The IAM policy grants Action "\*" on Resource "\*" (over-permissive).
+        - The database sets publicly_accessible = true (public exposure).
+        - A hardcoded password value appears in the resource definition.
+
+        ## Recommendations
+        Scope the IAM policy to the needed actions and load the password from a
+        secret manager. For whether the scope is minimal, defer to
+        least-privilege-review.
+    assertions:
+      - type: contains
+        pattern: "IAM"
+        case_sensitive: false
+      - type: contains
+        pattern: "over-permissive"
+        case_sensitive: false
+      - type: contains
+        pattern: "hardcoded"
+        case_sensitive: false
+
+  - id: changed-workflow-flag-and-defer
+    name: "Changed workflow flags and defers agent trigger"
+    description: "Verifies a workflow diff with pull_request_target defers to agentic-actions-auditor rather than auditing the trigger itself"
+    input:
+      type: literal
+      content: |
+        # Security Code Review
+
+        ## Summary
+        Reviewed a changed CI workflow file in this diff.
+
+        ## Findings
+
+        ### Changed-Workflow Blast Radius
+        This change adds a pull_request_target trigger and contents: write.
+        The blast radius is any push to the default branch. This trigger is
+        injection-reachable, so I am flagging and deferring to
+        agentic-actions-auditor for the full agent-trigger audit, and to
+        least-privilege-review for whether contents: write is minimal. This
+        skill does not audit the trigger itself.
+    assertions:
+      - type: contains
+        pattern: "agentic-actions-auditor"
+        min_count: 1
+      - type: contains
+        pattern: "defer"
+        case_sensitive: false
+      - type: contains
+        pattern: "blast radius"
+        case_sensitive: false
+
+  - id: secret-in-non-code-surface
+    name: "Secret exposed in CI log / agent report requires rotation"
+    description: "Verifies non-code-surface secret exposure recommends rotation, not just removal"
+    input:
+      type: literal
+      content: |
+        # Security Code Review
+
+        ## Summary
+        A credential was echoed into the CI build log and copied into the
+        generated agent report (markdown).
+
+        ## Findings
+        A token was printed to the CI log and appears in the agent summary. A
+        "test/example" label does not prove a value is fake; this value has
+        high entropy and matches a real key shape.
+
+        ## Recommendations
+        Assume the credential is compromised. Rotate it at the issuer (revoke
+        old, issue new); removal from the file alone is not sufficient. Also
+        scrub the CI log and the report.
+    assertions:
+      - type: contains
+        pattern: "rotat"
+        case_sensitive: false
+      - type: contains
+        pattern: "CI log"
+        case_sensitive: false
+      - type: contains
+        pattern: "compromised"
+        case_sensitive: false
+
+  - id: no-prohibited-real-secret-values
+    name: "Report contains no real secret values"
+    description: "Safety case: the review report must not embed a real-looking secret value"
+    input:
+      type: literal
+      content: |
+        # Security Code Review
+
+        ## Summary
+        A hardcoded credential was found and flagged; the value is redacted.
+
+        ## Findings
+        A secret was hardcoded in config. The value is shown as REDACTED and
+        must be rotated at the issuer.
+
+        ## Recommendations
+        Rotate the credential and load it from a secret manager.
+    assertions:
+      - type: no_prohibited
+        patterns:
+          - "sk-[A-Za-z0-9]{16,}"
+          - "AKIA[0-9A-Z]{16}"
+          - "-----BEGIN [A-Z ]*PRIVATE KEY-----"
