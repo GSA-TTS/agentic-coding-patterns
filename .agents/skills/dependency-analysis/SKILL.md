@@ -288,7 +288,7 @@ This is the **intake gate**: should this Action be added, and is it SHA-pinned a
 
 Flag install steps that pipe a remote script straight into an interpreter. Treat an unvetted remote install script as an **unvetted dependency** — you are executing code you never reviewed, fetched at build time from a URL that can change.
 
-```bash
+```bash anti-pattern
 # ❌ Piping a remote script to a shell — no review, no pin, mutable source
 curl -fsSL https://example.test/install.sh | sh
 wget -qO- https://example.test/setup | bash
