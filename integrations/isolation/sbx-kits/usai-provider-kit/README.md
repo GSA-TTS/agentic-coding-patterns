@@ -23,6 +23,33 @@ on a non-OpenCode agent has no effect beyond the network allow-list.
   instead of prompting for a provider on startup.
 - **Co-tenancy guard** — a warn-only startup check (see
   [Co-tenancy](#co-tenancy)).
+- **Permissions** — a deliberately **default-allow** OpenCode permission policy
+  tuned for the sandbox (see [Permissions](#permissions)).
+
+## Permissions
+
+The shipped `opencode.jsonc` uses a **default-allow** permission policy. This is
+a deliberate deviation from a host-safe config, and it is safe **only because
+this kit runs exclusively inside an sbx sandbox**: an ephemeral container with no
+host filesystem access, a proxied/allow-listed network, and injected credentials
+(the container never holds real key material). That isolation is the security
+boundary; re-gating ordinary operations (`rm`, package installs, `sudo`, reading
+dotfiles, `env`/`printenv`, …) would only duplicate it and train users to approve
+prompts reflexively.
+
+The policy gates (`ask`) exactly one class of command: those that establish a
+**new outbound destination** for workspace contents, which the sandbox boundary
+does not fully contain — `git push`, `git remote add`/`set-url`, and
+`scp`/`sftp`/`rsync`/`nc`/`telnet`. Everything else, including `curl`/`wget`
+(egress is already bounded by the sandbox proxy allow-list) and secret-surfacing
+commands like `env`/`printenv`/`git remote -v` (which expose injected
+placeholders, not real secrets), is allowed.
+
+**Want a stricter posture?** Don't fork this kit. Compose a separate mixin that
+contributes `ask`/`deny` rules via a project-layer
+`<workspace>/.opencode/opencode.jsonc`, which OpenCode deep-merges *over* this
+config (OpenCode evaluates the last matching rule). See
+[`docs/decisions/relax-permissions-for-sandbox.md`](docs/decisions/relax-permissions-for-sandbox.md).
 
 ## Usage
 
@@ -108,6 +135,8 @@ See [`docs/decisions/`](docs/decisions/):
   — why a self-contained kit, namespaced `OPENCODE_CONFIG`, secret handling.
 - [`opencode-config-co-tenancy.md`](docs/decisions/opencode-config-co-tenancy.md)
   — single `OPENCODE_CONFIG` owner, the ownership marker, the fragment contract.
+- [`relax-permissions-for-sandbox.md`](docs/decisions/relax-permissions-for-sandbox.md)
+  — why the permission policy is default-allow, and how to re-gate via a mixin.
 
 ## Layout
 
