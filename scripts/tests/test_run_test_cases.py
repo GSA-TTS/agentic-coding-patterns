@@ -16,13 +16,60 @@ from run_test_cases import (
     load_test_cases,
     run_assertion,
     run_assertion_contains,
+    run_assertion_flags_finding,
     run_assertion_has_pattern,
     run_assertion_has_sections,
+    run_assertion_no_false_positive,
     run_assertion_no_prohibited,
     run_assertion_not_contains,
     run_test_case,
     run_test_suite,
 )
+
+
+class TestSecurityAssertions:
+    """issue #157 (security-skill assertions) + #203 (literal no_prohibited)."""
+
+    def test_no_prohibited_regex_default_backward_compatible(self):
+        # Default regex behavior unchanged: 'a|b' matches 'a'.
+        passed, _ = run_assertion_no_prohibited("just a here", ["a|b"])
+        assert passed is False
+
+    def test_no_prohibited_literal_avoids_regex_footgun(self):
+        # #203: 'curl | sh' as a literal must NOT match a safe 'curl -o f'
+        # (regex would match via the ' sh'/'curl ' alternation branches).
+        passed, _ = run_assertion_no_prohibited("curl -fsSL -o f url", ["curl | sh"], literal=True)
+        assert passed is True
+        # ...but it DOES match the real literal substring 'curl | sh'.
+        passed2, _ = run_assertion_no_prohibited("run: curl x.sh | sh here", ["| sh"], literal=True)
+        assert passed2 is False
+
+    def test_flags_finding_all_present(self):
+        report = "## Findings\n- Class: overclaimed\n- Fix: add citation\n"
+        passed, _ = run_assertion_flags_finding(report, ["overclaimed", "add citation"])
+        assert passed is True
+
+    def test_flags_finding_missing_one_fails(self):
+        report = "## Findings\n- Class: overclaimed\n"
+        passed, msg = run_assertion_flags_finding(report, ["overclaimed", "add citation"])
+        assert passed is False
+        assert "add citation" in msg
+
+    def test_no_false_positive_clean_report_passes(self):
+        report = "## Summary\nNo issues found. The workflow is least-privilege.\n"
+        passed, _ = run_assertion_no_false_positive(report, ["FAIL", "flagged", "severity: high"])
+        assert passed is True
+
+    def test_no_false_positive_detects_overreport(self):
+        report = "## Findings\n- severity: high — flagged\n"
+        passed, msg = run_assertion_no_false_positive(report, ["flagged", "severity: high"])
+        assert passed is False
+        assert "flagged" in msg or "severity: high" in msg
+
+    def test_dispatch_new_assertion_types(self):
+        assert run_assertion({"type": "flags_finding", "patterns": ["x"]}, "x here")[0] is True
+        assert run_assertion({"type": "no_false_positive", "patterns": ["x"]}, "clean")[0] is True
+        assert run_assertion({"type": "no_prohibited", "patterns": ["a | b"], "literal": True}, "a -o b")[0] is True
 
 
 class TestLoadTestCases:
