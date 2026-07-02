@@ -61,3 +61,4 @@ integrations/
 | [isolation/sbx-kits/usai-provider-kit](isolation/sbx-kits/usai-provider-kit/) | sbx | Mixin kit: configure OpenCode to use the GSA USAi model provider, with egress allow-listed. |
 | [isolation/sbx-kits/playbook-kit](isolation/sbx-kits/playbook-kit/) | sbx | Mixin kit: clone the GSA playbook at sandbox startup and link its AGENTS.md + skills into each agent. |
 | [isolation/sbx-kits/zscaler-ca-certificate](isolation/sbx-kits/zscaler-ca-certificate/) | sbx | Mixin kit: install the public Zscaler Root CA into the sandbox trust store for HTTPS-inspecting proxies. |
+| [isolation/sbx-kits/git-ssh-sign](isolation/sbx-kits/git-ssh-sign/) | sbx | Mixin kit: sign git commits/tags with the host-forwarded SSH key (vendored from sbx-kits-contrib). |
