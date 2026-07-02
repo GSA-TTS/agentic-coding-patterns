@@ -53,10 +53,10 @@ GitHub marks an SSH-signed commit **Verified** only when **both** are true:
 
 1. The commit's `user.email` matches an **email verified on your GitHub account**, and
 2. The signing key is registered on that account **as a _signing_ key** (Settings
-   → SSH and GPG keys → *New SSH key* → key type **Signing Key**). An
+   → SSH and GPG keys → _New SSH key_ → key type **Signing Key**). An
    authentication-only key does not make commits verified.
 
-Note what GitHub does **not** use: the SSH key's *comment/principal* and this
+Note what GitHub does **not** use: the SSH key's _comment/principal_ and this
 kit's local `allowed_signers` file are irrelevant to the GitHub badge. So a
 mismatch between your committer email and the key comment does not cause
 "Unverified" — an unverified account email or an unregistered signing key does.
