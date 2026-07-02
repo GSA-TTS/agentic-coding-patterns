@@ -44,20 +44,53 @@ git config --system --get gpg.format            # ssh
 A repo-local `commit.gpgsign=false` or `--no-gpg-sign` overrides the system
 setting; check `git config --show-origin --get commit.gpgSign`.
 
-## The signing email doesn't match my key's identity
+## My commit is signed locally but shows "Unverified" on GitHub
 
-**Cause:** `allowed_signers` is generated from `git config user.email`. If that
-isn't set, the kit falls back to `agent@sandbox.local`, which won't match your
-key's principal for verification.
+**This is not a kit bug** — it's how GitHub decides the "Verified" badge, which
+is separate from local signature checks.
 
-**Fix:** set your identity (the playbook/provider setup or your own config):
+GitHub marks an SSH-signed commit **Verified** only when **both** are true:
+
+1. The commit's `user.email` matches an **email verified on your GitHub account**, and
+2. The signing key is registered on that account **as a _signing_ key** (Settings
+   → SSH and GPG keys → *New SSH key* → key type **Signing Key**). An
+   authentication-only key does not make commits verified.
+
+Note what GitHub does **not** use: the SSH key's *comment/principal* and this
+kit's local `allowed_signers` file are irrelevant to the GitHub badge. So a
+mismatch between your committer email and the key comment does not cause
+"Unverified" — an unverified account email or an unregistered signing key does.
+
+**Fix:**
+
+- Set `user.email` to an address verified on your GitHub account. Identity
+  (`user.email` / `user.name`) belongs to your base agent / provider setup, not
+  to this signing mixin — set it there (or globally) so every kit sees it:
+
+  ```console
+  git config --global user.email you@verified-on-github.example
+  ```
+
+- Add the **public** half of your signing key to GitHub as a **Signing Key**
+  (the same key can also be an auth key; add it twice, once per type).
+
+Then make a **new** commit — verification applies going forward.
+
+## Local `git log --show-signature` says the signer is unknown
+
+**Cause:** local verification uses this kit's `allowed_signers` file, which the
+signing-key command generates from `git config user.email` at signing time. If
+`user.email` was unset when the commit was made, the kit falls back to
+`agent@sandbox.local`, so the recorded principal won't match the identity you
+expect. `allowed_signers` is **local-only** and has no bearing on GitHub's badge
+(see above).
+
+**Fix:** set your identity (in the base/provider setup or globally), then commit
+again so the key command regenerates `allowed_signers` from the current email:
 
 ```console
 git config --global user.email you@example.com
 ```
-
-Then make a new commit (the key command regenerates `allowed_signers` from the
-current email at signing time).
 
 ## I want to commit without signing
 

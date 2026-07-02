@@ -9,7 +9,8 @@ and signing resolves the public key from that agent at signing time.
 
 > Vendored from [docker/sbx-kits-contrib](https://github.com/docker/sbx-kits-contrib/tree/main/git-ssh-sign)
 > (Apache-2.0; see [`NOTICE`](NOTICE) and [`LICENSE`](LICENSE)) and ported to the
-> sbx v2 spec. See [`docs/decisions/`](docs/decisions/).
+> sbx v2 spec. See [`docs/decisions/`](docs/decisions/) and the public-source
+> [intake record](docs/security-skill-intake.md).
 
 ## Prerequisites
 

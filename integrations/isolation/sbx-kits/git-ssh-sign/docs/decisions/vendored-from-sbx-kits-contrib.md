@@ -64,3 +64,5 @@ is copied verbatim.
 
 - Upstream: <https://github.com/docker/sbx-kits-contrib/tree/main/git-ssh-sign>
 - [Docker: signed commits in sandboxes](https://docs.docker.com/ai/sandboxes/usage/#signed-commits)
+- [Public-source intake record](../security-skill-intake.md) — provenance chain
+  for the vendored copy (AGENTS.md §4.3)
