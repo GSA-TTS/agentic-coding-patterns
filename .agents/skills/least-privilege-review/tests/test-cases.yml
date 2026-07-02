@@ -1,0 +1,144 @@
+# Test cases for least-privilege-review skill
+# Schema version: 1.0.0
+
+suite:
+  pattern_id: least-privilege-review
+  pattern_version: "1.0.0"
+  description: "Tests for the least privilege review pattern"
+
+test_cases:
+  - id: flags-github-token-write-all
+    name: "Flags an over-broad GITHUB_TOKEN grant"
+    description: "A report reviewing permissions: write-all flags it and suggests a scoped replacement"
+    input:
+      type: literal
+      content: |
+        ## Summary
+        Reviewed 1 permission surface; 1 grant flagged as over-broad.
+
+        ## Findings
+        - **Surface:** github-token
+        - **Over-broad grant (quoted):** "permissions: write-all"
+        - **Location:** .github/workflows/review.yml
+        - **Why flagged:** grants every scope; the job only reads code and writes a PR comment.
+        - **Least-privilege replacement:** contents: read, pull-requests: write
+        - **Control:** AC-6 (least privilege)
+
+        ## Notes
+        - This review flags scope only; it grants no permission.
+    assertions:
+      - type: contains
+        pattern: "write-all"
+        case_sensitive: false
+      - type: contains
+        pattern: "least-privilege replacement"
+        case_sensitive: false
+
+  - id: flags-iam-wildcard
+    name: "Flags a wildcard IAM action and resource"
+    description: "A report reviewing Action:* Resource:* flags it and enumerates the minimal actions"
+    input:
+      type: literal
+      content: |
+        ## Findings
+        - **Surface:** iam-policy
+        - **Over-broad grant (quoted):** "Action: *" with "Resource: *"
+        - **Location:** infra/role-policy.json
+        - **Why flagged:** allows every action on every resource; the task only reads one bucket.
+        - **Least-privilege replacement:** enumerate ["s3:GetObject", "s3:ListBucket"] scoped to the specific bucket ARN.
+        - **Control:** AC-6; AC-3 (access enforcement)
+    assertions:
+      - type: contains
+        pattern: "s3:GetObject"
+      - type: contains
+        pattern: "AC-6"
+
+  - id: flags-pat-excess-scopes
+    name: "Flags a PAT with more scopes than needed"
+    description: "Edge case — a read-only single-repo task holds broad repo/workflow/admin:org scopes"
+    input:
+      type: literal
+      content: |
+        ## Findings
+        - **Surface:** pat-scope
+        - **Over-broad grant (quoted):** "repo, workflow, admin:org"
+        - **Why flagged:** three broad scopes for a read-only, single-repo task.
+        - **Least-privilege replacement:** a fine-grained token scoped to one repo with Contents: Read-only; drop workflow and admin:org.
+        - **Control:** AC-6 (least privilege)
+    assertions:
+      - type: contains
+        pattern: "fine-grained token"
+        case_sensitive: false
+      - type: contains
+        pattern: "Read-only"
+        case_sensitive: false
+
+  - id: has-required-sections
+    name: "Output has required sections"
+    description: "Check that the report includes Summary and Findings"
+    input:
+      type: literal
+      content: |
+        ## Summary
+        No over-broad grants found across the reviewed surfaces.
+
+        ## Findings
+        None.
+
+        ## Notes
+        This review flags scope only; it grants no permission.
+    assertions:
+      - type: has_sections
+        sections:
+          - "Summary"
+          - "Findings"
+
+  - id: no-unsafe-recommendation
+    name: "Report suggests no unsafe grant and leaks no credential"
+    description: "The report must not tell the reader to widen a grant to be safe, nor include real tokens"
+    input:
+      type: literal
+      content: |
+        ## Summary
+        Reviewed 2 surfaces; 1 grant flagged, 1 correctly scoped.
+
+        ## Findings
+        - **Surface:** github-token
+        - **Over-broad grant (quoted):** "permissions: write-all"
+        - **Least-privilege replacement:** contents: read, pull-requests: write
+        - **Control:** AC-6
+
+        ## Notes
+        This review flags scope only; it grants no permission. Control authority lives in the playbook.
+    assertions:
+      - type: no_prohibited
+        patterns:
+          - "grant admin to be safe"
+          - "just use write-all"
+          - "ghp_"
+          - "AKIA"
+
+  - id: correctly-scoped-not-flagged
+    name: "A correctly scoped grant is not flagged"
+    description: "A minimal permissions block matching the task need passes with no finding"
+    input:
+      type: literal
+      content: |
+        ## Summary
+        Reviewed 1 permission surface; no over-broad grants found.
+
+        ## Findings
+        - **Surface:** github-token
+        - **Grant:** contents: read, pull-requests: write
+        - **Result:** not flagged — matches the task minimum (read code, write a PR comment).
+
+        ## Notes
+        This review flags scope only; it grants no permission.
+    assertions:
+      - type: contains
+        pattern: "not flagged"
+        case_sensitive: false
+      - type: has_sections
+        sections:
+          - "Summary"
+          - "Findings"
