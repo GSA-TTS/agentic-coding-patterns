@@ -309,3 +309,88 @@ class TestSecurityGovernance:
         errors, warnings = check_security_governance(Path("frontend/uswds-prototype/SKILL.md"), fm)
         assert errors == []
         assert warnings == []
+
+
+class TestRealSchemaStrictness:
+    """Tests against the REAL repo schema (schemas/skill.schema.json), which sets
+    additionalProperties: false — so unknown/typo'd keys are rejected, not tolerated."""
+
+    @pytest.fixture
+    def real_schema(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        return load_schema(repo_root / "schemas" / "skill.schema.json")
+
+    def _base(self):
+        """A minimal valid skill frontmatter dict."""
+        return {
+            "id": "x-skill",
+            "version": "1.0.0",
+            "title": "X Skill",
+            "type": "skill",
+            "status": "experimental",
+            "owners": ["@GSA-TTS/agentic-coding-team"],
+            "primary_personas": ["developers"],
+            "requires": {"anchors": []},
+            "output": {
+                "format": "markdown",
+                "contract": {
+                    "required_sections": ["Summary"],
+                    "prohibited_content": ["Secrets"],
+                },
+            },
+            "quality_gates": {"readability_max_grade": 10, "citations_required": False},
+        }
+
+    def test_base_is_valid(self, real_schema):
+        import jsonschema
+
+        jsonschema.validate(instance=self._base(), schema=real_schema)
+
+    def test_name_field_accepted(self, real_schema):
+        import jsonschema
+
+        fm = self._base()
+        fm["name"] = "x-skill"
+        jsonschema.validate(instance=fm, schema=real_schema)
+
+    def test_unknown_top_level_key_rejected(self, real_schema):
+        """A typo'd/unknown top-level key now fails (additionalProperties: false)."""
+        import jsonschema
+
+        fm = self._base()
+        fm["complaince"] = {"frameworks": ["NIST"]}  # typo of 'compliance'
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(instance=fm, schema=real_schema)
+
+    def test_unknown_nested_key_rejected(self, real_schema):
+        """Unknown key inside a nested object (compliance) is rejected."""
+        import jsonschema
+
+        fm = self._base()
+        fm["compliance"] = {"nist_control": ["AC-6"]}  # singular typo
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(instance=fm, schema=real_schema)
+
+    def test_nist_control_pattern_enforced(self, real_schema):
+        """A malformed control id fails the ^[A-Z]{2}-\\d+ pattern."""
+        import jsonschema
+
+        fm = self._base()
+        fm["compliance"] = {"nist_controls": ["not-a-control"]}
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(instance=fm, schema=real_schema)
+
+    def test_well_formed_nist_control_accepted(self, real_schema):
+        import jsonschema
+
+        fm = self._base()
+        fm["compliance"] = {"frameworks": ["NIST SP 800-53"], "nist_controls": ["AC-6", "AU-2"]}
+        jsonschema.validate(instance=fm, schema=real_schema)
+
+    def test_last_updated_accepted(self, real_schema):
+        """AGENTS.md-style last_updated is an allowed field."""
+        import jsonschema
+
+        fm = self._base()
+        fm["last_updated"] = "2026-07-01"
+        jsonschema.validate(instance=fm, schema=real_schema)
