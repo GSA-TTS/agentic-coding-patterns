@@ -3,6 +3,15 @@ repo: GSA-TTS/agentic-coding-patterns
 description: Community patterns for agentic coding
 patterns:
   skills:
+  - path: skills/compliance-claim-checker/SKILL.md
+    id: compliance-claim-checker
+    title: Compliance Claim Checker
+    type: skill
+    status: experimental
+    categories:
+    - security
+    - compliance
+    - documentation
   - path: skills/documentation-review/SKILL.md
     id: documentation-review
     title: Documentation Review
@@ -10,6 +19,22 @@ patterns:
     status: experimental
     categories:
     - documentation
+    - review
+  - path: skills/least-privilege-review/SKILL.md
+    id: least-privilege-review
+    title: Least Privilege Review
+    type: skill
+    status: experimental
+    categories:
+    - security
+    - review
+  - path: skills/untrusted-input-boundary-review/SKILL.md
+    id: untrusted-input-boundary-review
+    title: Untrusted Input Boundary Review
+    type: skill
+    status: experimental
+    categories:
+    - security
     - review
   - path: skills/over-engineering-review/SKILL.md
     id: over-engineering-review
@@ -28,6 +53,40 @@ patterns:
     - security
     - dependencies
     - supply-chain
+  - path: skills/safe-shell-script-author/SKILL.md
+    id: safe-shell-script-author
+    title: Safe Shell Script Author
+    type: skill
+    status: experimental
+    categories:
+    - security
+    - development
+  - path: skills/incident-evidence-review/SKILL.md
+    id: incident-evidence-review
+    title: Incident Evidence Review
+    type: skill
+    status: experimental
+    categories:
+    - security
+    - incident-response
+    - review
+  - path: skills/agentic-actions-auditor/SKILL.md
+    id: agentic-actions-auditor
+    title: Agentic Actions Auditor
+    type: skill
+    status: experimental
+    categories:
+    - security
+    - review
+    - supply-chain
+  - path: skills/backdoor-review/SKILL.md
+    id: backdoor-review
+    title: Backdoor Review
+    type: skill
+    status: experimental
+    categories:
+    - security
+    - review
   - path: skills/test-generation/SKILL.md
     id: test-generation
     title: Test Case Generation
@@ -183,20 +242,32 @@ patterns:
     - documentation
 categories:
   security:
+  - agentic-actions-auditor
+  - backdoor-review
+  - compliance-claim-checker
   - dependency-analysis
   - example-agentic-session
+  - incident-evidence-review
+  - least-privilege-review
   - safe-code-review
+  - safe-shell-script-author
   - secure-code-review
   - security-review-agent
+  - untrusted-input-boundary-review
   development:
   - general-agent
   - implementation-plan
   - issue-to-merge-request
   - over-engineering-review
+  - safe-shell-script-author
   review:
   - accessibility-review
+  - agentic-actions-auditor
+  - backdoor-review
   - documentation-review
+  - incident-evidence-review
   - issue-to-merge-request
+  - least-privilege-review
   - over-engineering-review
   - plain-language-review
   - qa-round
@@ -204,12 +275,14 @@ categories:
   - safe-code-review
   - secure-code-review
   - security-review-agent
+  - untrusted-input-boundary-review
   testing:
   - issue-to-merge-request
   - qa-round
   - qa-workflow
   - test-generation
   documentation:
+  - compliance-claim-checker
   - documentation-agent
   - documentation-review
   - example-agentic-session
@@ -220,13 +293,16 @@ categories:
   dependencies:
   - dependency-analysis
   supply-chain:
+  - agentic-actions-auditor
   - dependency-analysis
   - explainer-video
   compliance:
   - accessibility-review
+  - compliance-claim-checker
   - federal-service-blueprint
   - uswds-form-flow
-  incident-response: []
+  incident-response:
+  - incident-evidence-review
   frontend:
   - accessibility-review
   - federal-service-blueprint
@@ -235,8 +311,8 @@ categories:
   - uswds-landing-page
   - uswds-prototype
 stats:
-  total_patterns: 22
-  skills: 13
+  total_patterns: 29
+  skills: 20
   prompts: 3
   agents: 3
   workflows: 2
