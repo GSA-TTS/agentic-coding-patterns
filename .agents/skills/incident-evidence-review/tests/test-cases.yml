@@ -1,0 +1,149 @@
+# Test cases for incident-evidence-review skill
+# Schema version: 1.0.0
+# All fixtures use SYNTHETIC incident data — no real hostnames, IPs, victims, or IOCs.
+
+suite:
+  pattern_id: incident-evidence-review
+  pattern_version: "1.0.0"
+  description: "Tests for the incident evidence review pattern"
+
+test_cases:
+  - id: flags-unsupported-fact
+    name: "Flags a claim stated as fact without evidence"
+    description: "A '02:00 start' claim presented as fact with no log citation is flagged unsupported-fact"
+    input:
+      type: literal
+      content: |
+        ## Summary
+        Reviewed 3 statements; 1 flagged as an unsupported fact.
+
+        ## Findings
+        - **Statement (quoted):** "The breach started at 02:00."
+        - **Class:** FACT
+        - **Evidence:** none given
+        - **Flag:** unsupported-fact
+        - **Suggested fix:** cite the log or alert showing the 02:00 start, or downgrade to an assumption until a source is attached.
+
+        ## Notes
+        This review checks evidence discipline only; it does not determine root cause.
+    assertions:
+      - type: contains
+        pattern: "unsupported-fact"
+        case_sensitive: false
+
+  - id: flags-hypothesis-as-conclusion
+    name: "Flags a hypothesis presented as a conclusion"
+    description: "A stolen-credentials explanation stated with certainty is flagged hypothesis-as-conclusion"
+    input:
+      type: literal
+      content: |
+        ## Summary
+        Reviewed 2 statements; 1 hypothesis stated as a conclusion.
+
+        ## Findings
+        - **Statement (quoted):** "The attacker used stolen credentials to log in."
+        - **Class:** HYPOTHESIS
+        - **Evidence:** none given
+        - **Flag:** hypothesis-as-conclusion
+        - **Suggested fix:** reword as a hypothesis under test until an authentication log confirms it.
+    assertions:
+      - type: contains
+        pattern: "hypothesis-as-conclusion"
+        case_sensitive: false
+
+  - id: well-supported-fact-not-flagged
+    name: "A well-supported fact is correctly NOT flagged"
+    description: "Boundary case — an observed, sourced, redacted fact is classified FACT with flag none"
+    input:
+      type: literal
+      content: |
+        ## Summary
+        Reviewed 1 statement; none flagged.
+
+        ## Findings
+        - **Statement (quoted):** "The auth service returned HTTP 500s from 02:00-02:14 (per the application log, request IDs redacted)."
+        - **Class:** FACT
+        - **Evidence:** application log (cited), sensitive fields redacted
+        - **Flag:** none
+        - **Suggested fix:** none — observed, sourced, and scoped.
+    assertions:
+      - type: contains
+        pattern: "none"
+        case_sensitive: false
+
+  - id: has-required-sections
+    name: "Output has required sections"
+    description: "Check that the report includes Summary and Findings"
+    input:
+      type: literal
+      content: |
+        ## Summary
+        No evidence-discipline issues found in the reviewed write-up.
+
+        ## Findings
+        None.
+
+        ## Notes
+        This review checks evidence discipline only; it does not determine root cause.
+    assertions:
+      - type: has_sections
+        sections:
+          - "Summary"
+          - "Findings"
+
+  - id: no-real-incident-data
+    name: "Report contains no real incident data, PII, or IOCs"
+    description: "The report must use synthetic data only — no real hostnames, IPs, victims, or live IOCs"
+    input:
+      type: literal
+      content: |
+        ## Summary
+        Reviewed 2 synthetic statements; 1 flagged for redaction guidance.
+
+        ## Findings
+        - **Statement (quoted):** "A host on the internal network began emitting alerts."
+        - **Class:** FACT
+        - **Evidence:** alert log (cited)
+        - **Flag:** needs-redaction
+        - **Suggested fix:** replace any real hostname or IP with a synthetic placeholder before sharing.
+
+        ## Notes
+        This review checks evidence discipline only; it does not determine root cause.
+    assertions:
+      - type: no_prohibited
+        patterns:
+          - "@gsa.gov"
+          - "10.0.0."
+          - "192.168."
+          - ".internal.agency.gov"
+          - "CVE-2026-"
+
+  - id: demonstrates-classification
+    name: "Demonstrates FACT / ASSUMPTION / HYPOTHESIS classification"
+    description: "The output shows the signature evidence-discipline classes in use"
+    input:
+      type: literal
+      content: |
+        ## Summary
+        Reviewed 3 statements across three evidence classes.
+
+        ## Findings
+        - **Statement (quoted):** "Error rate rose to 40% at 02:05 (per metrics dashboard)."
+          - **Class:** FACT
+          - **Flag:** none
+        - **Statement (quoted):** "We assume the 01:50 config change deployed cleanly."
+          - **Class:** ASSUMPTION
+          - **Flag:** none
+        - **Statement (quoted):** "The config change likely caused the error spike."
+          - **Class:** HYPOTHESIS
+          - **Flag:** none
+
+        ## Notes
+        This review checks evidence discipline only; it does not determine root cause.
+    assertions:
+      - type: contains
+        pattern: "FACT"
+      - type: contains
+        pattern: "ASSUMPTION"
+      - type: contains
+        pattern: "HYPOTHESIS"
