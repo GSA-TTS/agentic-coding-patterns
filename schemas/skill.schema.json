@@ -4,6 +4,7 @@
   "title": "Agentic Coding Pattern Schema",
   "description": "Schema for validating agentic coding patterns (skills, prompts, workflows, lessons)",
   "type": "object",
+  "additionalProperties": false,
   "required": [
     "id",
     "version",
@@ -22,6 +23,11 @@
       "description": "Unique pattern identifier in kebab-case",
       "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
     },
+    "name": {
+      "type": "string",
+      "description": "Agent Skills (agentskills.io) interop name; kebab-case and SHOULD equal `id` and the containing directory name.",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
     "description": {
       "type": "string",
       "description": "Short human-readable summary of the pattern (1-2 sentences)",
@@ -38,6 +44,11 @@
       "description": "Human-readable title",
       "minLength": 3,
       "maxLength": 100
+    },
+    "last_updated": {
+      "type": "string",
+      "description": "Date the pattern was last updated (YYYY-MM-DD).",
+      "format": "date"
     },
     "type": {
       "type": "string",
@@ -64,6 +75,7 @@
     "requires": {
       "type": "object",
       "description": "Pattern dependencies",
+      "additionalProperties": false,
       "required": ["anchors"],
       "properties": {
         "anchors": {
@@ -83,6 +95,7 @@
     "output": {
       "type": "object",
       "description": "Output format and contract",
+      "additionalProperties": false,
       "required": ["format", "contract"],
       "properties": {
         "format": {
@@ -92,6 +105,7 @@
         },
         "contract": {
           "type": "object",
+          "additionalProperties": false,
           "required": ["required_sections", "prohibited_content"],
           "properties": {
             "required_sections": {
@@ -114,6 +128,7 @@
     "quality_gates": {
       "type": "object",
       "description": "Quality requirements for output",
+      "additionalProperties": false,
       "required": ["readability_max_grade", "citations_required"],
       "properties": {
         "readability_max_grade": {
@@ -130,6 +145,7 @@
     "portability": {
       "type": "object",
       "description": "Platform compatibility flags",
+      "additionalProperties": false,
       "properties": {
         "opencode": {"type": "boolean", "default": true},
         "cursor": {"type": "boolean", "default": true},
@@ -203,6 +219,7 @@
       "description": "Public sources used as INSPIRATION only (never copied). Each entry records the intake provenance (security-governance field).",
       "items": {
         "type": "object",
+        "additionalProperties": false,
         "required": ["url", "license", "intake_record"],
         "properties": {
           "url": {"type": "string"},
@@ -213,6 +230,7 @@
     },
     "scope": {
       "type": "object",
+      "additionalProperties": false,
       "properties": {
         "intended_use": {
           "type": "array",
@@ -226,6 +244,7 @@
     },
     "compliance": {
       "type": "object",
+      "additionalProperties": false,
       "properties": {
         "frameworks": {
           "type": "array",
@@ -242,6 +261,7 @@
     },
     "deprecated": {
       "type": "object",
+      "additionalProperties": false,
       "required": ["as_of", "reason"],
       "properties": {
         "as_of": {"type": "string", "format": "date"},
@@ -257,6 +277,7 @@
       "type": "array",
       "items": {
         "type": "object",
+        "additionalProperties": false,
         "required": ["version", "date", "summary"],
         "properties": {
           "version": {"type": "string"},

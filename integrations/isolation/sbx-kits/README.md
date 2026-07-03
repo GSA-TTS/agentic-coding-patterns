@@ -15,6 +15,7 @@ not agent behavior. (Behavioral patterns live in `skills/`, `prompts/`, etc.)
 | [`usai-provider-kit/`](usai-provider-kit/) | Configure the agent to use the GSA USAi model provider (OpenCode today), with egress allow-listed. |
 | [`playbook-kit/`](playbook-kit/) | Clone the GSA agentic-coding-playbook at startup and link its `AGENTS.md` + skills into each agent's search paths. |
 | [`zscaler-ca-certificate/`](zscaler-ca-certificate/) | Install the public Zscaler Root CA into the sandbox trust store, so HTTPS works on Zscaler-inspected hosts. |
+| [`git-ssh-sign/`](git-ssh-sign/) | Sign git commits and tags with the SSH key forwarded from the host agent (vendored from sbx-kits-contrib). |
 
 Each kit is self-contained: a `spec.yaml`, any `files/` payload, a
 `scripts/verify` host-side check, a `README.md`, a `TROUBLESHOOTING.md`, and

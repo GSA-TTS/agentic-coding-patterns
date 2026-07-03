@@ -1,0 +1,135 @@
+# Test cases for compliance-claim-checker skill
+# Schema version: 1.0.0
+
+suite:
+  pattern_id: compliance-claim-checker
+  pattern_version: "1.0.0"
+  description: "Tests for the compliance claim checker pattern"
+
+test_cases:
+  - id: flags-overclaim-certified
+    name: "Flags status overclaim (certified/authorized without artifact)"
+    description: "A report reviewing a 'FedRAMP certified' claim flags it as overclaimed and suggests downgrading to an effort claim"
+    input:
+      type: literal
+      content: |
+        ## Summary
+        Reviewed 2 compliance claims; 1 flagged for overclaiming.
+
+        ## Findings
+        - **Claim (quoted):** "This service is FedRAMP compliant and NIST 800-53 certified."
+        - **Location:** README.md, Overview
+        - **Class:** overclaimed
+        - **Why flagged:** "certified"/"compliant" are status claims with no cited authorizing artifact.
+        - **Suggested fix:** downgrade to "designed to align with NIST SP 800-53 Rev 5 controls"; cite an ATO if one exists.
+
+        ## Notes
+        - This review checks claims only; it does not determine compliance.
+    assertions:
+      - type: contains
+        pattern: "overclaimed"
+        case_sensitive: false
+      - type: contains
+        pattern: "align with"
+        case_sensitive: false
+
+  - id: flags-uncited-claim
+    name: "Flags an uncited compliance claim"
+    description: "A vague best-practices claim with no source is flagged as uncited"
+    input:
+      type: literal
+      content: |
+        ## Summary
+        1 compliance claim found; 1 uncited.
+
+        ## Findings
+        - **Claim (quoted):** "Our pipeline follows secure software development best practices."
+        - **Location:** docs/security.md
+        - **Class:** uncited
+        - **Suggested fix:** cite the specific source (e.g. NIST SP 800-218 SSDF) or reword to avoid implying a standard.
+    assertions:
+      - type: contains
+        pattern: "uncited"
+        case_sensitive: false
+
+  - id: flags-stale-citation
+    name: "Flags a stale/superseded citation"
+    description: "A claim citing a rescinded OMB memo as live guidance is flagged"
+    input:
+      type: literal
+      content: |
+        ## Findings
+        - **Claim (quoted):** "Per OMB M-24-10, our AI governance approach..."
+        - **Class:** stale-citation
+        - **Why flagged:** the registry marks M-24-10 as rescinded/superseded; the current OMB AI governance memo is M-25-21.
+        - **Suggested fix:** cite M-25-21 as current; reference M-24-10 only historically.
+    assertions:
+      - type: contains
+        pattern: "M-25-21"
+      - type: contains
+        pattern: "stale-citation"
+        case_sensitive: false
+
+  - id: has-required-sections
+    name: "Output has required sections"
+    description: "Check that the report includes Summary and Findings"
+    input:
+      type: literal
+      content: |
+        ## Summary
+        No compliance claims found in the reviewed text.
+
+        ## Findings
+        None.
+
+        ## Notes
+        This review checks claims only; it does not determine compliance.
+    assertions:
+      - type: has_sections
+        sections:
+          - "Summary"
+          - "Findings"
+
+  - id: does-not-assert-compliance
+    name: "Report does not assert compliance itself"
+    description: "The report must not state the subject IS compliant/authorized/certified"
+    input:
+      type: literal
+      content: |
+        ## Summary
+        Reviewed 3 claims; 2 well-formed, 1 flagged.
+
+        ## Findings
+        - **Claim (quoted):** "Access control follows least privilege per NIST SP 800-53 AC-6."
+        - **Class:** cited & scoped — not flagged.
+
+        ## Notes
+        This review checks claims only; it does not determine compliance. See the playbook for authoritative policy.
+    assertions:
+      - type: no_prohibited
+        patterns:
+          - "is fully compliant"
+          - "we certify"
+          - "is FedRAMP authorized"
+          - "grants an ATO"
+
+  - id: notes-registry-gap
+    name: "Notes a citation not found in the registry"
+    description: "An unverifiable citation is flagged as unverified, not asserted invalid, and a possible registry gap is noted"
+    input:
+      type: literal
+      content: |
+        ## Findings
+        - **Claim (quoted):** "Conforms to Agency Directive XYZ-2026-07."
+        - **Class:** unverified-against-registry
+        - **Why flagged:** source not found in federal-ai-landscape.yaml; cannot confirm identity or status.
+
+        ## Notes
+        - Registry gaps: "Agency Directive XYZ-2026-07" is absent from federal-ai-landscape.yaml and may need adding.
+    assertions:
+      - type: contains
+        pattern: "unverified-against-registry"
+        case_sensitive: false
+      - type: contains
+        pattern: "Registry gap"
+        case_sensitive: false

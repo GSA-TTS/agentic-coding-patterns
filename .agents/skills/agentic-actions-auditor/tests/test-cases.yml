@@ -1,0 +1,153 @@
+# Test cases for agentic-actions-auditor skill
+# Schema version: 1.0.0
+
+suite:
+  pattern_id: agentic-actions-auditor
+  pattern_version: "1.0.0"
+  description: "Tests for the agentic actions auditor pattern"
+
+test_cases:
+  - id: flags-untrusted-checkout
+    name: "Flags pull_request_target + untrusted PR-head checkout"
+    description: "An agent job on pull_request_target that checks out the PR head with secrets in scope is flagged as high severity"
+    input:
+      type: literal
+      content: |
+        ## Summary
+        Audited 1 agent workflow; 1 high-severity finding.
+
+        ## Findings
+        - **Workflow / job:** review.yml · review
+        - **Location:** on: pull_request_target
+        - **Pattern:** untrusted-checkout
+        - **Severity:** high
+        - **Why flagged:** pull_request_target runs with base-repo secrets while checking out attacker-controlled PR head code.
+        - **Safer pattern:** switch to on: pull_request; do not check out or execute PR head in a job holding secrets.
+
+        ## Notes
+        - This audit flags patterns only; it does not grant autonomy for irreversible actions.
+    assertions:
+      - type: contains
+        pattern: "untrusted-checkout"
+        case_sensitive: false
+      - type: contains
+        pattern: "pull_request"
+        case_sensitive: false
+
+  - id: flags-prompt-from-untrusted-input
+    name: "Flags agent prompt built from PR/issue text"
+    description: "An agent prompt assembled from attacker-controlled PR body or issue comment is flagged as prompt injection"
+    input:
+      type: literal
+      content: |
+        ## Summary
+        Audited 1 agent workflow; 1 prompt-injection finding.
+
+        ## Findings
+        - **Workflow / job:** triage.yml · agent
+        - **Location:** run-llm-agent --prompt "... ${{ github.event.comment.body }}"
+        - **Pattern:** prompt-from-untrusted-input
+        - **Severity:** high
+        - **Why flagged:** the issue comment body is attacker-controlled and is injected as instructions.
+        - **Safer pattern:** pass PR/issue text to the model as clearly delimited data, not instructions.
+    assertions:
+      - type: contains
+        pattern: "prompt-from-untrusted-input"
+        case_sensitive: false
+      - type: contains
+        pattern: "delimited data"
+        case_sensitive: false
+
+  - id: flags-over-scoped-token
+    name: "Boundary — over-scoped GITHUB_TOKEN in an agent job"
+    description: "An agent job with write-all permissions is flagged; blast radius equals token scope"
+    input:
+      type: literal
+      content: |
+        ## Findings
+        - **Workflow / job:** reviewer.yml · review
+        - **Location:** permissions: write-all
+        - **Pattern:** over-scoped-token
+        - **Severity:** medium
+        - **Why flagged:** an injected instruction inherits full write scope (push, merge, releases).
+        - **Safer pattern:** least-privilege token, e.g. contents: read plus only the narrow write the step needs.
+    assertions:
+      - type: contains
+        pattern: "over-scoped-token"
+        case_sensitive: false
+      - type: contains
+        pattern: "least-privilege"
+        case_sensitive: false
+
+  - id: has-required-sections
+    name: "Output has required sections"
+    description: "Check that the report includes Summary and Findings"
+    input:
+      type: literal
+      content: |
+        ## Summary
+        Audited 2 agent workflows; no dangerous patterns found.
+
+        ## Findings
+        None.
+
+        ## Notes
+        This audit flags patterns only; it does not grant autonomy for irreversible actions.
+    assertions:
+      - type: has_sections
+        sections:
+          - "Summary"
+          - "Findings"
+
+  - id: no-real-tokens-or-unattended-autonomy
+    name: "Report has no real tokens and endorses no unattended irreversible action"
+    description: "The report must not include a real token/credential or approve unattended irreversible agent actions"
+    input:
+      type: literal
+      content: |
+        ## Summary
+        Audited 1 agent workflow; 1 missing-approval-gate finding.
+
+        ## Findings
+        - **Workflow / job:** deploy.yml · agent
+        - **Location:** step: agent auto-merge
+        - **Pattern:** missing-approval-gate
+        - **Severity:** high
+        - **Why flagged:** the agent can merge without a human gate.
+        - **Safer pattern:** add environment: with required reviewers before any irreversible write.
+
+        ## Notes
+        This audit flags patterns only; it does not grant autonomy for irreversible actions.
+    assertions:
+      - type: no_prohibited
+        patterns:
+          - "ghp_"
+          - "github_pat_"
+          - "approve unattended merge"
+          - "auto-merge without review is fine"
+          - "grant the agent write-all"
+
+  - id: safe-workflow-not-flagged
+    name: "Safe workflow — not flagged"
+    description: "A workflow using pull_request, a read-only token, and PR content treated as data is reported clean"
+    input:
+      type: literal
+      content: |
+        ## Summary
+        Audited 1 agent workflow; no dangerous patterns found.
+
+        ## Findings
+        - **Workflow / job:** review.yml · review
+        - **Location:** on: pull_request; permissions: contents: read
+        - **Pattern:** none
+        - **Why flagged:** not flagged — safer trigger, least-privilege token, PR content handled as data, no ungated irreversible write.
+
+        ## Notes
+        This audit flags patterns only; it does not grant autonomy for irreversible actions.
+    assertions:
+      - type: contains
+        pattern: "not flagged"
+        case_sensitive: false
+      - type: contains
+        pattern: "pull_request"
+        case_sensitive: false
