@@ -1,0 +1,80 @@
+# spec.yaml — git-ssh-sign (an sbx mixin kit)
+#
+# Configures git inside the sandbox to sign commits and tags with the SSH key
+# forwarded from the host's SSH agent — the private key never leaves the host.
+# Vendored from docker/sbx-kits-contrib (git-ssh-sign) at commit
+# d259d157af15649d1f90902cae397ebe1f2b1e3d, Apache-2.0 (see NOTICE), and ported
+# from that kit's schemaVersion "1" to "2". See docs/decisions/.
+#
+# Two-part design (unchanged from upstream):
+#   - commands.install (root): write the SSH-signing config to the SYSTEM
+#     gitconfig at create time. System config is read at git startup and is not
+#     overwritten by the sandbox, so the signing config is always present.
+#   - commands.initFiles: drop a key-resolution command that git runs at
+#     SIGNING time (gpg.ssh.defaultKeyCommand). It reads the first public key
+#     from `ssh-add -L`, so no key material is written at create/startup time,
+#     when the forwarded agent may not be connected yet.
+#
+# If no SSH agent / key is available, git signing fails with a clear error
+# (fail-closed). qsbx warns about a missing host key before attaching so the
+# user isn't surprised mid-commit; see the agentic-coding-quickstart wrapper.
+schemaVersion: "2"
+kind: mixin
+name: git-ssh-sign
+displayName: Git SSH Commit Signing
+description: >
+  Configures git to sign commits and tags using the SSH key forwarded from the
+  host's SSH agent. Works with any base agent kit. The private key stays on the
+  host; signing config is written to the system gitconfig and the signing key is
+  resolved from the SSH agent at signing time.
+
+commands:
+  initFiles:
+    - path: /home/agent/.config/git/ssh-signing-key-command
+      mode: "0755"
+      description: Resolve the forwarded SSH agent key for Git SSH signing
+      content: |
+        #!/bin/sh
+        set -e
+
+        if [ -z "$SSH_AUTH_SOCK" ]; then
+            echo "[git-ssh-sign] no SSH agent - cannot sign commits" >&2
+            exit 1
+        fi
+
+        key=$(ssh-add -L 2>/dev/null | head -n 1)
+        if [ -z "$key" ]; then
+            echo "[git-ssh-sign] no keys in SSH agent - cannot sign commits" >&2
+            exit 1
+        fi
+
+        config_dir="$GIT_SSH_SIGN_CONFIG_DIR"
+        if [ -z "$config_dir" ]; then
+            config_dir="/home/agent/.config/git"
+        fi
+        mkdir -p "$config_dir"
+
+        email=$(git config user.email 2>/dev/null || printf '%s' "agent@sandbox.local")
+        printf '%s %s\n' "$email" "$key" > "$config_dir/allowed_signers"
+        printf 'key::%s\n' "$key"
+
+  install:
+    - command: |
+        git config --system gpg.format ssh
+        git config --system --unset-all user.signingKey || true
+        git config --system commit.gpgSign true
+        git config --system tag.gpgSign true
+        git config --system gpg.ssh.defaultKeyCommand /home/agent/.config/git/ssh-signing-key-command
+        git config --system gpg.ssh.allowedSignersFile /home/agent/.config/git/allowed_signers
+        if [ "$(git config --system --get core.hooksPath || true)" = "/home/agent/.config/git/hooks" ]; then
+            git config --system --unset-all core.hooksPath
+        fi
+      user: "0"
+      description: Configure SSH commit signing with a dynamic key command
+
+agentContext: |
+  ## Git commit signing
+
+  This sandbox is configured to sign git commits with your host's SSH key.
+  Commits and tags are signed automatically. Use `git log --show-signature`
+  to verify signatures on existing commits.
