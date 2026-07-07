@@ -51,6 +51,9 @@ jobs:
             echo "::notice::No tests found in scripts/tests/ - skipping"
           fi
 
+      - name: Scan for unsafe shell patterns
+        run: python scripts/scan_unsafe_shell.py .
+
       - name: SCA vulnerability scan
         run: |
           pip install --upgrade pip

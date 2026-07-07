@@ -33,6 +33,9 @@ install-hooks:  ## Install pre-commit hooks (opt-in for contributors)
 validate:  ## Run all validators (frontmatter + sensitive terms)
 	python scripts/validate_repo.py
 
+scan-shell:  ## Scan shell scripts + markdown bash blocks for unsafe patterns (#154)
+	python scripts/scan_unsafe_shell.py .
+
 generate:  ## Generate INDEX.yaml from patterns
 	python scripts/generate_index.py
 
@@ -81,6 +84,9 @@ ci:  ## Full CI check (validate + security + test + pre-commit checks)
 	@echo ""
 	@echo "==> Running validators..."
 	python scripts/validate_repo.py
+	@echo ""
+	@echo "==> Scanning for unsafe shell patterns..."
+	python scripts/scan_unsafe_shell.py .
 	@echo ""
 	@echo "==> Running security audit..."
 	pip-audit
