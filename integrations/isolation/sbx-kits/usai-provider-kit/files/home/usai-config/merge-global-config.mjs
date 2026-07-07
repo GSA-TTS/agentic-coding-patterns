@@ -21,9 +21,13 @@
 //     Comments are lost in this branch (JSON has none); the annotated source
 //     remains at the kit's staged path and in the repo.
 //
-// The step is idempotent: re-merging the same keys converges to the same result
-// (once merged, the ownership marker is gone, but the effective config is
-// stable, and a subsequent run just re-writes the same JSON).
+// The step converges to a stable fixed point rather than being byte-idempotent
+// from the first run. On an empty global dir the first boot COPIES verbatim
+// (comments + marker intact); the next boot re-reads that output as an existing
+// config and takes the MERGE branch, normalizing it to bare JSON (comments +
+// marker dropped). From that point on every boot re-writes byte-identical JSON.
+// The effective config is stable at every step; only the on-disk form settles
+// after the first merge.
 //
 // Usage:
 //   node merge-global-config.mjs \

@@ -60,8 +60,14 @@ Concretely:
      `warning:` on stderr. If more than one global filename exists, they are
      merged in OpenCode's precedence order first, then the kit's config on top.
 
-5. **Idempotent.** Re-running the merge on every start converges to the same
-   result, satisfying sbx's "startup must be idempotent" rule.
+5. **Converges to a stable fixed point.** Re-running the merge on every start
+   satisfies sbx's "startup must be idempotent" rule in the sense that matters:
+   the effective config is stable at every boot. Note it is *not* byte-identical
+   from the very first run — on an empty global dir, boot 1 copies verbatim
+   (comments + marker intact) and boot 2 re-reads that file as an existing config
+   and normalizes it to bare JSON (comments + marker dropped). From boot 2 onward
+   the on-disk bytes are stable. No config key/value is ever lost across this
+   transition; only comments are (JSON has none).
 
 ### Co-tenancy after this change
 

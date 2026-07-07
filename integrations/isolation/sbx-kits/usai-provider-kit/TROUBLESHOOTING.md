@@ -81,3 +81,21 @@ unrelated keys from the existing config are preserved.
 **project** layer deep-merges *over* the global config, so a value set there wins
 over the USAi kit's global value — letting both compose. See the "Co-tenancy"
 section of the README.
+
+## A pre-existing global `config.json` seems to be ignored
+
+**Symptom:** the sandbox had a global `~/.config/opencode/config.json` (or
+`opencode.json`), you hand-edit it later, and your change has no effect.
+
+**Cause:** the startup merge writes its result to the canonical
+`opencode.jsonc` and leaves any other global filename (`config.json`,
+`opencode.json`) **on disk, untouched**. Your original keys were merged into
+`opencode.jsonc` at first boot, and OpenCode's precedence ranks `opencode.jsonc`
+**over** `config.json` — so the canonical file wins and later edits to the
+orphaned `config.json` are shadowed. No data is lost; the orphaned file is just
+no longer authoritative.
+
+**Fix:** make edits in `~/.config/opencode/opencode.jsonc` (the file the kit
+writes and OpenCode prefers), or drop a project-layer
+`<workspace>/.opencode/opencode.jsonc` fragment, which deep-merges *over* the
+global config.
