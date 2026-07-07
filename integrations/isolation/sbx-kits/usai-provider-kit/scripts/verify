@@ -3,9 +3,10 @@
 # verify — host-side validation for the usai-provider sbx mixin kit.
 #
 # Run on a host where `sbx` (>= 0.34.0) is installed and logged in. It validates
-# the kit spec, creates a sandbox with the kit applied, and confirms OpenCode is
-# pointed at the USAi config (OPENCODE_CONFIG set, the config file present, the
-# ownership marker comment intact, and the USAi API reachable with the key).
+# the kit spec, creates a sandbox with the kit applied, and confirms OpenCode's
+# GLOBAL config carries the USAi provider (config present at
+# ~/.config/opencode/opencode.jsonc, contains provider.usai, a pre-seeded
+# foreign global key survives the merge, and the USAi API is reachable).
 #
 # It creates a temporary sandbox named "usai-kit-verify-*" and removes it at the
 # end (and on interrupt). It does not touch your other sandboxes. Nothing here
@@ -73,13 +74,35 @@ else
 fi
 sleep 2
 
-info "3. OPENCODE_CONFIG points at the kit config"
-cfg="$(in_sbx 'printf "%s" "${OPENCODE_CONFIG:-}"')"
-echo "  OPENCODE_CONFIG=${cfg:-<unset>}"
-[ -n "$cfg" ] && ok "OPENCODE_CONFIG is set" || bad "OPENCODE_CONFIG is unset"
-[ "$(in_sbx "test -f \"$cfg\" && echo yes")" = "yes" ] && ok "config file present at \$OPENCODE_CONFIG" || bad "config file missing"
-[ "$(in_sbx "grep -q 'usai-provider-kit:owns-opencode-config' \"$cfg\" 2>/dev/null && echo yes")" = "yes" ] \
-  && ok "ownership marker present" || bad "ownership marker missing"
+info "3. USAi provider config landed in the global OpenCode config"
+glob="/home/agent/.config/opencode/opencode.jsonc"
+[ "$(in_sbx "test -f \"$glob\" && echo yes")" = "yes" ] \
+  && ok "global config present at $glob" || bad "global config missing at $glob"
+# The merged/copied global config must carry the USAi provider block. (In the
+# common case — no pre-existing global config — this is a verbatim copy that
+# also keeps the ownership marker; we don't require the marker here since a
+# merge into a foreign config drops comments.)
+[ "$(in_sbx "grep -q '\"usai\"' \"$glob\" 2>/dev/null && echo yes")" = "yes" ] \
+  && ok "global config contains the USAi provider" || bad "USAi provider missing from global config"
+
+info "3b. Merge preserves a pre-existing global key (does not clobber)"
+# Seed a foreign global config, then re-run the kit's merge script and confirm
+# the foreign key survives alongside the USAi provider.
+merge_check="$(in_sbx '
+  set -e
+  d="$HOME/.config/opencode"
+  mkdir -p "$d"
+  printf "%s" "{\"theme\":\"usai-verify-probe\"}" > "$d/opencode.jsonc"
+  node "$HOME/usai-config/merge-global-config.mjs" \
+    --source "$HOME/usai-config/opencode.jsonc" \
+    --global-dir "$d" >/dev/null 2>&1
+  if grep -q "usai-verify-probe" "$d/opencode.jsonc" && grep -q "\"usai\"" "$d/opencode.jsonc"; then
+    echo ok
+  fi
+')"
+[ "$merge_check" = "ok" ] \
+  && ok "foreign global key preserved and USAi merged in" \
+  || bad "merge clobbered the foreign key or dropped the USAi provider"
 
 info "4. USAi API reachable from the sandbox (uses injected key)"
 status="$(in_sbx "curl -sS -o /dev/null -w '%{http_code}' -H \"Authorization: Bearer \$USAI_API_KEY\" $USAI_MODELS_URL")"
