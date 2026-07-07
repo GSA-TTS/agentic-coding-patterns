@@ -294,6 +294,9 @@ credentials from a secret store at runtime — never echoes them.
 
 ## References
 
+- The [clean-script standard](../../docs/clean-script-standard.md) — the
+  authoritative required/prohibited checklist this skill emits to (enforced by
+  the unsafe-pattern scanner).
 - Secure code generation (never restated here):
   [playbook `AGENTS.md`](https://github.com/GSA-TTS/agentic-coding-playbook/blob/main/AGENTS.md)
   §5, and
