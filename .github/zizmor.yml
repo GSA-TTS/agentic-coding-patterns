@@ -1,0 +1,13 @@
+# zizmor configuration
+# https://docs.zizmor.sh/configuration/
+#
+# Suppress low-severity `adhoc-packages` findings for the frontend-skills-qa
+# workflow. These are `npm install -g <pkg>@<pinned-version>` steps in the
+# advisory-only HTML/accessibility jobs. The versions ARE pinned, the jobs are
+# path-filtered + non-blocking (they never fail the build), and installing a
+# global CLI for a throwaway CI job is the intended use — so the ad-hoc-install
+# finding is accepted here. Reassess if frontend-skills-qa is reworked (#193).
+rules:
+  adhoc-packages:
+    ignore:
+      - frontend-skills-qa.yml

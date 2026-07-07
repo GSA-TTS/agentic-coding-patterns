@@ -10,16 +10,19 @@
 #
 # What it does, declaratively:
 #   - caps.network: allow egress to the USAi endpoint (default-deny networks).
-#   - environment: set OPENCODE_CONFIG so OpenCode loads the namespaced USAi
-#     config below instead of prompting for a provider on startup.
-#   - files/: drop the USAi opencode.jsonc at ~/usai-config/opencode.jsonc.
-#   - commands.startup: warn-only co-tenancy guard (see README "Co-tenancy").
+#   - files/: drop the USAi opencode.jsonc AND the merge script at
+#     ~/usai-config/ (staging area; not the path OpenCode reads).
+#   - commands.startup: merge the staged USAi config INTO OpenCode's global
+#     config path (~/.config/opencode/opencode.jsonc) without clobbering an
+#     existing global config (see README "Design: merge, don't clobber").
 #
-# Design: we deliberately do NOT write the global config path
-# (~/.config/opencode/opencode.json). Pointing OPENCODE_CONFIG at a namespaced
-# path lets this kit COMPOSE with (rather than clobber) whatever the opencode
-# template/kit writes to the global path — OpenCode merges global < custom
-# (OPENCODE_CONFIG) < project. See README.md.
+# Design: OpenCode reads config from the GLOBAL path
+# (~/.config/opencode/opencode.json[c]) < project (<workspace>/.opencode/). By
+# popular request this kit now lands its config at the GLOBAL path rather than
+# pointing OPENCODE_CONFIG at a namespaced file. To keep the old
+# "compose, don't clobber" property, a startup step MERGES the kit's config into
+# any pre-existing global config instead of overwriting it. See
+# docs/decisions/0004-global-config-merge-instead-of-opencode-config.md.
 #
 # Secret: the USAi API key is NOT in this kit. opencode.jsonc reads it from the
 # injected USAI_API_KEY env var; supply it once with
@@ -31,10 +34,10 @@ name: usai-provider
 displayName: USAi Provider (OpenCode)
 description: >
   Configures the agent to use the GSA USAi OpenAI-compatible endpoint as its
-  model provider, with egress allow-listed. Targets OpenCode today: drops a
-  namespaced opencode.jsonc and points OpenCode at it via OPENCODE_CONFIG so it
-  composes with, rather than clobbers, any global config the opencode template
-  or kit writes.
+  model provider, with egress allow-listed. Targets OpenCode today: ships a
+  USAi opencode.jsonc and merges it into OpenCode's global config path at
+  startup, composing with (rather than clobbering) any global config the
+  opencode template or another kit wrote.
 
 caps:
   network:
@@ -43,50 +46,31 @@ caps:
       # built-in sbx service, so the kit must allow-list it explicitly.
       - api.gsa.usai.gov
 
-environment:
-  variables:
-    # Absolute path — v2 spec forbids "~"; the sbx agent home is /home/agent.
-    # OpenCode loads this file between the global and project configs.
-    OPENCODE_CONFIG: /home/agent/usai-config/opencode.jsonc
-
 commands:
-  # Warn-only co-tenancy guard. OPENCODE_CONFIG is a single scalar env var;
-  # if another mixin also sets it, sbx env composition is last-wins and one
-  # kit silently shadows the other. We can't prevent that from inside a kit,
-  # but we can detect it and fail loud instead of silent: check that the file
-  # OPENCODE_CONFIG resolves to is the one we wrote (identified by the
-  # "usai-provider-kit:owns-opencode-config" marker COMMENT — OpenCode rejects
-  # unknown JSON keys, so the sentinel is a comment, not a key). If not, warn
-  # with guidance. This never blocks startup. Future config-contributing kits
-  # should instead drop a fragment at <workspace>/.opencode/opencode.jsonc,
-  # which OpenCode deep-merges over OPENCODE_CONFIG — see README "Co-tenancy".
+  # Merge the staged USAi config into OpenCode's GLOBAL config path, without
+  # clobbering an existing global config. Runs at every start as the agent user
+  # (uid 1000, which owns /home/agent). The kit's files/ payload is laid down by
+  # the base-image setup that runs BEFORE startup (same lifecycle the
+  # zscaler-ca-certificate kit relies on), so the staged source + script exist
+  # here. The merge script:
+  #   - copies the staged file verbatim (comments preserved) if no global config
+  #     exists yet; or
+  #   - deep-merges the USAi keys INTO an existing global config (USAi wins for
+  #     its own keys; unrelated keys preserved; warns on any leaf it overrides).
+  # It is idempotent: re-merging the same keys converges to the same result.
+  # A non-zero exit only happens on an unexpected error (missing/unparseable
+  # source); leaf-conflict warnings do NOT fail startup.
   startup:
-    - description: Warn if OPENCODE_CONFIG was claimed by another kit
+    - description: Merge USAi provider config into the global OpenCode config
       user: "1000"
-      # StartupCommand.command is argv ([]string), not a shell string, so we
-      # invoke a shell explicitly. The script body is the third argv element.
+      # StartupCommand.command is argv ([]string), not a shell string.
       command:
-        - sh
-        - -c
-        - |
-          cfg="${OPENCODE_CONFIG:-}"
-          ours="/home/agent/usai-config/opencode.jsonc"
-          marker="usai-provider-kit:owns-opencode-config"
-          if [ -z "$cfg" ]; then
-            echo "usai-provider: warning: OPENCODE_CONFIG is unset after kit apply; USAi provider config may not load." >&2
-            exit 0
-          fi
-          if [ ! -f "$cfg" ]; then
-            echo "usai-provider: warning: OPENCODE_CONFIG points at '$cfg', which does not exist; USAi provider config may not load." >&2
-            exit 0
-          fi
-          if ! grep -q "$marker" "$cfg" 2>/dev/null; then
-            echo "usai-provider: warning: OPENCODE_CONFIG ('$cfg') is not the USAi kit config" >&2
-            echo "  (no ownership marker). Another kit likely set OPENCODE_CONFIG and shadowed ours" >&2
-            echo "  at '$ours'. OPENCODE_CONFIG is single-valued; only one kit can own it. Have the" >&2
-            echo "  other kit contribute via <workspace>/.opencode/opencode.jsonc instead (OpenCode" >&2
-            echo "  merges it). See README 'Co-tenancy'." >&2
-          fi
+        - node
+        - /home/agent/usai-config/merge-global-config.mjs
+        - --source
+        - /home/agent/usai-config/opencode.jsonc
+        - --global-dir
+        - /home/agent/.config/opencode
 
-# files/home/usai-config/opencode.jsonc maps to
-# /home/agent/usai-config/opencode.jsonc automatically — no explicit listing.
+# files/home/usai-config/{opencode.jsonc,merge-global-config.mjs} map to
+# /home/agent/usai-config/... automatically — no explicit listing.

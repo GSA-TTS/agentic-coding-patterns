@@ -19,18 +19,20 @@
   // outbound "new destination" commands (git push, new remotes, scp/sftp/etc.).
   // For stricter environments, layer a separate mixin that re-gates via a
   // project-layer .opencode/opencode.jsonc rather than editing this file. See
-  // docs/decisions/relax-permissions-for-sandbox.md.
+  // docs/decisions/0003-relax-permissions-for-sandbox.md.
   // ===========================================================================
   "$schema": "https://opencode.ai/config.json",
 
   // usai-provider-kit:owns-opencode-config
-  // ^ Ownership sentinel COMMENT for the usai-provider sbx kit. The kit's
-  // startup guard greps OPENCODE_CONFIG's file for this marker to tell "the
-  // file we wrote" apart from a foreign opencode.jsonc some other mixin may
-  // have pointed OPENCODE_CONFIG at (env-var last-wins). It is a comment (not a
-  // JSON key) on purpose: current OpenCode validates config against a closed
-  // schema and rejects unknown top-level keys. See the kit README "Co-tenancy".
-  // Do not remove this comment.
+  // ^ Ownership marker COMMENT for the usai-provider sbx kit. It tags this file
+  // as the one the kit ships, so the startup merge step (and `scripts/verify`)
+  // can recognize the kit's own config after it is copied verbatim into the
+  // global path. It is a comment (not a JSON key) on purpose: current OpenCode
+  // validates config against a closed schema and rejects unknown top-level keys.
+  // NOTE: comments (including this one) are preserved when the kit COPIES this
+  // file into an empty global path, but are dropped when it MERGES into a
+  // pre-existing global config (JSON has no comments). See the kit README
+  // "Design: merge, don't clobber". Do not remove this comment.
 
   // ===========================================================================
   // PROVIDER CONFIGURATION
@@ -294,7 +296,7 @@
     // <workspace>/.opencode/opencode.jsonc, which OpenCode deep-merges OVER this
     // config. OpenCode evaluates the LAST matching rule, so a re-gating fragment
     // that loads after this one wins. See
-    // docs/decisions/relax-permissions-for-sandbox.md.
+    // docs/decisions/0003-relax-permissions-for-sandbox.md.
     // -------------------------------------------------------------------------
     "*": "allow",
     "edit": "allow",
