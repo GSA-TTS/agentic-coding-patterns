@@ -174,7 +174,7 @@ def run_assertion_has_pattern(output: str, patterns: list[str], minimum_count: i
     )
 
 
-def run_assertion_no_prohibited(output: str, patterns: list[str]) -> tuple[bool, str | None]:
+def run_assertion_no_prohibited(output: str, patterns: list[str], literal: bool = False) -> tuple[bool, str | None]:
     """
     Run 'no_prohibited' assertion.
 
@@ -182,20 +182,76 @@ def run_assertion_no_prohibited(output: str, patterns: list[str]) -> tuple[bool,
 
     Args:
         output: The output text to check
-        patterns: List of prohibited patterns
+        patterns: List of prohibited patterns (regex by default)
+        literal: When True, match patterns as literal substrings instead of
+            regex. Prevents shell/CI strings like ``curl | sh`` being read as the
+            regex alternation ``curl `` | `` sh`` (issue #203). Default False for
+            backward compatibility with existing regex-based test-cases.
 
     Returns:
         (passed, error_message)
     """
     found_patterns = []
     for pattern in patterns:
-        if re.search(pattern, output):
+        hit = pattern in output if literal else re.search(pattern, output) is not None
+        if hit:
             found_patterns.append(pattern)
 
     if not found_patterns:
         return True, None
 
     return False, f"Found prohibited patterns: {', '.join(found_patterns)}"
+
+
+def run_assertion_flags_finding(
+    output: str, patterns: list[str], case_sensitive: bool = False
+) -> tuple[bool, str | None]:
+    """
+    Run 'flags_finding' assertion (security-skill support, issue #157).
+
+    Asserts a skill's report FLAGS a known-bad fixture: EVERY listed literal
+    pattern (e.g. the finding class + the recommended fix) must appear. Use to
+    verify the skill correctly detects a known-bad input.
+
+    Args:
+        output: The skill's report (expected-output fixture)
+        patterns: Literal substrings that must ALL be present
+        case_sensitive: Whether matching is case-sensitive (default False)
+
+    Returns:
+        (passed, error_message)
+    """
+    hay = output if case_sensitive else output.lower()
+    missing = [p for p in patterns if (p if case_sensitive else p.lower()) not in hay]
+    if not missing:
+        return True, None
+    return False, f"Expected the report to flag (all present): missing {missing}"
+
+
+def run_assertion_no_false_positive(
+    output: str, patterns: list[str], case_sensitive: bool = False
+) -> tuple[bool, str | None]:
+    """
+    Run 'no_false_positive' assertion (security-skill support, issue #157).
+
+    Asserts a skill's report does NOT raise a finding on a known-GOOD fixture:
+    NONE of the listed finding-signal literal patterns (e.g. "FAIL", "flagged",
+    a severity marker) may appear. Use to verify the skill does not over-report
+    on safe input.
+
+    Args:
+        output: The skill's report (expected-output fixture)
+        patterns: Finding-signal literal substrings that must NOT be present
+        case_sensitive: Whether matching is case-sensitive (default False)
+
+    Returns:
+        (passed, error_message)
+    """
+    hay = output if case_sensitive else output.lower()
+    present = [p for p in patterns if (p if case_sensitive else p.lower()) in hay]
+    if not present:
+        return True, None
+    return False, f"False-positive signals present on a known-good input: {present}"
 
 
 def run_assertion_readability_max(output: str, max_grade: float) -> tuple[bool, str | None]:
@@ -274,7 +330,6 @@ def run_assertion(assertion: dict[str, Any], output: str) -> tuple[bool, str | N
             assertion.get("min_count", 1),
             assertion.get("case_sensitive", True),
         )
-
     elif assertion_type == "not_contains":
         return run_assertion_not_contains(output, assertion["pattern"], assertion.get("case_sensitive", True))
 
@@ -285,7 +340,25 @@ def run_assertion(assertion: dict[str, Any], output: str) -> tuple[bool, str | N
         return run_assertion_has_pattern(output, assertion["patterns"], assertion.get("minimum_count", 1))
 
     elif assertion_type == "no_prohibited":
-        return run_assertion_no_prohibited(output, assertion["patterns"])
+        return run_assertion_no_prohibited(
+            output,
+            assertion["patterns"],
+            assertion.get("literal", False),
+        )
+
+    elif assertion_type == "flags_finding":
+        return run_assertion_flags_finding(
+            output,
+            assertion["patterns"],
+            assertion.get("case_sensitive", False),
+        )
+
+    elif assertion_type == "no_false_positive":
+        return run_assertion_no_false_positive(
+            output,
+            assertion["patterns"],
+            assertion.get("case_sensitive", False),
+        )
 
     elif assertion_type == "readability_max":
         return run_assertion_readability_max(output, assertion.get("max_grade", 12))

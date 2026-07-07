@@ -142,3 +142,44 @@ test_cases:
         sections:
           - "Summary"
           - "Findings"
+
+  - id: flags-finding-assertion-demo
+    name: "flags_finding: report catches the over-broad grant (fixture-style)"
+    description: "Exercises the #157 flags_finding assertion — the report names the finding and the fix"
+    input:
+      type: literal
+      content: |
+        ## Summary
+        Reviewed 1 workflow; 1 least-privilege finding.
+
+        ## Findings
+        - **Grant:** permissions: write-all
+        - **Why flagged:** grants more than the build needs.
+        - **Fix:** scope to contents: read.
+    assertions:
+      - type: has_sections
+        sections:
+          - "Summary"
+          - "Findings"
+      - type: flags_finding
+        patterns:
+          - "write-all"
+          - "contents: read"
+
+  - id: no-false-positive-assertion-demo
+    name: "no_false_positive: clean workflow is not over-reported (fixture-style)"
+    description: "Exercises the #157 no_false_positive assertion — no finding signals on a known-good input"
+    input:
+      type: literal
+      content: |
+        ## Summary
+        No least-privilege findings. Token is read-only and the action is SHA-pinned.
+
+        ## Findings
+        None.
+    assertions:
+      - type: no_false_positive
+        patterns:
+          - "write-all"
+          - "severity: high"
+          - "over-broad"
