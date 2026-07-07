@@ -170,5 +170,5 @@ overlay as independent, composable pieces.
 
 ## Links
 
-- Companion: `opencode-config-co-tenancy.md` (the merge/precedence contract a
+- Companion: `0002-opencode-config-co-tenancy.md` (the merge/precedence contract a
   re-gating mixin relies on)

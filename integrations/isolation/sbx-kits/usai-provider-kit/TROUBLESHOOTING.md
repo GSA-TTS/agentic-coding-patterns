@@ -8,20 +8,22 @@ applied the kit to a sandbox (`sbx run --kit <kit> opencode <project>`).
 **Symptoms:** OpenCode lists generic providers instead of USAi; the custom USAi
 model catalog is missing.
 
-**Cause:** the USAi provider config isn't loaded. The kit delivers it by setting
-`OPENCODE_CONFIG=/home/agent/usai-config/opencode.jsonc` and dropping that file.
-This symptom means the kit wasn't applied to the sandbox, or another kit claimed
-the single-valued `OPENCODE_CONFIG` channel (the kit's startup guard warns when
-it detects this — check the sandbox's startup logs).
+**Cause:** the USAi provider config isn't in OpenCode's global config. The kit
+delivers it by staging `opencode.jsonc` at `/home/agent/usai-config/` and running
+a startup step that merges it into `~/.config/opencode/opencode.jsonc`. This
+symptom means the kit wasn't applied, or the merge step didn't run.
 
 **Fix:**
 
 - Recreate the sandbox with the kit applied: `sbx run --kit <kit> opencode <proj>`.
 - Or inject it into an existing sandbox without recreating
-  (EXPERIMENTAL): `sbx kit add <sandbox> <kit>`, then restart the agent so it
-  re-reads `OPENCODE_CONFIG`.
-- Confirm the channel isn't shadowed: `sbx exec <sandbox> -- sh -c 'echo
-  $OPENCODE_CONFIG'` should print `/home/agent/usai-config/opencode.jsonc`.
+  (EXPERIMENTAL): `sbx kit add <sandbox> <kit>`, then restart the agent so the
+  startup merge runs and OpenCode re-reads its global config.
+- Confirm the global config has the USAi provider:
+  `sbx exec <sandbox> -- sh -c 'grep -c \"\\\"usai\\\"\" ~/.config/opencode/opencode.jsonc'`
+  should print a non-zero count.
+- Check the merge step's output in the sandbox startup logs (look for
+  `usai-provider: merged ...` or `usai-provider: ... copied ...`).
 
 ## USAi authentication fails (HTTP 401/403)
 
@@ -63,15 +65,19 @@ it detects this — check the sandbox's startup logs).
 sync:usai-models`, then re-apply/recreate the sandbox. The generator only
 rewrites the region between the `BEGIN/END GENERATED USAI MODELS` markers.
 
-## The ownership warning appeared at startup
+## A global-key override warning appeared at startup
 
-**Symptom:** a `usai-provider: warning: OPENCODE_CONFIG ... is not the USAi kit
-config` message in startup logs.
+**Symptom:** a `usai-provider: warning: overrode existing global key '<key>'
+with the USAi value` message in startup logs.
 
-**Cause:** another kit set `OPENCODE_CONFIG` and shadowed this kit's config
-(env-var composition is last-wins).
+**Cause:** the sandbox already had a global OpenCode config
+(`~/.config/opencode/opencode.jsonc` or `.json`) that set a key the USAi kit also
+sets (e.g. a top-level `model`). The kit's config wins for its own keys, so it
+overrode that leaf during the merge. This is informational, not an error — all
+unrelated keys from the existing config are preserved.
 
-**Fix:** have the other kit contribute its OpenCode config via
-`<workspace>/.opencode/opencode.jsonc` instead of setting `OPENCODE_CONFIG` —
-OpenCode deep-merges that *over* `OPENCODE_CONFIG`, so both compose. See the
-"Co-tenancy" section of the README.
+**Fix (only if the override is unwanted):** have the other config contribute via
+`<workspace>/.opencode/opencode.jsonc` instead of the global path. OpenCode's
+**project** layer deep-merges *over* the global config, so a value set there wins
+over the USAi kit's global value — letting both compose. See the "Co-tenancy"
+section of the README.

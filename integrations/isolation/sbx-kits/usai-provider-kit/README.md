@@ -6,8 +6,8 @@ provider, with network egress allow-listed.
 
 ## Scope and roadmap
 
-Today this kit targets **OpenCode**: it drops an `opencode.jsonc` and points
-OpenCode at it. It is named `usai-provider` (rather than
+Today this kit targets **OpenCode**: it ships an `opencode.jsonc` and merges it
+into OpenCode's global config. It is named `usai-provider` (rather than
 `usai-opencode-provider`) deliberately — the intent is to grow it into a single
 kit that configures the USAi provider for **multiple agents** (e.g. Codex,
 Claude Code, Cursor) as their config formats are added. Until then, applying it
@@ -18,11 +18,10 @@ on a non-OpenCode agent has no effect beyond the network allow-list.
 - **Network egress** — allow-lists `api.gsa.usai.gov` (`caps.network`), since
   USAi is a custom endpoint, not a built-in sbx service.
 - **Provider config** — ships `opencode.jsonc` (the USAi provider block + the
-  generated USAi model catalog) and sets
-  `OPENCODE_CONFIG=/home/agent/usai-config/opencode.jsonc` so OpenCode loads it
-  instead of prompting for a provider on startup.
-- **Co-tenancy guard** — a warn-only startup check (see
-  [Co-tenancy](#co-tenancy)).
+  generated USAi model catalog) and, at startup, **merges it into OpenCode's
+  global config** (`~/.config/opencode/opencode.jsonc`) so OpenCode loads it
+  instead of prompting for a provider — without clobbering any existing global
+  config (see [Design: merge, don't clobber](#design-merge-dont-clobber)).
 - **Permissions** — a deliberately **default-allow** OpenCode permission policy
   tuned for the sandbox, keeping only a zero-prompt `read` credential deny-list
   (see [Permissions](#permissions)).
@@ -69,7 +68,7 @@ contributes `ask`/`deny` rules via a project-layer
 config (OpenCode evaluates the **last matching** rule, so a later fragment wins —
 which is also why this config orders every `ask` edge after the broad `allow`).
 See
-[`docs/decisions/relax-permissions-for-sandbox.md`](docs/decisions/relax-permissions-for-sandbox.md).
+[`docs/decisions/0003-relax-permissions-for-sandbox.md`](docs/decisions/0003-relax-permissions-for-sandbox.md).
 
 ## Usage
 
@@ -93,33 +92,43 @@ sbx secret set-custom -g --host api.gsa.usai.gov --env USAI_API_KEY
 USAi keys expire periodically — if the agent starts failing auth, rotate the key
 and update the secret. See [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md).
 
-## Design: compose, don't clobber
+## Design: merge, don't clobber
 
-OpenCode merges config from **global** (`~/.config/opencode/opencode.json[c]`) <
-**`OPENCODE_CONFIG`** (a single custom file) < **project**
-(`<workspace>/.opencode/`). This kit deliberately writes a *namespaced* file
-(`~/usai-config/opencode.jsonc`) and points `OPENCODE_CONFIG` at it, rather than
-writing the global path. That way the kit **composes with** whatever the
-opencode base template writes globally instead of overwriting it — so USAi
-support doesn't preclude picking up upstream config changes.
+OpenCode reads config from the **global** path
+(`~/.config/opencode/opencode.json[c]`) < **project**
+(`<workspace>/.opencode/`). By request, this kit lands its config at the
+**global** path (rather than pointing `OPENCODE_CONFIG` at a namespaced file, as
+earlier versions did).
+
+To avoid overwriting a global config the base template or another kit may have
+written, a startup step **merges** instead of copying blindly:
+
+- **No existing global config** → the kit's `opencode.jsonc` is copied
+  **verbatim** (comments and the ownership marker preserved).
+- **An existing global config** → the USAi keys are **deep-merged into** it.
+  USAi wins for its own keys (`provider.usai`, `model`, `small_model`, `agent`,
+  `permission`, …); unrelated keys are preserved; any existing leaf the kit
+  overrides (e.g. a pre-existing top-level `model`) is logged as a warning.
+  Comments are dropped in this branch (JSON has none) — the fully annotated
+  source stays at `~/usai-config/opencode.jsonc` and in this repo.
+
+The merge is idempotent and runs as the agent user at every start. See
+[`docs/decisions/0004-global-config-merge-instead-of-opencode-config.md`](docs/decisions/0004-global-config-merge-instead-of-opencode-config.md).
 
 ## Co-tenancy
 
-`OPENCODE_CONFIG` is a single scalar env var, so only one kit can own it (env
-composition is last-wins). This kit owns it, and tags its config with an
-ownership **marker comment** (`usai-provider-kit:owns-opencode-config`). A
-warn-only `commands.startup` check fires if `OPENCODE_CONFIG` ends up pointing at
-a file without that marker (i.e. another kit claimed the channel). It never
-blocks startup.
+Because the kit no longer sets `OPENCODE_CONFIG` (a single-valued env var that
+only one kit could own), there is no env-var shadowing to guard against. Another
+kit that needs to add OpenCode config should drop its fragment at
+`<workspace>/.opencode/opencode.jsonc` (kit `files/workspace/...`) — OpenCode's
+**project** layer deep-merges it *over* the global config, so its keys and the
+USAi provider config compose without either clobbering the other.
 
-> The marker is a JSONC **comment**, not a config key, because current OpenCode
-> validates against a closed schema and rejects unknown top-level keys.
-
-**If you are writing another kit that needs to add OpenCode config, do not set
-`OPENCODE_CONFIG`.** Instead drop your fragment at
-`<workspace>/.opencode/opencode.jsonc` (kit `files/workspace/...`) — OpenCode
-deep-merges it *over* `OPENCODE_CONFIG`, so your keys and the USAi provider
-config compose without either clobbering the other.
+> The ownership **marker comment**
+> (`usai-provider-kit:owns-opencode-config`) is retained in the shipped file. It
+> is a JSONC **comment**, not a config key, because OpenCode validates against a
+> closed schema and rejects unknown top-level keys. It survives the verbatim-copy
+> path and lets `scripts/verify` recognize the kit's own config.
 
 ## Updating the model catalog
 
@@ -143,31 +152,38 @@ Run the bundled check on a host with `sbx` installed and logged in:
 ```
 
 It validates the spec, creates a throwaway sandbox with the kit, and confirms
-`OPENCODE_CONFIG` is set, the config file + ownership marker are present, and
-the USAi API is reachable with the injected key. Set `KEEP=1` to keep the
-sandbox for inspection.
+the global config (`~/.config/opencode/opencode.jsonc`) exists and carries the
+USAi `provider.usai` block, that a pre-seeded foreign global key survives the
+merge, and that the USAi API is reachable with the injected key. Set `KEEP=1` to
+keep the sandbox for inspection.
 
 ## Design decisions
 
 See [`docs/decisions/`](docs/decisions/):
 
-- [`usai-provider-as-mixin-kit.md`](docs/decisions/usai-provider-as-mixin-kit.md)
-  — why a self-contained kit, namespaced `OPENCODE_CONFIG`, secret handling.
-- [`opencode-config-co-tenancy.md`](docs/decisions/opencode-config-co-tenancy.md)
-  — single `OPENCODE_CONFIG` owner, the ownership marker, the fragment contract.
-- [`relax-permissions-for-sandbox.md`](docs/decisions/relax-permissions-for-sandbox.md)
+- [`0001-usai-provider-as-mixin-kit.md`](docs/decisions/0001-usai-provider-as-mixin-kit.md)
+  — why a self-contained kit, secret handling (config-delivery portion
+  superseded by 0004).
+- [`0002-opencode-config-co-tenancy.md`](docs/decisions/0002-opencode-config-co-tenancy.md)
+  — the old single-`OPENCODE_CONFIG` owner contract (**superseded** by 0004).
+- [`0003-relax-permissions-for-sandbox.md`](docs/decisions/0003-relax-permissions-for-sandbox.md)
   — why the permission policy is default-allow, and how to re-gate via a mixin.
+- [`0004-global-config-merge-instead-of-opencode-config.md`](docs/decisions/0004-global-config-merge-instead-of-opencode-config.md)
+  — why the kit merges into the global config path instead of setting
+  `OPENCODE_CONFIG`.
 
 ## Layout
 
 ```
 usai-provider-kit/
 ├── spec.yaml                                   # the kit
-├── files/home/usai-config/opencode.jsonc       # USAi provider + model catalog
+├── files/home/usai-config/
+│   ├── opencode.jsonc                          # USAi provider + model catalog
+│   └── merge-global-config.mjs                 # startup merge into global config
 ├── scripts/
 │   ├── sync-usai-models.mjs                    # regenerate the model catalog
 │   └── verify                                  # host-side end-to-end check
-├── tests/                                      # generator tests + fixture
-├── docs/decisions/                             # design decision records
+├── tests/                                      # generator + merge tests + fixture
+├── docs/decisions/                             # numbered design decision records
 └── package.json                                # npm test / sync:usai-models
 ```
