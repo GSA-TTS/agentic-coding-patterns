@@ -1,6 +1,19 @@
 # Decision: OpenCode config co-tenancy — single `OPENCODE_CONFIG` owner
 
-**Status:** accepted
+**Status:** superseded by
+[`0004-global-config-merge-instead-of-opencode-config.md`](0004-global-config-merge-instead-of-opencode-config.md)
+(2026-07-06)
+
+> **Why superseded:** this entire decision exists to make the kit's use of the
+> single-valued `OPENCODE_CONFIG` env var co-tenant-safe. The kit no longer sets
+> `OPENCODE_CONFIG` at all — it merges its config into the global path
+> (`~/.config/opencode/opencode.jsonc`) at startup, so the last-wins env-var
+> shadowing problem this document addresses no longer applies. The ownership
+> **marker comment** is retained in the shipped file (it still tags the kit's
+> config), but the warn-only startup guard that greps for it has been removed.
+> Co-tenant kits still contribute via `<workspace>/.opencode/opencode.jsonc`
+> (the project layer still deep-merges over the global layer). The record below
+> is retained for historical context.
 
 ## Context
 

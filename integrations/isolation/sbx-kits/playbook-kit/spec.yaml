@@ -68,8 +68,8 @@ environment:
     # cloned HEAD equals PLAYBOOK_SHA and refuses to link on mismatch. (Signed-tag
     # verification is a possible future hardening, tracked separately on the
     # playbook repo; it needs the playbook to sign its releases.)
-    PLAYBOOK_REF: "v0.12.1"
-    PLAYBOOK_SHA: "79cb496da9be67c207fff81e9019aef09f4c2866"
+    PLAYBOOK_REF: "v0.14.0"
+    PLAYBOOK_SHA: "cfadbc32b079d85c6328a20d3dadc583faa8aef1"
 
 commands:
   startup:
@@ -84,8 +84,8 @@ commands:
           # warn to stderr and exit 0 so the sandbox comes up without the
           # playbook (it self-heals on a later start once the clone can run).
           set -u
-          ref="${PLAYBOOK_REF:-v0.12.1}"
-          sha="${PLAYBOOK_SHA:-79cb496da9be67c207fff81e9019aef09f4c2866}"
+          ref="${PLAYBOOK_REF:-v0.14.0}"
+          sha="${PLAYBOOK_SHA:-cfadbc32b079d85c6328a20d3dadc583faa8aef1}"
           repo="https://github.com/GSA-TTS/agentic-coding-playbook.git"
           dir="$HOME/.agentic-coding-playbook"
 
