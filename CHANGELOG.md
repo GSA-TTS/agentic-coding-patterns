@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.5.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.4.0...v1.5.0) (2026-07-07)
+
+
+### Features
+
+* **ci:** add unsafe-shell-pattern scanner + wire into CI (M3 [#154](https://github.com/GSA-TTS/agentic-coding-patterns/issues/154), [#155](https://github.com/GSA-TTS/agentic-coding-patterns/issues/155)) ([#210](https://github.com/GSA-TTS/agentic-coding-patterns/issues/210)) ([f281707](https://github.com/GSA-TTS/agentic-coding-patterns/commit/f281707bac48fc494f5403ccf980b9759c17eed5))
+* **integrations:** relax usai-provider permissions for sandbox use ([#201](https://github.com/GSA-TTS/agentic-coding-patterns/issues/201)) ([6cb6cde](https://github.com/GSA-TTS/agentic-coding-patterns/commit/6cb6cde94f228073555837028cb5150b7c80005a))
+* **integrations:** vendor git-ssh-sign sbx mixin kit ([#200](https://github.com/GSA-TTS/agentic-coding-patterns/issues/200)) ([b791e04](https://github.com/GSA-TTS/agentic-coding-patterns/commit/b791e04a4dd6b97fe2cf172897e8cb3e9ddef1a1))
+* **sbx-kits:** usai kit merges into global opencode config ([#216](https://github.com/GSA-TTS/agentic-coding-patterns/issues/216)) ([5de0f3b](https://github.com/GSA-TTS/agentic-coding-patterns/commit/5de0f3b53c5bd1ac514fdf8b50a7fd2afbad86c8))
+* **schema:** add name field + tighten skill schema (additionalProperties: false) ([#202](https://github.com/GSA-TTS/agentic-coding-patterns/issues/202)) ([3f298d1](https://github.com/GSA-TTS/agentic-coding-patterns/commit/3f298d1cab567e1d7d2bce52fefd045ceba2ab85))
+* **skills:** add Security Skills Pack M2 — 7 security review/authoring skills ([#205](https://github.com/GSA-TTS/agentic-coding-patterns/issues/205)) ([c736287](https://github.com/GSA-TTS/agentic-coding-patterns/commit/c7362877873f461603d0172c90ea6b517b2791d0))
+* **skills:** Security Skills Pack M2 updates — secure-code-review + dependency-analysis ([#206](https://github.com/GSA-TTS/agentic-coding-patterns/issues/206)) ([f5e6898](https://github.com/GSA-TTS/agentic-coding-patterns/commit/f5e68980b341ae2fe4d8fc7f191b966e620fcbb9))
+* **test:** security-skill fixtures + runner assertions (M3 [#156](https://github.com/GSA-TTS/agentic-coding-patterns/issues/156)/[#157](https://github.com/GSA-TTS/agentic-coding-patterns/issues/157)/[#158](https://github.com/GSA-TTS/agentic-coding-patterns/issues/158), [#203](https://github.com/GSA-TTS/agentic-coding-patterns/issues/203)) ([#212](https://github.com/GSA-TTS/agentic-coding-patterns/issues/212)) ([ecde334](https://github.com/GSA-TTS/agentic-coding-patterns/commit/ecde3349e398ed77e9bd796b44797c3483004ee0))
+
+
+### Bug Fixes
+
+* **ci:** suppress low adhoc-packages zizmor findings in frontend-skills-qa ([#215](https://github.com/GSA-TTS/agentic-coding-patterns/issues/215)) ([259ea27](https://github.com/GSA-TTS/agentic-coding-patterns/commit/259ea2704de68c324b4d0d18674b5369d5e0d406))
+
 ## [1.4.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.3.0...v1.4.0) (2026-07-01)
 
 
