@@ -9,3 +9,13 @@
 /scripts/ @GSA-TTS/agentic-coding-team
 /AGENTS.md @GSA-TTS/agentic-coding-team
 /schemas/ @GSA-TTS/agentic-coding-team
+
+# Security skills (categories: [security]) — human-review gate per
+# docs/security-skill-governance.md. Canonical location is .agents/skills/;
+# skills/ is a backward-compat symlink. Both paths are team-owned so a security
+# skill change always routes to a code-owner regardless of which path is edited.
+/.agents/skills/ @GSA-TTS/agentic-coding-team
+/skills/ @GSA-TTS/agentic-coding-team
+/docs/security-skill-governance.md @GSA-TTS/agentic-coding-team
+/docs/security-skill-promotion-checklist.md @GSA-TTS/agentic-coding-team
+/templates/security-skill-intake.md @GSA-TTS/agentic-coding-team
