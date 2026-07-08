@@ -74,6 +74,25 @@
 - [ ] Output contract defined (required_sections, prohibited_content)
 - [ ] Status set to `experimental` for new patterns
 
+## Security Skill Checklist
+<!-- REQUIRED only if this PR adds or changes a security skill
+     (categories: [security]). Delete this section otherwise.
+     Governance: docs/security-skill-governance.md -->
+
+- [ ] This PR adds/changes a **security skill** (`categories: [security]`).
+- [ ] Governance frontmatter set deny-by-default: `risk_tier`,
+      `human_review_required: true`, `allowed_tools` (minimal), `network_policy`,
+      `write_policy`, `script_policy` — any grant above `deny` justified in the body.
+- [ ] Fixtures for this skill pass; unsafe-shell scanner clean for any embedded shell.
+- [ ] **No copied content** from public sources; if inspired by one, an
+      [intake record](../templates/security-skill-intake.md) is completed and
+      referenced here, and `source_inspiration` records url + license.
+- [ ] `needs-human-review` label applied and human security review requested
+      (security skills are never auto-/admin-merged).
+- [ ] One security skill in this PR (focused review).
+- [ ] If promoting `experimental → recommended`, the
+      [promotion checklist](../docs/security-skill-promotion-checklist.md) is complete.
+
 ## Validation Results
 <!-- Paste output of `make validate` -->
 
