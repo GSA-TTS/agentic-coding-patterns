@@ -200,6 +200,41 @@ if deps['has_dependencies']:
     print(f"Requires: {deps['skills']}")
 ```
 
+## Security Skill Routing
+
+Security skills (`categories: [security]`) overlap by design, so pick by the
+**specific trigger**, not by keyword alone. Map the user's request to one skill:
+
+| The user asks… | Route to | Not |
+|----------------|----------|-----|
+| "review this PR / diff / code for vulnerabilities" | `secure-code-review` | not `backdoor-review` (that's for *deliberate* hidden malice, not general vulns) |
+| "is this GitHub Actions workflow safe?" / "audit this `.github/workflows/*`" | `agentic-actions-auditor` | not `least-privilege-review` (auditor covers triggers + privilege; LPR is scope-only) |
+| "are these permissions / `GITHUB_TOKEN` scopes too broad?" | `least-privilege-review` | not `agentic-actions-auditor` unless it's a *workflow* |
+| "could untrusted input / prompt injection cross a trust boundary here?" | `untrusted-input-boundary-review` | not `secure-code-review` (broader) |
+| "does this hide a backdoor / auth bypass / persistence?" | `backdoor-review` | not `secure-code-review` |
+| "assess these dependencies / supply-chain risk" | `dependency-analysis` | — |
+| "verify this FedRAMP/NIST compliance claim" | `compliance-claim-checker` | not `secure-code-review` |
+| "review this incident postmortem / evidence" | `incident-evidence-review` | — |
+| "write me a safe bash/cleanup script" | `safe-shell-script-author` | — (authoring, not review) |
+
+**Disambiguation rules when two seem to fit:**
+
+1. **Workflow vs. permissions:** anything about a *CI workflow file* →
+   `agentic-actions-auditor`; a *permissions block / token scope* in isolation →
+   `least-privilege-review`. The auditor already includes a least-privilege pass
+   for workflows, so don't run both on the same workflow.
+2. **General vulns vs. deliberate malice:** default to `secure-code-review`;
+   escalate to `backdoor-review` only when the ask implies *intentional* hidden
+   behavior (obfuscation, unexplained network calls, hidden auth paths).
+3. **Broad review vs. injection:** if the concern is specifically *untrusted
+   input crossing a boundary*, prefer `untrusted-input-boundary-review` over the
+   broader `secure-code-review`.
+
+**Before applying any security skill**, an agent MUST honor its governance
+frontmatter — `human_review_required: true` means the *output* is advisory and a
+human must sign off before it drives a merge/promotion decision. See
+[`security-skill-governance.md`](security-skill-governance.md).
+
 ## Understanding Output Contracts
 
 Patterns define expected outputs:
