@@ -151,6 +151,37 @@ stats:
 
 **Default for new contributions:** `experimental`
 
+## Security Skills Pack
+
+A curated set of skills for **security review and secure authoring**. Every
+skill declares `categories: [security]`, which triggers extra governance: a
+required human review, a deny-by-default tool/network/write/script policy, and
+explicit `risk_tier`. Policy authority lives in the
+[playbook](https://github.com/GSA-TTS/agentic-coding-playbook) — this pack
+references it rather than restating it.
+
+- **Governance model:** [`docs/security-skill-governance.md`](docs/security-skill-governance.md)
+- **Agent routing (which skill for which trigger):** [`docs/AI-AGENT-GUIDE.md`](docs/AI-AGENT-GUIDE.md#security-skill-routing)
+- **Taxonomy:** `categories` is a closed vocabulary (see `schemas/skill.schema.json`);
+  `security` is the axis that gates this pack.
+
+| Skill | Risk | Use it for |
+|-------|------|------------|
+| [`secure-code-review`](skills/secure-code-review/) | moderate | Reviewing a code change or diff for vulnerabilities |
+| [`agentic-actions-auditor`](skills/agentic-actions-auditor/) | high | Auditing a GitHub Actions workflow for unsafe triggers/privilege |
+| [`least-privilege-review`](skills/least-privilege-review/) | moderate | Checking permissions/`GITHUB_TOKEN` scope for over-grant |
+| [`untrusted-input-boundary-review`](skills/untrusted-input-boundary-review/) | moderate | Prompt-injection / trust-boundary analysis of untrusted input |
+| [`backdoor-review`](skills/backdoor-review/) | high | Hunting for backdoors, auth bypass, hidden persistence |
+| [`dependency-analysis`](skills/dependency-analysis/) | moderate | Supply-chain / dependency vulnerability assessment |
+| [`compliance-claim-checker`](skills/compliance-claim-checker/) | low | Verifying a FedRAMP/NIST compliance claim against evidence |
+| [`incident-evidence-review`](skills/incident-evidence-review/) | high | Postmortem / incident evidence-discipline review |
+| [`safe-shell-script-author`](skills/safe-shell-script-author/) | moderate | Authoring a shell script that must pass the unsafe-shell scanner |
+
+> **Human-review gate:** security skills are `human_review_required: true`. An
+> agent may *apply* one, but promotion `experimental → recommended` and any
+> change to a security skill require human sign-off — see the
+> [human-review gates](docs/security-skill-governance.md#human-review-gates).
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
