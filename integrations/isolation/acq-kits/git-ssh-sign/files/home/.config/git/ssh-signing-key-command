@@ -1,0 +1,23 @@
+#!/bin/sh
+set -e
+
+if [ -z "$SSH_AUTH_SOCK" ]; then
+    echo "[git-ssh-sign] no SSH agent - cannot sign commits" >&2
+    exit 1
+fi
+
+key=$(ssh-add -L 2>/dev/null | head -n 1)
+if [ -z "$key" ]; then
+    echo "[git-ssh-sign] no keys in SSH agent - cannot sign commits" >&2
+    exit 1
+fi
+
+config_dir="$GIT_SSH_SIGN_CONFIG_DIR"
+if [ -z "$config_dir" ]; then
+    config_dir="/home/agent/.config/git"
+fi
+mkdir -p "$config_dir"
+
+email=$(git config user.email 2>/dev/null || printf '%s' "agent@sandbox.local")
+printf '%s %s\n' "$email" "$key" > "$config_dir/allowed_signers"
+printf 'key::%s\n' "$key"
