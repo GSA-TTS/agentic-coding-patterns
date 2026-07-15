@@ -13,7 +13,7 @@ and signing resolves the public key from that agent at signing time.
 > from Phase 2). It replaces the former `sbx-kits/git-ssh-sign/` sbx-only spec.
 > See [backend parity](#backend-parity) and
 > [`../../docs/decisions/0001-neutral-hybrid-v1-acq-kits.md`](../../docs/decisions/0001-neutral-hybrid-v1-acq-kits.md).
-
+>
 > Vendored from [docker/sbx-kits-contrib](https://github.com/docker/sbx-kits-contrib/tree/main/git-ssh-sign)
 > (Apache-2.0; see [`NOTICE`](NOTICE) and [`LICENSE`](LICENSE)), ported to the
 > sbx v2 spec and then to the neutral `hybrid/v1` spec. See
