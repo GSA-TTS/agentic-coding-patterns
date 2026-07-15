@@ -24,10 +24,14 @@ TIER1_PATTERNS = [
     (r"BEGIN.*PRIVATE KEY", "Private key detected"),
     (r"AWS_SECRET_ACCESS_KEY", "AWS secret key"),
     (r"AWS_ACCESS_KEY_ID", "AWS access key"),
-    (r"(?:password|passwd|pwd)\s*=\s*['\"]?[^'\"\\s]{8,}", "Hardcoded password"),
-    (r"(?:api_key|apikey)\s*=\s*['\"]?[^'\"\\s]{16,}", "API key"),
-    (r"(?:token|auth_token)\s*=\s*['\"]?[^'\"\\s]{16,}", "Auth token"),
-    (r"secret\s*=\s*['\"]?[^'\"\\s]{16,}", "Secret value"),
+    # Assignment patterns. The negative lookahead skips values that are shell
+    # command substitutions ($(...), `...`) or variable references ($VAR,
+    # ${VAR}) — those read a secret at runtime, they don't hardcode one, and
+    # flagging them produces false positives on legitimate scripts.
+    (r"(?:password|passwd|pwd)\s*=\s*['\"]?(?![`$])[^'\"\\s]{8,}", "Hardcoded password"),
+    (r"(?:api_key|apikey)\s*=\s*['\"]?(?![`$])[^'\"\\s]{16,}", "API key"),
+    (r"(?:token|auth_token)\s*=\s*['\"]?(?![`$])[^'\"\\s]{16,}", "Auth token"),
+    (r"secret\s*=\s*['\"]?(?![`$])[^'\"\\s]{16,}", "Secret value"),
     (r"\.gov\s+internal-only", "Internal-only government content"),
     (r"do\s+not\s+distribute", "Distribution restriction marker"),
 ]

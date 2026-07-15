@@ -63,7 +63,7 @@ sbx run opencode --kit "git+https://github.com/GSA-TTS/agentic-coding-patterns.g
 > created. `sbx kit add` on a *running* sandbox skips the port mapping, so add
 > this kit with `--kit` at create time (recreate the sandbox if it already
 > exists).
-
+>
 > **On HTTPS-inspected networks (e.g. Zscaler).** OpenChamber's first-boot
 > install downloads a prebuilt native binary; behind an inspecting proxy that
 > download only validates if the inspection CA is in the sandbox's system trust
