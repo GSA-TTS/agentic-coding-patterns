@@ -65,7 +65,11 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["path", "mode", "content"],
+        "required": ["path", "mode"],
+        "oneOf": [
+          { "required": ["source"] },
+          { "required": ["content"] }
+        ],
         "properties": {
           "path": {
             "type": "string",
@@ -77,9 +81,14 @@
             "pattern": "^0[0-7]{3}$",
             "description": "Octal file mode as a string, e.g. \"0644\"."
           },
+          "source": {
+            "type": "string",
+            "pattern": "^files/",
+            "description": "Path (relative to the kit dir, under files/) to the payload file. Preferred over inline content for multi-line payloads. Mutually exclusive with content."
+          },
           "content": {
             "type": "string",
-            "description": "Inline file content."
+            "description": "Inline file content. Use for short blobs (e.g. a PEM); prefer source for larger payloads. Mutually exclusive with source."
           },
           "phase": {
             "type": "string",

