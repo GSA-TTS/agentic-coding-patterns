@@ -16,9 +16,12 @@ This kit is **opt-in**. It is *not* one of the default GSA kits applied by
   native binary is downloaded from (`caps.network`). Default-deny otherwise.
 - **Install + startup (one step)** — on every sandbox start (`commands.startup`,
   background), a single idempotent script:
-  1. installs the OpenChamber CLI on first boot (only if missing), routing the
-     install through the sandbox proxy and trusting the sandbox proxy CA so the
-     prebuilt native binary downloads instead of trying to compile;
+  1. installs the OpenChamber CLI on first boot (only if missing) from a
+     **pinned release tag whose `install.sh` is SHA-256-verified before it
+     runs** (`OPENCHAMBER_REF` / `OPENCHAMBER_INSTALL_SHA256` in the spec — not
+     `main`), routing the install through the sandbox proxy and trusting the
+     sandbox proxy CA so the prebuilt native binary downloads instead of trying
+     to compile;
   2. starts a headless `opencode serve` on `127.0.0.1:4096` (the OpenCode server
      the browser drives); and
   3. starts OpenChamber bound to `0.0.0.0`, pointed at that managed server via
@@ -128,6 +131,22 @@ container with a proxied, allow-listed network and no host filesystem access.
 The sandbox is the security boundary. The managed `opencode serve` is bound to
 loopback (`127.0.0.1`) and is never published to the host directly; the browser
 reaches it only through OpenChamber's proxy.
+
+**Assumes a trusted, single-tenant host.** Unlike an on-demand wrapper that
+starts the UI only when you ask for it, this kit auto-starts on **every** boot,
+so the unauthenticated UI is always live — bound in-container to `0.0.0.0:3000`
+and mapped to a host **loopback** (`127.0.0.1`) ephemeral port — the whole time
+the sandbox runs. The published port is loopback-only, so it is not
+LAN-reachable; but anyone with access to the host's loopback (any local user, or
+anything you forward that port to) can drive OpenCode without a credential. Only
+run this on a host you trust as single-tenant, and don't forward the mapped port
+to a wider interface.
+
+**Installer supply chain.** The first-boot install fetches OpenChamber's
+`install.sh` from a **pinned release tag** (`OPENCHAMBER_REF`) and refuses to run
+it unless its SHA-256 matches `OPENCHAMBER_INSTALL_SHA256` — it does not pipe
+`main` to a shell on each boot. Bump both values together to adopt a newer
+release (see the comments in `spec.yaml`).
 
 ## Validating
 

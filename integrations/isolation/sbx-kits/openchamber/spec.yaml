@@ -9,7 +9,9 @@
 # Design:
 #   - caps.network: allow egress to the OpenChamber install sources (npm registry,
 #     the install-script host, and the GitHub release-asset hosts the prebuilt
-#     better-sqlite3 binary comes from). Default-deny otherwise.
+#     better-sqlite3 binary comes from). Default-deny otherwise. The install
+#     script is fetched from a PINNED tag and SHA-256-verified before it runs
+#     (see environment.variables + the install note below).
 #   - commands.startup (agent uid 1000, background): a single INLINE `sh -c`
 #     script that (a) installs OpenChamber on first boot, then (b) starts a
 #     headless `opencode serve` on 127.0.0.1:4096 and OpenChamber bound to
@@ -81,7 +83,8 @@ publishedPorts:
 caps:
   network:
     allow:
-      # 1. The install script is fetched from GitHub raw (at startup, first boot).
+      # 1. The install script is fetched from GitHub raw (at startup, first boot),
+      #    from a PINNED tag — not `main` (see OPENCHAMBER_REF/SHA below).
       - raw.githubusercontent.com
       # 2. npm downloads @openchamber/web and its deps from the npm registry.
       - registry.npmjs.org
@@ -93,6 +96,30 @@ caps:
       - github.com
       - objects.githubusercontent.com
       - release-assets.githubusercontent.com
+
+environment:
+  variables:
+    # Pinned OpenChamber release: a human-legible tag (OPENCHAMBER_REF) plus the
+    # SHA-256 of the install.sh served at that tag (OPENCHAMBER_INSTALL_SHA256,
+    # an integrity pin). The startup script fetches install.sh from
+    # raw.githubusercontent.com at this TAG — NOT `main` — and verifies the
+    # fetched script's SHA-256 equals OPENCHAMBER_INSTALL_SHA256 before piping it
+    # to a shell; on mismatch it refuses to run it. Bump BOTH together to adopt a
+    # newer release, keeping them in sync with the fallback defaults in the
+    # startup script.
+    #
+    # Why pin (per the sibling playbook-kit's SHA-pin rationale): the whole kit
+    # model is SHA-pinning. Fetching an installer from `main` on EVERY boot means
+    # a compromised or accidentally-broken upstream `main` runs with the agent's
+    # full sandbox capabilities at every start. A tag is a MUTABLE ref, and the
+    # sibling CA kit has the sandbox trusting an inspecting proxy on the fetch
+    # path, so tag immutability alone is not sufficient — hence the content-hash
+    # check. (Content SHA-256, not a git commit SHA: the script is fetched as a
+    # raw file, so verifying the bytes we actually pipe to bash is the pin that
+    # matters. Re-pin the hash when bumping OPENCHAMBER_REF; the value below is
+    # `curl -fsSL <raw-url>@<ref> | sha256sum`.)
+    OPENCHAMBER_REF: "v1.9.10"
+    OPENCHAMBER_INSTALL_SHA256: "aa268c96ddc6d7d53fc54d2e5c2312e689493ecef6ba4f69730a93d50cf33287"
 
 commands:
   # Install + run entirely from commands.startup (there is NO commands.install).
@@ -162,8 +189,24 @@ commands:
             [ -n "${PROXY_CA_CERT_B64:-}" ] && printf %s "$PROXY_CA_CERT_B64" | base64 -d >> "$_ca" 2>/dev/null
             [ -f /etc/ssl/certs/ca-certificates.crt ] && cat /etc/ssl/certs/ca-certificates.crt >> "$_ca"
             [ -s "$_ca" ] && export NODE_EXTRA_CA_CERTS="$_ca"
-            curl -fsSL https://raw.githubusercontent.com/openchamber/openchamber/main/scripts/install.sh \
-              | bash > /tmp/openchamber-install.log 2>&1 || true
+            # Fetch install.sh from a PINNED TAG (never `main`) and verify its
+            # SHA-256 before running it — the installer runs with the agent's
+            # full sandbox caps, and the fetch path may be MITM-inspected, so a
+            # tag alone is not enough. On mismatch, skip install (UI unavailable)
+            # rather than pipe unverified bytes to bash.
+            _ref="${OPENCHAMBER_REF:-v1.9.10}"
+            _want_sha="${OPENCHAMBER_INSTALL_SHA256:-aa268c96ddc6d7d53fc54d2e5c2312e689493ecef6ba4f69730a93d50cf33287}"
+            _installer="$HOME/.local/state/openchamber/install.sh"
+            if curl -fsSL "https://raw.githubusercontent.com/openchamber/openchamber/$_ref/scripts/install.sh" \
+                 -o "$_installer" 2>/tmp/openchamber-install.log; then
+              _got_sha="$( (sha256sum "$_installer" 2>/dev/null || shasum -a 256 "$_installer" 2>/dev/null) | cut -d' ' -f1)"
+              if [ "$_got_sha" = "$_want_sha" ]; then
+                bash "$_installer" >>/tmp/openchamber-install.log 2>&1 || true
+              else
+                echo "openchamber: install.sh SHA-256 mismatch (got $_got_sha, want $_want_sha) at $_ref; refusing to run it" >>/tmp/openchamber-install.log 2>&1
+              fi
+              rm -f "$_installer"
+            fi
           fi
           command -v openchamber >/dev/null 2>&1 || {
             echo "openchamber install failed; see /tmp/openchamber-install.log" >&2

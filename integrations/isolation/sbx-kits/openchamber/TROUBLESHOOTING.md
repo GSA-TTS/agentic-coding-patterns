@@ -89,6 +89,31 @@ Node, but a customized base image may not.
 **Fix:** use the opencode base template (the default), or add a Node 22 install
 step ahead of this kit.
 
+## Installer SHA-256 mismatch (install refused)
+
+**Symptoms:** `/tmp/openchamber-install.log` shows
+`install.sh SHA-256 mismatch (got <hash>, want <hash>) at <ref>; refusing to run
+it`, and `openchamber` never installs.
+
+**Cause:** the kit fetches OpenChamber's `install.sh` from the pinned tag
+(`OPENCHAMBER_REF`) and runs it only if its SHA-256 equals
+`OPENCHAMBER_INSTALL_SHA256`. A mismatch means the fetched bytes are not the
+pinned ones — either the pin is stale (the two values weren't bumped together),
+the fetch was corrupted/tampered on the inspected path, or the tag content moved.
+The kit fails **closed**: it skips the install rather than run unverified code.
+
+**Fix:** re-pin the hash for the tag you intend to use, then restart the sandbox:
+
+```bash
+# recompute the expected hash for the pinned ref
+curl -fsSL "https://raw.githubusercontent.com/openchamber/openchamber/<ref>/scripts/install.sh" | sha256sum
+# set OPENCHAMBER_REF + OPENCHAMBER_INSTALL_SHA256 in spec.yaml to matching values,
+# recreate the sandbox so the startup step re-runs.
+```
+
+If the hash you compute keeps changing for a fixed tag, treat that as suspicious
+(a tag should be immutable) and do not bump the pin to match it.
+
 ## The terminal TUI and the browser show different sessions
 
 **Not a bug.** This is expected — see
