@@ -1,6 +1,15 @@
 #!/bin/sh
 set -e
 
+# Trust scope (read before reusing the file this produces):
+#   This resolves the FIRST public key from the forwarded SSH agent and writes an
+#   allowed_signers entry for it, keyed to `git config user.email` (or
+#   agent@sandbox.local if unset). It is a SANDBOX SELF-SIGNING CONVENIENCE: it
+#   trusts whatever key the forwarded agent currently presents, bound to a
+#   possibly-unset identity. The allowed_signers file it emits is scoped to this
+#   ephemeral sandbox and MUST NOT be treated as an authorization root anywhere
+#   else (do not copy it out and reuse it as a verification trust anchor).
+
 if [ -z "$SSH_AUTH_SOCK" ]; then
     echo "[git-ssh-sign] no SSH agent - cannot sign commits" >&2
     exit 1
