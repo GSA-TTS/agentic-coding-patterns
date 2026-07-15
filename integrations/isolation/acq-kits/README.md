@@ -56,7 +56,11 @@ The schema is [`schemas/kit-hybrid-v1.schema.json`](../../../schemas/kit-hybrid-
 
 ```bash
 # Backend-agnostic gate: schema + source paths + known backends + registry.
-python integrations/isolation/acq-kits/validate-kits.py
+# Wired into CI (Pattern Validation job) + pre-commit + `make ci`.
+python integrations/isolation/acq-kits/validate-kits.py    # or: make validate-kits
+
+# Kit unit tests (usai-provider generator + merge). CI: acq-kits Tests job.
+make test-kits
 
 # Live, per-backend end-to-end check (needs a backend CLI + a sandbox-capable host):
 <kit>/scripts/verify

@@ -56,3 +56,8 @@ repos:
         entry: python scripts/validate_repo.py
         language: unsupported
         pass_filenames: false
+      - id: validate-acq-kits
+        name: Validate acq-kits (hybrid/v1 schema)
+        entry: python integrations/isolation/acq-kits/validate-kits.py
+        language: unsupported
+        pass_filenames: false

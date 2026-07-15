@@ -1,5 +1,5 @@
 {
-  "name": "usai-provider-kit",
+  "name": "usai-provider",
   "private": true,
   "type": "module",
   "description": "acq mixin kit (hybrid/v1): configure the agent to use the GSA USAi provider",

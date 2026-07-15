@@ -23,8 +23,8 @@
   // ===========================================================================
   "$schema": "https://opencode.ai/config.json",
 
-  // usai-provider-kit:owns-opencode-config
-  // ^ Ownership marker COMMENT for the usai-provider sbx kit. It tags this file
+  // usai-provider:owns-opencode-config
+  // ^ Ownership marker COMMENT for the usai-provider acq kit. It tags this file
   // as the one the kit ships, so the startup merge step (and `scripts/verify`)
   // can recognize the kit's own config after it is copied verbatim into the
   // global path. It is a comment (not a JSON key) on purpose: current OpenCode

@@ -142,12 +142,10 @@ deep-merges it *over* the global config, so its keys and the USAi provider confi
 compose without either clobbering the other.
 
 > The ownership **marker comment**
-> (`usai-provider-kit:owns-opencode-config`) is retained in the shipped file. It
+> (`usai-provider:owns-opencode-config`) is present in the shipped file. It
 > is a JSONC **comment**, not a config key, because OpenCode validates against a
 > closed schema and rejects unknown top-level keys. It survives the verbatim-copy
-> path and lets `scripts/verify` recognize the kit's own config. (The marker text
-> keeps the historical `usai-provider-kit` token for continuity with existing
-> sandboxes; the kit itself is now named `usai-provider`.)
+> path and lets `scripts/verify` recognize the kit's own config.
 
 ## Updating the model catalog
 

@@ -53,7 +53,7 @@ already merges):
 
 1. **This kit owns `OPENCODE_CONFIG` by convention.** It is the single kit
    permitted to set that env var. Its config file carries an ownership **marker
-   comment** — the literal string `usai-provider-kit:owns-opencode-config` in a
+   comment** — the literal string `usai-provider:owns-opencode-config` in a
    JSONC comment.
 
 2. **Other config-contributing kits MUST NOT set `OPENCODE_CONFIG` or

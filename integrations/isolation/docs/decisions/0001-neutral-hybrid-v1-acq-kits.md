@@ -119,7 +119,12 @@ in each kit's README and the registry, not machine-enforced.
   kits.
 - No functional change for current `sbx` users; payloads carried verbatim.
 - Extracted playbook script and the CA-as-payload are now lintable/testable.
-- Schema + validator give a backend-agnostic gate that runs offline in CI.
+- Schema + validator give a backend-agnostic gate that runs offline in CI. It is
+  wired into `make validate-kits` / `make test-kits` (folded into `make ci`), a
+  `validate-acq-kits` pre-commit hook, and dedicated CI steps in
+  `.github/workflows/ci.yml` (the `Pattern Validation` and `acq-kits Tests`
+  jobs), so a spec regression or model-sync drift is caught in CI, not only by
+  hand.
 
 **Negative / residual**
 

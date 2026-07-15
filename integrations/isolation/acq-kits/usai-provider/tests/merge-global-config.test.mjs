@@ -71,7 +71,7 @@ test("computeOutput: no existing config copies verbatim (comments preserved)", a
   assert.equal(merged, false)
   assert.equal(output, sourceText)
   assert.deepEqual(conflicts, [])
-  assert.match(output, /usai-provider-kit:owns-opencode-config/)
+  assert.match(output, /usai-provider:owns-opencode-config/)
 })
 
 test("computeOutput: existing config merges, USAi provider survives, foreign key kept", async () => {
