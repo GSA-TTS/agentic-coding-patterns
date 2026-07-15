@@ -81,12 +81,38 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     all_errors: list[str] = []
+    kit_names: list[str] = []
     for kit_dir in kit_dirs:
         errs = validate_kit(kit_dir, schema)
         if errs:
             all_errors.extend(errs)
         else:
             print(f"  OK  {kit_dir.name}")
+        # record the spec's own name for the registry cross-check
+        try:
+            spec = yaml.safe_load((kit_dir / "spec.yaml").read_text())
+            if isinstance(spec, dict) and spec.get("name"):
+                kit_names.append(spec["name"])
+        except Exception:
+            pass
+
+    # Registry cross-check: kits.yaml must list exactly the kits present.
+    registry_path = kits_dir / "kits.yaml"
+    if registry_path.exists():
+        try:
+            registry = yaml.safe_load(registry_path.read_text()) or {}
+            listed = set((registry.get("kits") or {}).keys())
+            present = set(kit_names)
+            missing = present - listed
+            extra = listed - present
+            for name in sorted(missing):
+                all_errors.append(f"kits.yaml: missing registry entry for kit '{name}'")
+            for name in sorted(extra):
+                all_errors.append(f"kits.yaml: registry lists unknown kit '{name}'")
+        except yaml.YAMLError as e:
+            all_errors.append(f"kits.yaml: not valid YAML: {e}")
+    else:
+        all_errors.append("kits.yaml registry not found")
 
     if all_errors:
         print("\nFAIL:", file=sys.stderr)
