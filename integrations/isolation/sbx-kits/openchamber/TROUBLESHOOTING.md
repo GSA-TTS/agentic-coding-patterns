@@ -38,9 +38,12 @@ sbx exec <sandbox> -- sh -c 'openchamber status'
 ```
 
 If `opencode serve` is failing, confirm a provider is configured — pair this kit
-with the `usai-provider` kit (the default GSA setup does). Then re-run the
-startup steps manually (the startup script is inlined in the kit; the commands
-below reproduce it):
+with the `usai-provider` kit (the default GSA setup does). Both services run
+under a respawn loop, so a transient failure self-heals within a few seconds;
+if a service is *repeatedly* dying, the logs above will show recurring
+`[supervisor] ... restarting` lines. To reproduce a single run by hand (the
+startup script is inlined in the kit; the commands below run one instance
+without the loop):
 
 ```bash
 sbx exec <sandbox> -- sh -lc '
@@ -49,6 +52,29 @@ sbx exec <sandbox> -- sh -lc '
   OPENCODE_SKIP_START=true OPENCODE_PORT=4096 OPENCHAMBER_ALLOW_UNAUTHENTICATED_LAN=true \
     OPENCODE_SERVER_PASSWORD="$PW" openchamber --lan --port 3000 >/tmp/openchamber.log 2>&1 &
 '
+```
+
+## A service keeps restarting (crash loop)
+
+**Symptoms:** `/tmp/opencode-serve.log` or `/tmp/openchamber.log` shows
+`[supervisor] <name> exited; restarting in 5s` over and over.
+
+**Cause:** the respawn loop is doing its job — the underlying process keeps
+exiting immediately (bad config, missing provider, a failed self-update), so it
+is restarted every few seconds. The restart mechanism is fine; the *service* is
+the problem.
+
+**Fix:** read the lines *above* each `[supervisor]` restart marker for the real
+error (missing model provider, auth failure, etc.), and fix that. To slow the
+loop down while you investigate, raise the delay by recreating the sandbox with
+`OPENCHAMBER_RESTART_DELAY` set higher (default `5` seconds). The loop
+intentionally never gives up, so once the underlying cause is fixed the service
+comes back on the next cycle without a sandbox restart.
+
+To confirm exactly one supervisor is running per service:
+
+```bash
+sbx exec <sandbox> -- sh -c 'pgrep -af "supervisor:"'
 ```
 
 ## OpenChamber failed to install (native build error)

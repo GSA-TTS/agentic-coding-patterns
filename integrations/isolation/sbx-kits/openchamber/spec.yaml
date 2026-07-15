@@ -16,7 +16,10 @@
 #     script that (a) installs OpenChamber on first boot, then (b) starts a
 #     headless `opencode serve` on 127.0.0.1:4096 and OpenChamber bound to
 #     0.0.0.0, pointed at that server via OPENCODE_SKIP_START + OPENCODE_PORT.
-#     Idempotent: no-ops if OpenChamber is present and the server/UI are up.
+#     Both are wrapped in a tiny respawn loop so that if either process exits
+#     (e.g. an interactive self-update, which needs a restart to take effect, or
+#     a crash) it is restarted after a few seconds — no systemd.
+#     Idempotent: no-ops if a supervisor for each service is already running.
 #     There is deliberately NO commands.install — see the install note below.
 #
 # Why inline (not a static file / initFiles): sbx's create-time static-file write
@@ -230,29 +233,69 @@ commands:
           OPENCODE_SERVER_PASSWORD="$(cat "$PW_FILE")"
           export OPENCODE_SERVER_PASSWORD
 
-          # Start `opencode serve` if it isn't already answering. The health
-          # probe sends Basic auth (unauthenticated requests return 401), or
-          # we'd wrongly conclude the server is down and start a duplicate.
-          if ! curl -fsS -u "opencode:$OPENCODE_SERVER_PASSWORD" \
-               "http://127.0.0.1:$OC_PORT/global/health" >/dev/null 2>&1; then
-            nohup opencode serve --hostname 127.0.0.1 --port "$OC_PORT" \
-              >/tmp/opencode-serve.log 2>&1 &
+          # Both services are kept alive by a tiny supervisor loop: if the
+          # process exits (e.g. OpenCode/OpenChamber does an interactive
+          # self-update, which requires a restart to take effect, or just
+          # crashes), wait a few seconds and start it again. No systemd — the
+          # startup step is already background:true, so each supervisor loop
+          # runs backgrounded here and lives for the container's lifetime.
+          #
+          # RESTART_DELAY: seconds to wait before respawning a stopped process.
+          RESTART_DELAY="${OPENCHAMBER_RESTART_DELAY:-5}"
+
+          # Guard against a second startup run (idempotent restarts) spawning a
+          # duplicate supervisor: only start a supervisor if one isn't already
+          # running for that service. Each loop is launched with a marker
+          # ARGUMENT ("supervisor:<name>") that the inner `sh -c` ignores; pgrep
+          # -f matches the whole command line, so it finds the loop by that
+          # marker. (An argument, not `exec -a` — the startup shell is POSIX
+          # `sh`/dash, which has no `exec -a`.) A single supervisor per service
+          # means we never spawn a duplicate — the loop only relaunches after
+          # the previous instance has actually exited.
+          supervisor_running() { pgrep -u "$(id -u)" -f "supervisor:$1" >/dev/null 2>&1; }
+
+          # Start the managed `opencode serve` supervisor unless already running.
+          # No health probe is needed: the loop only respawns after serve
+          # actually exits, so it can't start a duplicate against a live server.
+          # argv to the inner sh -c: $0=marker, $1=RESTART_DELAY, $2=port.
+          if ! supervisor_running opencode-serve; then
+            ( sh -c '
+                while :; do
+                  echo "[supervisor] starting opencode serve at $(date -u +%FT%TZ)"
+                  opencode serve --hostname 127.0.0.1 --port "$2" || true
+                  echo "[supervisor] opencode serve exited; restarting in ${1}s"
+                  sleep "$1"
+                done
+              ' "supervisor:opencode-serve" "$RESTART_DELAY" "$OC_PORT" \
+              >>/tmp/opencode-serve.log 2>&1 ) &
           fi
 
-          # Start OpenChamber, pointed at the managed server (skip-start mode),
-          # bound to 0.0.0.0 so the published port works from the host. It
-          # inherits OPENCODE_SERVER_PASSWORD to authenticate to the managed
-          # server. The sandbox is the security boundary, so OpenChamber's own
-          # LAN access is unauthenticated. `openchamber` is a daemon by default
-          # and no-ops if already running.
-          OPENCODE_SKIP_START=true \
-          OPENCODE_PORT="$OC_PORT" \
-          OPENCHAMBER_ALLOW_UNAUTHENTICATED_LAN=true \
-            openchamber --lan --port "$CHAMBER_PORT" \
-              >/tmp/openchamber.log 2>&1 || true
+          # Start the OpenChamber supervisor unless already running. OpenChamber
+          # normally daemonizes; run it with OPENCHAMBER_NO_DAEMON so it stays in
+          # the foreground and the supervisor can see it exit (and thus restart
+          # it after a self-update). It inherits OPENCODE_SERVER_PASSWORD to
+          # authenticate to the managed server. The sandbox is the security
+          # boundary, so OpenChamber's own LAN access is unauthenticated.
+          # argv to the inner sh -c: $0=marker, $1=RESTART_DELAY, $2=OC_PORT,
+          # $3=CHAMBER_PORT.
+          if ! supervisor_running openchamber; then
+            ( sh -c '
+                while :; do
+                  echo "[supervisor] starting openchamber at $(date -u +%FT%TZ)"
+                  OPENCODE_SKIP_START=true \
+                  OPENCODE_PORT="$2" \
+                  OPENCHAMBER_ALLOW_UNAUTHENTICATED_LAN=true \
+                  OPENCHAMBER_NO_DAEMON=true \
+                    openchamber --lan --port "$3" || true
+                  echo "[supervisor] openchamber exited; restarting in ${1}s"
+                  sleep "$1"
+                done
+              ' "supervisor:openchamber" "$RESTART_DELAY" "$OC_PORT" "$CHAMBER_PORT" \
+              >>/tmp/openchamber.log 2>&1 ) &
+          fi
       user: "1000"
       background: true
-      description: Install (first boot) and start the managed opencode server + OpenChamber
+      description: Install (first boot) and supervise the managed opencode server + OpenChamber
 
 agentContext: |
   ## OpenChamber (web UI for OpenCode)
@@ -292,3 +335,7 @@ agentContext: |
   ```
 
   Logs: `/tmp/openchamber.log` and `/tmp/opencode-serve.log` inside the sandbox.
+  Both services run under a respawn loop, so if `opencode serve` or OpenChamber
+  exits — for example after an interactive self-update, which needs a restart to
+  take effect — it comes back a few seconds later on its own. Those logs show
+  `[supervisor] ... restarting` lines when that happens.

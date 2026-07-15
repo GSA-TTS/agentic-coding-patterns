@@ -26,7 +26,10 @@ This kit is **opt-in**. It is *not* one of the default GSA kits applied by
      the browser drives); and
   3. starts OpenChamber bound to `0.0.0.0`, pointed at that managed server via
      `OPENCODE_SKIP_START=true` + `OPENCODE_PORT=4096`.
-  Each step no-ops when already done.
+  Each step no-ops when already done. Both services (2 and 3) run under a tiny
+  respawn loop — if either process exits (e.g. after an interactive self-update,
+  which needs a restart to apply, or a crash) it is restarted after a few
+  seconds (`OPENCHAMBER_RESTART_DELAY`, default `5`). No systemd.
 - **Port** — declares container port `3000` (`publishedPorts`); sbx maps it to
   an ephemeral host port at sandbox start.
 

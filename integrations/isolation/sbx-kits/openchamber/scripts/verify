@@ -169,6 +169,17 @@ else
   printf '%s\n' "$ports_out" | sed 's/^/    | /'
 fi
 
+info "7. Respawn supervisors running (auto-restart)"
+# Each service runs under a loop marked "supervisor:<name>" in its argv, so a
+# process exit (self-update/crash) is followed by a restart. Assert exactly one
+# supervisor per service is alive (one guards against duplicates on re-runs).
+oc_sup="$(in_sbx 'pgrep -c -f "supervisor:opencode-serve" 2>/dev/null')"
+ch_sup="$(in_sbx 'pgrep -c -f "supervisor:openchamber" 2>/dev/null')"
+[ "${oc_sup:-0}" -ge 1 ] 2>/dev/null && ok "opencode-serve supervisor running (count=$oc_sup)" \
+  || bad "no opencode-serve supervisor found (auto-restart not active)"
+[ "${ch_sup:-0}" -ge 1 ] 2>/dev/null && ok "openchamber supervisor running (count=$ch_sup)" \
+  || bad "no openchamber supervisor found (auto-restart not active)"
+
 info "Summary"
 printf '  %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ] && printf '  \033[32mAll checks passed.\033[0m\n' || printf '  \033[31mSome checks failed — see notes above.\033[0m\n'
