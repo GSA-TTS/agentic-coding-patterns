@@ -283,3 +283,24 @@ prohibited_content:
         tier1_matches, _ = scan_file(file_path)
 
         assert tier1_matches == [], f"unexpected matches: {tier1_matches}"
+
+    def test_dollar_leading_literal_still_flagged(self, tmp_path):
+        """A literal secret that merely STARTS with '$' (not a var ref) is still flagged.
+
+        Regression guard for the lookahead: skipping any '$'-leading value would
+        let ``password="$3cr3tLiteral"`` bypass detection. The lookahead only
+        skips genuine var-ref / cmd-sub shapes (``${...``, ``$(...``,
+        ``$<letter|underscore>``, backtick), so a '$' followed by a digit — a
+        valid shell literal, not a variable reference — must still be caught.
+        """
+        file_path = tmp_path / "app.sh"
+        file_path.write_text(
+            'password="$3cr3tLiteralPass"\n'
+            'api_key="$1234567890abcdef1234"\n'
+        )
+
+        tier1_matches, _ = scan_file(file_path)
+
+        descs = [desc.lower() for _, desc, _ in tier1_matches]
+        assert any("password" in d for d in descs), f"password literal not flagged: {tier1_matches}"
+        assert any("api key" in d for d in descs), f"api key literal not flagged: {tier1_matches}"
