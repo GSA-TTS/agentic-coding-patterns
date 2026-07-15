@@ -1,0 +1,176 @@
+#!/usr/bin/env bash
+#
+# verify — host-side validation for the openchamber sbx mixin kit.
+#
+# Run on a host where `sbx` (>= 0.35.0) is installed and logged in. It validates
+# the kit spec, creates a sandbox with the kit applied (paired with the USAi
+# provider so OpenCode has a model provider), and asserts that:
+#   - the OpenChamber CLI installed,
+#   - the startup wrapper landed,
+#   - the managed opencode server answers on 127.0.0.1:4096,
+#   - OpenChamber answers on 0.0.0.0:3000 inside the sandbox,
+#   - sbx published a host port for container 3000.
+#
+# It creates a temporary sandbox named "openchamber-verify-*" and removes it at
+# the end (and on interrupt). It does not touch your other sandboxes.
+#
+# Usage (from anywhere):
+#   path/to/openchamber/scripts/verify
+#   KEEP=1 path/to/.../scripts/verify        # keep the sandbox for inspection
+#
+# The USAi kit needs a USAi key; set one first if you want the managed server to
+# come up fully (`sbx secret set-custom -g --host api.gsa.usai.gov --env
+# USAI_API_KEY`). Without it, opencode serve may not start and the server checks
+# are reported as SKIP rather than FAIL.
+
+set -uo pipefail
+
+KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+# Sibling kits applied alongside, to mirror real GSA usage:
+#  - usai-provider-kit:      gives `opencode serve` a model provider.
+#  - zscaler-ca-certificate: populates the system trust store, which the startup
+#    install folds into NODE_EXTRA_CA_CERTS so the prebuilt better-sqlite3 binary
+#    downloads (rather than failing TLS and falling back to a source build).
+# Both are local paths here (the verify runs from a repo checkout).
+USAI_KIT_DIR="$(cd "$KIT_DIR/../usai-provider-kit" 2>/dev/null && pwd || true)"
+ZSCALER_KIT_DIR="$(cd "$KIT_DIR/../zscaler-ca-certificate" 2>/dev/null && pwd || true)"
+SBX_NAME="openchamber-verify-$$"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/openchamber-verify.XXXXXX")"
+CREATE_LOG="$WORK/sbx-create.log"
+KEEP="${KEEP:-0}"
+# How long to wait for the background startup, which on FIRST boot also installs
+# OpenChamber (npm install of a native dep). Override with READY_TIMEOUT.
+READY_TIMEOUT="${READY_TIMEOUT:-120}"
+# Poll interval while waiting. Small so failures surface quickly.
+POLL_INTERVAL="${POLL_INTERVAL:-2}"
+# Once the install is done, the servers should come up fast; stop waiting this
+# many seconds after install completes even if a server never answers, so a
+# broken serve/UI fails quickly instead of burning the whole READY_TIMEOUT.
+POST_INSTALL_GRACE="${POST_INSTALL_GRACE:-20}"
+
+pass=0
+fail=0
+ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass+1)); }
+bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail+1)); }
+skip() { printf '  \033[33mSKIP\033[0m %s\n' "$1"; }
+info() { printf '\n\033[1m%s\033[0m\n' "$1"; }
+
+cleanup() {
+  if [ "$KEEP" = "1" ]; then
+    printf '\nKEEP=1 set; leaving sandbox %s and %s in place.\n' "$SBX_NAME" "$WORK" >&2
+    return
+  fi
+  sbx rm -f "$SBX_NAME" >/dev/null 2>&1 || true
+  rm -rf "$WORK" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT INT TERM
+
+# Run a command in the sandbox, swallowing transient exec errors.
+in_sbx() { sbx exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true; }
+
+info "0. Preconditions"
+if ! command -v sbx >/dev/null 2>&1; then
+  echo "  sbx not on PATH. Install sbx >= 0.35.0 and retry." >&2
+  exit 1
+fi
+echo "  sbx version: $(sbx version 2>/dev/null | grep -oE 'v?[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1)"
+[ -f "$KIT_DIR/spec.yaml" ] && ok "kit spec.yaml present" || { bad "spec.yaml missing"; exit 1; }
+
+info "1. sbx kit validate"
+if sbx kit validate "$KIT_DIR" >/dev/null 2>&1; then ok "kit validates"; else bad "kit failed validation"; fi
+
+info "2. Create a sandbox with the kit"
+create_kits=(--kit "$KIT_DIR")
+if [ -n "$USAI_KIT_DIR" ] && [ -f "$USAI_KIT_DIR/spec.yaml" ]; then
+  create_kits+=(--kit "$USAI_KIT_DIR")
+  echo "  pairing with usai-provider kit at $USAI_KIT_DIR"
+else
+  echo "  NOTE: usai-provider kit not found next to this kit; creating without a" >&2
+  echo "        provider. 'opencode serve' may not fully start (server checks SKIP)." >&2
+fi
+if [ -n "$ZSCALER_KIT_DIR" ] && [ -f "$ZSCALER_KIT_DIR/spec.yaml" ]; then
+  create_kits+=(--kit "$ZSCALER_KIT_DIR")
+  echo "  pairing with zscaler-ca-certificate kit at $ZSCALER_KIT_DIR"
+else
+  echo "  NOTE: zscaler-ca-certificate kit not found next to this kit. On an" >&2
+  echo "        HTTPS-inspected network the OpenChamber install may fail TLS." >&2
+fi
+echo "  creating $SBX_NAME (workspace $WORK)..."
+# -D/--debug surfaces the underlying container-runtime error behind sbx's
+# generic "500 ... failed to run sandbox container". Set DEBUG=1 to include it.
+dbg=(); [ "${DEBUG:-0}" = "1" ] && dbg=(-D)
+# Expand dbg[@] safely: an empty array under `set -u` on bash 3.2 (macOS)
+# otherwise errors with "dbg[@]: unbound variable".
+if sbx ${dbg[@]+"${dbg[@]}"} create --name "$SBX_NAME" "${create_kits[@]}" opencode "$WORK" >"$CREATE_LOG" 2>&1; then
+  ok "sandbox created with --kit"
+else
+  bad "sbx create failed (exit $?)"
+  sed 's/^/  | /' "$CREATE_LOG" >&2
+  exit 1
+fi
+
+info "3. Wait for startup install + services (install up to ${READY_TIMEOUT}s, then ${POST_INSTALL_GRACE}s)"
+# Everything happens in the background startup step (install on first boot, then
+# opencode serve + OpenChamber), so poll rather than expecting it right after
+# create. The managed opencode server requires Basic auth; read the per-sandbox
+# password the kit generated so the health probe doesn't get a 401.
+PW_PATH='$HOME/.local/state/openchamber/opencode-server-password'
+oc_probe="curl -fsS -u \"opencode:\$(cat $PW_PATH 2>/dev/null)\" http://127.0.0.1:4096/global/health >/dev/null 2>&1 && echo yes"
+deadline=$(( $(date +%s) + READY_TIMEOUT ))
+installed=""; oc_up=""; chamber_up=""; grace_deadline=""
+while :; do
+  now=$(date +%s)
+  [ -z "$installed" ] && [ -n "$(in_sbx 'command -v openchamber')" ] && {
+    installed=yes
+    # Install done — the servers should appear within POST_INSTALL_GRACE.
+    grace_deadline=$(( now + POST_INSTALL_GRACE ))
+  }
+  [ -z "$oc_up" ] && [ "$(in_sbx "$oc_probe")" = "yes" ] && oc_up=yes
+  [ -z "$chamber_up" ] && [ "$(in_sbx 'curl -fsS http://127.0.0.1:3000 >/dev/null 2>&1 && echo yes')" = "yes" ] && chamber_up=yes
+  [ -n "$installed" ] && [ -n "$oc_up" ] && [ -n "$chamber_up" ] && break
+  # Stop conditions: overall deadline, or the post-install grace elapsed.
+  [ "$now" -ge "$deadline" ] && break
+  [ -n "$grace_deadline" ] && [ "$now" -ge "$grace_deadline" ] && break
+  sleep "$POLL_INTERVAL"
+done
+
+if [ -n "$installed" ]; then
+  ok "OpenChamber CLI installed by the startup step"
+else
+  bad "openchamber not installed (see /tmp/openchamber-install.log)"
+  in_sbx 'tail -n 25 /tmp/openchamber-install.log' | sed 's/^/    | /'
+fi
+
+info "4. Managed opencode server"
+if [ -n "$oc_up" ]; then
+  ok "managed opencode server answers on 127.0.0.1:4096"
+elif [ -n "$USAI_KIT_DIR" ]; then
+  bad "managed opencode server did not answer on :4096 (see /tmp/opencode-serve.log)"
+  in_sbx 'tail -n 20 /tmp/opencode-serve.log' | sed 's/^/    | /'
+else
+  skip "opencode server on :4096 (no provider configured — expected without USAi key)"
+fi
+
+info "5. OpenChamber web server"
+if [ -n "$chamber_up" ]; then
+  ok "OpenChamber answers on 127.0.0.1:3000 inside the sandbox"
+else
+  bad "OpenChamber did not answer on :3000 (see /tmp/openchamber.log)"
+  in_sbx 'tail -n 20 /tmp/openchamber.log' | sed 's/^/    | /'
+fi
+
+info "6. Host port published for container 3000"
+ports_out="$(sbx ports "$SBX_NAME" 2>/dev/null || true)"
+if printf '%s' "$ports_out" | grep -q '3000'; then
+  ok "sbx ports maps container 3000 to a host port"
+  printf '%s\n' "$ports_out" | sed 's/^/    | /'
+else
+  bad "no host mapping for container 3000 in 'sbx ports' output"
+  printf '%s\n' "$ports_out" | sed 's/^/    | /'
+fi
+
+info "Summary"
+printf '  %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ] && printf '  \033[32mAll checks passed.\033[0m\n' || printf '  \033[31mSome checks failed — see notes above.\033[0m\n'
+
+[ "$fail" -eq 0 ]

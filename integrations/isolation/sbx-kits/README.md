@@ -16,6 +16,7 @@ not agent behavior. (Behavioral patterns live in `skills/`, `prompts/`, etc.)
 | [`playbook-kit/`](playbook-kit/) | Clone the GSA agentic-coding-playbook at startup and link its `AGENTS.md` + skills into each agent's search paths. |
 | [`zscaler-ca-certificate/`](zscaler-ca-certificate/) | Install the public Zscaler Root CA into the sandbox trust store, so HTTPS works on Zscaler-inspected hosts. |
 | [`git-ssh-sign/`](git-ssh-sign/) | Sign git commits and tags with the SSH key forwarded from the host agent (vendored from sbx-kits-contrib). |
+| [`openchamber/`](openchamber/) | Run OpenChamber, a browser UI for OpenCode, inside the sandbox alongside the terminal TUI. Opt-in (not a default kit). |
 
 Each kit is self-contained: a `spec.yaml`, any `files/` payload, a
 `scripts/verify` host-side check, a `README.md`, a `TROUBLESHOOTING.md`, and
