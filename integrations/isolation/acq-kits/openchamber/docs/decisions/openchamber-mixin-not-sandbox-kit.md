@@ -46,8 +46,9 @@ makes the TUI expose a fixed server (verified against the opencode source:
 
 ## Consequences
 
-- The kit composes with `usai-provider`, `playbook-kit`, `zscaler-ca-certificate`,
-  and `git-ssh-sign` via repeated `--kit` flags — no changes to `acq`/`qsbx`.
+- The kit composes with `usai-provider`, `agentic-coding-playbook`,
+  `zscaler-ca-certificate`, and `git-ssh-sign` via `acq`'s kit application — no
+  changes to `acq`.
 - The default TUI and the OpenChamber browser do **not** share live session
   state by default. This is surfaced prominently to users (it's the most likely
   source of confusion) with a one-command workaround.

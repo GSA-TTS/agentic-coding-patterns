@@ -5,19 +5,18 @@ to a sandbox (see [README.md](README.md#usage)).
 
 ## The browser page won't load / no host port
 
-**Symptoms:** `sbx ports <sandbox>` shows no mapping for container port 3000, or
-the browser can't connect.
+**Symptoms:** `acq ports <sandbox>` (`sbx ports <sandbox>`) shows no mapping for
+container port 3000, or the browser can't connect.
 
-**Cause:** `publishedPorts` is an immutable, create-time setting. If the kit was
-added to an already-running sandbox with `sbx kit add`, the port mapping is
-skipped (sbx warns and continues).
+**Cause:** the published port is an immutable, create-time setting. If the kit
+was added to an already-running sandbox, the port mapping is skipped (the backend
+warns and continues).
 
 **Fix:** recreate the sandbox with the kit applied at create time:
 
 ```bash
-sbx rm <sandbox>
+acq rm <sandbox>                       # (or sbx rm <sandbox>)
 acq run opencode /path/to/project      # with ACQ_EXTRA_KITS set (see README)
-# or: sbx run opencode --kit "git+…&dir=integrations/isolation/sbx-kits/openchamber" /path/to/project
 ```
 
 ## OpenChamber didn't start
@@ -31,22 +30,22 @@ come up (e.g. no model provider configured, so `opencode serve` exits).
 **Fix:** check the logs inside the sandbox:
 
 ```bash
-sbx exec <sandbox> -- sh -c 'cat /tmp/openchamber-install.log'   # first-boot install
-sbx exec <sandbox> -- sh -c 'cat /tmp/openchamber.log'
-sbx exec <sandbox> -- sh -c 'cat /tmp/opencode-serve.log'
-sbx exec <sandbox> -- sh -c 'openchamber status'
+acq exec <sandbox> -- sh -c 'cat /tmp/openchamber-install.log'   # first-boot install
+acq exec <sandbox> -- sh -c 'cat /tmp/openchamber.log'
+acq exec <sandbox> -- sh -c 'cat /tmp/opencode-serve.log'
+acq exec <sandbox> -- sh -c 'openchamber status'
 ```
 
 If `opencode serve` is failing, confirm a provider is configured — pair this kit
 with the `usai-provider` kit (the default GSA setup does). Both services run
 under a respawn loop, so a transient failure self-heals within a few seconds;
 if a service is *repeatedly* dying, the logs above will show recurring
-`[supervisor] ... restarting` lines. To reproduce a single run by hand (the
-startup script is inlined in the kit; the commands below run one instance
-without the loop):
+`[supervisor] ... restarting` lines. To reproduce a single run by hand (this
+runs one instance of each service without the supervisor loop, mirroring
+`files/home/openchamber-start.sh`):
 
 ```bash
-sbx exec <sandbox> -- sh -lc '
+acq exec <sandbox> -- sh -lc '
   PW="$(cat ~/.local/state/openchamber/opencode-server-password)"
   OPENCODE_SERVER_PASSWORD="$PW" nohup opencode serve --hostname 127.0.0.1 --port 4096 >/tmp/opencode-serve.log 2>&1 &
   OPENCODE_SKIP_START=true OPENCODE_PORT=4096 OPENCHAMBER_ALLOW_UNAUTHENTICATED_LAN=true \
@@ -74,7 +73,7 @@ comes back on the next cycle without a sandbox restart.
 To confirm exactly one supervisor is running per service:
 
 ```bash
-sbx exec <sandbox> -- sh -c 'pgrep -af "supervisor:"'
+acq exec <sandbox> -- sh -c 'pgrep -af "supervisor:"'
 ```
 
 ## OpenChamber failed to install (native build error)
@@ -94,16 +93,16 @@ download succeed; this error means one of those wasn't in effect.
 **Fix:** confirm the proxy env and CA are present, then re-trigger the startup:
 
 ```bash
-sbx exec <sandbox> -- sh -c 'echo "${HTTPS_PROXY:-unset}"; echo "PROXY_CA len=${#PROXY_CA_CERT_B64}"'
+acq exec <sandbox> -- sh -c 'echo "${HTTPS_PROXY:-unset}"; echo "PROXY_CA len=${#PROXY_CA_CERT_B64}"'
 # then restart the sandbox so the startup step re-runs the install:
-sbx stop <sandbox> && sbx run --name <sandbox>
+sbx stop <sandbox> && sbx run --name <sandbox>   # (sbx backend; use the equivalent acq restart)
 ```
 
 If the prebuilt still can't be fetched (blocked release-asset hosts), ensure
 `github.com`, `objects.githubusercontent.com`, and
 `release-assets.githubusercontent.com` are permitted — under org governance,
 kit `caps.network.allow` is superseded by org policy (`sbx policy log <sandbox>`
-shows what was blocked).
+shows what was blocked on the sbx backend).
 
 ## Node.js too old
 
@@ -147,7 +146,7 @@ If the hash you compute keeps changing for a fixed tag, treat that as suspicious
 from a terminal, attach with the per-sandbox password:
 
 ```bash
-sbx exec <sandbox> -- sh -lc \
+acq exec <sandbox> -- sh -lc \
   'OPENCODE_SERVER_PASSWORD="$(cat ~/.local/state/openchamber/opencode-server-password)" \
      opencode attach http://127.0.0.1:4096'
 ```
@@ -161,15 +160,16 @@ per-sandbox password is rejected.
 command above). Confirm the file exists:
 
 ```bash
-sbx exec <sandbox> -- sh -c 'test -s ~/.local/state/openchamber/opencode-server-password && echo present'
+acq exec <sandbox> -- sh -c 'test -s ~/.local/state/openchamber/opencode-server-password && echo present'
 ```
 
 ## Do multiple sandboxes fight over port 3000?
 
-**No.** `publishedPorts` declares the *container* port. sbx allocates a distinct
-**ephemeral host port on `127.0.0.1` per sandbox**, so several sandboxes running
-this kit each get their own host port — they don't collide. `sbx ports
-<sandbox>` shows which host port maps to container 3000 for that sandbox.
+**No.** The kit declares the *container* port; the sbx backend allocates a
+distinct **ephemeral host port on `127.0.0.1` per sandbox**, so several sandboxes
+running this kit each get their own host port — they don't collide. `acq ports
+<sandbox>` (`sbx ports <sandbox>`) shows which host port maps to container 3000
+for that sandbox.
 
 If you'd rather pin each to a known host port, publish them explicitly:
 

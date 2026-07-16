@@ -1,6 +1,28 @@
 # Decision: inline the startup script, avoid static files and initFiles
 
-**Status:** accepted
+**Status:** superseded (see "Update" below) — the script is now a `files/`
+payload in the neutral `hybrid/v1` kit.
+
+> **Update (acq-kits conversion, #223).** When this kit was converted from the
+> sbx `schemaVersion: "2"` spec to the neutral `hybrid/v1` spec, the startup
+> body was **extracted to `files/home/openchamber-start.sh`** and dropped via
+> `files[].source` — the opposite of the decision below. Why the reversal is
+> safe now:
+>
+> - The #118 crash was specific to sbx's create-time static-file **`content`**
+>   write hook. The neutral `files[].source` mechanism references a payload file
+>   in the kit tree (like `agentic-coding-playbook`'s `playbook-clone.sh` and
+>   `git-ssh-sign`'s key command), which each backend materializes with its
+>   native file-drop — not the metacharacter-fragile inline-content path.
+> - A `source:` payload has no `initFiles.content` placeholder restriction
+>   either, so `${VAR}` expansions survive verbatim.
+> - Extracting the script makes it lintable (`sh -n`, unsafe-shell scan) and
+>   testable on its own, matching the design doc §6 rationale the other acq-kits
+>   followed.
+>
+> The original context/decision is retained below for history.
+
+---
 
 ## Context
 
@@ -18,9 +40,11 @@ Three ways to get that script into the sandbox were tried, in order:
 2. **Static file under `files/home/.local/bin/`** — passed `sbx kit validate`,
    but `sbx create` failed at container start with a generic
    `500 ... failed to run sandbox container`. sbx's create-time static-file
-   write hook mishandles shell-metacharacter-heavy content (quotes, `$(...)`,
-   backslash continuations) — see docker/sbx-releases #118
-   ("[Kits] Crash on startup with some static files").
+   write hook (inline **`content`**) mishandles shell-metacharacter-heavy content
+   (quotes, `$(...)`, backslash continuations) — see docker/sbx-releases #118
+   ("[Kits] Crash on startup with some static files"). *(The neutral
+   `files[].source` payload mechanism used after the #223 conversion is a
+   different, working path — see the Update above.)*
 3. **Inline the script into `commands.startup`** — the script body is passed as
    the third element of an `sh -c` argv.
 

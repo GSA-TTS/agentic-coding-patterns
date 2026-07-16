@@ -1,38 +1,39 @@
 #!/usr/bin/env bash
 #
-# verify — host-side validation for the openchamber sbx mixin kit.
+# verify — host-side validation for the openchamber acq mixin kit.
 #
-# Run on a host where `sbx` (>= 0.35.0) is installed and logged in. It validates
-# the kit spec, creates a sandbox with the kit applied (paired with the USAi
-# provider so OpenCode has a model provider), and asserts that:
-#   - the OpenChamber CLI installed,
-#   - the startup wrapper landed,
-#   - the managed opencode server answers on 127.0.0.1:4096,
-#   - OpenChamber answers on 0.0.0.0:3000 inside the sandbox,
-#   - sbx published a host port for container 3000.
+# NOTE (hybrid/v1): the backend-agnostic gate is
+# integrations/isolation/acq-kits/validate-kits.py (schema + files[].source +
+# registry), run as check #1 below. The live sandbox portion drives the sbx
+# backend. Because this kit carries its port-publish + background hints in
+# backend_extras.sbx (the neutral spec models neither), a raw `sbx create --kit`
+# on the NEUTRAL spec would NOT publish the UI port — that translation is acq's
+# kit-translate layer (Phase 2 Part B). Until Part B lands, this script SKIPS the
+# live sandbox checks unless RUN_SBX=1 is set AND a translated sbx spec is
+# available, so it never reports a false FAIL for a translation gap that isn't
+# this kit's bug. The offline gate (check #1) always runs.
 #
-# It creates a temporary sandbox named "openchamber-verify-*" and removes it at
-# the end (and on interrupt). It does not touch your other sandboxes.
+# Run on a host where `sbx` (>= 0.35.0) is installed and logged in. The USAi kit
+# needs a USAi key; set one first if you want the managed server to come up fully
+# (`sbx secret set-custom -g --host api.gsa.usai.gov --env USAI_API_KEY`).
 #
 # Usage (from anywhere):
-#   path/to/openchamber/scripts/verify
-#   KEEP=1 path/to/.../scripts/verify        # keep the sandbox for inspection
-#
-# The USAi kit needs a USAi key; set one first if you want the managed server to
-# come up fully (`sbx secret set-custom -g --host api.gsa.usai.gov --env
-# USAI_API_KEY`). Without it, opencode serve may not start and the server checks
-# are reported as SKIP rather than FAIL.
+#   path/to/openchamber/scripts/verify           # offline gate only (default)
+#   RUN_SBX=1 path/to/.../scripts/verify         # also attempt the live sbx run
+#   KEEP=1 RUN_SBX=1 path/to/.../scripts/verify  # keep the sandbox for inspection
 
 set -uo pipefail
 
 KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-# Sibling kits applied alongside, to mirror real GSA usage:
-#  - usai-provider-kit:      gives `opencode serve` a model provider.
+# Repo root (…/agentic-coding-patterns) for the backend-agnostic validator.
+REPO_ROOT="$(cd "$KIT_DIR/../../../.." && pwd)"
+# Sibling acq-kits applied alongside, to mirror real GSA usage:
+#  - usai-provider:          gives `opencode serve` a model provider.
 #  - zscaler-ca-certificate: populates the system trust store, which the startup
 #    install folds into NODE_EXTRA_CA_CERTS so the prebuilt better-sqlite3 binary
 #    downloads (rather than failing TLS and falling back to a source build).
 # Both are local paths here (the verify runs from a repo checkout).
-USAI_KIT_DIR="$(cd "$KIT_DIR/../usai-provider-kit" 2>/dev/null && pwd || true)"
+USAI_KIT_DIR="$(cd "$KIT_DIR/../usai-provider" 2>/dev/null && pwd || true)"
 ZSCALER_KIT_DIR="$(cd "$KIT_DIR/../zscaler-ca-certificate" 2>/dev/null && pwd || true)"
 SBX_NAME="openchamber-verify-$$"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/openchamber-verify.XXXXXX")"
@@ -69,15 +70,41 @@ trap cleanup EXIT INT TERM
 in_sbx() { sbx exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true; }
 
 info "0. Preconditions"
+[ -f "$KIT_DIR/spec.yaml" ] && ok "kit spec.yaml present" || { bad "spec.yaml missing"; exit 1; }
+
+info "1. Validate the neutral kit spec"
+# This is a hybrid/v1 acq kit; the backend-agnostic gate is validate-kits.py
+# (schema + files[].source resolution + registry cross-check), not `sbx kit
+# validate` (which only understands the translated sbx spec). Prefer the neutral
+# validator; if it isn't runnable here, note it rather than silently skipping.
+if command -v python3 >/dev/null 2>&1 && [ -f "$REPO_ROOT/integrations/isolation/acq-kits/validate-kits.py" ]; then
+  if python3 "$REPO_ROOT/integrations/isolation/acq-kits/validate-kits.py" --root "$REPO_ROOT" >/dev/null 2>&1; then
+    ok "acq-kits validate-kits.py passes (schema + registry)"
+  else
+    bad "validate-kits.py failed (run it directly to see the error)"
+  fi
+else
+  skip "validate-kits.py not runnable here (needs python3 + jsonschema)"
+fi
+
+# The live sandbox portion (checks 2-7) needs the neutral spec translated to an
+# sbx spec (acq kit-translate, Part B) so the backend_extras.sbx port-publish +
+# background hints take effect. Until that's wired, only run it on explicit
+# opt-in, so the default run is the offline gate above and never a false FAIL.
+if [ "${RUN_SBX:-0}" != "1" ]; then
+  info "Live sandbox checks (2-7): SKIPPED"
+  echo "  Set RUN_SBX=1 to attempt the live sbx run (needs sbx + acq kit-translate)." >&2
+  info "Summary"
+  printf '  %d passed, %d failed\n' "$pass" "$fail"
+  [ "$fail" -eq 0 ] && printf '  \033[32mOffline gate passed.\033[0m\n' || printf '  \033[31mOffline gate failed — see above.\033[0m\n'
+  exit "$([ "$fail" -eq 0 ] && echo 0 || echo 1)"
+fi
+
 if ! command -v sbx >/dev/null 2>&1; then
-  echo "  sbx not on PATH. Install sbx >= 0.35.0 and retry." >&2
+  echo "  RUN_SBX=1 set but sbx not on PATH. Install sbx >= 0.35.0 and retry." >&2
   exit 1
 fi
 echo "  sbx version: $(sbx version 2>/dev/null | grep -oE 'v?[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1)"
-[ -f "$KIT_DIR/spec.yaml" ] && ok "kit spec.yaml present" || { bad "spec.yaml missing"; exit 1; }
-
-info "1. sbx kit validate"
-if sbx kit validate "$KIT_DIR" >/dev/null 2>&1; then ok "kit validates"; else bad "kit failed validation"; fi
 
 info "2. Create a sandbox with the kit"
 create_kits=(--kit "$KIT_DIR")
