@@ -82,9 +82,16 @@ command -v openchamber >/dev/null 2>&1 || {
 PW_FILE="$HOME/.local/state/openchamber/opencode-server-password"
 mkdir -p "$(dirname "$PW_FILE")"
 if [ ! -s "$PW_FILE" ]; then
+  # Prefer a real CSPRNG (openssl, then /dev/urandom). The last-ditch fallback
+  # is only reached if BOTH are unavailable — a broken box — and is a weak
+  # source of entropy, not a security guarantee. It avoids the bash-only
+  # $RANDOM (undefined in POSIX sh, shellcheck SC3028) and instead mixes the
+  # pid, a nanosecond timestamp, and awk's PRNG so the script stays sh-portable.
   ( openssl rand -hex 32 2>/dev/null \
     || head -c 32 /dev/urandom 2>/dev/null | od -An -tx1 | tr -d ' \n' \
-    || printf '%s%s%s%s' "$$" "$RANDOM" "$RANDOM" "$(date +%s)" ) > "$PW_FILE"
+    || printf '%s%s%s' "$$" "$(date +%s%N 2>/dev/null || date +%s)" \
+         "$(awk 'BEGIN{srand();printf "%08x%08x",int(rand()*2^31),int(rand()*2^31)}' 2>/dev/null)" \
+  ) > "$PW_FILE"
   chmod 600 "$PW_FILE"
 fi
 OPENCODE_SERVER_PASSWORD="$(cat "$PW_FILE")"
