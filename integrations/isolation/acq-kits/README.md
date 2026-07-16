@@ -50,6 +50,12 @@ vocabulary:
 - `backend_extras.<backend>` — free-form per-backend config the neutral spec
   doesn't model.
 
+> The `backend_shortcuts` / `backend_extras` values are **unconstrained
+> objects** — the schema fixes only the set of backend keys (`sbx`, `msb`,
+> `ppp`), not the shape of what's inside. Their content is **human-review-only,
+> not schema-enforced**. `ppp` (Podman) is a **reserved** backend slot for the
+> in-flight Phase 3 adapter; `sbx` and `msb` have live consumers today.
+
 The schema is [`schemas/kit-hybrid-v1.schema.json`](../../../schemas/kit-hybrid-v1.schema.json).
 
 ## Validating kits

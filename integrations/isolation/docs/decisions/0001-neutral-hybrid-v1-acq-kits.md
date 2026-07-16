@@ -111,6 +111,25 @@ primitive (the msb `--trust-host-cas` case) short-circuit the generic
 drift without forking the kit. Cross-backend parity is **advisory** — documented
 in each kit's README and the registry, not machine-enforced.
 
+The `backend_shortcuts.<backend>` / `backend_extras.<backend>` values are
+**deliberately unconstrained objects**: they are an escape hatch for
+backend-native config the neutral spec does not model. Their *shape* is
+**human-review-only — it is NOT schema-enforced** (the schema fixes only the set
+of backend keys, via `additionalProperties: false`). A reviewer, not the
+validator, is the control on what goes inside them.
+
+### Backend enum: `sbx`, `msb`, `ppp`
+
+The schema's backend enum and `KNOWN_BACKENDS` list three backends:
+
+- **`sbx`** — the current backend; live consumer.
+- **`msb`** — the Phase 2 in-flight backend; has an exercised consumer
+  (`zscaler.backend_shortcuts.msb.trust_host_cas`).
+- **`ppp`** — the Podman backend, **in active development and expected
+  imminently** (Phase 3). It is retained as a **reserved** slot (documented as
+  such in the schema descriptions) so the vocabulary and registry are ready when
+  its adapter lands; no kit declares a `ppp` shortcut yet.
+
 ## Consequences
 
 **Positive**

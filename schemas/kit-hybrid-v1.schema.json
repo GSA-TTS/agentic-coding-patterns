@@ -140,7 +140,7 @@
     "backend_shortcuts": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Per-backend native primitives that replace the declarative caps/files/commands path for that backend. Adapters check this first; when a shortcut is present for the active backend, caps/files/commands are skipped for this kit.",
+      "description": "Per-backend native primitives that replace the declarative caps/files/commands path for that backend. Adapters check this first; when a shortcut is present for the active backend, caps/files/commands are skipped for this kit. NOTE: each backend value is an unconstrained object (human-review-only; the shape is NOT schema-enforced). 'ppp' is a reserved slot for the in-flight Podman backend (Phase 3); 'sbx' and 'msb' have live consumers.",
       "properties": {
         "sbx": { "type": "object" },
         "msb": { "type": "object" },
@@ -150,7 +150,7 @@
     "backend_extras": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Free-form per-backend configuration the neutral spec does not model, kept in-spec so review covers it.",
+      "description": "Free-form per-backend configuration the neutral spec does not model. Each backend value is an unconstrained object: it is surfaced in-spec so a human reviewer sees it, but its shape is human-review-only and NOT schema-enforced. 'ppp' is reserved for the in-flight Podman backend (Phase 3).",
       "properties": {
         "sbx": { "type": "object" },
         "msb": { "type": "object" },

@@ -33,8 +33,8 @@ install-hooks:  ## Install pre-commit hooks (opt-in for contributors)
 validate:  ## Run all validators (frontmatter + sensitive terms)
 	python scripts/validate_repo.py
 
-validate-kits:  ## Validate neutral acq-kits specs against the hybrid/v1 schema
-	python integrations/isolation/acq-kits/validate-kits.py
+validate-kits:  ## Validate neutral acq-kits specs against the hybrid/v1 schema (strict: warnings fail)
+	python integrations/isolation/acq-kits/validate-kits.py --strict
 
 test-kits:  ## Run the acq-kits node test suites (usai-provider generator + merge)
 	@if command -v node >/dev/null 2>&1; then \
@@ -100,7 +100,7 @@ ci:  ## Full CI check (validate + security + test + pre-commit checks)
 	python scripts/scan_unsafe_shell.py .
 	@echo ""
 	@echo "==> Validating acq-kits (hybrid/v1 schema)..."
-	python integrations/isolation/acq-kits/validate-kits.py
+	python integrations/isolation/acq-kits/validate-kits.py --strict
 	@echo ""
 	@echo "==> Running security audit..."
 	pip-audit
