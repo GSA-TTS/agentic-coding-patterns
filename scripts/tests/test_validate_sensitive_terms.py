@@ -294,10 +294,7 @@ prohibited_content:
         valid shell literal, not a variable reference — must still be caught.
         """
         file_path = tmp_path / "app.sh"
-        file_path.write_text(
-            'password="$3cr3tLiteralPass"\n'
-            'api_key="$1234567890abcdef1234"\n'
-        )
+        file_path.write_text('password="$3cr3tLiteralPass"\napi_key="$1234567890abcdef1234"\n')
 
         tier1_matches, _ = scan_file(file_path)
 
