@@ -32,12 +32,3 @@ reference `sbx-kits/…` do not break abruptly. The old kit contents below this
 README are retained, unchanged, as historical reference and will be removed in a
 later release (tracked with the Phase 4 cleanup). **Do not add new work here** —
 edit the kits under `../acq-kits/` instead.
-
-## Still here: `openchamber/`
-
-The opt-in [`openchamber/`](openchamber/) kit (a browser UI for OpenCode) still
-lives here as a `schemaVersion: "2"` **sbx** kit. It landed alongside the
-`acq-kits/` migration and has not yet been converted to `hybrid/v1`/moved under
-`../acq-kits/`; that conversion is tracked as a follow-up. Until then, apply it
-by its `sbx-kits/openchamber` path as documented in its
-[README](openchamber/README.md).

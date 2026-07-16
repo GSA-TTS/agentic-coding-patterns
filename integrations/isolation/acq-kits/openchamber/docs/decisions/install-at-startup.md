@@ -2,6 +2,12 @@
 
 **Status:** accepted
 
+> **Neutral-spec note (acq-kits conversion, #223).** This decision carries over
+> unchanged to the `hybrid/v1` spec: the neutral `commands[].phase` vocabulary
+> has the same `install` (root, create-time once) vs `startup` (every start)
+> split, and this kit uses **`startup`** for exactly the reason below. The
+> sbx-specific `sbx create` / 500 detail is retained as the original evidence.
+
 ## Context
 
 OpenChamber is installed via `npm install -g @openchamber/web`. That package

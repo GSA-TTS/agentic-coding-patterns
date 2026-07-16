@@ -42,14 +42,16 @@ running it.** The startup script:
    install (UI unavailable, sandbox healthy) rather than piping unverified bytes
    to a shell.
 
-Both pins live in `environment.variables` (with matching fallback defaults in the
-startup script) and are bumped together to adopt a newer release.
+Both pins live in the startup command's environment (with matching fallback
+defaults in `files/home/openchamber-start.sh`) and are bumped together to adopt a
+newer release.
 
 ## Why content SHA-256, not a git commit SHA
 
-`playbook-kit` clones a git repo, so it can verify a commit SHA. This kit fetches
-a single raw file over HTTP, so the meaningful integrity anchor is the SHA-256 of
-the exact bytes piped to bash. Re-pin the hash whenever `OPENCHAMBER_REF` changes:
+`agentic-coding-playbook` clones a git repo, so it can verify a commit SHA. This
+kit fetches a single raw file over HTTP, so the meaningful integrity anchor is
+the SHA-256 of the exact bytes piped to bash. Re-pin the hash whenever
+`OPENCHAMBER_REF` changes:
 
 ```sh
 curl -fsSL "https://raw.githubusercontent.com/openchamber/openchamber/<ref>/scripts/install.sh" | sha256sum
@@ -69,5 +71,6 @@ curl -fsSL "https://raw.githubusercontent.com/openchamber/openchamber/<ref>/scri
 ## Links
 
 - PR #220 review — requested pinning the installer per the repo's SHA-pin model.
-- `../../playbook-kit/spec.yaml` — the sibling SHA-pin precedent (tag + commit SHA).
+- `../../agentic-coding-playbook/files/home/playbook-clone.sh` — the sibling
+  SHA-pin precedent (tag + commit SHA over a clone).
 - `install-at-startup.md` — why the install runs at startup at all.

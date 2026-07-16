@@ -42,3 +42,17 @@ kits:
       msb uses `msb ssh authorize` + agent forwarding). The signing key is
       resolved at signing time; no key material is written at create. No backend
       shortcut — SSH-agent forwarding is the shared mechanism.
+
+  openchamber:
+    backends: [sbx]
+    parity: |
+      Opt-in browser UI for OpenCode. sbx-only for now: the kit needs a
+      published container port (3000 → an ephemeral host loopback port per
+      sandbox) and a background startup hook, both expressed via
+      backend_extras.sbx (publishedPorts + background). The neutral spec models
+      neither port publishing nor a background flag, so msb/ppp support is
+      deferred until acq defines a neutral port-publish + background vocabulary
+      (or the msb adapter grows an equivalent extra). The install+supervise
+      script itself (files/home/openchamber-start.sh) is backend-agnostic — the
+      only gap is the port/background plumbing. Tracked as a follow-up on #223.
+
