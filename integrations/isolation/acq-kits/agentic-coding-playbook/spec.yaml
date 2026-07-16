@@ -1,0 +1,83 @@
+# spec.yaml — agentic-coding-playbook (a neutral acq mixin kit, hybrid/v1)
+#
+# Delivers the GSA agentic-coding-playbook (federal AGENTS.md rules + Agent
+# Skills) into a sandbox. At startup it clones the playbook at a pinned ref and
+# symlinks its AGENTS.md and skills into every supported agent's search paths.
+#
+# NEUTRAL (backend-agnostic) form. Converted from the former sbx kit in Phase 2;
+# see integrations/isolation/docs/decisions/0001-neutral-hybrid-v1-acq-kits.md.
+# The inline startup shell of the old sbx kit was extracted into a tested,
+# standalone script (files/home/playbook-clone.sh) per the acq design doc §6.
+#
+# Behavior (unchanged):
+#   - caps.network: allow egress to GitHub so the clone can run.
+#   - files: drop the clone/link script into the agent home.
+#   - commands (phase startup, agent uid): run the script. It is idempotent
+#     (clone-if-missing) and NON-FATAL (warns + exits 0 on any failure, so the
+#     sandbox still starts and self-heals on a later start).
+#
+# Pinning: the playbook ref + integrity SHA are passed to the script via the
+# startup command's own environment (the neutral spec has no environment block;
+# the pins live in the command and as fallback defaults inside the script — keep
+# the two in sync). The tag is a MUTABLE ref over a possibly MITM-inspected path,
+# so the script verifies HEAD == PLAYBOOK_SHA and refuses to link on mismatch.
+#
+# GitHub auth (while the playbook repo is PRIVATE): this kit does NOT declare a
+# github credential. The base agent sandbox already provides one; acq's backend
+# injects it on the outbound clone. This kit only allow-lists the egress.
+schemaVersion: "hybrid/v1"
+kind: mixin
+name: agentic-coding-playbook
+displayName: Agentic Coding Playbook (federal rules + skills)
+description: >
+  Clones the GSA agentic-coding-playbook at a pinned ref at container startup and
+  links its AGENTS.md and Agent Skills into each supported agent's search paths
+  (OpenCode, Claude Code, Codex, Copilot, Cursor, Droid, Kiro, Docker Agent).
+  Degrades gracefully (warns and continues) when the clone is unavailable;
+  self-heals on a later start. Relies on the base sandbox's github credential for
+  cloning while the playbook repo is private.
+
+caps:
+  network:
+    allow:
+      # git clone over HTTPS hits github.com; the smart-HTTP pack fetch for a
+      # shallow clone is served from codeload.github.com. Pinned to the minimal
+      # set. Network allow lists union across kits.
+      - github.com:443
+      - codeload.github.com:443
+
+files:
+  - path: /home/agent/playbook-clone.sh
+    mode: "0755"
+    source: files/home/playbook-clone.sh
+    description: Clone the playbook at the pinned ref and link rules + skills
+
+commands:
+  # Run the extracted clone/link script as the agent user at every start. The
+  # pins are exported here (the script also carries matching fallback defaults);
+  # bump BOTH together with the script's defaults to adopt a newer playbook.
+  - phase: startup
+    user: "1000"
+    description: Clone the playbook at the pinned ref and link rules + skills
+    command:
+      - sh
+      - -c
+      - |
+        PLAYBOOK_REF="v0.14.0" \
+        PLAYBOOK_SHA="cfadbc32b079d85c6328a20d3dadc583faa8aef1" \
+          sh /home/agent/playbook-clone.sh
+
+agentContext: |
+  ## Agentic Coding Playbook
+
+  The GSA agentic-coding-playbook is cloned into `~/.agentic-coding-playbook` and
+  its `AGENTS.md` (federal behavioral rules) plus its Agent Skills are linked into
+  your search paths. Follow the playbook's rules; use its skills when a task
+  matches one. If the clone was unavailable at start, the playbook may be absent —
+  it self-heals on a later start.
+
+# No backend shortcuts: every backend allow-lists github.com and runs the same
+# clone+link script at startup. GitHub token handled by the backend, not the kit.
+backend_shortcuts:
+  sbx: {}
+  msb: {}

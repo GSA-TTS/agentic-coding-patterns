@@ -1,4 +1,4 @@
-.PHONY: setup validate generate generate-check test coverage security ci clean search install-hooks help
+.PHONY: setup validate validate-kits test-kits generate generate-check test coverage security ci clean search install-hooks help
 
 help:  ## Show this help message
 	@echo "agentic-coding-patterns — Available targets:"
@@ -32,6 +32,17 @@ install-hooks:  ## Install pre-commit hooks (opt-in for contributors)
 
 validate:  ## Run all validators (frontmatter + sensitive terms)
 	python scripts/validate_repo.py
+
+validate-kits:  ## Validate neutral acq-kits specs against the hybrid/v1 schema (strict: warnings fail)
+	python integrations/isolation/acq-kits/validate-kits.py --strict
+
+test-kits:  ## Run the acq-kits node test suites (usai-provider generator + merge)
+	@if command -v node >/dev/null 2>&1; then \
+		echo "==> usai-provider kit tests"; \
+		cd integrations/isolation/acq-kits/usai-provider && node --test 'tests/**/*.test.mjs'; \
+	else \
+		echo "⚠️  node not installed — skipping acq-kits node tests"; \
+	fi
 
 scan-shell:  ## Scan shell scripts + markdown bash blocks for unsafe patterns (#154)
 	python scripts/scan_unsafe_shell.py .
@@ -88,6 +99,9 @@ ci:  ## Full CI check (validate + security + test + pre-commit checks)
 	@echo "==> Scanning for unsafe shell patterns..."
 	python scripts/scan_unsafe_shell.py .
 	@echo ""
+	@echo "==> Validating acq-kits (hybrid/v1 schema)..."
+	python integrations/isolation/acq-kits/validate-kits.py --strict
+	@echo ""
 	@echo "==> Running security audit..."
 	pip-audit
 	@echo ""
@@ -97,6 +111,9 @@ ci:  ## Full CI check (validate + security + test + pre-commit checks)
 	else \
 		echo "⚠️  No tests found — skipping"; \
 	fi
+	@echo ""
+	@echo "==> Running acq-kits node tests..."
+	@$(MAKE) --no-print-directory test-kits
 	@echo ""
 	@echo "✓ All checks passed"
 

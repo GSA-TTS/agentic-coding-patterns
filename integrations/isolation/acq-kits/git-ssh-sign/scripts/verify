@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+#
+# verify — host-side validation for the git-ssh-sign acq mixin kit.
+#
+# NOTE (hybrid/v1): this drives the sbx path directly. acq's kit-translate layer
+# (Phase 2 Part B) emits the sbx-native ops from this neutral spec; per-backend
+# SSH-agent forwarding differences are covered in Part B's scripts/verify-backends.
+# The backend-agnostic gate is integrations/isolation/acq-kits/validate-kits.py.
+# Live sandbox verification is otherwise deferred (CI here cannot nest sandboxes).
+#
+# Run on a host where `sbx` (>= 0.34.0) is installed and logged in, AND with a
+# signing key loaded in your SSH agent (`ssh-add ~/.ssh/id_ed25519`). It
+# validates the kit spec, creates a sandbox with the kit applied, and confirms
+# git's system-level SSH signing config is in place and the signing key command
+# resolves the forwarded agent key. As a full end-to-end check it also makes a
+# throwaway signed commit and verifies the signature.
+#
+# It creates a temporary sandbox named "git-ssh-sign-verify-*" and removes it at
+# the end (and on interrupt). It does not touch your other sandboxes. No secret
+# is written — the private key stays in your host's SSH agent.
+#
+# Usage (from anywhere):
+#   path/to/git-ssh-sign/scripts/verify
+#   KEEP=1 path/to/.../scripts/verify        # keep the sandbox for inspection
+
+set -uo pipefail
+
+KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+SBX_NAME="git-ssh-sign-verify-$$"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/git-ssh-sign-verify.XXXXXX")"
+CREATE_LOG="$WORK/sbx-create.log"
+KEEP="${KEEP:-0}"
+
+pass=0
+fail=0
+ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass+1)); }
+bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail+1)); }
+info() { printf '\n\033[1m%s\033[0m\n' "$1"; }
+
+cleanup() {
+  if [ "$KEEP" = "1" ]; then
+    printf '\nKEEP=1 set; leaving sandbox %s and %s in place.\n' "$SBX_NAME" "$WORK" >&2
+    return
+  fi
+  sbx rm -f "$SBX_NAME" >/dev/null 2>&1 || true
+  rm -rf "$WORK" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT INT TERM
+
+in_sbx() { sbx exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true; }
+
+info "0. Preconditions"
+if ! command -v sbx >/dev/null 2>&1; then
+  echo "  sbx not on PATH. Install sbx >= 0.34.0 and retry." >&2
+  exit 1
+fi
+echo "  sbx version: $(sbx version 2>/dev/null | grep -oE 'v?[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1)"
+[ -f "$KIT_DIR/spec.yaml" ] && ok "kit spec.yaml present" || { bad "spec.yaml missing"; exit 1; }
+if ssh-add -L >/dev/null 2>&1; then
+  ok "host SSH agent has a key loaded (signing can succeed)"
+else
+  echo "  NOTE: no key in the host SSH agent. The kit installs fine, but signing" >&2
+  echo "        will fail until you run: ssh-add ~/.ssh/id_ed25519" >&2
+fi
+
+info "1. sbx kit validate"
+if sbx kit validate "$KIT_DIR" >/dev/null 2>&1; then ok "kit validates"; else bad "kit failed validation"; fi
+
+info "2. Create a sandbox with the kit"
+echo "  creating $SBX_NAME (workspace $WORK)..."
+if sbx create --name "$SBX_NAME" --kit "$KIT_DIR" opencode "$WORK" >"$CREATE_LOG" 2>&1; then
+  ok "sandbox created with --kit"
+else
+  bad "sbx create failed (exit $?)"
+  sed 's/^/  | /' "$CREATE_LOG" >&2
+  exit 1
+fi
+
+info "3. System signing config is in place"
+[ "$(in_sbx 'git config --system --get gpg.format')" = "ssh" ] \
+  && ok "gpg.format = ssh" || bad "gpg.format not ssh"
+[ "$(in_sbx 'git config --system --get commit.gpgSign')" = "true" ] \
+  && ok "commit.gpgSign = true" || bad "commit.gpgSign not true"
+[ "$(in_sbx 'git config --system --get tag.gpgSign')" = "true" ] \
+  && ok "tag.gpgSign = true" || bad "tag.gpgSign not true"
+[ "$(in_sbx 'test -x "$HOME/.config/git/ssh-signing-key-command" && echo yes')" = "yes" ] \
+  && ok "signing-key command present and executable" || bad "signing-key command missing"
+
+info "4. End-to-end signed commit (requires a key in the forwarded agent)"
+if [ "$(in_sbx 'ssh-add -L >/dev/null 2>&1 && echo yes')" = "yes" ]; then
+  out=$(in_sbx '
+    set -e
+    d=$(mktemp -d)
+    cd "$d"
+    git init -q
+    git config user.email verify@example.com
+    git config user.name "Verify"
+    echo hi > f
+    git add f
+    git commit -q -m "signed test" >/dev/null 2>&1
+    git log --show-signature -1 2>&1 | grep -qiE "good .* signature|ssh key" && echo SIGNED || echo UNSIGNED
+  ')
+  [ "$out" = "SIGNED" ] && ok "commit was signed and verified" || bad "commit not signed (got: ${out:-none})"
+else
+  echo "  SKIP: no key in the forwarded SSH agent inside the sandbox." >&2
+  echo "        Load one on the host (ssh-add) and re-run for the full check." >&2
+fi
+
+info "Summary"
+printf '  %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ] && printf '  \033[32mAll checks passed.\033[0m\n' || printf '  \033[31mSome checks failed — see notes above.\033[0m\n'
+
+[ "$fail" -eq 0 ]
