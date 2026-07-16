@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gsa-tts.github.io/agentic-coding-patterns/schemas/kit-hybrid-v1.schema.json",
+  "title": "acq Neutral Kit Schema (hybrid/v1)",
+  "description": "Schema for the neutral, backend-agnostic acq kit spec (schemaVersion: \"hybrid/v1\"). Captures the declarative parts of an isolation-sandbox mixin kit (network egress, files to drop, lifecycle commands, agent context) in a vocabulary shared across acq backends (sbx, msb, ppp), plus per-backend shortcuts and extras. See integrations/isolation/docs/decisions/0001-neutral-hybrid-v1-acq-kits.md and the acq-design.md exploration (quickstart repo) for rationale.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "kind",
+    "name",
+    "displayName",
+    "description"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "hybrid/v1",
+      "description": "Must be exactly the string \"hybrid/v1\"."
+    },
+    "kind": {
+      "type": "string",
+      "const": "mixin",
+      "description": "Only mixin kits are modeled by hybrid/v1 today (they layer onto a base agent sandbox)."
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$",
+      "description": "Kit identifier. Kebab-case, 1-64 chars, starts/ends alphanumeric. SHOULD equal the containing directory name."
+    },
+    "displayName": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable kit name."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "description": "One-paragraph summary of what the kit does."
+    },
+    "caps": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Sandbox capabilities the kit requires.",
+      "properties": {
+        "network": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "allow": {
+              "type": "array",
+              "description": "Outbound egress allow-list. Hostnames, optionally with :port (default 443). Each backend maps these to its native egress primitive.",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "files": {
+      "type": "array",
+      "description": "Files to drop into the guest. Each backend materializes these via its native file-drop mechanism.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "mode"],
+        "oneOf": [
+          { "required": ["source"] },
+          { "required": ["content"] }
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "pattern": "^/",
+            "description": "Absolute path inside the sandbox."
+          },
+          "mode": {
+            "type": "string",
+            "pattern": "^0[0-7]{3}$",
+            "description": "Octal file mode as a string, e.g. \"0644\"."
+          },
+          "source": {
+            "type": "string",
+            "pattern": "^files/",
+            "description": "Path (relative to the kit dir, under files/) to the payload file. Preferred over inline content for multi-line payloads. Mutually exclusive with content."
+          },
+          "content": {
+            "type": "string",
+            "description": "Inline file content. Use for short blobs (e.g. a PEM); prefer source for larger payloads. Mutually exclusive with source."
+          },
+          "phase": {
+            "type": "string",
+            "enum": ["initFiles"],
+            "description": "Optional lifecycle phase hint for when the file is written (default: written before commands run)."
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "commands": {
+      "type": "array",
+      "description": "Lifecycle commands, in neutral phase vocabulary. Adapters map each phase to the backend's native hook.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["phase", "command"],
+        "properties": {
+          "phase": {
+            "type": "string",
+            "enum": ["install", "initFiles", "startup"],
+            "description": "install = root, create-time once; initFiles = agent uid, every start after base setup; startup = every start after initFiles."
+          },
+          "user": {
+            "type": "string",
+            "pattern": "^[0-9]+$",
+            "description": "Numeric uid to run as (e.g. \"0\" root, \"1000\" agent). Defaults are phase-specific if omitted."
+          },
+          "description": {
+            "type": "string"
+          },
+          "command": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            },
+            "description": "argv form (list of strings). To run a shell snippet, use [\"sh\", \"-c\", \"...\"]."
+          }
+        }
+      }
+    },
+    "agentContext": {
+      "type": "string",
+      "description": "Markdown context surfaced to the agent (written to the agent context root by each backend)."
+    },
+    "backend_shortcuts": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Per-backend native primitives that replace the declarative caps/files/commands path for that backend. Adapters check this first; when a shortcut is present for the active backend, caps/files/commands are skipped for this kit. NOTE: each backend value is an unconstrained object (human-review-only; the shape is NOT schema-enforced). 'ppp' is a reserved slot for the in-flight Podman backend (Phase 3); 'sbx' and 'msb' have live consumers.",
+      "properties": {
+        "sbx": { "type": "object" },
+        "msb": { "type": "object" },
+        "ppp": { "type": "object" }
+      }
+    },
+    "backend_extras": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Free-form per-backend configuration the neutral spec does not model. Each backend value is an unconstrained object: it is surfaced in-spec so a human reviewer sees it, but its shape is human-review-only and NOT schema-enforced. 'ppp' is reserved for the in-flight Podman backend (Phase 3).",
+      "properties": {
+        "sbx": { "type": "object" },
+        "msb": { "type": "object" },
+        "ppp": { "type": "object" }
+      }
+    }
+  }
+}

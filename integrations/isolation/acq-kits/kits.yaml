@@ -1,0 +1,44 @@
+# acq-kits registry — human-readable parity summary.
+#
+# Maps each neutral (schemaVersion: "hybrid/v1") kit to the backends that
+# support it and a prose parity note describing any per-backend capability
+# difference. For Phase 2 the supported backends are sbx and msb; ppp arrives in
+# Phase 3. Parity is ADVISORY (documented, not machine-enforced) — the source of
+# truth for a per-backend difference is the kit's spec.yaml backend_shortcuts and
+# its README parity note.
+#
+# See integrations/isolation/docs/decisions/0001-neutral-hybrid-v1-acq-kits.md.
+schemaVersion: "acq-kits-registry/v1"
+
+kits:
+  usai-provider:
+    backends: [sbx, msb]
+    parity: |
+      Both backends allow-list api.gsa.usai.gov, drop the USAi opencode.jsonc +
+      merge script, and run the startup merge into OpenCode's global config. No
+      backend shortcut. The USAi API key is injected at runtime by acq via the
+      active backend's credential path (never stored in the kit).
+
+  agentic-coding-playbook:
+    backends: [sbx, msb]
+    parity: |
+      Both backends allow-list github.com / codeload.github.com and run the same
+      clone+link script (files/home/playbook-clone.sh) at sandbox startup, with
+      the PLAYBOOK_SHA integrity gate. No backend shortcut. The GitHub token
+      (while the playbook repo is private) is injected per-backend by acq.
+
+  zscaler-ca-certificate:
+    backends: [sbx, msb]
+    parity: |
+      msb uses the native --trust-host-cas shortcut (host-trusted CAs imported
+      into the guest at boot); sbx (and ppp later) use the file-drop +
+      update-ca-certificates mechanism. Behavioral parity: the guest ends up
+      trusting the Zscaler CA either way.
+
+  git-ssh-sign:
+    backends: [sbx, msb]
+    parity: |
+      Both backends forward the host SSH agent (sbx forwards the agent socket;
+      msb uses `msb ssh authorize` + agent forwarding). The signing key is
+      resolved at signing time; no key material is written at create. No backend
+      shortcut — SSH-agent forwarding is the shared mechanism.

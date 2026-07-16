@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+#
+# verify — host-side validation for the zscaler-ca-certificate acq mixin kit.
+#
+# NOTE (hybrid/v1): this is the sbx-path (file-drop) end-to-end check. On msb the
+# CA trust is established by the native --trust-host-cas shortcut (see spec.yaml
+# backend_shortcuts), verified in Part B's scripts/verify-backends, not here. The
+# backend-agnostic gate is integrations/isolation/acq-kits/validate-kits.py. Live
+# sandbox verification is otherwise deferred (CI here cannot nest sandboxes).
+#
+# Run on a host where `sbx` (>= 0.34.0) is installed and logged in. It validates
+# the kit spec, creates a sandbox with the kit applied, and confirms the Zscaler
+# Root CA was installed into the system trust store (the cert file landed, its
+# fingerprint matches the cert embedded in spec.yaml, and update-ca-certificates
+# wired it into /etc/ssl/certs).
+#
+# It creates a temporary sandbox named "zscaler-ca-verify-*" and removes it at
+# the end (and on interrupt). It does not touch your other sandboxes. Nothing
+# here is secret — a root CA certificate is public.
+#
+# Usage (from anywhere):
+#   path/to/zscaler-ca-certificate/scripts/verify
+#   KEEP=1 path/to/.../scripts/verify        # keep the sandbox for inspection
+#
+# No prerequisites beyond sbx itself: the certificate is embedded in the kit's
+# spec.yaml (commands.initFiles), so there is no secret to set and no egress to
+# allow.
+
+set -uo pipefail
+
+KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+SPEC_FILE="$KIT_DIR/spec.yaml"
+SBX_NAME="zscaler-ca-verify-$$"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/zscaler-ca-verify.XXXXXX")"
+CREATE_LOG="$WORK/sbx-create.log"
+# Host-side copy of the cert, extracted from spec.yaml's inlined initFiles PEM.
+CERT_FILE="$WORK/zscaler-ca-from-spec.crt"
+KEEP="${KEEP:-0}"
+INSTALLED_PATH="/usr/local/share/ca-certificates/zscaler-ca.crt"
+
+pass=0
+fail=0
+ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass+1)); }
+bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail+1)); }
+info() { printf '\n\033[1m%s\033[0m\n' "$1"; }
+
+cleanup() {
+  if [ "$KEEP" = "1" ]; then
+    printf '\nKEEP=1 set; leaving sandbox %s and %s in place.\n' "$SBX_NAME" "$WORK" >&2
+    return
+  fi
+  sbx rm -f "$SBX_NAME" >/dev/null 2>&1 || true
+  rm -rf "$WORK" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT INT TERM
+
+in_sbx() { sbx exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true; }
+
+# Normalize an openssl SHA-256 fingerprint line to just the hex (upper, colons).
+fp_of() { openssl x509 -in "$1" -noout -fingerprint -sha256 2>/dev/null | sed -E 's/.*=//'; }
+
+info "0. Preconditions"
+if ! command -v sbx >/dev/null 2>&1; then
+  echo "  sbx not on PATH. Install sbx >= 0.34.0 and retry." >&2
+  exit 1
+fi
+echo "  sbx version: $(sbx version 2>/dev/null | grep -oE 'v?[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1)"
+[ -f "$SPEC_FILE" ] && ok "kit spec.yaml present" || { bad "spec.yaml missing"; exit 1; }
+
+# Extract the PEM cert into a host-side file so we can fingerprint it and compare
+# against the sandbox. Under hybrid/v1 the cert is a files/ payload
+# (files/home/zscaler-ca.crt); fall back to an inlined PEM in spec.yaml for
+# forward/backward compatibility. No YAML parser needed (keeps verify
+# dependency-free).
+PAYLOAD_CERT="$KIT_DIR/files/home/zscaler-ca.crt"
+if [ -f "$PAYLOAD_CERT" ]; then
+  cp "$PAYLOAD_CERT" "$CERT_FILE"
+else
+  awk '
+    /-----BEGIN CERTIFICATE-----/ { grab=1 }
+    grab { sub(/^[[:space:]]+/, ""); print }
+    /-----END CERTIFICATE-----/   { grab=0 }
+  ' "$SPEC_FILE" > "$CERT_FILE"
+fi
+if grep -q 'BEGIN CERTIFICATE' "$CERT_FILE" 2>/dev/null; then
+  ok "kit ships a PEM-encoded Zscaler Root CA"
+else
+  bad "no PEM certificate found (files/home/zscaler-ca.crt or spec.yaml)"; exit 1
+fi
+HOST_FP="$(fp_of "$CERT_FILE")"
+if [ -n "$HOST_FP" ]; then
+  ok "embedded cert parses (SHA-256 ${HOST_FP})"
+else
+  bad "embedded cert does not parse as an X.509 certificate"; exit 1
+fi
+
+info "1. sbx kit validate"
+if sbx kit validate "$KIT_DIR" >/dev/null 2>&1; then ok "kit validates"; else bad "kit failed validation"; fi
+
+info "2. Create a sandbox with the kit"
+echo "  creating $SBX_NAME (workspace $WORK)..."
+# A CA install is agent-agnostic; the lightweight `shell` base is enough.
+# Fall back to `opencode` if this sbx build doesn't accept `shell`.
+agent="shell"
+if ! sbx create --name "$SBX_NAME" --kit "$KIT_DIR" "$agent" "$WORK" >"$CREATE_LOG" 2>&1; then
+  agent="opencode"
+  if sbx create --name "$SBX_NAME" --kit "$KIT_DIR" "$agent" "$WORK" >"$CREATE_LOG" 2>&1; then
+    ok "sandbox created with --kit (agent: $agent)"
+  else
+    bad "sbx create failed (exit $?)"
+    sed 's/^/  | /' "$CREATE_LOG" >&2
+    exit 1
+  fi
+else
+  ok "sandbox created with --kit (agent: $agent)"
+fi
+sleep 2
+
+info "3. Certificate landed in the system CA source dir"
+if [ "$(in_sbx "test -f '$INSTALLED_PATH' && echo yes")" = "yes" ]; then
+  ok "cert present at $INSTALLED_PATH"
+else
+  bad "cert NOT found at $INSTALLED_PATH (initFiles did not write it?)"
+fi
+
+info "4. Installed cert matches the cert embedded in spec.yaml (SHA-256)"
+sbx_fp="$(in_sbx "openssl x509 -in '$INSTALLED_PATH' -noout -fingerprint -sha256 2>/dev/null | sed -E 's/.*=//'")"
+echo "  in-sandbox fingerprint: ${sbx_fp:-<none>}"
+if [ -z "$sbx_fp" ]; then
+  echo "  NOTE: could not read fingerprint in sandbox (no openssl?); skipping match." >&2
+elif [ "$sbx_fp" = "$HOST_FP" ]; then
+  ok "fingerprint matches the cert embedded in spec.yaml"
+else
+  bad "fingerprint mismatch (sandbox=$sbx_fp spec=$HOST_FP)"
+fi
+
+info "5. update-ca-certificates wired it into the trust bundle"
+# update-ca-certificates creates a subject-hash symlink under /etc/ssl/certs
+# that resolves back to our cert in /usr/local/share/ca-certificates.
+linked="$(in_sbx "for l in /etc/ssl/certs/*.0; do [ -L \"\$l\" ] || continue; case \"\$(readlink \"\$l\")\" in *zscaler-ca*) echo yes; break;; esac; done")"
+if [ "$linked" = "yes" ]; then
+  ok "/etc/ssl/certs has a hash symlink to zscaler-ca"
+else
+  # Fallback: the cert may have been concatenated into the bundle instead.
+  in_bundle="$(in_sbx "openssl x509 -in '$INSTALLED_PATH' -noout -subject_hash 2>/dev/null")"
+  if [ -n "$in_bundle" ] && [ "$(in_sbx "test -e /etc/ssl/certs/${in_bundle}.0 && echo yes")" = "yes" ]; then
+    ok "/etc/ssl/certs/${in_bundle}.0 present (trust bundle updated)"
+  else
+    bad "no trust-store entry for the Zscaler CA (update-ca-certificates may have failed)"
+    echo "  Inspect: sbx exec $SBX_NAME -- sh -c 'ls -l /etc/ssl/certs | grep -i zscaler'" >&2
+  fi
+fi
+
+info "6. HTTPS-through-Zscaler probe (informational)"
+cat <<'NOTE'
+  A real end-to-end test (an HTTPS request that traverses the Zscaler proxy and
+  succeeds because the sandbox now trusts the inspected cert) depends on running
+  inside the Zscaler-intercepted network. It is environment-specific and not run
+  here. To check it manually from inside such a network:
+    sbx exec <sandbox> -- curl -fsS https://example.com >/dev/null && echo OK
+NOTE
+
+info "Summary"
+printf '  %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ] && printf '  \033[32mAll checks passed.\033[0m\n' || printf '  \033[31mSome checks failed — see notes above.\033[0m\n'
+
+[ "$fail" -eq 0 ]
