@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.5.0...v1.6.0) (2026-07-16)
+
+
+### Features
+
+* **integrations:** add neutral hybrid/v1 acq-kits + schema + registry ([#221](https://github.com/GSA-TTS/agentic-coding-patterns/issues/221)) ([f386458](https://github.com/GSA-TTS/agentic-coding-patterns/commit/f386458c67ffd6c3757bf2f7b98af499f0962ab9))
+* **sbx-kits:** add opt-in openchamber mixin kit ([#220](https://github.com/GSA-TTS/agentic-coding-patterns/issues/220)) ([9af380f](https://github.com/GSA-TTS/agentic-coding-patterns/commit/9af380f0d85ee07721c3f0b919809a68989f1aee))
+
 ## [1.5.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.4.0...v1.5.0) (2026-07-07)
 
 
