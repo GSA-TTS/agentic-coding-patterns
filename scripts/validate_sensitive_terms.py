@@ -24,10 +24,19 @@ TIER1_PATTERNS = [
     (r"BEGIN.*PRIVATE KEY", "Private key detected"),
     (r"AWS_SECRET_ACCESS_KEY", "AWS secret key"),
     (r"AWS_ACCESS_KEY_ID", "AWS access key"),
-    (r"(?:password|passwd|pwd)\s*=\s*['\"]?[^'\"\\s]{8,}", "Hardcoded password"),
-    (r"(?:api_key|apikey)\s*=\s*['\"]?[^'\"\\s]{16,}", "API key"),
-    (r"(?:token|auth_token)\s*=\s*['\"]?[^'\"\\s]{16,}", "Auth token"),
-    (r"secret\s*=\s*['\"]?[^'\"\\s]{16,}", "Secret value"),
+    # Assignment patterns. The negative lookahead skips values that are ONLY a
+    # shell command substitution ($(...), `...`) or variable reference
+    # (${VAR}, $VAR) — those read a secret at runtime, they don't hardcode one,
+    # and flagging them produces false positives on legitimate scripts. The
+    # lookahead matches the specific var-ref / cmd-sub SHAPES:
+    #   ${...  |  $(...  |  $<letter|underscore>...  |  `...
+    # NOT merely a leading $/backtick. A literal secret that happens to start
+    # with $ followed by a digit (e.g. password="$3cr3tLiteral") is a valid
+    # shell literal (not a var ref) and is STILL flagged.
+    (r"(?:password|passwd|pwd)\s*=\s*['\"]?(?!\$\{|\$\(|\$[A-Za-z_]|`)[^'\"\\s]{8,}", "Hardcoded password"),
+    (r"(?:api_key|apikey)\s*=\s*['\"]?(?!\$\{|\$\(|\$[A-Za-z_]|`)[^'\"\\s]{16,}", "API key"),
+    (r"(?:token|auth_token)\s*=\s*['\"]?(?!\$\{|\$\(|\$[A-Za-z_]|`)[^'\"\\s]{16,}", "Auth token"),
+    (r"secret\s*=\s*['\"]?(?!\$\{|\$\(|\$[A-Za-z_]|`)[^'\"\\s]{16,}", "Secret value"),
     (r"\.gov\s+internal-only", "Internal-only government content"),
     (r"do\s+not\s+distribute", "Distribution restriction marker"),
 ]

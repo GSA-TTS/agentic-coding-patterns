@@ -255,3 +255,49 @@ prohibited_content:
 
         # Private keys should be detected even in SECURITY.md
         assert len(tier1_matches) > 0
+
+    def test_hardcoded_password_still_flagged(self, tmp_path):
+        """A literal hardcoded password value is still a blocking Tier 1 match."""
+        file_path = tmp_path / "app.sh"
+        file_path.write_text('password="hunter2hardcoded"\n')
+
+        tier1_matches, _ = scan_file(file_path)
+
+        assert any("password" in desc.lower() for _, desc, _ in tier1_matches)
+
+    def test_runtime_password_assignment_not_flagged(self, tmp_path):
+        """Assigning a secret from a command substitution / var ref is not hardcoding.
+
+        These read the value at runtime (they don't embed a literal), so flagging
+        them is a false positive. Covers the openchamber kit's
+        OPENCODE_SERVER_PASSWORD="$(cat ...)" style.
+        """
+        file_path = tmp_path / "startup.sh"
+        file_path.write_text(
+            'OPENCODE_SERVER_PASSWORD="$(cat "$PW_FILE")"\n'
+            'PASSWORD="$PW"\n'
+            "password=${SOME_VAR}\n"
+            "password=`cat /run/secret`\n"
+        )
+
+        tier1_matches, _ = scan_file(file_path)
+
+        assert tier1_matches == [], f"unexpected matches: {tier1_matches}"
+
+    def test_dollar_leading_literal_still_flagged(self, tmp_path):
+        """A literal secret that merely STARTS with '$' (not a var ref) is still flagged.
+
+        Regression guard for the lookahead: skipping any '$'-leading value would
+        let ``password="$3cr3tLiteral"`` bypass detection. The lookahead only
+        skips genuine var-ref / cmd-sub shapes (``${...``, ``$(...``,
+        ``$<letter|underscore>``, backtick), so a '$' followed by a digit — a
+        valid shell literal, not a variable reference — must still be caught.
+        """
+        file_path = tmp_path / "app.sh"
+        file_path.write_text('password="$3cr3tLiteralPass"\napi_key="$1234567890abcdef1234"\n')
+
+        tier1_matches, _ = scan_file(file_path)
+
+        descs = [desc.lower() for _, desc, _ in tier1_matches]
+        assert any("password" in d for d in descs), f"password literal not flagged: {tier1_matches}"
+        assert any("api key" in d for d in descs), f"api key literal not flagged: {tier1_matches}"
