@@ -44,6 +44,14 @@ KNOWN_BACKENDS = {"sbx", "msb", "ppp"}
 # environment and possibly a shell; the schema enforces this via patternProperties,
 # but we ALSO check it here so a bad name is reported with a clear message at the
 # gate (the maintainer of quickstart#202 wants field-level validation here).
+#
+# NOTE: only the NAME is validated. The VALUE is intentionally NOT sanitized or
+# shell-escaped here (it may legitimately contain newlines or shell
+# metacharacters). Safety is guaranteed *downstream, by construction*: backends
+# MUST pass each value as argv / native env (msb `exec -e NAME=value`; sbx's
+# native `environment.variables` block) and MUST NOT interpolate a value into a
+# shell string. A new backend adapter must uphold this — do not assume this gate
+# sanitized the value.
 _ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 # Extensions that indicate a kit-provided payload/script a command expects to
