@@ -7,6 +7,10 @@ JSON Schema cannot express on its own:
 
   - every files[].source resolves to an existing file under the kit dir
   - every backend_shortcuts / backend_extras key is a known backend
+  - every environment[] key is a valid POSIX env var NAME, and its value is a
+    plain string (defense-in-depth over the schema pattern: env vars reach the
+    guest environment and possibly a shell, so a bad name is reported explicitly
+    rather than only failing the schema's additionalProperties rule)
   - a README.md exists (parity note lives there)
 
 It also emits WARN-level advisories (non-fatal by default) for likely re-home
@@ -35,6 +39,12 @@ import jsonschema
 import yaml
 
 KNOWN_BACKENDS = {"sbx", "msb", "ppp"}
+
+# Env var NAME must be a POSIX-portable identifier. Env values reach the guest
+# environment and possibly a shell; the schema enforces this via patternProperties,
+# but we ALSO check it here so a bad name is reported with a clear message at the
+# gate (the maintainer of quickstart#202 wants field-level validation here).
+_ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 # Extensions that indicate a kit-provided payload/script a command expects to
 # have been dropped by files[] (as opposed to a base-image binary, a runtime-
@@ -97,6 +107,22 @@ def validate_kit(kit_dir: Path, schema: dict) -> tuple[list[str], list[str]]:
         for backend in (spec.get(section) or {}):
             if backend not in KNOWN_BACKENDS:
                 errors.append(f"{kit_dir.name}: {section}: unknown backend '{backend}'")
+
+    environment = spec.get("environment") or {}
+    if not isinstance(environment, dict):
+        errors.append(f"{kit_dir.name}: environment must be a mapping of NAME -> value")
+    else:
+        for name, value in environment.items():
+            if not _ENV_NAME_RE.match(str(name)):
+                errors.append(
+                    f"{kit_dir.name}: environment: invalid env var name '{name}' "
+                    f"(must match [A-Za-z_][A-Za-z0-9_]*)"
+                )
+            if not isinstance(value, str):
+                errors.append(
+                    f"{kit_dir.name}: environment['{name}']: value must be a string "
+                    f"(got {type(value).__name__})"
+                )
 
     if not (kit_dir / "README.md").exists():
         errors.append(f"{kit_dir.name}: missing README.md (parity note required)")

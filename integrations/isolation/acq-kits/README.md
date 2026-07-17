@@ -44,6 +44,12 @@ vocabulary:
 - `commands[]` — lifecycle commands, each with a `phase` (`install` /
   `initFiles` / `startup`), `user`, and argv `command`.
 - `agentContext` — markdown surfaced to the agent.
+- `environment` — a flat map of NAME → value for **non-secret** guest
+  environment variables (e.g. `OPENCODE_CONFIG`, `GITLAB_HOST`). Names must be
+  POSIX identifiers (`[A-Za-z_][A-Za-z0-9_]*`); values are plain strings. Each
+  backend maps these onto its native env mechanism (sbx `environment.variables`;
+  msb `--env NAME=value`). **Secrets do NOT go here** — they flow through the
+  backend credential/secret path (`acq secret …`), never the kit spec.
 - `backend_shortcuts.<backend>` — a native primitive that replaces the
   declarative path for one backend (e.g. msb's `--trust-host-cas` for the
   Zscaler kit). Adapters check this first; if present, `caps`/`files`/`commands`

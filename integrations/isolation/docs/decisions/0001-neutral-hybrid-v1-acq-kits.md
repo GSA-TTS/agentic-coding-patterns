@@ -66,7 +66,9 @@ Adopt **Option 1**.
   2020-12) capturing the neutral fields: `caps.network.allow`, `files[]`
   (`content` or `source:` + optional `phase`), `commands[]`
   (`phase`/`user`/`command`), `agentContext`, `backend_shortcuts.<backend>`,
-  `backend_extras.<backend>`. A repo validator
+  `backend_extras.<backend>`, and `environment` (a flat NAME → value map of
+  non-secret guest env vars; added post-1.6.0 — see the amendment note below).
+  A repo validator
   (`integrations/isolation/acq-kits/validate-kits.py`) enforces schema + source
   resolution + known-backend keys + README presence + a registry cross-check.
 - **Registry** `integrations/isolation/acq-kits/kits.yaml` — kit → supported
@@ -156,6 +158,46 @@ The schema's backend enum and `KNOWN_BACKENDS` list three backends:
   sandbox (no nested sandboxes); each kit's `scripts/verify` runs on a
   sandbox-capable host. The offline gate (schema validation, the usai node
   tests, `bash -n`, unsafe-shell scan) runs everywhere.
+
+## Amendment: `environment` vocabulary (post-1.6.0)
+
+The initial `hybrid/v1` vocabulary had **no way to express guest environment
+variables**. The two sbx-v2 kits that used env (`playbook-kit`, `openchamber`)
+carried an `environment.variables` block that was dropped in the Phase-2
+conversion and re-expressed as inline `KEY=val \` prefixes on their startup
+commands — a workaround, not a first-class mechanism. A downstream team
+(quickstart#202 review) needs `environment.variables`-style config
+(`OPENCODE_CONFIG`, `OPENCODE_TUI_CONFIG`, `GITLAB_HOST`) as a first-class kit
+mechanism, which the neutral format could not express.
+
+**Decision:** add a top-level `environment` block — a **flat map** of
+`NAME → value`, both strings. Deliberately minimal (YAGNI):
+
+- Static string values only. No interpolation/templating, no references to
+  paths staged by `files[]`. None of the reference kits need more; a kit that
+  needs a computed value uses a `commands[]` step as before.
+- Env var **names** are validated against `^[A-Za-z_][A-Za-z0-9_]*$` at the
+  schema (`patternProperties` + `additionalProperties: false`) AND in
+  `validate-kits.py` (explicit field-level check with a clear message). Names
+  reach the guest environment and possibly a shell, so a bad name is rejected,
+  not silently passed.
+- **Secrets do NOT go here.** This block is plain, human-readable config. API
+  keys / tokens continue to flow through the backend credential/secret path
+  (sbx secret proxy, msb `--secret ENV@HOST`), never the kit spec.
+
+**Backend mapping** (implemented in the quickstart translate layer):
+
+- **sbx** — emit the native sbx-v2 `environment: { variables: { … } }` block
+  (the mechanism the pre-Phase-2 `playbook-kit`/`openchamber` kits used). sbx
+  sets these in the guest environment natively; no `commands` workaround needed.
+- **msb** — thread each `NAME=value` as an `msb exec -e NAME=value` on the
+  kit's lifecycle commands (msb's native per-exec env flag, already used for
+  `HOME=/home/agent`). Per-exec `-e` scopes the env to the kit's own commands
+  and mirrors how `msb.sh` already threads env.
+
+The schema addition is additive and backward-compatible (existing kits without
+`environment` are unaffected). See quickstart#202 for the translate-layer
+implementation and ADR-0011 there.
 
 ## Follow-ups (tracked, not in this change)
 
