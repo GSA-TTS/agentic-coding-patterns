@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.7.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.6.0...v1.7.0) (2026-07-17)
+
+
+### Features
+
+* **acq-kits:** add environment vocabulary to hybrid/v1 schema ([#227](https://github.com/GSA-TTS/agentic-coding-patterns/issues/227)) ([7181d21](https://github.com/GSA-TTS/agentic-coding-patterns/commit/7181d2150004570ba81b8006b52c318d55fb2bf0))
+* **acq-kits:** convert openchamber to hybrid/v1 and move to acq-kits/ ([#224](https://github.com/GSA-TTS/agentic-coding-patterns/issues/224)) ([900d2fa](https://github.com/GSA-TTS/agentic-coding-patterns/commit/900d2fa007c1cb4a32dfad59f0e974260c6fe1ba))
+
 ## [1.6.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.5.0...v1.6.0) (2026-07-16)
 
 
