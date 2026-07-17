@@ -184,6 +184,13 @@ mechanism, which the neutral format could not express.
 - **Secrets do NOT go here.** This block is plain, human-readable config. API
   keys / tokens continue to flow through the backend credential/secret path
   (sbx secret proxy, msb `--secret ENV@HOST`), never the kit spec.
+- **Env var *values* are NOT validated or shell-escaped here** — only names are.
+  A value is `type: string` and may contain newlines or shell metacharacters.
+  This is safe *by construction downstream, not by validation here*: backends
+  MUST pass each value as argv / native env (msb `exec -e NAME=value`; sbx's
+  native `environment.variables` block), and MUST NOT interpolate a value into a
+  shell string. A future backend adapter (e.g. `ppp`) must uphold this contract
+  — do not assume the gate sanitized the value.
 
 **Backend mapping** (implemented in the quickstart translate layer):
 
