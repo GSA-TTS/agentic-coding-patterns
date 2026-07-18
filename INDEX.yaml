@@ -231,6 +231,14 @@ patterns:
     categories:
     - testing
     - review
+  - path: workflows/security-scan-review/SKILL.md
+    id: security-scan-review
+    title: Language-Aware Security Scan & Triage Workflow
+    type: workflow
+    status: experimental
+    categories:
+    - security
+    - review
   lessons:
   - path: lessons-learned/example-agentic-session/SKILL.md
     id: example-agentic-session
@@ -253,6 +261,7 @@ categories:
   - safe-shell-script-author
   - secure-code-review
   - security-review-agent
+  - security-scan-review
   - untrusted-input-boundary-review
   development:
   - general-agent
@@ -275,6 +284,7 @@ categories:
   - safe-code-review
   - secure-code-review
   - security-review-agent
+  - security-scan-review
   - untrusted-input-boundary-review
   testing:
   - issue-to-merge-request
@@ -311,9 +321,9 @@ categories:
   - uswds-landing-page
   - uswds-prototype
 stats:
-  total_patterns: 29
+  total_patterns: 30
   skills: 20
   prompts: 3
   agents: 3
-  workflows: 2
+  workflows: 3
   lessons: 1

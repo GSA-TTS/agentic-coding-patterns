@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "pip-audit",
+          "version": "2.9.0",
+          "informationUri": "https://github.com/pypa/pip-audit",
+          "rules": [
+            { "id": "GHSA-x84v-xcm2-53pg", "properties": { "aliases": ["CVE-2018-18074"] } },
+            { "id": "GHSA-462w-v97r-4m45", "properties": { "aliases": ["CVE-2020-28493"] } }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "GHSA-x84v-xcm2-53pg",
+          "level": "error",
+          "message": { "text": "requests 2.19.0: sends Authorization header on https-to-http redirect (fix: 2.20.0). CVE-2018-18074." },
+          "locations": [
+            { "physicalLocation": { "artifactLocation": { "uri": "requirements.txt" } } }
+          ],
+          "properties": { "package": "requests", "version": "2.19.0", "fix_versions": ["2.20.0"], "native_severity": "high" }
+        },
+        {
+          "ruleId": "GHSA-462w-v97r-4m45",
+          "level": "warning",
+          "message": { "text": "jinja2 2.10: ReDoS in the urlize filter (fix: 2.11.3). CVE-2020-28493." },
+          "locations": [
+            { "physicalLocation": { "artifactLocation": { "uri": "requirements.txt" } } }
+          ],
+          "properties": { "package": "jinja2", "version": "2.10", "fix_versions": ["2.11.3"], "native_severity": "medium" }
+        }
+      ]
+    }
+  ]
+}

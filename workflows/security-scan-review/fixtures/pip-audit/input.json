@@ -1,0 +1,30 @@
+{
+  "dependencies": [
+    {
+      "name": "requests",
+      "version": "2.19.0",
+      "vulns": [
+        {
+          "id": "GHSA-x84v-xcm2-53pg",
+          "fix_versions": ["2.20.0"],
+          "aliases": ["CVE-2018-18074"],
+          "description": "The requests package before 2.20.0 sends an HTTP Authorization header to an http URI upon receiving a same-hostname https-to-http redirect, exposing credentials.",
+          "severity": "high"
+        }
+      ]
+    },
+    {
+      "name": "jinja2",
+      "version": "2.10",
+      "vulns": [
+        {
+          "id": "GHSA-462w-v97r-4m45",
+          "fix_versions": ["2.11.3"],
+          "aliases": ["CVE-2020-28493"],
+          "description": "ReDoS in the urlize filter.",
+          "severity": "medium"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+tool: pip-audit
+tool_version: "2.9.0"
+finding_count: 2
+notes: >-
+  Happy-path fixture: two vulns, mixed severity (high->error, medium->warning),
+  both package-level (no line -> manifest-file location, no fabricated line).
+  Demonstrates severity fidelity + no-line-fidelity + rule-id/alias preservation.
+  Additional required fixtures for this converter (to be added): empty,
+  single-critical, unknown-severity (->note+flag), malformed (->fail loudly).
