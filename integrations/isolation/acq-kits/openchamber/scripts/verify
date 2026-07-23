@@ -281,10 +281,13 @@ esac
   || bad "~/.local/bin/opencode missing or not executable"
 
 info "5. Shared opencode server (started on demand by the wrapper)"
-# The server is on-demand: nothing listens on :4096 until the wrapper runs. Run
-# the wrapper NON-INTERACTIVELY (no TTY via `acq exec`), so it starts the server
-# and exits without prompting, then probe. Unsecured — no auth header needed.
-in_sbx 'opencode >/tmp/wrapper-run.log 2>&1 || true'
+# The server is on-demand: nothing listens on :4096 until the wrapper runs. The
+# wrapper is the sandbox ENTRYPOINT, so on its no-arg, no-TTY path it does NOT
+# return — it foregrounds `opencode serve` to keep PID 1 (the sandbox) alive.
+# Running it here with a plain `acq exec` would therefore BLOCK forever. Start it
+# DETACHED (background + nohup) — the same lifecycle the entrypoint has — and
+# then probe the port it brings up.
+in_sbx 'nohup opencode >/tmp/wrapper-run.log 2>&1 & echo started'
 oc_up=""
 oc_deadline=$(( $(date +%s) + 20 ))
 while :; do
@@ -333,6 +336,36 @@ info "8. OpenChamber respawn supervisor running (auto-restart)"
 ch_sup="$(in_sbx 'pgrep -c -f "supervisor:openchamber" 2>/dev/null')"
 [ "${ch_sup:-0}" -ge 1 ] 2>/dev/null && ok "openchamber supervisor running (count=$ch_sup)" \
   || bad "no openchamber supervisor found (auto-restart not active)"
+
+info "9. Sandbox stays 'running' (wrapper entrypoint does not exit) — regression guard"
+# REGRESSION GUARD (the running->stopped bug): the wrapper IS the sandbox
+# entrypoint. If its no-arg path backgrounds the server and RETURNS, PID 1 exits
+# and the sandbox stops on its own moments after create. The fixed wrapper
+# instead foregrounds `opencode serve` (or `wait`s on it) so PID 1 stays alive.
+# We can't easily attach the entrypoint from a test, so we assert the *invariant*
+# that makes the entrypoint safe: running the wrapper no-arg, no-TTY BLOCKS
+# (holds the process open) rather than returning. Do it with a bounded timeout;
+# a return within the window is the BUG, a timeout is the FIX.
+#
+# `timeout` may be absent on macOS hosts, but this runs INSIDE the sandbox via
+# `sh -c`, where coreutils `timeout` is present. Exit 124 == timed out (good).
+wrapper_probe="$(in_sbx '
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 8 opencode </dev/null >/dev/null 2>&1
+    echo "rc=$?"
+  else
+    echo "rc=notimeout"
+  fi
+')"
+case "$wrapper_probe" in
+  *rc=124*)
+    ok "wrapper no-arg path stays in the foreground (entrypoint won't exit → sandbox stays running)" ;;
+  *rc=notimeout*)
+    skip "could not run the entrypoint-liveness probe (no 'timeout' in sandbox)" ;;
+  *)
+    bad "wrapper no-arg path RETURNED (${wrapper_probe}); as the entrypoint this exits PID 1 and stops the sandbox"
+    in_sbx 'tail -n 20 /tmp/opencode-serve.log' | sed 's/^/    | /' ;;
+esac
 
 info "Summary"
 printf '  %d passed, %d failed\n' "$pass" "$fail"

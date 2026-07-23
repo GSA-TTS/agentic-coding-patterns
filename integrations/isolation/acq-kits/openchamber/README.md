@@ -30,8 +30,10 @@ explicitly (see [Usage](#usage)).
   - with **no arguments** — idempotently starts a shared
     `opencode serve --hostname 0.0.0.0 --port 4096` (a no-op if it's already up),
     prints host-connect instructions, then offers to attach a TUI right there
-    (yes → `opencode attach`; no or non-interactive → exits, leaving the
-    reconnect recipe); and
+    (yes → `opencode attach`). If you decline or there's no terminal, the wrapper
+    keeps the shared server in the **foreground** — because the wrapper *is* the
+    sandbox entrypoint, it must not return, or PID 1 would exit and the sandbox
+    would stop; and
   - with **any arguments** — passes straight through to the real `opencode`
     (`opencode run …`, `opencode auth login`, etc.).
 - **Install + supervise OpenChamber (one script)** — a `startup`-phase command

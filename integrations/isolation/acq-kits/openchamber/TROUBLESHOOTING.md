@@ -3,6 +3,33 @@
 Failure modes specific to the OpenChamber kit. They assume you applied the kit
 to a sandbox (see [README.md](README.md#usage)).
 
+## The sandbox stops on its own right after `acq run`
+
+**Symptoms:** you `acq run opencode <path>` with this kit and decline the TUI
+prompt (or run non-interactively); the sandbox briefly shows `running` in
+`acq ls` and then flips to `stopped` on its own, seconds later — with nothing
+else started. Starting a *second* sandbox is not the cause; the first had
+already stopped.
+
+**Cause:** the kit's `opencode` **wrapper** is the sandbox entrypoint (it shadows
+the real binary via PATH). A Docker sandbox is "running" only while its entrypoint
+/ PID 1 is alive. An earlier version of the wrapper backgrounded `opencode serve`
+with `nohup … &` and then **returned** on the no-TUI path — so PID 1 exited and
+the sandbox stopped. Fixed by having the wrapper **foreground** the shared server
+(it `wait`s on / `exec`s `opencode serve`) so PID 1 stays alive.
+
+**Fix / confirm you have the fix:** the shared server should be the sandbox's
+foreground process after a no-arg run. Check the wrapper's tail:
+
+```bash
+grep -n 'wait\|exec .*serve' ~/.local/bin/opencode   # inside the sandbox
+```
+
+If your copy still ends the no-arg path with `exit 0` after a `nohup … &`, update
+the kit to the current version and recreate the sandbox. As a stopgap you can
+keep a sandbox alive by attaching a TUI when prompted, or re-attach a stopped one
+any time with `acq run <name>` (state persists until `acq rm`).
+
 ## The browser page won't load / no host port
 
 **Symptoms:** `acq ports <sandbox>` (`sbx ports <sandbox>`) shows no mapping for
@@ -33,11 +60,12 @@ no sessions.
 **on demand** — the startup script only manages OpenChamber, not the server.
 
 **Fix:** run the wrapper once to bring the server up (no args), then reload
-OpenChamber:
+OpenChamber. The no-arg wrapper foregrounds the server (it holds the process
+open), so run it **detached** from `acq exec`:
 
 ```bash
-acq exec <sandbox> -- opencode        # starts the shared server on :4096
-# or open a shell in the sandbox and run `opencode`
+acq exec <sandbox> -- sh -c 'nohup opencode >/tmp/wrapper-run.log 2>&1 &'  # start shared server on :4096
+# or open a shell in the sandbox and run `opencode` there (it will stay in the foreground)
 ```
 
 Then confirm the server answers:
@@ -187,10 +215,11 @@ that the kit was applied and recreate the sandbox.
 **Cause:** the shared server is started **on demand** by the wrapper. If nobody
 has run `opencode` yet, nothing is listening on `:4096`.
 
-**Fix:** start it, then attach:
+**Fix:** start it, then attach. The no-arg wrapper foregrounds the server, so
+start it detached:
 
 ```bash
-acq exec <sandbox> -- opencode                       # start the shared server
+acq exec <sandbox> -- sh -c 'nohup opencode >/tmp/wrapper-run.log 2>&1 &'  # start the shared server
 acq exec <sandbox> -- opencode attach http://127.0.0.1:4096
 ```
 

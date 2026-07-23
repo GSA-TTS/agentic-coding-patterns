@@ -41,14 +41,32 @@ The wrapper, run by the sandbox entrypoint (bare `opencode`):
 
 - **No arguments** — idempotently starts
   `opencode serve --hostname 0.0.0.0 --port 4096` (no-op if already answering
-  `/global/health`), backgrounded with `nohup`; prints host-connect instructions
-  for both published ports; then, only if attached to a TTY, offers to
+  `/global/health`); prints host-connect instructions for both published ports;
+  then, only if attached to a TTY, offers to
   `opencode attach http://127.0.0.1:4096` in that same terminal. On "no" or when
-  non-interactive (e.g. `acq exec` with no TTY), it prints the reconnect recipe
-  and exits 0 without hanging.
+  non-interactive (e.g. `acq exec` with no TTY), it **hands the entrypoint off to
+  a foreground `opencode serve`** (via `exec`, or by `wait`ing on the server it
+  just backgrounded) so PID 1 stays alive — see "Keeping the entrypoint alive"
+  below.
 - **Any arguments** — resolves the real `opencode` on PATH (skipping itself) and
   `exec`s it with the args unchanged, so `opencode run …`, `opencode auth login`,
   etc. behave normally.
+
+### Keeping the entrypoint alive (the running→stopped fix)
+
+A Docker sandbox is reported "running" only while its **entrypoint / PID 1** is
+alive. Because this wrapper *is* the entrypoint (via PATH-shadowing), the no-arg
+path must never simply background the server and **return** — doing so lets PID 1
+exit, so the sandbox flips running→stopped moments after `acq run` even though
+the backgrounded server was briefly up.
+
+The initial implementation of this ADR did exactly that (`nohup … serve & ; exit
+0`), which surfaced as: `acq run <A>` then `acq run <B>` shows A "stopped" — A had
+in fact stopped itself. The corrected wrapper ends every no-TUI path on a
+long-lived **foreground** process: it `wait`s on the server it just backgrounded,
+or `exec`s a fresh foreground `opencode serve` if one was already up. The
+interactive `opencode attach` path already `exec`s (the TUI holds the entrypoint
+open), so it was never affected.
 
 The startup script (`openchamber-start.sh`) installs OpenChamber on first boot
 and supervises OpenChamber in skip-start mode (`OPENCODE_SKIP_START=true` +
@@ -71,8 +89,10 @@ Two related choices:
   manual attach step. The old "different sessions" confusion goes away.
 - **The server is on-demand.** OpenChamber shows no live server until `opencode`
   is run once. This is documented in `agentContext`, `README.md`, and
-  `TROUBLESHOOTING.md`. It also means the unauthenticated server is only live
-  while in use, not for the whole sandbox lifetime.
+  `TROUBLESHOOTING.md`. Because the wrapper is also the entrypoint, the no-arg
+  run additionally keeps the sandbox alive by foregrounding the server (see
+  "Keeping the entrypoint alive"); the unauthenticated server is live for as long
+  as the sandbox is.
 - **Unsecured + host-published `:4096`.** Anyone with access to the host's
   loopback can drive OpenCode without a credential. Safe only on a trusted,
   single-tenant host; the Security note in the README states this and warns
