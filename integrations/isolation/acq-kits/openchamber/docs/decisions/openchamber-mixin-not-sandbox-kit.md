@@ -1,6 +1,18 @@
 # Decision: OpenChamber as an opt-in mixin, not a sandbox kit
 
-**Status:** accepted
+**Status:** accepted (core premise partially superseded — see the Update below)
+
+> **Update (wrapper-entrypoint redesign).** The claim below that "a mixin
+> **cannot** give the terminal and browser a shared live session, because that
+> needs owning the entrypoint, which only a `kind: sandbox` kit can do" is **no
+> longer true**. The base image's `PATH` puts `~/.local/bin` first and its `CMD`
+> is the bare, unqualified `opencode`, so a mixin can drop an `opencode` wrapper
+> at `~/.local/bin/opencode` that **shadows** the real binary and becomes the
+> entrypoint — owning the shared server without a `kind: sandbox` kit. The kit
+> now does exactly that; see
+> [`wrapper-entrypoint-owns-server.md`](wrapper-entrypoint-owns-server.md). The
+> "ship it as an opt-in mixin" decision itself still stands; only the
+> shared-session limitation described below is obsolete.
 
 ## Context
 

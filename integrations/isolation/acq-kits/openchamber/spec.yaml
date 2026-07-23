@@ -1,42 +1,40 @@
 # spec.yaml — openchamber (a neutral acq mixin kit, hybrid/v1)
 #
-# Runs OpenChamber, a web UI for OpenCode, inside the sandbox and points it at a
-# managed OpenCode server. Applying this kit gives you a browser-based OpenCode
-# in addition to the terminal TUI you get from `acq run opencode`. It is OPT-IN:
-# it is not one of the default GSA kits. Apply it with an extra kit ref (see
-# README.md "Usage").
+# Runs OpenChamber, a web UI for OpenCode, inside the sandbox and ships an
+# `opencode` wrapper that owns a single, shared OpenCode server. Applying this
+# kit gives you a browser-based OpenCode plus an optional terminal TUI that both
+# drive the SAME live session. It is OPT-IN: it is not one of the default GSA
+# kits. Apply it with an extra kit ref (see README.md "Usage").
 #
 # NEUTRAL (backend-agnostic) form. Converted from the former sbx kit
 # (`sbx-kits/openchamber/`, schemaVersion "2") in the acq-kits migration
 # follow-up (#223); see
 # integrations/isolation/docs/decisions/0001-neutral-hybrid-v1-acq-kits.md and
 # this kit's docs/decisions/. The inline startup shell of the old sbx kit was
-# extracted into a standalone script (files/home/openchamber-start.sh), matching
-# how agentic-coding-playbook handles its startup script.
+# extracted into standalone scripts (files/home/...), matching how
+# agentic-coding-playbook handles its startup script.
 #
-# Behavior (unchanged from the sbx kit):
-#   - caps.network: allow egress to the OpenChamber install sources (npm registry,
-#     the install-script host, and the GitHub release-asset hosts the prebuilt
-#     better-sqlite3 binary comes from). Default-deny otherwise. The install
-#     script is fetched from a PINNED tag and SHA-256-verified before it runs.
-#   - files: drop the extracted startup script into the agent home.
-#   - commands (phase startup, agent uid): run the script IN THE BACKGROUND. It
-#     (a) installs OpenChamber on first boot, then (b) supervises a headless
-#     `opencode serve` on 127.0.0.1:4096 and OpenChamber bound to 0.0.0.0. Both
-#     run under a respawn loop, so if either process exits (an interactive
-#     self-update — which needs a restart to take effect — or a crash) it is
-#     restarted after a few seconds (OPENCHAMBER_RESTART_DELAY, default 5). No
-#     systemd. Idempotent: no-ops if a supervisor for each service is already up.
-#     There is deliberately NO install phase — see the install note below.
+# DESIGN (redesigned — see docs/decisions/wrapper-entrypoint-owns-server.md):
+#   - The sandbox entrypoint runs the bare command `opencode`. This kit drops an
+#     `opencode` WRAPPER at ~/.local/bin/opencode, which is first on the image
+#     PATH (ahead of the npm-global bin where the real opencode lives), so the
+#     wrapper is what the entrypoint runs. With arguments it passes through to
+#     the real opencode; with NO arguments it idempotently starts a shared
+#     `opencode serve --hostname 0.0.0.0 --port 4096`, prints host-connect
+#     instructions, and offers to attach a TUI now (yes → `opencode attach`;
+#     no / non-interactive → exit, leaving the reconnect recipe).
+#   - The STARTUP script manages ONLY OpenChamber (install on first boot, then a
+#     respawn-supervised OpenChamber bound to 0.0.0.0:3000 in skip-start mode,
+#     attaching to the shared server on :4096). It no longer starts or supervises
+#     `opencode serve` — the wrapper owns that, on demand. There is deliberately
+#     NO install phase — see the install note below.
 #
-# Why the script runs in the BACKGROUND: the supervisor loops never exit (they
-# respawn forever), so the startup command must not block sandbox start. The
-# neutral spec has no `background` field, so the backgrounding is expressed two
-# ways: the command backgrounds the script itself (`sh …openchamber-start.sh &`),
-# and backend_extras.sbx.background:true carries the native sbx hint for the sbx
-# adapter. The script's own supervisor subshells are already backgrounded within
-# it, so even a foreground-only backend does not hang (the `&` on the invocation
-# is what matters).
+# Why the startup script runs in the BACKGROUND: the OpenChamber supervisor loop
+# never exits (it respawns forever), so the startup command must not block
+# sandbox start. The neutral spec has no `background` field, so the backgrounding
+# is expressed two ways: the command backgrounds the script itself
+# (`sh …openchamber-start.sh &`), and backend_extras.sbx.background:true carries
+# the native sbx hint for the sbx adapter.
 #
 # Why install at STARTUP, not an install phase: @openchamber/web depends on
 # better-sqlite3, a NATIVE module whose npm install runs
@@ -47,28 +45,29 @@
 # keeps it OFF the create path (a failure degrades to "UI unavailable", never a
 # dead sandbox) and is where the egress proxy + its CA are fully usable.
 #
-# AUTH: `opencode serve` requires HTTP Basic auth (unauthenticated requests get
-# 401). The script generates a per-sandbox password once (stored at
-# ~/.local/state/openchamber/opencode-server-password, mode 600) and exports it
-# as OPENCODE_SERVER_PASSWORD for both `opencode serve` and OpenChamber, so they
-# share one credential. It is a sandbox-local secret, not host key material.
+# AUTH: the shared `opencode serve` is UNSECURED (no OPENCODE_SERVER_PASSWORD).
+# The sandbox — an ephemeral container with proxied, allow-listed egress and no
+# host FS — is the security boundary, and the published ports are host loopback
+# only. OpenChamber (skip-start) attaches to the unsecured server, and a host
+# TUI can attach directly without a credential. See the README "Security note".
 #
-# PORT FORWARDING: OpenChamber binds container port 3000. The neutral spec does
-# not model published ports, so the sbx port-publish declaration (map 3000 to an
-# ephemeral host loopback port, per sandbox) lives under backend_extras.sbx. See
-# the README backend-parity note.
+# PORT FORWARDING: OpenChamber binds container port 3000 and the shared server
+# binds container port 4096; BOTH are published to the host. The neutral spec
+# does not model published ports, so the sbx port-publish declaration (map each
+# to an ephemeral host loopback port, per sandbox) lives under backend_extras.sbx.
+# See the README backend-parity note.
 schemaVersion: "hybrid/v1"
 kind: mixin
 name: openchamber
 displayName: OpenChamber (web UI for OpenCode)
 description: >
-  Runs OpenChamber, a browser UI for OpenCode, inside the sandbox alongside the
-  terminal TUI. Installs the OpenChamber CLI on first boot, then supervises a
-  managed OpenCode server on 127.0.0.1:4096 and OpenChamber on 0.0.0.0:3000,
-  restarting either if it exits. Opt-in mixin; composes with the USAi provider
-  and the other GSA kits. The browser and the default TUI do not share live
-  session state — attach a terminal to the managed server to share (see
-  agentContext).
+  Runs OpenChamber, a browser UI for OpenCode, inside the sandbox and ships an
+  `opencode` wrapper that owns a single shared OpenCode server. Installs the
+  OpenChamber CLI on first boot and supervises OpenChamber on 0.0.0.0:3000; the
+  wrapper starts a shared `opencode serve` on 0.0.0.0:4096 on demand so the
+  browser and an optional terminal TUI share one live session. Both ports are
+  published to the host. Opt-in mixin; composes with the USAi provider and the
+  other GSA kits.
 
 caps:
   network:
@@ -77,8 +76,13 @@ caps:
       #    from a PINNED tag — not `main` (see the pins in the startup command).
       - raw.githubusercontent.com
       # 2. npm downloads @openchamber/web and its deps from the npm registry.
+      #    Both metadata and tarballs are served from registry.npmjs.org (npm's
+      #    dist.tarball URLs point at this host), so no wildcard subdomain is
+      #    needed. NOTE: do NOT use a leading-`*` host here (e.g. "*.npmjs.org") —
+      #    acq's neutral→sbx translator emits allow entries UNQUOTED, and a bare
+      #    `- *.npmjs.org` is parsed by YAML as an alias, breaking the translated
+      #    spec ("did not find expected alphabetic or numeric character").
       - registry.npmjs.org
-      - "*.npmjs.org"
       # 3. @openchamber/web depends on better-sqlite3, a native module whose
       #    install downloads a PREBUILT binary from GitHub release assets (and only
       #    compiles from source if that download is blocked — which fails here, no
@@ -88,20 +92,27 @@ caps:
       - release-assets.githubusercontent.com
 
 files:
+  # The `opencode` wrapper. Dropped at ~/.local/bin/opencode, which is FIRST on
+  # the base-image PATH, so it shadows the real opencode and is what the sandbox
+  # entrypoint (bare `opencode`) runs. See the header DESIGN note.
+  - path: /home/agent/.local/bin/opencode
+    mode: "0755"
+    source: files/home/.local/bin/opencode
+    description: opencode wrapper — owns the shared server, offers a TUI, passes other args through
   - path: /home/agent/openchamber-start.sh
     mode: "0755"
     source: files/home/openchamber-start.sh
-    description: Install (first boot) and supervise the managed opencode server + OpenChamber
+    description: Install (first boot) and supervise OpenChamber (attaches to the wrapper's shared server)
 
 commands:
   # Run the extracted startup script as the agent user at every start, IN THE
-  # BACKGROUND (trailing `&`) so the never-exiting supervisor loops don't block
-  # sandbox start. The OpenChamber release pins are exported here (the script
-  # also carries matching fallback defaults); bump BOTH together with the
-  # script's defaults to adopt a newer release. See docs/decisions/.
+  # BACKGROUND (trailing `&`) so the never-exiting OpenChamber supervisor loop
+  # doesn't block sandbox start. The OpenChamber release pins are exported here
+  # (the script also carries matching fallback defaults); bump BOTH together with
+  # the script's defaults to adopt a newer release. See docs/decisions/.
   - phase: startup
     user: "1000"
-    description: Install (first boot) and supervise opencode serve + OpenChamber (background)
+    description: Install (first boot) and supervise OpenChamber (background)
     command:
       - sh
       - -c
@@ -114,57 +125,72 @@ agentContext: |
   ## OpenChamber (web UI for OpenCode)
 
   This sandbox runs **OpenChamber**, a browser UI for OpenCode, in the
-  background on container port 3000. A managed `opencode serve` runs on
-  `127.0.0.1:4096`; OpenChamber drives that server.
+  background on container port 3000. It ships an `opencode` **wrapper** (at
+  `~/.local/bin/opencode`, first on PATH) that owns a single **shared**
+  `opencode serve` on `0.0.0.0:4096`. OpenChamber and any attached TUI drive
+  that one server, so they share one live session.
 
-  **Reaching it from the host.** The kit declares container port 3000, which
-  acq's active backend maps to an ephemeral host port on 127.0.0.1, allocated
-  per sandbox (so multiple sandboxes running this kit don't collide — each gets
-  its own host port). Find the assigned port and open it:
+  **Starting the shared server.** Running `opencode` with **no arguments**
+  starts the shared server on `:4096` (idempotent — a no-op if it's already up),
+  prints host-connect instructions, and offers to attach a TUI right there. Until
+  the server has been started once, OpenChamber loads but shows no live server.
+  Running `opencode <args…>` (e.g. `opencode run …`, `opencode auth login`)
+  passes straight through to the real opencode.
 
-  ```
-  acq ports <sandbox>        # (sbx ports <sandbox>) — lists the host port for container 3000
-  # then open http://127.0.0.1:<host-port>
-  ```
-
-  For a stable/chosen host port, publish it explicitly:
-  `sbx ports <sandbox> --publish 3000:3000`.
-
-  **Session sharing (important).** The terminal TUI you get from
-  `acq run opencode` starts its OWN in-process OpenCode server, so it does
-  **not** share live session state with the OpenChamber browser (which uses the
-  managed server on `:4096`). Session *history* is on disk and reachable from
-  both, but a live, in-flight run is not shared.
-
-  To drive the **same** server from a terminal — so the terminal and the
-  browser share one live session — attach to the managed server instead of
-  launching a fresh TUI. The managed server requires Basic auth with a
-  per-sandbox password the kit generated; pass it via `OPENCODE_SERVER_PASSWORD`:
+  **Reaching it from the host.** The kit publishes container ports 3000
+  (OpenChamber) and 4096 (the raw server); acq's active backend maps each to an
+  ephemeral host loopback port, per sandbox (so multiple sandboxes don't
+  collide). Find them and open/attach:
 
   ```
-  acq exec <sandbox> -- sh -lc \
-    'OPENCODE_SERVER_PASSWORD="$(cat ~/.local/state/openchamber/opencode-server-password)" \
-       opencode attach http://127.0.0.1:4096'
+  acq ports <sandbox>        # (sbx ports <sandbox>) — host ports for 3000 and 4096
+  # OpenChamber:   open http://127.0.0.1:<host-port-for-3000>
+  # host TUI:      opencode attach http://127.0.0.1:<host-port-for-4096>
   ```
 
-  Logs: `/tmp/openchamber.log` and `/tmp/opencode-serve.log` inside the sandbox.
-  Both services run under a respawn loop, so if `opencode serve` or OpenChamber
-  exits — for example after an interactive self-update, which needs a restart to
-  take effect — it comes back a few seconds later on its own. Those logs show
-  `[supervisor] ... restarting` lines when that happens.
+  **Session sharing.** Because the wrapper's shared server backs both the
+  browser and any attached TUI, they share one live, in-flight session by
+  default. To attach a TUI from the host to the same session:
+
+  ```
+  acq exec <sandbox> -- opencode attach http://127.0.0.1:4096
+  ```
+
+  The shared server is **unsecured** (no password): the sandbox is the security
+  boundary and the published ports are host loopback only.
+
+  Logs: `/tmp/openchamber.log` (OpenChamber) and `/tmp/opencode-serve.log` (the
+  shared server, started by the wrapper). OpenChamber runs under a respawn loop,
+  so if it exits — for example after an interactive self-update, which needs a
+  restart to take effect — it comes back a few seconds later on its own; that log
+  shows `[supervisor] ... restarting` lines when it happens.
 
 # Backend extras: the neutral spec does not model published ports or a
-# background-command flag, so the sbx-native bits live here. The sbx adapter
-# publishes container port 3000 (mapped to an ephemeral host loopback port per
-# sandbox — IMMUTABLE at create time, so apply this kit at create time) and
-# marks the startup command as a background hook. These are per-backend hints,
-# human-review-only (not schema-enforced); other backends express the same
-# behavior their own way (see the README backend-parity note). No
-# backend_shortcuts: every backend runs the same install+supervise script.
+# background-command flag, so the sbx-native bits live here. These declare the
+# intent for the sbx adapter: publish container ports 3000 (OpenChamber) and 4096
+# (the shared server), and run the startup command as a background hook.
+#
+# CAVEAT (acq translation): acq's neutral→sbx translator (kit_translate_to_sbx)
+# carries caps/files/commands/environment/agentContext. Emitting publishedPorts
+# was added upstream in quickstart#221 (closes quickstart#219); until that fix is
+# in the pinned patterns kit ref, applying via `acq` does NOT auto-publish the
+# ports — publish them once per sandbox with `acq ports <sandbox> --publish
+# 3000:3000` and `--publish 4096:4096` (see README "Reaching it from the host").
+# A direct sbx-v2 apply of a pre-translated kit already honors publishedPorts.
+# Adopting the upstream fix here (and dropping the manual step) is tracked as
+# #233.
+#
+# These are per-backend hints, human-review-only (not schema-enforced); other
+# backends express the same behavior their own way (see the README backend-parity
+# note). No backend_shortcuts: every backend runs the same install+supervise
+# script and the same wrapper.
 backend_extras:
   sbx:
     publishedPorts:
       - container: 3000
         protocol: tcp
         name: openchamber
+      - container: 4096
+        protocol: tcp
+        name: opencode-server
     background: true

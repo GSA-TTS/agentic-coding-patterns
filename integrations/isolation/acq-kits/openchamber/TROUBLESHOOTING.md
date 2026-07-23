@@ -6,74 +6,98 @@ to a sandbox (see [README.md](README.md#usage)).
 ## The browser page won't load / no host port
 
 **Symptoms:** `acq ports <sandbox>` (`sbx ports <sandbox>`) shows no mapping for
-container port 3000, or the browser can't connect.
+container port 3000 (or 4096), or the browser can't connect.
 
-**Cause:** the published port is an immutable, create-time setting. If the kit
-was added to an already-running sandbox, the port mapping is skipped (the backend
-warns and continues).
+**Cause:** `acq`'s neutral→sbx kit translation does **not** carry the kit's
+`backend_extras.sbx.publishedPorts`, so creating the sandbox with this kit does
+not by itself publish the ports.
 
-**Fix:** recreate the sandbox with the kit applied at create time:
+**Fix:** publish the two container ports (once per sandbox):
 
 ```bash
-acq rm <sandbox>                       # (or sbx rm <sandbox>)
-acq run opencode /path/to/project      # with ACQ_EXTRA_KITS set (see README)
+acq ports <sandbox> --publish 3000:3000    # OpenChamber web UI
+acq ports <sandbox> --publish 4096:4096    # shared opencode server
+acq ports <sandbox>                        # confirm the mappings
+```
+
+If you applied a *pre-translated* sbx-v2 kit directly via `sbx --kit`, the
+`publishedPorts` are honored at create time and this manual step isn't needed.
+
+## OpenChamber loads but shows no server
+
+**Symptoms:** the OpenChamber page opens, but there is no live OpenCode server /
+no sessions.
+
+**Cause:** this is expected until the shared server is started. In this kit the
+`opencode` **wrapper** owns the shared `opencode serve` on `:4096` and starts it
+**on demand** — the startup script only manages OpenChamber, not the server.
+
+**Fix:** run the wrapper once to bring the server up (no args), then reload
+OpenChamber:
+
+```bash
+acq exec <sandbox> -- opencode        # starts the shared server on :4096
+# or open a shell in the sandbox and run `opencode`
+```
+
+Then confirm the server answers:
+
+```bash
+acq exec <sandbox> -- sh -c 'curl -fsS http://127.0.0.1:4096/global/health >/dev/null && echo up'
 ```
 
 ## OpenChamber didn't start
 
-**Symptoms:** the host port is mapped but nothing answers on it.
+**Symptoms:** the host port is mapped but nothing answers on the OpenChamber
+port.
 
 **Cause:** the startup step is still installing OpenChamber (first boot does a
-one-time npm install), the install failed, or the managed OpenCode server didn't
-come up (e.g. no model provider configured, so `opencode serve` exits).
+one-time npm install), or the install failed.
 
 **Fix:** check the logs inside the sandbox:
 
 ```bash
 acq exec <sandbox> -- sh -c 'cat /tmp/openchamber-install.log'   # first-boot install
 acq exec <sandbox> -- sh -c 'cat /tmp/openchamber.log'
-acq exec <sandbox> -- sh -c 'cat /tmp/opencode-serve.log'
+acq exec <sandbox> -- sh -c 'cat /tmp/opencode-serve.log'        # written by the wrapper
 acq exec <sandbox> -- sh -c 'openchamber status'
 ```
 
-If `opencode serve` is failing, confirm a provider is configured — pair this kit
-with the `usai-provider` kit (the default GSA setup does). Both services run
-under a respawn loop, so a transient failure self-heals within a few seconds;
-if a service is *repeatedly* dying, the logs above will show recurring
-`[supervisor] ... restarting` lines. To reproduce a single run by hand (this
-runs one instance of each service without the supervisor loop, mirroring
-`files/home/openchamber-start.sh`):
+If the shared server is failing (see `/tmp/opencode-serve.log`), confirm a
+provider is configured — pair this kit with the `usai-provider` kit (the default
+GSA setup does). OpenChamber runs under a respawn loop, so a transient OpenChamber
+failure self-heals within a few seconds; the shared server is not supervised (the
+wrapper starts one instance), so if it exits, re-run `opencode`. To reproduce a
+single run by hand (mirrors what the wrapper and `files/home/openchamber-start.sh`
+do):
 
 ```bash
 acq exec <sandbox> -- sh -lc '
-  PW="$(cat ~/.local/state/openchamber/opencode-server-password)"
-  OPENCODE_SERVER_PASSWORD="$PW" nohup opencode serve --hostname 127.0.0.1 --port 4096 >/tmp/opencode-serve.log 2>&1 &
+  nohup opencode serve --hostname 0.0.0.0 --port 4096 >/tmp/opencode-serve.log 2>&1 &
   OPENCODE_SKIP_START=true OPENCODE_PORT=4096 OPENCHAMBER_ALLOW_UNAUTHENTICATED_LAN=true \
-    OPENCODE_SERVER_PASSWORD="$PW" openchamber --lan --port 3000 >/tmp/openchamber.log 2>&1 &
+    openchamber --lan --port 3000 >/tmp/openchamber.log 2>&1 &
 '
 ```
 
-## A service keeps restarting (crash loop)
+## OpenChamber keeps restarting (crash loop)
 
-**Symptoms:** `/tmp/opencode-serve.log` or `/tmp/openchamber.log` shows
-`[supervisor] <name> exited; restarting in 5s` over and over.
+**Symptoms:** `/tmp/openchamber.log` shows
+`[supervisor] openchamber exited; restarting in 5s` over and over.
 
-**Cause:** the respawn loop is doing its job — the underlying process keeps
-exiting immediately (bad config, missing provider, a failed self-update), so it
-is restarted every few seconds. The restart mechanism is fine; the *service* is
-the problem.
+**Cause:** the respawn loop is doing its job — OpenChamber keeps exiting
+immediately (bad config, a failed self-update), so it is restarted every few
+seconds. The restart mechanism is fine; the *service* is the problem.
 
 **Fix:** read the lines *above* each `[supervisor]` restart marker for the real
-error (missing model provider, auth failure, etc.), and fix that. To slow the
-loop down while you investigate, raise the delay by recreating the sandbox with
-`OPENCHAMBER_RESTART_DELAY` set higher (default `5` seconds). The loop
-intentionally never gives up, so once the underlying cause is fixed the service
-comes back on the next cycle without a sandbox restart.
+error, and fix that. To slow the loop down while you investigate, raise the delay
+by recreating the sandbox with `OPENCHAMBER_RESTART_DELAY` set higher (default
+`5` seconds). The loop intentionally never gives up, so once the underlying cause
+is fixed OpenChamber comes back on the next cycle without a sandbox restart.
 
-To confirm exactly one supervisor is running per service:
+To confirm exactly one supervisor is running:
 
 ```bash
-acq exec <sandbox> -- sh -c 'pgrep -af "supervisor:"'
+acq exec <sandbox> -- sh -c 'pgrep -af "supervisor:openchamber"'
 ```
 
 ## OpenChamber failed to install (native build error)
@@ -139,37 +163,51 @@ curl -fsSL "https://raw.githubusercontent.com/openchamber/openchamber/<ref>/scri
 If the hash you compute keeps changing for a fixed tag, treat that as suspicious
 (a tag should be immutable) and do not bump the pin to match it.
 
-## The terminal TUI and the browser show different sessions
+## `opencode` doesn't run the wrapper (real opencode runs instead)
 
-**Not a bug.** This is expected — see
-[Session sharing](README.md#session-sharing-important). To drive the same server
-from a terminal, attach with the per-sandbox password:
+**Symptoms:** running `opencode` with no args launches the plain TUI instead of
+the wrapper's "start shared server / offer a TUI" flow.
 
-```bash
-acq exec <sandbox> -- sh -lc \
-  'OPENCODE_SERVER_PASSWORD="$(cat ~/.local/state/openchamber/opencode-server-password)" \
-     opencode attach http://127.0.0.1:4096'
-```
+**Cause:** the wrapper shadows the real `opencode` by being **first on PATH** at
+`~/.local/bin/opencode`. If `~/.local/bin` isn't first on PATH, or the file
+wasn't dropped, the real binary wins.
 
-## `opencode attach` returns 401 / can't connect to the managed server
-
-**Cause:** `opencode serve` requires Basic auth; attaching without the
-per-sandbox password is rejected.
-
-**Fix:** pass `OPENCODE_SERVER_PASSWORD` from the file the kit wrote (see the
-command above). Confirm the file exists:
+**Fix:** confirm the wrapper is present, executable, and first on PATH:
 
 ```bash
-acq exec <sandbox> -- sh -c 'test -s ~/.local/state/openchamber/opencode-server-password && echo present'
+acq exec <sandbox> -- sh -c 'command -v opencode; ls -l ~/.local/bin/opencode; echo "$PATH"'
 ```
 
-## Do multiple sandboxes fight over port 3000?
+`command -v opencode` should print `/home/agent/.local/bin/opencode`. If it
+prints the npm-global path instead, the kit's `files[]` drop didn't land — check
+that the kit was applied and recreate the sandbox.
 
-**No.** The kit declares the *container* port; the sbx backend allocates a
-distinct **ephemeral host port on `127.0.0.1` per sandbox**, so several sandboxes
-running this kit each get their own host port — they don't collide. `acq ports
-<sandbox>` (`sbx ports <sandbox>`) shows which host port maps to container 3000
-for that sandbox.
+## A host TUI can't attach to the shared server
+
+**Cause:** the shared server is started **on demand** by the wrapper. If nobody
+has run `opencode` yet, nothing is listening on `:4096`.
+
+**Fix:** start it, then attach:
+
+```bash
+acq exec <sandbox> -- opencode                       # start the shared server
+acq exec <sandbox> -- opencode attach http://127.0.0.1:4096
+```
+
+The server is unsecured (no password), so no `OPENCODE_SERVER_PASSWORD` is
+needed. Confirm it's listening:
+
+```bash
+acq exec <sandbox> -- sh -c 'curl -fsS http://127.0.0.1:4096/global/health >/dev/null && echo up'
+```
+
+## Do multiple sandboxes fight over ports 3000 / 4096?
+
+**No.** The kit declares the *container* ports; the sbx backend allocates
+distinct **ephemeral host ports on `127.0.0.1` per sandbox**, so several
+sandboxes running this kit each get their own host ports — they don't collide.
+`acq ports <sandbox>` (`sbx ports <sandbox>`) shows which host ports map to
+container 3000 and 4096 for that sandbox.
 
 If you'd rather pin each to a known host port, publish them explicitly:
 
@@ -178,6 +216,6 @@ sbx ports <sandbox-a> --publish 3000:3000    # host 3000 → container 3000
 sbx ports <sandbox-b> --publish 3001:3000    # host 3001 → container 3000
 ```
 
-Inside every sandbox OpenChamber always listens on container port 3000; that's
-private to each sandbox's network namespace, so there's no in-container conflict
-either.
+Inside every sandbox OpenChamber always listens on container port 3000 and the
+shared server on 4096; those are private to each sandbox's network namespace, so
+there's no in-container conflict either.

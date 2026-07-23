@@ -2,25 +2,42 @@
 #
 # verify — host-side validation for the openchamber acq mixin kit.
 #
-# NOTE (hybrid/v1): the backend-agnostic gate is
-# integrations/isolation/acq-kits/validate-kits.py (schema + files[].source +
-# registry), run as check #1 below. The live sandbox portion drives the sbx
-# backend. Because this kit carries its port-publish + background hints in
-# backend_extras.sbx (the neutral spec models neither), a raw `sbx create --kit`
-# on the NEUTRAL spec would NOT publish the UI port — that translation is acq's
-# kit-translate layer (Phase 2 Part B). Until Part B lands, this script SKIPS the
-# live sandbox checks unless RUN_SBX=1 is set AND a translated sbx spec is
-# available, so it never reports a false FAIL for a translation gap that isn't
-# this kit's bug. The offline gate (check #1) always runs.
+# Two layers:
 #
-# Run on a host where `sbx` (>= 0.35.0) is installed and logged in. The USAi kit
-# needs a USAi key; set one first if you want the managed server to come up fully
-# (`sbx secret set-custom -g --host api.gsa.usai.gov --env USAI_API_KEY`).
+#   1. OFFLINE GATE (always runs): the backend-agnostic validator
+#      integrations/isolation/acq-kits/validate-kits.py (schema + files[].source
+#      + registry). Needs python3 with jsonschema + pyyaml; if those aren't
+#      importable this check reports SKIP (with the fix), not a false FAIL.
+#
+#   2. LIVE END-TO-END (opt-in): create a real sandbox with the kit applied,
+#      then assert the wrapper, the on-demand shared server, OpenChamber, the
+#      published ports, and the respawn supervisor.
+#
+#      Preferred driver — RUN_ACQ=1: drive the `acq` CLI. acq translates the
+#      neutral hybrid/v1 spec to an sbx-v2 kit (kit_translate_to_sbx) and applies
+#      it, so the kit's `files:`/`commands:` land correctly. IMPORTANT: acq's
+#      translator does NOT carry backend_extras.sbx.publishedPorts, so this
+#      script publishes container ports 3000 and 4096 EXPLICITLY via
+#      `acq ports --publish` after create. That mirrors what a user does today.
+#
+#      Legacy driver — RUN_SBX=1: drive `sbx` directly on the NEUTRAL spec. sbx
+#      cannot parse the neutral schema (it expects sbx-v2), so `sbx create --kit`
+#      on this kit fails ("field files not found", "cannot unmarshal !!seq into
+#      CommandsPolicy", "field backend_extras not found"). This path therefore
+#      requires a PRE-TRANSLATED sbx-v2 kit dir in SBX_KIT_DIR; without it the
+#      script reports SKIP with guidance rather than a misleading FAIL. Prefer
+#      RUN_ACQ=1.
+#
+# Run on a host where `acq` (RUN_ACQ) or `sbx` >= 0.35.0 (RUN_SBX) is installed
+# and logged in. The USAi kit needs a USAi key; set one first if you want the
+# shared server to come up fully:
+#   acq secret set-custom -g --host api.gsa.usai.gov --env USAI_API_KEY
 #
 # Usage (from anywhere):
-#   path/to/openchamber/scripts/verify           # offline gate only (default)
-#   RUN_SBX=1 path/to/.../scripts/verify         # also attempt the live sbx run
-#   KEEP=1 RUN_SBX=1 path/to/.../scripts/verify  # keep the sandbox for inspection
+#   path/to/openchamber/scripts/verify              # offline gate only (default)
+#   RUN_ACQ=1 path/to/.../scripts/verify            # live, via acq (preferred)
+#   KEEP=1 RUN_ACQ=1 path/to/.../scripts/verify     # keep the sandbox to inspect
+#   RUN_SBX=1 SBX_KIT_DIR=<translated> .../verify   # live, via sbx (needs sbx-v2 dir)
 
 set -uo pipefail
 
@@ -37,8 +54,13 @@ USAI_KIT_DIR="$(cd "$KIT_DIR/../usai-provider" 2>/dev/null && pwd || true)"
 ZSCALER_KIT_DIR="$(cd "$KIT_DIR/../zscaler-ca-certificate" 2>/dev/null && pwd || true)"
 SBX_NAME="openchamber-verify-$$"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/openchamber-verify.XXXXXX")"
-CREATE_LOG="$WORK/sbx-create.log"
+CREATE_LOG="$WORK/create.log"
 KEEP="${KEEP:-0}"
+# Which live driver to use. RUN_ACQ takes precedence. DRIVER is set below.
+RUN_ACQ="${RUN_ACQ:-0}"
+RUN_SBX="${RUN_SBX:-0}"
+# For the RUN_SBX legacy path: a pre-translated sbx-v2 kit dir (see header).
+SBX_KIT_DIR="${SBX_KIT_DIR:-}"
 # How long to wait for the background startup, which on FIRST boot also installs
 # OpenChamber (npm install of a native dep). Override with READY_TIMEOUT.
 READY_TIMEOUT="${READY_TIMEOUT:-120}"
@@ -61,13 +83,31 @@ cleanup() {
     printf '\nKEEP=1 set; leaving sandbox %s and %s in place.\n' "$SBX_NAME" "$WORK" >&2
     return
   fi
-  sbx rm -f "$SBX_NAME" >/dev/null 2>&1 || true
+  case "${DRIVER:-}" in
+    acq) acq rm "$SBX_NAME" >/dev/null 2>&1 || true ;;
+    *)   sbx rm -f "$SBX_NAME" >/dev/null 2>&1 || true ;;
+  esac
   rm -rf "$WORK" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM
 
-# Run a command in the sandbox, swallowing transient exec errors.
-in_sbx() { sbx exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true; }
+# --- Driver abstraction: exec a command inside the sandbox (non-TTY). --------
+# acq exec NAME -- CMD and sbx exec NAME -- CMD have the same shape; both are
+# non-TTY by default. We swallow transient exec errors so a probe never aborts
+# the run.
+in_sbx() {
+  case "${DRIVER:-}" in
+    acq) acq exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true ;;
+    *)   sbx exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true ;;
+  esac
+}
+# List published ports for the sandbox.
+sbx_ports_out() {
+  case "${DRIVER:-}" in
+    acq) acq ports "$SBX_NAME" 2>/dev/null || true ;;
+    *)   sbx ports "$SBX_NAME" 2>/dev/null || true ;;
+  esac
+}
 
 info "0. Preconditions"
 [ -f "$KIT_DIR/spec.yaml" ] && ok "kit spec.yaml present" || { bad "spec.yaml missing"; exit 1; }
@@ -75,86 +115,142 @@ info "0. Preconditions"
 info "1. Validate the neutral kit spec"
 # This is a hybrid/v1 acq kit; the backend-agnostic gate is validate-kits.py
 # (schema + files[].source resolution + registry cross-check), not `sbx kit
-# validate` (which only understands the translated sbx spec). Prefer the neutral
-# validator; if it isn't runnable here, note it rather than silently skipping.
-if command -v python3 >/dev/null 2>&1 && [ -f "$REPO_ROOT/integrations/isolation/acq-kits/validate-kits.py" ]; then
-  if python3 "$REPO_ROOT/integrations/isolation/acq-kits/validate-kits.py" --root "$REPO_ROOT" >/dev/null 2>&1; then
+# validate` (which only understands the translated sbx spec). Distinguish three
+# outcomes so a missing Python dep is reported as SKIP (with the fix), not as a
+# false FAIL that looks like a kit problem.
+VALIDATOR="$REPO_ROOT/integrations/isolation/acq-kits/validate-kits.py"
+if ! command -v python3 >/dev/null 2>&1; then
+  skip "validate-kits.py not run (python3 not on PATH)"
+elif [ ! -f "$VALIDATOR" ]; then
+  skip "validate-kits.py not found at $VALIDATOR"
+elif ! python3 -c 'import jsonschema, yaml' >/dev/null 2>&1; then
+  skip "validate-kits.py needs 'jsonschema' + 'pyyaml' — install them (pip install jsonschema pyyaml) and re-run"
+else
+  # Deps present: run it and, on failure, SHOW the real error instead of hiding it.
+  if val_out="$(python3 "$VALIDATOR" --root "$REPO_ROOT" 2>&1)"; then
     ok "acq-kits validate-kits.py passes (schema + registry)"
   else
-    bad "validate-kits.py failed (run it directly to see the error)"
+    bad "validate-kits.py failed:"
+    printf '%s\n' "$val_out" | sed 's/^/    | /' >&2
   fi
-else
-  skip "validate-kits.py not runnable here (needs python3 + jsonschema)"
 fi
 
-# The live sandbox portion (checks 2-7) needs the neutral spec translated to an
-# sbx spec (acq kit-translate, Part B) so the backend_extras.sbx port-publish +
-# background hints take effect. Until that's wired, only run it on explicit
-# opt-in, so the default run is the offline gate above and never a false FAIL.
-if [ "${RUN_SBX:-0}" != "1" ]; then
-  info "Live sandbox checks (2-7): SKIPPED"
-  echo "  Set RUN_SBX=1 to attempt the live sbx run (needs sbx + acq kit-translate)." >&2
+# --- Select the live driver. -------------------------------------------------
+# RUN_ACQ takes precedence over RUN_SBX. If neither is set, run offline only.
+DRIVER=""
+if [ "$RUN_ACQ" = "1" ]; then
+  DRIVER="acq"
+elif [ "$RUN_SBX" = "1" ]; then
+  DRIVER="sbx"
+fi
+
+if [ -z "$DRIVER" ]; then
+  info "Live sandbox checks (2-8): SKIPPED"
+  echo "  Set RUN_ACQ=1 to run the live end-to-end check via acq (preferred)." >&2
+  echo "  (RUN_SBX=1 also works but needs a pre-translated sbx-v2 kit; see header.)" >&2
   info "Summary"
   printf '  %d passed, %d failed\n' "$pass" "$fail"
   [ "$fail" -eq 0 ] && printf '  \033[32mOffline gate passed.\033[0m\n' || printf '  \033[31mOffline gate failed — see above.\033[0m\n'
   exit "$([ "$fail" -eq 0 ] && echo 0 || echo 1)"
 fi
 
-if ! command -v sbx >/dev/null 2>&1; then
-  echo "  RUN_SBX=1 set but sbx not on PATH. Install sbx >= 0.35.0 and retry." >&2
+if ! command -v "$DRIVER" >/dev/null 2>&1; then
+  echo "  RUN_${DRIVER^^}=1 set but '$DRIVER' not on PATH. Install it and retry." >&2
   exit 1
 fi
-echo "  sbx version: $(sbx version 2>/dev/null | grep -oE 'v?[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1)"
+echo "  driver: $DRIVER"
+if [ "$DRIVER" = "sbx" ]; then
+  echo "  sbx version: $(sbx version 2>/dev/null | grep -oE 'v?[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1)"
+fi
 
 info "2. Create a sandbox with the kit"
-create_kits=(--kit "$KIT_DIR")
-if [ -n "$USAI_KIT_DIR" ] && [ -f "$USAI_KIT_DIR/spec.yaml" ]; then
-  create_kits+=(--kit "$USAI_KIT_DIR")
-  echo "  pairing with usai-provider kit at $USAI_KIT_DIR"
+if [ "$DRIVER" = "acq" ]; then
+  # acq translates the neutral hybrid/v1 spec to sbx-v2 and applies it. The kit
+  # under test is passed as an ACQ_EXTRA_KITS *local path*; acq's kit_translate_fetch
+  # accepts a bare directory path and uses it verbatim. The usai/zscaler kits are
+  # already in acq's built-in pinned set, so we don't re-add them here.
+  echo "  creating $SBX_NAME via acq (extra kit: $KIT_DIR)..."
+  if ACQ_EXTRA_KITS="$KIT_DIR" acq create --name "$SBX_NAME" opencode "$WORK" >"$CREATE_LOG" 2>&1; then
+    ok "sandbox created via acq (kit translated + applied)"
+  else
+    bad "acq create failed (exit $?)"
+    sed 's/^/  | /' "$CREATE_LOG" >&2
+    exit 1
+  fi
+  # acq's translator does NOT carry backend_extras.sbx.publishedPorts, so publish
+  # the kit's two container ports explicitly — exactly what a user does today.
+  info "2b. Publish container ports 3000 and 4096 (acq translator drops publishedPorts)"
+  for cport in 3000 4096; do
+    if acq ports "$SBX_NAME" --publish "${cport}:${cport}" >/dev/null 2>&1; then
+      ok "published container $cport"
+    else
+      bad "failed to publish container $cport (acq ports --publish)"
+    fi
+  done
 else
-  echo "  NOTE: usai-provider kit not found next to this kit; creating without a" >&2
-  echo "        provider. 'opencode serve' may not fully start (server checks SKIP)." >&2
-fi
-if [ -n "$ZSCALER_KIT_DIR" ] && [ -f "$ZSCALER_KIT_DIR/spec.yaml" ]; then
-  create_kits+=(--kit "$ZSCALER_KIT_DIR")
-  echo "  pairing with zscaler-ca-certificate kit at $ZSCALER_KIT_DIR"
-else
-  echo "  NOTE: zscaler-ca-certificate kit not found next to this kit. On an" >&2
-  echo "        HTTPS-inspected network the OpenChamber install may fail TLS." >&2
-fi
-echo "  creating $SBX_NAME (workspace $WORK)..."
-# -D/--debug surfaces the underlying container-runtime error behind sbx's
-# generic "500 ... failed to run sandbox container". Set DEBUG=1 to include it.
-dbg=(); [ "${DEBUG:-0}" = "1" ] && dbg=(-D)
-# Expand dbg[@] safely: an empty array under `set -u` on bash 3.2 (macOS)
-# otherwise errors with "dbg[@]: unbound variable".
-if sbx ${dbg[@]+"${dbg[@]}"} create --name "$SBX_NAME" "${create_kits[@]}" opencode "$WORK" >"$CREATE_LOG" 2>&1; then
-  ok "sandbox created with --kit"
-else
-  bad "sbx create failed (exit $?)"
-  sed 's/^/  | /' "$CREATE_LOG" >&2
-  exit 1
+  # RUN_SBX legacy path: sbx cannot parse the NEUTRAL spec. Require a
+  # pre-translated sbx-v2 kit dir; otherwise SKIP with guidance rather than
+  # emitting a misleading create failure.
+  if [ -z "$SBX_KIT_DIR" ]; then
+    info "Live sandbox checks (2-8): SKIPPED"
+    echo "  RUN_SBX=1 needs a PRE-TRANSLATED sbx-v2 kit dir in SBX_KIT_DIR." >&2
+    echo "  sbx cannot parse the neutral hybrid/v1 spec directly (it fails with" >&2
+    echo "  'field files not found' / 'cannot unmarshal !!seq into CommandsPolicy'" >&2
+    echo "  / 'field backend_extras not found'). Prefer RUN_ACQ=1, which translates" >&2
+    echo "  automatically. To use RUN_SBX, translate first (acq's kit_translate_to_sbx)" >&2
+    echo "  and point SBX_KIT_DIR at the output." >&2
+    info "Summary"
+    printf '  %d passed, %d failed\n' "$pass" "$fail"
+    [ "$fail" -eq 0 ] && printf '  \033[32mOffline gate passed; live checks skipped.\033[0m\n' \
+      || printf '  \033[31mOffline gate failed — see above.\033[0m\n'
+    exit "$([ "$fail" -eq 0 ] && echo 0 || echo 1)"
+  fi
+  create_kits=(--kit "$SBX_KIT_DIR")
+  if [ -n "$USAI_KIT_DIR" ] && [ -f "$USAI_KIT_DIR/spec.yaml" ]; then
+    create_kits+=(--kit "$USAI_KIT_DIR")
+    echo "  pairing with usai-provider kit at $USAI_KIT_DIR"
+  else
+    echo "  NOTE: usai-provider kit not found next to this kit; creating without a" >&2
+    echo "        provider. 'opencode serve' may not fully start (server checks SKIP)." >&2
+  fi
+  if [ -n "$ZSCALER_KIT_DIR" ] && [ -f "$ZSCALER_KIT_DIR/spec.yaml" ]; then
+    create_kits+=(--kit "$ZSCALER_KIT_DIR")
+    echo "  pairing with zscaler-ca-certificate kit at $ZSCALER_KIT_DIR"
+  else
+    echo "  NOTE: zscaler-ca-certificate kit not found next to this kit. On an" >&2
+    echo "        HTTPS-inspected network the OpenChamber install may fail TLS." >&2
+  fi
+  echo "  creating $SBX_NAME (workspace $WORK) from translated kit $SBX_KIT_DIR..."
+  # -D/--debug surfaces the underlying container-runtime error behind sbx's
+  # generic "500 ... failed to run sandbox container". Set DEBUG=1 to include it.
+  dbg=(); [ "${DEBUG:-0}" = "1" ] && dbg=(-D)
+  # Expand dbg[@] safely: an empty array under `set -u` on bash 3.2 (macOS)
+  # otherwise errors with "dbg[@]: unbound variable".
+  if sbx ${dbg[@]+"${dbg[@]}"} create --name "$SBX_NAME" "${create_kits[@]}" opencode "$WORK" >"$CREATE_LOG" 2>&1; then
+    ok "sandbox created with --kit"
+  else
+    bad "sbx create failed (exit $?)"
+    sed 's/^/  | /' "$CREATE_LOG" >&2
+    exit 1
+  fi
 fi
 
-info "3. Wait for startup install + services (install up to ${READY_TIMEOUT}s, then ${POST_INSTALL_GRACE}s)"
-# Everything happens in the background startup step (install on first boot, then
-# opencode serve + OpenChamber), so poll rather than expecting it right after
-# create. The managed opencode server requires Basic auth; read the per-sandbox
-# password the kit generated so the health probe doesn't get a 401.
-PW_PATH='$HOME/.local/state/openchamber/opencode-server-password'
-oc_probe="curl -fsS -u \"opencode:\$(cat $PW_PATH 2>/dev/null)\" http://127.0.0.1:4096/global/health >/dev/null 2>&1 && echo yes"
+info "3. Wait for startup install + OpenChamber (install up to ${READY_TIMEOUT}s, then ${POST_INSTALL_GRACE}s)"
+# The background startup step installs OpenChamber on first boot, then supervises
+# OpenChamber (skip-start mode). It does NOT start opencode serve — the wrapper
+# owns that on demand (checked separately below). So here we only wait for the
+# install and for OpenChamber to answer.
 deadline=$(( $(date +%s) + READY_TIMEOUT ))
-installed=""; oc_up=""; chamber_up=""; grace_deadline=""
+installed=""; chamber_up=""; grace_deadline=""
 while :; do
   now=$(date +%s)
   [ -z "$installed" ] && [ -n "$(in_sbx 'command -v openchamber')" ] && {
     installed=yes
-    # Install done — the servers should appear within POST_INSTALL_GRACE.
+    # Install done — OpenChamber should appear within POST_INSTALL_GRACE.
     grace_deadline=$(( now + POST_INSTALL_GRACE ))
   }
-  [ -z "$oc_up" ] && [ "$(in_sbx "$oc_probe")" = "yes" ] && oc_up=yes
   [ -z "$chamber_up" ] && [ "$(in_sbx 'curl -fsS http://127.0.0.1:3000 >/dev/null 2>&1 && echo yes')" = "yes" ] && chamber_up=yes
-  [ -n "$installed" ] && [ -n "$oc_up" ] && [ -n "$chamber_up" ] && break
+  [ -n "$installed" ] && [ -n "$chamber_up" ] && break
   # Stop conditions: overall deadline, or the post-install grace elapsed.
   [ "$now" -ge "$deadline" ] && break
   [ -n "$grace_deadline" ] && [ "$now" -ge "$grace_deadline" ] && break
@@ -168,17 +264,48 @@ else
   in_sbx 'tail -n 25 /tmp/openchamber-install.log' | sed 's/^/    | /'
 fi
 
-info "4. Managed opencode server"
+info "4. opencode wrapper installed and shadows the real binary"
+# The wrapper must be at ~/.local/bin/opencode and resolve FIRST on PATH.
+wrapper_path="$(in_sbx 'command -v opencode')"
+case "$wrapper_path" in
+  */.local/bin/opencode)
+    ok "opencode resolves to the wrapper ($wrapper_path)" ;;
+  "")
+    bad "opencode not found on PATH in the sandbox" ;;
+  *)
+    bad "opencode resolves to '$wrapper_path', not ~/.local/bin/opencode (wrapper not shadowing)" ;;
+esac
+# Sanity: the dropped file is executable.
+[ -n "$(in_sbx 'test -x ~/.local/bin/opencode && echo yes')" ] \
+  && ok "wrapper file is executable" \
+  || bad "~/.local/bin/opencode missing or not executable"
+
+info "5. Shared opencode server (started on demand by the wrapper)"
+# The server is on-demand: nothing listens on :4096 until the wrapper runs. Run
+# the wrapper NON-INTERACTIVELY (no TTY via `acq exec`), so it starts the server
+# and exits without prompting, then probe. Unsecured — no auth header needed.
+in_sbx 'opencode >/tmp/wrapper-run.log 2>&1 || true'
+oc_up=""
+oc_deadline=$(( $(date +%s) + 20 ))
+while :; do
+  [ "$(in_sbx 'curl -fsS http://127.0.0.1:4096/global/health >/dev/null 2>&1 && echo yes')" = "yes" ] && { oc_up=yes; break; }
+  [ "$(date +%s)" -ge "$oc_deadline" ] && break
+  sleep "$POLL_INTERVAL"
+done
 if [ -n "$oc_up" ]; then
-  ok "managed opencode server answers on 127.0.0.1:4096"
-elif [ -n "$USAI_KIT_DIR" ]; then
-  bad "managed opencode server did not answer on :4096 (see /tmp/opencode-serve.log)"
+  ok "shared opencode server answers on 127.0.0.1:4096 after running the wrapper"
+elif [ "$DRIVER" = "acq" ] || [ -n "$USAI_KIT_DIR" ]; then
+  # A provider is expected: acq applies usai-provider as a built-in kit, and the
+  # sbx path pairs USAI_KIT_DIR. Without a USAi *key* the server may still not
+  # come up — treat as FAIL only when a provider kit is present; the key itself
+  # is the operator's responsibility (see the header).
+  bad "shared server did not answer on :4096 (see /tmp/opencode-serve.log; is a USAi key set?)"
   in_sbx 'tail -n 20 /tmp/opencode-serve.log' | sed 's/^/    | /'
 else
-  skip "opencode server on :4096 (no provider configured — expected without USAi key)"
+  skip "shared server on :4096 (no provider configured — expected without USAi key)"
 fi
 
-info "5. OpenChamber web server"
+info "6. OpenChamber web server"
 if [ -n "$chamber_up" ]; then
   ok "OpenChamber answers on 127.0.0.1:3000 inside the sandbox"
 else
@@ -186,24 +313,24 @@ else
   in_sbx 'tail -n 20 /tmp/openchamber.log' | sed 's/^/    | /'
 fi
 
-info "6. Host port published for container 3000"
-ports_out="$(sbx ports "$SBX_NAME" 2>/dev/null || true)"
-if printf '%s' "$ports_out" | grep -q '3000'; then
-  ok "sbx ports maps container 3000 to a host port"
-  printf '%s\n' "$ports_out" | sed 's/^/    | /'
-else
-  bad "no host mapping for container 3000 in 'sbx ports' output"
-  printf '%s\n' "$ports_out" | sed 's/^/    | /'
-fi
+info "7. Host ports published for container 3000 and 4096"
+ports_out="$(sbx_ports_out)"
+for cport in 3000 4096; do
+  if printf '%s' "$ports_out" | grep -q "$cport"; then
+    ok "ports maps container $cport to a host port"
+  else
+    bad "no host mapping for container $cport in 'ports' output"
+  fi
+done
+printf '%s\n' "$ports_out" | sed 's/^/    | /'
 
-info "7. Respawn supervisors running (auto-restart)"
-# Each service runs under a loop marked "supervisor:<name>" in its argv, so a
+info "8. OpenChamber respawn supervisor running (auto-restart)"
+# OpenChamber runs under a loop marked "supervisor:openchamber" in its argv, so a
 # process exit (self-update/crash) is followed by a restart. Assert exactly one
-# supervisor per service is alive (one guards against duplicates on re-runs).
-oc_sup="$(in_sbx 'pgrep -c -f "supervisor:opencode-serve" 2>/dev/null')"
+# supervisor is alive (guards against duplicates on re-runs). The shared server is
+# NOT supervised — the wrapper starts one instance on demand — so there is no
+# opencode-serve supervisor to check anymore.
 ch_sup="$(in_sbx 'pgrep -c -f "supervisor:openchamber" 2>/dev/null')"
-[ "${oc_sup:-0}" -ge 1 ] 2>/dev/null && ok "opencode-serve supervisor running (count=$oc_sup)" \
-  || bad "no opencode-serve supervisor found (auto-restart not active)"
 [ "${ch_sup:-0}" -ge 1 ] 2>/dev/null && ok "openchamber supervisor running (count=$ch_sup)" \
   || bad "no openchamber supervisor found (auto-restart not active)"
 
