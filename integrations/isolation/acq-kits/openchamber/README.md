@@ -64,7 +64,7 @@ explicitly (see [Usage](#usage)).
 > keeps a failure to "UI unavailable" instead of a dead sandbox. The first boot
 > therefore does a one-time npm install (a few extra seconds); later starts skip
 > it.
-
+>
 > **OpenChamber shows no server until you run `opencode`.** The shared server is
 > started on demand by the wrapper, not by the startup script. Run `opencode`
 > (no args) once — in the sandbox or via `acq exec <sandbox> -- opencode` — to
