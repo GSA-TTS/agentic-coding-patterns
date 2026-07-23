@@ -58,9 +58,11 @@ still `exec`s the attach, update the kit and recreate the sandbox.
 **Symptoms:** `acq ports <sandbox>` shows no mapping for
 container port 3000 (or 4096), or the browser can't connect.
 
-**Cause:** `acq`'s neutral→sbx kit translation does **not** carry the kit's
-`backend_extras.sbx.publishedPorts`, so creating the sandbox with this kit does
-not by itself publish the ports.
+**Cause:** on a **current `acq`** the ports are published automatically at create
+time (acq carries the kit's `backend_extras.sbx.publishedPorts` as of
+[quickstart#221](https://github.com/GSA-TTS/agentic-coding-quickstart/pull/221),
+merged). If you see no mapping, you are most likely on an **older `acq`** that
+predates that fix, so it did not publish the ports.
 
 **Fix:** publish the two container ports (once per sandbox):
 
@@ -70,8 +72,7 @@ acq ports <sandbox> --publish 4096:4096    # shared opencode server
 acq ports <sandbox>                        # confirm the mappings
 ```
 
-If you applied a *pre-translated* sbx-v2 kit directly via `sbx --kit`, the
-`publishedPorts` are honored at create time and this manual step isn't needed.
+Upgrading `acq` to a build that includes quickstart#221 removes the manual step.
 
 ## OpenChamber loads but shows no server
 
@@ -110,21 +111,22 @@ one-time npm install), or the install failed.
 ```bash
 acq exec <sandbox> -- sh -c 'cat /tmp/openchamber-install.log'   # first-boot install
 acq exec <sandbox> -- sh -c 'cat /tmp/openchamber.log'
-acq exec <sandbox> -- sh -c 'cat /tmp/opencode-serve.log'        # written by the wrapper
+acq exec <sandbox> -- sh -c 'cat ~/.local/state/openchamber/opencode-serve.log'  # written by the wrapper
 acq exec <sandbox> -- sh -c 'openchamber status'
 ```
 
-If the shared server is failing (see `/tmp/opencode-serve.log`), confirm a
+If the shared server is failing (see
+`~/.local/state/openchamber/opencode-serve.log`), confirm a
 provider is configured — pair this kit with the `usai-provider` kit (the default
 GSA setup does). OpenChamber runs under a respawn loop, so a transient OpenChamber
-failure self-heals within a few seconds; the shared server is not supervised (the
-wrapper starts one instance), so if it exits, re-run `opencode`. To reproduce a
+failure self-heals within a few seconds; the shared server is held by the
+wrapper's `hold_pid1` loop, which re-launches it if it dies. To reproduce a
 single run by hand (mirrors what the wrapper and `files/home/openchamber-start.sh`
 do):
 
 ```bash
 acq exec <sandbox> -- sh -lc '
-  nohup opencode serve --hostname 0.0.0.0 --port 4096 >/tmp/opencode-serve.log 2>&1 &
+  nohup opencode serve --hostname 0.0.0.0 --port 4096 >~/.local/state/openchamber/opencode-serve.log 2>&1 &
   OPENCODE_SKIP_START=true OPENCODE_PORT=4096 OPENCHAMBER_ALLOW_UNAUTHENTICATED_LAN=true \
     openchamber --lan --port 3000 >/tmp/openchamber.log 2>&1 &
 '

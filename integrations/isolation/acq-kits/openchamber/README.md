@@ -74,19 +74,20 @@ explicitly (see [Usage](#usage)).
 
 | Backend | Support | Notes |
 |---------|---------|-------|
-| **sbx** | Supported (ports need one manual step) | The startup script runs as a background hook. Port publishing is **not** carried by acq's neutral→sbx translation, so publish the two container ports once after create: `acq ports <sandbox> --publish 3000:3000` and `--publish 4096:4096`. `backend_extras.sbx.publishedPorts` documents the intended mapping and is honored by a direct sbx-v2 apply. |
+| **sbx** | Supported | The startup script runs as a background hook, and acq's neutral→sbx translation carries `backend_extras.sbx.publishedPorts` ([quickstart#221](https://github.com/GSA-TTS/agentic-coding-quickstart/pull/221), merged), so the two container ports are published to the host at create time — no manual step. |
 | **msb** | Not yet | Deferred: the neutral spec models neither port publishing nor a background-command flag, and no equivalent `backend_extras.msb` is wired. The install+supervise script and the `opencode` wrapper are backend-agnostic; only the port/background plumbing is missing. |
 | **ppp** (later) | Not yet | Same gap as msb. |
 
 The one backend-specific dependency is **exposing the in-container ports to the
 host** and **running the startup command in the background**. The background hook
-is carried through acq's translation; **port publishing** was added to acq's
-translator upstream ([quickstart#221](https://github.com/GSA-TTS/agentic-coding-quickstart/pull/221)),
-but until that fix reaches the pinned patterns kit ref it is a manual
-`acq ports … --publish` step. Both live in `backend_extras.sbx` because
-`hybrid/v1` does not (yet) model published ports or a background flag. Extending
-`openchamber` to `msb`/`ppp` — and adopting the upstream `publishedPorts`
-translation (dropping the manual step) — is tracked as a follow-up on
+is carried through acq's translation; **port publishing** is now carried too, as
+of acq's translator fix ([quickstart#221](https://github.com/GSA-TTS/agentic-coding-quickstart/pull/221),
+merged) — so a current `acq` publishes ports 3000/4096 at create time with no
+manual step. (If you run an older `acq` that predates that fix, publish them once
+per sandbox with `acq ports <sandbox> --publish 3000:3000` / `--publish
+4096:4096`.) Both live in `backend_extras.sbx` because `hybrid/v1` does not (yet)
+model published ports or a background flag. Extending `openchamber` to
+`msb`/`ppp` is tracked as a follow-up on
 [#233](https://github.com/GSA-TTS/agentic-coding-patterns/issues/233);
 it needs either a neutral port-publish + background vocabulary in `acq` or an
 `msb`-native equivalent extra.
@@ -109,17 +110,18 @@ commit SHA of this repo (branches and tags are rejected for git kit refs).
 Because `acq run opencode` runs the bare command `opencode`, the kit's wrapper
 takes over: it starts the shared server and offers you a TUI in that terminal.
 
-> **Publish the ports after create.** `acq`'s neutral→sbx translation does **not**
-> carry `backend_extras.sbx.publishedPorts`, so creating with this kit does not by
-> itself map the container ports to the host. Publish them once, per sandbox:
+> **Ports are published at create time.** A current `acq` carries the kit's
+> `backend_extras.sbx.publishedPorts` through translation
+> ([quickstart#221](https://github.com/GSA-TTS/agentic-coding-quickstart/pull/221),
+> merged), so both container ports are mapped to the host **loopback** on create.
+> If you're on an older `acq` that predates that fix, map them once per sandbox:
 >
 > ```bash
 > acq ports <sandbox> --publish 3000:3000    # OpenChamber web UI
 > acq ports <sandbox> --publish 4096:4096    # shared opencode server
 > ```
 >
-> (`publishedPorts` in `spec.yaml` documents the intended mapping and is honored
-> by a direct sbx-v2 apply, but not by the current acq translator — see
+> (`publishedPorts` in `spec.yaml` is the source of that mapping — see
 > [backend parity](#backend-parity).)
 >
 > **On HTTPS-inspected networks (e.g. Zscaler).** OpenChamber's first-boot
@@ -183,9 +185,18 @@ shared server is now published to the host (container port `4096` → a host
 loopback-only, so they are not LAN-reachable; but anyone with access to the
 host's loopback (any local user, or anything you forward those ports to) can
 drive OpenCode without a credential. Only run this on a host you trust as
-single-tenant, and don't forward the mapped ports to a wider interface. The
-server is started on demand by the wrapper, so it is only live once you've run
-`opencode` — not for the whole sandbox lifetime unless you start it.
+single-tenant, and don't forward the mapped ports to a wider interface.
+
+**The loopback-only guarantee depends on the acq port-publish translation.** The
+"host **loopback** only" claim holds only because the backend publishes the
+`0.0.0.0:4096` container bind to a loopback-scoped host port. That mapping is
+carried by acq's `backend_extras.sbx.publishedPorts` translation, added in
+[quickstart#221](https://github.com/GSA-TTS/agentic-coding-quickstart/pull/221)
+(merged). On an **older `acq`** that predates that fix, the ports are **not**
+auto-published — you must publish them yourself (`acq ports <sandbox> --publish
+4096:4096`), and acq maps published ports to `127.0.0.1` per sandbox. Until the
+ports are published loopback-scoped, treat the unauthenticated `0.0.0.0` bind as
+reachable to whatever can route to the container, and don't expose it.
 
 **Installer supply chain.** The first-boot install fetches OpenChamber's
 `install.sh` from a **pinned release tag** (`OPENCHAMBER_REF`) and refuses to run

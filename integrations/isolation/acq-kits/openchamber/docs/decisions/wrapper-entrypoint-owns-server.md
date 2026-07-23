@@ -113,14 +113,16 @@ Two related choices:
   (`command -v opencode`).
 - **Ports need a manual publish step under acq (transitional).** acq's
   neutral→sbx translator (`kit_translate_to_sbx`) did not carry
-  `backend_extras.sbx.publishedPorts`, so applying via `acq` did not auto-map
-  3000/4096 to the host. Fixed upstream in
+- **Ports published at create (as of quickstart#221).** acq's neutral→sbx
+  translator (`kit_translate_to_sbx`) now carries
+  `backend_extras.sbx.publishedPorts`, so applying via `acq` auto-maps 3000/4096
+  to the host loopback at create time. Fixed in
   [quickstart#221](https://github.com/GSA-TTS/agentic-coding-quickstart/pull/221)
-  (closes quickstart#219/#220); until that reaches the pinned patterns kit ref
-  the workaround is a one-time `acq ports <sandbox> --publish 3000:3000` /
-  `--publish 4096:4096`. The verify script does this automatically on the
-  `RUN_ACQ=1` path, and the README / TROUBLESHOOTING document it. Adopting the
-  fix here is tracked as #233.
+  (merged; closes quickstart#219/#220). On an older `acq` predating that fix, the
+  workaround is a one-time `acq ports <sandbox> --publish 3000:3000` /
+  `--publish 4096:4096`. The verify script re-publishes idempotently on the
+  `RUN_ACQ=1` path (working on both old and new acq), and the README /
+  TROUBLESHOOTING document the fallback.
 - The `kind: sandbox` variant contemplated by the older ADR is no longer needed
   for shared sessions — the mixin achieves it via the wrapper.
 

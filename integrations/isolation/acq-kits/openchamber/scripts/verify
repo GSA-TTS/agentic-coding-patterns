@@ -15,10 +15,10 @@
 #
 #      Preferred driver — RUN_ACQ=1: drive the `acq` CLI. acq translates the
 #      neutral hybrid/v1 spec to an sbx-v2 kit (kit_translate_to_sbx) and applies
-#      it, so the kit's `files:`/`commands:` land correctly. IMPORTANT: acq's
-#      translator does NOT carry backend_extras.sbx.publishedPorts, so this
-#      script publishes container ports 3000 and 4096 EXPLICITLY via
-#      `acq ports --publish` after create. That mirrors what a user does today.
+#      it, so the kit's `files:`/`commands:` land correctly. As of quickstart#221
+#      (merged) acq also carries backend_extras.sbx.publishedPorts, so ports
+#      3000/4096 are published at create time; this script still re-publishes
+#      them idempotently so it also works on an older acq predating that fix.
 #
 #      Legacy driver — RUN_SBX=1: drive `sbx` directly on the NEUTRAL spec. sbx
 #      cannot parse the neutral schema (it expects sbx-v2), so `sbx create --kit`
@@ -177,9 +177,11 @@ if [ "$DRIVER" = "acq" ]; then
     sed 's/^/  | /' "$CREATE_LOG" >&2
     exit 1
   fi
-  # acq's translator does NOT carry backend_extras.sbx.publishedPorts, so publish
-  # the kit's two container ports explicitly — exactly what a user does today.
-  info "2b. Publish container ports 3000 and 4096 (acq translator drops publishedPorts)"
+  # As of quickstart#221 (merged) acq carries backend_extras.sbx.publishedPorts,
+  # so a current acq already published 3000/4096 at create. Re-publish explicitly
+  # anyway: it's idempotent, and it keeps this check working on an older acq that
+  # predates that fix. Step 7 asserts the mappings actually exist either way.
+  info "2b. Ensure container ports 3000 and 4096 are published (idempotent; auto as of quickstart#221)"
   for cport in 3000 4096; do
     if acq ports "$SBX_NAME" --publish "${cport}:${cport}" >/dev/null 2>&1; then
       ok "published container $cport"
@@ -302,8 +304,8 @@ elif [ "$DRIVER" = "acq" ] || [ -n "$USAI_KIT_DIR" ]; then
   # sbx path pairs USAI_KIT_DIR. Without a USAi *key* the server may still not
   # come up — treat as FAIL only when a provider kit is present; the key itself
   # is the operator's responsibility (see the header).
-  bad "shared server did not answer on :4096 (see /tmp/opencode-serve.log; is a USAi key set?)"
-  in_sbx 'tail -n 20 /tmp/opencode-serve.log' | sed 's/^/    | /'
+  bad "shared server did not answer on :4096 (see the serve log; is a USAi key set?)"
+  in_sbx 'tail -n 20 "${XDG_STATE_HOME:-$HOME/.local/state}/openchamber/opencode-serve.log"' | sed 's/^/    | /'
 else
   skip "shared server on :4096 (no provider configured — expected without USAi key)"
 fi
@@ -364,7 +366,7 @@ case "$wrapper_probe" in
     skip "could not run the entrypoint-liveness probe (no 'timeout' in sandbox)" ;;
   *)
     bad "wrapper no-arg path RETURNED (${wrapper_probe}); as the entrypoint this exits PID 1 and stops the sandbox"
-    in_sbx 'tail -n 20 /tmp/opencode-serve.log' | sed 's/^/    | /' ;;
+    in_sbx 'tail -n 20 "${XDG_STATE_HOME:-$HOME/.local/state}/openchamber/opencode-serve.log"' | sed 's/^/    | /' ;;
 esac
 
 info "10. Sandbox survives an attached TUI being quit — regression guard"
@@ -389,6 +391,47 @@ else
     ok "wrapper ends by holding PID 1 (hold_pid1), so a quit TUI falls through to the foreground server"
   else
     bad "wrapper does not end in a hold_pid1 call — a quit TUI may let the entrypoint return"
+  fi
+fi
+
+info "11. Sandbox survives the shared server dying — self-heal regression guard"
+# REGRESSION GUARD (the reviewer's must-fix): if the server hold_pid1 holds ever
+# dies (crash/OOM/lost bind race), the loop must (re)launch a server and keep
+# blocking — it must NEVER return, or PID 1 exits and the sandbox stops. Prove it
+# live: bring the server up, KILL it, and confirm a server is answering again
+# afterward (self-heal) AND the sandbox is still reachable.
+#
+# We drive a detached wrapper as the "holder" (its hold_pid1 loop re-launches),
+# then kill the serve process out from under it and re-probe :4096.
+health='curl -fsS http://127.0.0.1:4096/global/health >/dev/null 2>&1 && echo yes'
+# Ensure a holder + server are up (step 5 already ran one; this is idempotent).
+in_sbx 'nohup opencode >/dev/null 2>&1 & echo started'
+# Wait for a server to answer before we try to kill it.
+heal_pre=""
+pre_deadline=$(( $(date +%s) + 20 ))
+while :; do
+  [ "$(in_sbx "$health")" = "yes" ] && { heal_pre=yes; break; }
+  [ "$(date +%s)" -ge "$pre_deadline" ] && break
+  sleep "$POLL_INTERVAL"
+done
+if [ -z "$heal_pre" ]; then
+  skip "self-heal guard: no server was up to kill (provider/USAi key likely missing)"
+else
+  # Kill the actual `opencode serve` process (not the wrapper/holder). pkill -f
+  # matches the serve command line; the wrapper's hold_pid1 should relaunch it.
+  in_sbx 'pkill -f "opencode serve --hostname" 2>/dev/null; echo killed'
+  healed=""
+  heal_deadline=$(( $(date +%s) + 30 ))   # allow reheal loop + serve readiness
+  while :; do
+    [ "$(in_sbx "$health")" = "yes" ] && { healed=yes; break; }
+    [ "$(date +%s)" -ge "$heal_deadline" ] && break
+    sleep "$POLL_INTERVAL"
+  done
+  if [ -n "$healed" ]; then
+    ok "shared server was re-launched after being killed (hold_pid1 self-healed; PID 1 held)"
+  else
+    bad "shared server did NOT come back after being killed — hold_pid1 may have returned (sandbox would stop)"
+    in_sbx 'tail -n 20 "${XDG_STATE_HOME:-$HOME/.local/state}/openchamber/opencode-serve.log"' | sed 's/^/    | /'
   fi
 fi
 

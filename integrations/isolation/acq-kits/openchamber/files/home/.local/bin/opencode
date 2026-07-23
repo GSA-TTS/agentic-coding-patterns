@@ -29,9 +29,10 @@
 #   entrypoint / PID 1 is alive. If this wrapper backgrounds the server and then
 #   returns — OR execs a TUI that you later quit — PID 1 exits and the sandbox
 #   transitions running -> stopped. So on the no-arg path the wrapper always ends
-#   by BLOCKING on a long-lived foreground server (hold_pid1): the TUI, when
-#   requested, runs as a CHILD, and quitting it falls through to that hold rather
-#   than ending the entrypoint.
+#   by BLOCKING FOREVER in hold_pid1: a self-healing loop that keeps a server
+#   answering on :4096 and re-launches it if it ever dies (crash/OOM/lost race),
+#   so a dead server can NEVER let the loop return and stop the sandbox. The TUI,
+#   when requested, runs as a CHILD; quitting it falls through to that same hold.
 #
 # The managed server is UNSECURED (no OPENCODE_SERVER_PASSWORD): the sandbox — an
 # ephemeral container with proxied, allow-listed egress and no host FS — is the
@@ -42,7 +43,19 @@ set -eu
 
 OC_PORT=4096
 OC_HOST=0.0.0.0
-SERVE_LOG=/tmp/opencode-serve.log
+
+# Sandbox-local state dir for our log + serve lock. Prefer an XDG-ish per-user
+# location over a predictable /tmp path (the log can echo host-connect details).
+# It is created 0700 and lives for the sandbox's lifetime.
+OC_STATE_DIR="${XDG_STATE_HOME:-${HOME:-/home/agent}/.local/state}/openchamber"
+mkdir -p "$OC_STATE_DIR" 2>/dev/null || OC_STATE_DIR="$(mktemp -d 2>/dev/null || echo /tmp)"
+chmod 0700 "$OC_STATE_DIR" 2>/dev/null || true
+SERVE_LOG="$OC_STATE_DIR/opencode-serve.log"
+# Lock dir guarding the serve launch (mkdir is atomic, so it doubles as a
+# mutex): only one wrapper wins the race to `nohup … serve`, closing the
+# two-starts-both-bind-:4096 TOCTOU. Held only across launch, not for the
+# server's lifetime.
+SERVE_LOCK="$OC_STATE_DIR/serve.lock"
 
 # --- Resolve the REAL opencode (never ourselves). ---------------------------
 # We are ~/.local/bin/opencode and are first on PATH, so `command -v opencode`
@@ -83,25 +96,66 @@ serve_up() {
   curl -fsS "http://127.0.0.1:$OC_PORT/global/health" >/dev/null 2>&1
 }
 
-# Start the shared server in the background and wait for it to answer, so the
-# host-connect instructions and any TUI attach below are truthful. This is only
-# a TEMPORARY background start: on every no-TUI path we replace it by exec'ing a
-# foreground server so PID 1 stays alive (see the header "must not return" note).
-started_here=0
-if serve_up; then
-  echo "opencode: shared server already running on 0.0.0.0:$OC_PORT"
-else
-  echo "opencode: starting shared server on $OC_HOST:$OC_PORT ..."
-  nohup "$real_opencode" serve --hostname "$OC_HOST" --port "$OC_PORT" \
-    >"$SERVE_LOG" 2>&1 &
-  started_here=1
+# Launch a backgrounded `opencode serve` exactly once across racing wrappers.
+# `mkdir` is atomic, so it is our mutex: only the wrapper that creates SERVE_LOCK
+# launches; the others skip the launch and just wait for the port to answer.
+# This closes the TOCTOU where two near-simultaneous no-arg starts both
+# `nohup … serve` and race the :4096 bind (the loser dies). We release the lock
+# once the server answers (or we give up), so a later respawn can re-acquire it.
+#
+# Stale-lock safety: if a lock holder was killed before it could `rmdir`, the
+# lock would otherwise wedge every future launch into the wait-only branch. We
+# record the holder PID and reclaim the lock if that PID is gone. `set -e` never
+# fires here — all the checks are in conditions or `|| true`.
+# Returns 0 if a server is answering by the end, 1 otherwise.
+_serve_wait() {
   _i=0
   while [ "$_i" -lt 30 ]; do
-    serve_up && break
+    serve_up && return 0
     _i=$((_i + 1))
     sleep 1
   done
-  if serve_up; then
+  serve_up
+}
+serve_launch_once() {
+  _own=0
+  if mkdir "$SERVE_LOCK" 2>/dev/null; then
+    _own=1
+  else
+    # Lock exists — reclaim it if the recorded holder PID is gone (stale),
+    # so a crashed launch can't wedge us forever.
+    _holder="$(cat "$SERVE_LOCK/pid" 2>/dev/null || true)"
+    if [ -n "$_holder" ] && ! kill -0 "$_holder" 2>/dev/null; then
+      rm -rf "$SERVE_LOCK" 2>/dev/null || true
+      if mkdir "$SERVE_LOCK" 2>/dev/null; then _own=1; fi
+    fi
+  fi
+
+  if [ "$_own" -eq 1 ]; then
+    printf '%s' "$$" >"$SERVE_LOCK/pid" 2>/dev/null || true
+    # Re-check under the lock in case a server came up between the caller's
+    # check and our acquiring the lock.
+    if ! serve_up; then
+      echo "opencode: starting shared server on $OC_HOST:$OC_PORT ..."
+      nohup "$real_opencode" serve --hostname "$OC_HOST" --port "$OC_PORT" \
+        >>"$SERVE_LOG" 2>&1 &
+    fi
+    _serve_wait
+    rm -rf "$SERVE_LOCK" 2>/dev/null || true
+  else
+    # Another (live) wrapper owns the launch; just wait for the port to answer.
+    _serve_wait
+  fi
+  serve_up
+}
+
+# Bring the server up now, so the host-connect instructions and any TUI attach
+# below are truthful. This first start is TEMPORARY: on every no-TUI path we end
+# by holding a foreground server so PID 1 stays alive (see the header note).
+if serve_up; then
+  echo "opencode: shared server already running on 0.0.0.0:$OC_PORT"
+else
+  if serve_launch_once; then
     echo "opencode: shared server is up on $OC_HOST:$OC_PORT"
   else
     echo "opencode: server did not answer yet; see $SERVE_LOG" >&2
@@ -147,11 +201,11 @@ if [ -t 0 ] && [ -t 1 ]; then
   esac
 fi
 
-# --- Keep the sandbox alive by holding the FOREGROUND server as PID 1. --------
+# --- Keep the sandbox alive by holding a FOREGROUND server as PID 1. ----------
 # Reached on every no-arg path: declined prompt, non-interactive, OR after an
 # attached TUI is quit. We are the sandbox entrypoint; if we returned here PID 1
-# would exit and the sandbox would stop (the running->stopped bug). So block on
-# a long-lived foreground process instead of returning.
+# would exit and the sandbox would stop (the running->stopped bug). So loop
+# forever holding a live server in the foreground — and SELF-HEAL if it dies.
 cat <<EOF
 The shared server runs in the FOREGROUND as the sandbox's main process (so the
 sandbox stays running). Attach a TUI to the SAME session any time:
@@ -163,29 +217,25 @@ sandbox stays running). Attach a TUI to the SAME session any time:
 Server log: $SERVE_LOG
 EOF
 
+# hold_pid1 — never returns; keeps a server answering on :$OC_PORT as long as
+# the sandbox lives. This is a single self-healing loop (no started_here fork):
+# whether we launched the server or another process owns it, if it ever stops
+# answering we (re)launch one and keep going. Crucially, we NEVER let the loop
+# fall through to the end of the script — a returning hold_pid1 would exit PID 1
+# and stop the sandbox, the exact failure this wrapper prevents.
 hold_pid1() {
-  if [ "$started_here" -eq 1 ]; then
-    # A background server we launched is already bound to :$OC_PORT. Don't start
-    # a second one (the port is taken); keep PID 1 alive by waiting on that
-    # background job. `wait` blocks in the foreground until it exits, so the
-    # entrypoint stays open for the sandbox's lifetime.
-    wait
-  else
-    # The server was already up before this wrapper ran (e.g. OpenChamber's
-    # skip-start supervisor, or an earlier wrapper invocation, owns :$OC_PORT).
-    # We must NOT start a second server on the same port (it would fail to bind
-    # and, under `set -e`, kill this entrypoint — reintroducing the stop bug).
-    # Instead, hold PID 1 open by parking on a harmless foreground loop that
-    # keeps re-checking the server is alive. If the pre-existing server ever
-    # disappears, we exit the loop and become the foreground server ourselves.
-    echo "opencode: holding sandbox open; shared server already owns :$OC_PORT" >>"$SERVE_LOG"
-    while serve_up; do
-      sleep 30
-    done
-    echo "opencode: shared server on :$OC_PORT went away; taking over in foreground" >>"$SERVE_LOG"
-    exec "$real_opencode" serve --hostname "$OC_HOST" --port "$OC_PORT" \
-      >>"$SERVE_LOG" 2>&1
-  fi
+  while :; do
+    if serve_up; then
+      # Something owns :$OC_PORT. Park briefly and re-check; if it dies, the
+      # next iteration re-launches. (We can't `wait` on a process we may not
+      # own — a pre-existing server or one from a racing wrapper — so poll.)
+      sleep 5
+      continue
+    fi
+    # No server answering — (re)launch one under the lock, then loop to confirm.
+    echo "opencode: no server on :$OC_PORT; (re)starting in foreground-hold at $(date -u +%FT%TZ)" >>"$SERVE_LOG"
+    serve_launch_once || true
+  done
 }
 
 hold_pid1

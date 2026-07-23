@@ -175,11 +175,12 @@ agentContext: |
   The shared server is **unsecured** (no password): the sandbox is the security
   boundary and the published ports are host loopback only.
 
-  Logs: `/tmp/openchamber.log` (OpenChamber) and `/tmp/opencode-serve.log` (the
-  shared server, started by the wrapper). OpenChamber runs under a respawn loop,
-  so if it exits — for example after an interactive self-update, which needs a
-  restart to take effect — it comes back a few seconds later on its own; that log
-  shows `[supervisor] ... restarting` lines when it happens.
+  Logs: `/tmp/openchamber.log` (OpenChamber) and
+  `~/.local/state/openchamber/opencode-serve.log` (the shared server, started by
+  the wrapper). OpenChamber runs under a respawn loop, so if it exits — for
+  example after an interactive self-update, which needs a restart to take
+  effect — it comes back a few seconds later on its own; that log shows
+  `[supervisor] ... restarting` lines when it happens.
 
 # Backend extras: the neutral spec does not model published ports or a
 # background-command flag, so the sbx-native bits live here. These declare the
@@ -187,14 +188,13 @@ agentContext: |
 # (the shared server), and run the startup command as a background hook.
 #
 # CAVEAT (acq translation): acq's neutral→sbx translator (kit_translate_to_sbx)
-# carries caps/files/commands/environment/agentContext. Emitting publishedPorts
-# was added upstream in quickstart#221 (closes quickstart#219); until that fix is
-# in the pinned patterns kit ref, applying via `acq` does NOT auto-publish the
+# carries caps/files/commands/environment/agentContext, AND — as of quickstart#221
+# (merged, closes quickstart#219) — publishedPorts. So a current `acq` publishes
+# container ports 3000/4096 to the host at create time with no manual step. On an
+# OLDER acq that predates that fix, applying via `acq` does NOT auto-publish the
 # ports — publish them once per sandbox with `acq ports <sandbox> --publish
 # 3000:3000` and `--publish 4096:4096` (see README "Reaching it from the host").
 # A direct sbx-v2 apply of a pre-translated kit already honors publishedPorts.
-# Adopting the upstream fix here (and dropping the manual step) is tracked as
-# #233.
 #
 # These are per-backend hints, human-review-only (not schema-enforced); other
 # backends express the same behavior their own way (see the README backend-parity
