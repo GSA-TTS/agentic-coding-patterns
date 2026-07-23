@@ -46,13 +46,19 @@ kits:
   openchamber:
     backends: [sbx]
     parity: |
-      Opt-in browser UI for OpenCode. sbx-only for now: the kit needs a
-      published container port (3000 → an ephemeral host loopback port per
-      sandbox) and a background startup hook, both expressed via
-      backend_extras.sbx (publishedPorts + background). The neutral spec models
-      neither port publishing nor a background flag, so msb/ppp support is
-      deferred until acq defines a neutral port-publish + background vocabulary
-      (or the msb adapter grows an equivalent extra). The install+supervise
-      script itself (files/home/openchamber-start.sh) is backend-agnostic — the
-      only gap is the port/background plumbing. Tracked as a follow-up on #223.
+      Opt-in browser UI for OpenCode plus an `opencode` wrapper that owns a
+      single shared OpenCode server (see docs/decisions/). sbx-only for now: the
+      kit needs two published container ports (3000 for OpenChamber, 4096 for the
+      shared server → ephemeral host loopback ports per sandbox) and a background
+      startup hook, both expressed via backend_extras.sbx (publishedPorts +
+      background). The neutral spec models neither port publishing nor a
+      background flag, so msb/ppp support is deferred until acq defines a neutral
+      port-publish + background vocabulary (or the msb adapter grows an
+      equivalent extra). acq's neutral→sbx translator now CARRIES publishedPorts
+      (quickstart#221, merged), so on a current acq the ports are published at
+      create time with no manual step (older acq: fall back to `acq ports
+      --publish`). The install+supervise script (files/home/openchamber-start.sh)
+      and the wrapper (files/home/.local/bin/opencode) are backend-agnostic — the
+      only remaining gap is msb port/background plumbing, tracked as Increment B
+      on #233.
 

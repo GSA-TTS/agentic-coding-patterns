@@ -1,15 +1,22 @@
 #!/bin/sh
-# openchamber-start.sh — install OpenChamber on first boot, then supervise a
-# managed `opencode serve` and OpenChamber so both auto-restart if they exit.
+# openchamber-start.sh — install OpenChamber on first boot, then supervise
+# OpenChamber so it auto-restarts if it exits.
+#
+# SCOPE (new design): this startup script manages ONLY OpenChamber. It does NOT
+# start `opencode serve`. The shared opencode server is owned by the kit's
+# `opencode` wrapper (files/home/.local/bin/opencode), which the sandbox
+# entrypoint runs on demand; OpenChamber attaches to that server on port 4096
+# (OPENCODE_SKIP_START=true + OPENCODE_PORT=4096). Until the wrapper has started
+# the server at least once, OpenChamber loads but shows no live server — that is
+# the intended on-demand flow.
 #
 # Extracted (per the acq design doc §6, like agentic-coding-playbook's
 # playbook-clone.sh) from the former sbx kit's inline startup command into a
-# standalone, testable script. Behavior is unchanged.
+# standalone, testable script.
 #
 # Runs as the agent user (uid 1000) in the background on every sandbox start and
 # is fully idempotent: it installs OpenChamber only if missing, then starts a
-# supervisor for `opencode serve` and one for OpenChamber only if one isn't
-# already running for that service.
+# supervisor for OpenChamber only if one isn't already running.
 #
 # Pins are provided via the environment, with in-script fallback defaults kept
 # in sync with the kit spec's documented pin:
@@ -73,70 +80,33 @@ command -v openchamber >/dev/null 2>&1 || {
   exit 0   # never fail the sandbox over an optional UI
 }
 
-# --- Managed opencode server + OpenChamber (idempotent). ---------------------
-# `opencode serve` REQUIRES HTTP Basic auth: unauthenticated requests get 401.
-# OpenChamber (skip-start mode) authenticates with Basic
-# opencode:$OPENCODE_SERVER_PASSWORD, so both share one password. Generate a
-# per-sandbox secret once and reuse it on every startup so restarts keep matching
-# a server started with the same password.
-PW_FILE="$HOME/.local/state/openchamber/opencode-server-password"
-mkdir -p "$(dirname "$PW_FILE")"
-if [ ! -s "$PW_FILE" ]; then
-  # Prefer a real CSPRNG (openssl, then /dev/urandom). The last-ditch fallback
-  # is only reached if BOTH are unavailable — a broken box — and is a weak
-  # source of entropy, not a security guarantee. It avoids the bash-only
-  # $RANDOM (undefined in POSIX sh, shellcheck SC3028) and instead mixes the
-  # pid, a nanosecond timestamp, and awk's PRNG so the script stays sh-portable.
-  ( openssl rand -hex 32 2>/dev/null \
-    || head -c 32 /dev/urandom 2>/dev/null | od -An -tx1 | tr -d ' \n' \
-    || printf '%s%s%s' "$$" "$(date +%s%N 2>/dev/null || date +%s)" \
-         "$(awk 'BEGIN{srand();printf "%08x%08x",int(rand()*2^31),int(rand()*2^31)}' 2>/dev/null)" \
-  ) > "$PW_FILE"
-  chmod 600 "$PW_FILE"
-fi
-OPENCODE_SERVER_PASSWORD="$(cat "$PW_FILE")"
-export OPENCODE_SERVER_PASSWORD
-
-# Both services are kept alive by a tiny supervisor loop: if the process exits
-# (e.g. OpenCode/OpenChamber does an interactive self-update, which requires a
-# restart to take effect, or just crashes), wait a few seconds and start it
-# again. No systemd — this script is launched in the background by the kit's
-# startup command, so each supervisor loop runs backgrounded here and lives for
-# the container's lifetime.
+# --- Supervise OpenChamber (idempotent). -------------------------------------
+# OpenChamber runs in SKIP-START mode (OPENCODE_SKIP_START=true, OPENCODE_PORT=
+# 4096): it does NOT start its own opencode server; it attaches to the shared
+# server the `opencode` wrapper brings up on 127.0.0.1:4096. The shared server is
+# UNSECURED (no OPENCODE_SERVER_PASSWORD) — the sandbox is the security boundary,
+# so no per-sandbox password is generated here anymore.
+#
+# The service is kept alive by a tiny supervisor loop: if OpenChamber exits (e.g.
+# an interactive self-update, which requires a restart to take effect, or a
+# crash), wait a few seconds and start it again. No systemd — this script is
+# launched in the background by the kit's startup command, so the supervisor loop
+# runs backgrounded here and lives for the container's lifetime.
 #
 # RESTART_DELAY: seconds to wait before respawning a stopped process.
 RESTART_DELAY="${OPENCHAMBER_RESTART_DELAY:-5}"
 
 # Guard against a second startup run (idempotent restarts) spawning a duplicate
-# supervisor: only start a supervisor if one isn't already running for that
-# service. Each loop is launched with a marker ARGUMENT ("supervisor:<name>")
-# that the inner `sh -c` ignores; pgrep -f matches the whole command line, so it
-# finds the loop by that marker. (An argument, not `exec -a` — the startup shell
-# is POSIX `sh`/dash, which has no `exec -a`.) A single supervisor per service
-# means we never spawn a duplicate — the loop only relaunches after the previous
-# instance has actually exited.
+# supervisor: only start a supervisor if one isn't already running. The loop is
+# launched with a marker ARGUMENT ("supervisor:<name>") that the inner `sh -c`
+# ignores; pgrep -f matches the whole command line, so it finds the loop by that
+# marker. (An argument, not `exec -a` — the startup shell is POSIX `sh`/dash,
+# which has no `exec -a`.)
 supervisor_running() { pgrep -u "$(id -u)" -f "supervisor:$1" >/dev/null 2>&1; }
-
-# Start the managed `opencode serve` supervisor unless already running. No health
-# probe is needed: the loop only respawns after serve actually exits, so it can't
-# start a duplicate against a live server.
-# argv to the inner sh -c: $0=marker, $1=RESTART_DELAY, $2=port.
-if ! supervisor_running opencode-serve; then
-  ( sh -c '
-      while :; do
-        echo "[supervisor] starting opencode serve at $(date -u +%FT%TZ)"
-        opencode serve --hostname 127.0.0.1 --port "$2" || true
-        echo "[supervisor] opencode serve exited; restarting in ${1}s"
-        sleep "$1"
-      done
-    ' "supervisor:opencode-serve" "$RESTART_DELAY" "$OC_PORT" \
-    >>/tmp/opencode-serve.log 2>&1 ) &
-fi
 
 # Start the OpenChamber supervisor unless already running. OpenChamber normally
 # daemonizes; run it with OPENCHAMBER_NO_DAEMON so it stays in the foreground and
-# the supervisor can see it exit (and thus restart it after a self-update). It
-# inherits OPENCODE_SERVER_PASSWORD to authenticate to the managed server. The
+# the supervisor can see it exit (and thus restart it after a self-update). The
 # sandbox is the security boundary, so OpenChamber's own LAN access is
 # unauthenticated.
 # argv to the inner sh -c: $0=marker, $1=RESTART_DELAY, $2=OC_PORT, $3=CHAMBER_PORT.
