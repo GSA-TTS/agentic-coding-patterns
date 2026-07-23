@@ -341,11 +341,11 @@ info "9. Sandbox stays 'running' (wrapper entrypoint does not exit) — regressi
 # REGRESSION GUARD (the running->stopped bug): the wrapper IS the sandbox
 # entrypoint. If its no-arg path backgrounds the server and RETURNS, PID 1 exits
 # and the sandbox stops on its own moments after create. The fixed wrapper
-# instead foregrounds `opencode serve` (or `wait`s on it) so PID 1 stays alive.
-# We can't easily attach the entrypoint from a test, so we assert the *invariant*
-# that makes the entrypoint safe: running the wrapper no-arg, no-TTY BLOCKS
-# (holds the process open) rather than returning. Do it with a bounded timeout;
-# a return within the window is the BUG, a timeout is the FIX.
+# instead holds a foreground `opencode serve` (waits on / execs it) so PID 1
+# stays alive. We can't easily attach the entrypoint from a test, so we assert
+# the *invariant* that makes the entrypoint safe: running the wrapper no-arg,
+# no-TTY BLOCKS (holds the process open) rather than returning. Do it with a
+# bounded timeout; a return within the window is the BUG, a timeout is the FIX.
 #
 # `timeout` may be absent on macOS hosts, but this runs INSIDE the sandbox via
 # `sh -c`, where coreutils `timeout` is present. Exit 124 == timed out (good).
@@ -367,8 +367,32 @@ case "$wrapper_probe" in
     in_sbx 'tail -n 20 /tmp/opencode-serve.log' | sed 's/^/    | /' ;;
 esac
 
+info "10. Sandbox survives an attached TUI being quit — regression guard"
+# REGRESSION GUARD (the TUI-exit stop bug): on the "yes, attach a TUI" path an
+# earlier wrapper `exec`ed `opencode attach`, so the TUI BECAME PID 1 and quitting
+# it stopped the sandbox. The fix runs the TUI as a CHILD and falls through to the
+# same foreground hold, so a quit TUI returns to the wrapper instead of ending the
+# entrypoint. That path only triggers with a TTY (the prompt is TTY-gated), which
+# `acq exec` doesn't give us, so assert the two source invariants that make it
+# safe: (a) the attach line is NOT exec'd, and (b) the script ends by calling
+# hold_pid1. Read the wrapper file that was actually dropped INTO the sandbox.
+wrapper_src="$(in_sbx 'cat ~/.local/bin/opencode 2>/dev/null')"
+if [ -z "$wrapper_src" ]; then
+  bad "could not read ~/.local/bin/opencode from the sandbox to check TUI-exit survival"
+else
+  if printf '%s\n' "$wrapper_src" | grep -Eq '^[[:space:]]*exec[[:space:]]+"?\$real_opencode"?[[:space:]]+attach'; then
+    bad "wrapper EXECs 'opencode attach' — quitting the TUI would exit PID 1 and stop the sandbox"
+  else
+    ok "wrapper runs 'opencode attach' as a child (not exec) — TUI quit won't end the entrypoint"
+  fi
+  if printf '%s\n' "$wrapper_src" | grep -Eq '^[[:space:]]*hold_pid1[[:space:]]*$'; then
+    ok "wrapper ends by holding PID 1 (hold_pid1), so a quit TUI falls through to the foreground server"
+  else
+    bad "wrapper does not end in a hold_pid1 call — a quit TUI may let the entrypoint return"
+  fi
+fi
+
 info "Summary"
-printf '  %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ] && printf '  \033[32mAll checks passed.\033[0m\n' || printf '  \033[31mSome checks failed — see notes above.\033[0m\n'
 
 [ "$fail" -eq 0 ]

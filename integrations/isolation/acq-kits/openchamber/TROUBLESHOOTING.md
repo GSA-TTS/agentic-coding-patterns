@@ -27,8 +27,31 @@ grep -n 'wait\|exec .*serve' ~/.local/bin/opencode   # inside the sandbox
 
 If your copy still ends the no-arg path with `exit 0` after a `nohup … &`, update
 the kit to the current version and recreate the sandbox. As a stopgap you can
-keep a sandbox alive by attaching a TUI when prompted, or re-attach a stopped one
-any time with `acq run <name>` (state persists until `acq rm`).
+re-attach a stopped sandbox any time with `acq run <name>` (state persists until
+`acq rm`).
+
+## The sandbox stops when I quit the attached TUI
+
+**Symptoms:** you `acq run opencode <path>`, accept the "Connect a TUI now?"
+prompt, work in the TUI, then quit it — and the sandbox flips to `stopped` (and
+the OpenChamber browser UI goes dark).
+
+**Cause:** an earlier version of the wrapper `exec`ed `opencode attach`, so the
+TUI *became* the entrypoint / PID 1; quitting it ended PID 1 and stopped the
+sandbox. Fixed: the wrapper now runs the TUI as a **child** and, when you quit,
+falls through to holding the shared server in the foreground — so the sandbox and
+the browser UI survive a TUI exit.
+
+**Fix / confirm you have the fix:** the attach line must not use `exec`, and the
+wrapper must end in a `hold_pid1` call:
+
+```bash
+grep -n 'attach\|hold_pid1' ~/.local/bin/opencode   # inside the sandbox
+```
+
+The `opencode attach …` line should have no `exec` prefix (it ends with
+`|| true`), and the file should end with a `hold_pid1` invocation. If your copy
+still `exec`s the attach, update the kit and recreate the sandbox.
 
 ## The browser page won't load / no host port
 

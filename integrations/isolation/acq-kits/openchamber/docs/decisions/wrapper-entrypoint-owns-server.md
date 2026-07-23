@@ -43,11 +43,11 @@ The wrapper, run by the sandbox entrypoint (bare `opencode`):
   `opencode serve --hostname 0.0.0.0 --port 4096` (no-op if already answering
   `/global/health`); prints host-connect instructions for both published ports;
   then, only if attached to a TTY, offers to
-  `opencode attach http://127.0.0.1:4096` in that same terminal. On "no" or when
-  non-interactive (e.g. `acq exec` with no TTY), it **hands the entrypoint off to
-  a foreground `opencode serve`** (via `exec`, or by `wait`ing on the server it
-  just backgrounded) so PID 1 stays alive — see "Keeping the entrypoint alive"
-  below.
+  `opencode attach http://127.0.0.1:4096` in that same terminal. If you attach,
+  the TUI runs as a **child** — quitting it returns to the wrapper. In every case
+  (declined, non-interactive, or after a TUI is quit) the wrapper ends by
+  **holding a foreground `opencode serve` as PID 1** so the sandbox stays alive —
+  see "Keeping the entrypoint alive" below.
 - **Any arguments** — resolves the real `opencode` on PATH (skipping itself) and
   `exec`s it with the args unchanged, so `opencode run …`, `opencode auth login`,
   etc. behave normally.
@@ -56,17 +56,27 @@ The wrapper, run by the sandbox entrypoint (bare `opencode`):
 
 A Docker sandbox is reported "running" only while its **entrypoint / PID 1** is
 alive. Because this wrapper *is* the entrypoint (via PATH-shadowing), the no-arg
-path must never simply background the server and **return** — doing so lets PID 1
-exit, so the sandbox flips running→stopped moments after `acq run` even though
-the backgrounded server was briefly up.
+path must never end in a way that lets PID 1 exit — doing so flips the sandbox
+running→stopped.
 
-The initial implementation of this ADR did exactly that (`nohup … serve & ; exit
-0`), which surfaced as: `acq run <A>` then `acq run <B>` shows A "stopped" — A had
-in fact stopped itself. The corrected wrapper ends every no-TUI path on a
-long-lived **foreground** process: it `wait`s on the server it just backgrounded,
-or `exec`s a fresh foreground `opencode serve` if one was already up. The
-interactive `opencode attach` path already `exec`s (the TUI holds the entrypoint
-open), so it was never affected.
+Two variants of this bug were fixed:
+
+1. **Backgrounding the server and returning.** The initial implementation of this
+   ADR did `nohup … serve & ; exit 0`, which surfaced as: `acq run <A>` then
+   `acq run <B>` shows A "stopped" — A had in fact stopped itself, seconds after
+   `acq run`, when you declined the TUI prompt.
+2. **`exec`-ing the attached TUI.** The follow-up fix for (1) still `exec`ed
+   `opencode attach` on the "yes" path, making the TUI *become* PID 1 — so
+   quitting the TUI ended the entrypoint and stopped the sandbox (and with it the
+   browser UI). This contradicts the kit's premise that the browser and TUI share
+   one long-lived server.
+
+The corrected wrapper handles both: it always ends the no-arg path by BLOCKING on
+a long-lived foreground server (`hold_pid1`): it `wait`s on the server it
+backgrounded, or parks on a liveness loop and `exec`s a fresh foreground server
+if one was already up. The attached TUI now runs as a **child** (not `exec`), and
+quitting it falls through to that same hold — so the sandbox and browser survive a
+TUI exit.
 
 The startup script (`openchamber-start.sh`) installs OpenChamber on first boot
 and supervises OpenChamber in skip-start mode (`OPENCODE_SKIP_START=true` +

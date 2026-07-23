@@ -21,10 +21,12 @@
 #     wrapper is what the entrypoint runs. With arguments it passes through to
 #     the real opencode; with NO arguments it idempotently starts a shared
 #     `opencode serve --hostname 0.0.0.0 --port 4096`, prints host-connect
-#     instructions, and offers to attach a TUI now (yes → `opencode attach`).
-#     On "no"/non-interactive the wrapper does NOT return — it FOREGROUNDS the
-#     shared server so it becomes PID 1 and holds the sandbox open (see the
-#     "entrypoint must not exit" note below).
+#     instructions, and offers to attach a TUI now. If you attach, the TUI runs
+#     as a CHILD; quitting it returns to the wrapper, which keeps holding the
+#     foreground server. On "no"/non-interactive the TUI is skipped. In EVERY
+#     no-arg case the wrapper does NOT return — it holds the shared server in the
+#     FOREGROUND as PID 1 so the sandbox stays open (see the "entrypoint must not
+#     exit" note below).
 #   - The STARTUP script manages ONLY OpenChamber (install on first boot, then a
 #     respawn-supervised OpenChamber bound to 0.0.0.0:3000 in skip-start mode,
 #     attaching to the shared server on :4096). It no longer starts or supervises
@@ -34,10 +36,11 @@
 # WHY THE WRAPPER (entrypoint) MUST NOT RETURN: a Docker sandbox is "running"
 # only while its entrypoint / PID 1 is alive. Because the wrapper IS the
 # entrypoint (via PATH-shadowing), a no-arg path that backgrounds the server and
-# returns lets PID 1 exit — so the sandbox transitions running -> stopped moments
-# after `acq run`, even though the backgrounded server was briefly up. The
-# wrapper therefore ends its no-TUI path by exec'ing / `wait`ing on a foreground
-# `opencode serve` so PID 1 stays alive. See the ADR "Consequences".
+# returns — or that execs a TUI you later quit — lets PID 1 exit, so the sandbox
+# transitions running -> stopped. The wrapper therefore always ends the no-arg
+# path by `wait`ing on / exec'ing a foreground `opencode serve` so PID 1 stays
+# alive; an attached TUI runs as a CHILD and quitting it falls through to that
+# hold. See the ADR "Consequences".
 #
 # Why the startup script runs in the BACKGROUND: the OpenChamber supervisor loop
 # never exits (it respawns forever), so the startup command must not block
@@ -142,12 +145,13 @@ agentContext: |
 
   **Starting the shared server.** Running `opencode` with **no arguments**
   starts the shared server on `:4096` (idempotent — a no-op if it's already up),
-  prints host-connect instructions, and offers to attach a TUI right there. If
-  you decline (or there's no terminal), the wrapper keeps the shared server in
-  the **foreground** as the sandbox's main process, so the sandbox stays
-  running. Until the server has been started once, OpenChamber loads but shows
-  no live server. Running `opencode <args…>` (e.g. `opencode run …`,
-  `opencode auth login`) passes straight through to the real opencode.
+  prints host-connect instructions, and offers to attach a TUI right there.
+  Whether you attach and later quit that TUI, or decline (or there's no
+  terminal), the wrapper keeps the shared server in the **foreground** as the
+  sandbox's main process, so the sandbox stays running either way. Until the
+  server has been started once, OpenChamber loads but shows no live server.
+  Running `opencode <args…>` (e.g. `opencode run …`, `opencode auth login`)
+  passes straight through to the real opencode.
 
   **Reaching it from the host.** The kit publishes container ports 3000
   (OpenChamber) and 4096 (the raw server); acq's active backend maps each to an
