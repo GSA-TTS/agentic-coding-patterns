@@ -55,7 +55,7 @@ still `exec`s the attach, update the kit and recreate the sandbox.
 
 ## The browser page won't load / no host port
 
-**Symptoms:** `acq ports <sandbox>` (`sbx ports <sandbox>`) shows no mapping for
+**Symptoms:** `acq ports <sandbox>` shows no mapping for
 container port 3000 (or 4096), or the browser can't connect.
 
 **Cause:** `acq`'s neutral→sbx kit translation does **not** carry the kit's
@@ -170,13 +170,13 @@ download succeed; this error means one of those wasn't in effect.
 ```bash
 acq exec <sandbox> -- sh -c 'echo "${HTTPS_PROXY:-unset}"; echo "PROXY_CA len=${#PROXY_CA_CERT_B64}"'
 # then restart the sandbox so the startup step re-runs the install:
-sbx stop <sandbox> && sbx run --name <sandbox>   # (sbx backend; use the equivalent acq restart)
+acq stop <sandbox> && acq run <sandbox>
 ```
 
 If the prebuilt still can't be fetched (blocked release-asset hosts), ensure
 `github.com`, `objects.githubusercontent.com`, and
 `release-assets.githubusercontent.com` are permitted — under org governance,
-kit `caps.network.allow` is superseded by org policy (`sbx policy log <sandbox>`
+kit `caps.network.allow` is superseded by org policy (`acq policy log <sandbox>`
 shows what was blocked on the sbx backend).
 
 ## Node.js too old
@@ -258,14 +258,14 @@ acq exec <sandbox> -- sh -c 'curl -fsS http://127.0.0.1:4096/global/health >/dev
 **No.** The kit declares the *container* ports; the sbx backend allocates
 distinct **ephemeral host ports on `127.0.0.1` per sandbox**, so several
 sandboxes running this kit each get their own host ports — they don't collide.
-`acq ports <sandbox>` (`sbx ports <sandbox>`) shows which host ports map to
+`acq ports <sandbox>` shows which host ports map to
 container 3000 and 4096 for that sandbox.
 
 If you'd rather pin each to a known host port, publish them explicitly:
 
 ```bash
-sbx ports <sandbox-a> --publish 3000:3000    # host 3000 → container 3000
-sbx ports <sandbox-b> --publish 3001:3000    # host 3001 → container 3000
+acq ports <sandbox-a> --publish 3000:3000    # host 3000 → container 3000
+acq ports <sandbox-b> --publish 3001:3000    # host 3001 → container 3000
 ```
 
 Inside every sandbox OpenChamber always listens on container port 3000 and the

@@ -138,7 +138,7 @@ fine: each gets its own distinct host ports and they don't collide. Find the
 assigned ports:
 
 ```bash
-acq ports <sandbox>        # (sbx ports <sandbox>) — host ports for 3000 and 4096
+acq ports <sandbox>        # host ports for 3000 and 4096
 # OpenChamber:  open http://127.0.0.1:<host-port-for-3000> in a browser
 # host TUI:     opencode attach http://127.0.0.1:<host-port-for-4096>
 ```
@@ -148,8 +148,8 @@ a different port of your choosing? Publish it explicitly on top of the kit's
 declaration:
 
 ```bash
-sbx ports <sandbox> --publish 3000:3000        # first sandbox → host 3000
-sbx ports <other-sandbox> --publish 3001:3000  # second sandbox → host 3001
+acq ports <sandbox> --publish 3000:3000        # first sandbox → host 3000
+acq ports <other-sandbox> --publish 3001:3000  # second sandbox → host 3001
 ```
 
 ## Session sharing
