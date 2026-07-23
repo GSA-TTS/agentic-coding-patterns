@@ -16,9 +16,10 @@
 #      Preferred driver — RUN_ACQ=1: drive the `acq` CLI. acq translates the
 #      neutral hybrid/v1 spec to an sbx-v2 kit (kit_translate_to_sbx) and applies
 #      it, so the kit's `files:`/`commands:` land correctly. As of quickstart#221
-#      (merged) acq also carries backend_extras.sbx.publishedPorts, so ports
-#      3000/4096 are published at create time; this script still re-publishes
-#      them idempotently so it also works on an older acq predating that fix.
+#      (merged) acq carries backend_extras.sbx.publishedPorts, so ports 3000/4096
+#      are published at CREATE time — no manual step. This script verifies that
+#      and only falls back to an explicit `acq ports --publish` on an older acq
+#      that predates #221.
 #
 #      Legacy driver — RUN_SBX=1: drive `sbx` directly on the NEUTRAL spec. sbx
 #      cannot parse the neutral schema (it expects sbx-v2), so `sbx create --kit`
@@ -76,6 +77,9 @@ fail=0
 ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass+1)); }
 bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail+1)); }
 skip() { printf '  \033[33mSKIP\033[0m %s\n' "$1"; }
+# warn: a non-fatal note (does NOT count toward fail) — e.g. an older acq took a
+# documented fallback path. The run can still pass.
+warn() { printf '  \033[33mWARN\033[0m %s\n' "$1"; }
 info() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 
 cleanup() {
@@ -177,16 +181,22 @@ if [ "$DRIVER" = "acq" ]; then
     sed 's/^/  | /' "$CREATE_LOG" >&2
     exit 1
   fi
-  # As of quickstart#221 (merged) acq carries backend_extras.sbx.publishedPorts,
-  # so a current acq already published 3000/4096 at create. Re-publish explicitly
-  # anyway: it's idempotent, and it keeps this check working on an older acq that
-  # predates that fix. Step 7 asserts the mappings actually exist either way.
-  info "2b. Ensure container ports 3000 and 4096 are published (idempotent; auto as of quickstart#221)"
+  # As of quickstart#221 (merged) acq carries backend_extras.sbx.publishedPorts
+  # through translation, so a current acq publishes 3000/4096 at CREATE time — no
+  # manual step. Verify that here: check the mappings exist post-create. If they
+  # don't (an older acq predating #221), fall back to an explicit publish so the
+  # rest of the run still exercises the kit. Step 7 re-asserts the mappings.
+  info "2b. Container ports 3000 and 4096 published at create (quickstart#221)"
   for cport in 3000 4096; do
-    if acq ports "$SBX_NAME" --publish "${cport}:${cport}" >/dev/null 2>&1; then
-      ok "published container $cport"
+    if acq ports "$SBX_NAME" 2>/dev/null | grep -q "$cport"; then
+      ok "container $cport auto-published at create"
     else
-      bad "failed to publish container $cport (acq ports --publish)"
+      warn "container $cport not auto-published — older acq (pre-#221)? falling back to manual publish"
+      if acq ports "$SBX_NAME" --publish "${cport}:${cport}" >/dev/null 2>&1; then
+        ok "container $cport published via fallback (acq ports --publish)"
+      else
+        bad "failed to publish container $cport (acq ports --publish)"
+      fi
     fi
   done
 else

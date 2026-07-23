@@ -212,10 +212,11 @@ release (see the comments in `spec.yaml` and the startup command).
 python ../validate-kits.py
 
 # 2. Live end-to-end via acq (preferred). acq translates this neutral kit to an
-#    sbx-v2 kit and applies it; the verify script then publishes ports 3000/4096
-#    (acq's translator does not carry backend_extras.publishedPorts), runs the
-#    wrapper to bring up the shared server, and asserts the wrapper, server,
-#    OpenChamber, ports, and supervisor. Set a USAi key first for the :4096 check:
+#    sbx-v2 kit and applies it, carrying backend_extras.sbx.publishedPorts
+#    (quickstart#221) so ports 3000/4096 publish at create time; the verify
+#    script confirms that, runs the wrapper to bring up the shared server, and
+#    asserts the wrapper, server, OpenChamber, ports, and supervisor. Set a USAi
+#    key first for the :4096 check:
 #      acq secret set-custom -g --host api.gsa.usai.gov --env USAI_API_KEY
 RUN_ACQ=1 ./scripts/verify
 RUN_ACQ=1 KEEP=1 ./scripts/verify     # keep the sandbox to poke at it

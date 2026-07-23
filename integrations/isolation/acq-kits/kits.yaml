@@ -54,10 +54,11 @@ kits:
       background). The neutral spec models neither port publishing nor a
       background flag, so msb/ppp support is deferred until acq defines a neutral
       port-publish + background vocabulary (or the msb adapter grows an
-      equivalent extra). NOTE: acq's neutral→sbx translator does not yet carry
-      publishedPorts (fixed upstream in quickstart#221); until that lands in the
-      pinned kit ref, publish the ports manually with `acq ports --publish`. The
-      install+supervise script (files/home/openchamber-start.sh) and the wrapper
-      (files/home/.local/bin/opencode) are backend-agnostic — the only gap is the
-      port/background plumbing. Tracked as a follow-up on #233.
+      equivalent extra). acq's neutral→sbx translator now CARRIES publishedPorts
+      (quickstart#221, merged), so on a current acq the ports are published at
+      create time with no manual step (older acq: fall back to `acq ports
+      --publish`). The install+supervise script (files/home/openchamber-start.sh)
+      and the wrapper (files/home/.local/bin/opencode) are backend-agnostic — the
+      only remaining gap is msb port/background plumbing, tracked as Increment B
+      on #233.
 
