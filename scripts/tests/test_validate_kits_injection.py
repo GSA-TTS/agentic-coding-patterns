@@ -45,6 +45,7 @@ def _base(**extra) -> dict:
 
 # --- schema-level: hostile mode / user / path must not validate ---------------
 
+
 @pytest.mark.parametrize(
     "instance, why",
     [
@@ -67,6 +68,7 @@ def test_schema_accepts_valid_file_entry():
 
 # --- validate_kit defense-in-depth: unsafe path is reported even if reached ---
 
+
 def test_validate_kit_flags_unsafe_path(tmp_path):
     validate_kit = _load_validate_kit()
     kit = tmp_path / "evilkit"
@@ -79,8 +81,8 @@ def test_validate_kit_flags_unsafe_path(tmp_path):
         "displayName: Evil\n"
         "description: d\n"
         "files:\n"
-        "  - path: \"/home/agent/x'; id #\"\n"
-        "    mode: \"0644\"\n"
+        '  - path: "/home/agent/x\'; id #"\n'
+        '    mode: "0644"\n'
         "    source: files/x\n"
     )
     errors, _warnings = validate_kit(kit, _load_schema())
