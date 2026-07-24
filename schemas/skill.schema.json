@@ -185,6 +185,82 @@
       "minItems": 1,
       "uniqueItems": true
     },
+    "collection": {
+      "type": "string",
+      "description": "Primary human-navigation home for the pattern (organizational, not the security taxonomy axis). Closed controlled vocabulary; see schemas/taxonomy.yaml.",
+      "enum": [
+        "meta",
+        "engineering",
+        "security",
+        "content",
+        "digital-service",
+        "communications"
+      ]
+    },
+    "routing": {
+      "type": "object",
+      "description": "Machine-routing facets used by the pattern-router (#237). Values in task_types / input_artifacts / output_artifacts are cross-checked against schemas/taxonomy.yaml by the validator.",
+      "additionalProperties": false,
+      "properties": {
+        "task_types": {
+          "type": "array",
+          "description": "Controlled task verbs this pattern performs (see taxonomy.yaml task_types).",
+          "items": {"type": "string"},
+          "uniqueItems": true
+        },
+        "input_artifacts": {
+          "type": "array",
+          "description": "Controlled artifact slugs this pattern consumes (see taxonomy.yaml artifact_types).",
+          "items": {"type": "string"},
+          "uniqueItems": true
+        },
+        "output_artifacts": {
+          "type": "array",
+          "description": "Controlled artifact slugs this pattern produces (see taxonomy.yaml artifact_types).",
+          "items": {"type": "string"},
+          "uniqueItems": true
+        },
+        "prefer_when": {
+          "type": "array",
+          "description": "Natural-language conditions under which this pattern is the right choice.",
+          "items": {"type": "string"}
+        },
+        "avoid_when": {
+          "type": "array",
+          "description": "Natural-language conditions under which this pattern must NOT be selected (hard exclusion in scoring).",
+          "items": {"type": "string"}
+        },
+        "delegates": {
+          "type": "array",
+          "description": "Patterns that own a more specific lane; the router should prefer the delegate when its condition holds.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["pattern", "when"],
+            "properties": {
+              "pattern": {
+                "type": "string",
+                "description": "Target pattern id (kebab-case).",
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+              },
+              "when": {"type": "string"}
+            }
+          }
+        },
+        "aliases": {
+          "type": "array",
+          "description": "Alternative phrasings a request may use for this pattern.",
+          "items": {"type": "string"},
+          "uniqueItems": true
+        },
+        "priority": {
+          "type": "integer",
+          "description": "Tie-break precedence; higher wins. Default 50.",
+          "minimum": 0,
+          "maximum": 100
+        }
+      }
+    },
     "risk_tier": {
       "type": "string",
       "description": "Risk tier of the skill's actions (security-governance field; required for security skills via validator).",
