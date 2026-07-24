@@ -3,7 +3,10 @@
 A neutral [`acq`](https://github.com/GSA-TTS/agentic-coding-quickstart) **mixin
 kit** that runs [OpenChamber](https://github.com/openchamber/openchamber) — a
 browser UI for OpenCode — inside the sandbox, and ships an `opencode` wrapper so
-the browser and an optional terminal TUI share one live OpenCode session.
+the browser and an optional terminal TUI share one live OpenCode session. The
+shared server and the UI are started by the kit's startup script on every
+sandbox start, so a single `acq create` brings up a working OpenChamber with
+**no terminal left in the foreground** (see [Usage](#usage)).
 
 This kit is **opt-in**. It is *not* one of the default GSA kits; you add it
 explicitly (see [Usage](#usage)).
@@ -22,38 +25,55 @@ explicitly (see [Usage](#usage)).
   GitHub release-asset hosts (`github.com`, `objects.githubusercontent.com`,
   `release-assets.githubusercontent.com`) that the prebuilt `better-sqlite3`
   native binary is downloaded from (`caps.network`). Default-deny otherwise.
-- **An `opencode` wrapper that owns the shared server** — the kit drops
+- **An `opencode` wrapper for the interactive path** — the kit drops
   [`files/home/.local/bin/opencode`](files/home/.local/bin/opencode) at
   `~/.local/bin/opencode`, which is **first on the base-image PATH** (ahead of
-  the npm-global bin where the real `opencode` lives). The sandbox entrypoint
-  runs the bare command `opencode`, so it runs this wrapper. The wrapper:
-  - with **no arguments** — idempotently starts a shared
-    `opencode serve --hostname 0.0.0.0 --port 4096` (a no-op if it's already up),
-    prints host-connect instructions, then offers to attach a TUI right there. If
-    you attach, the TUI runs as a **child** — quitting it returns to the wrapper,
-    which keeps the server running. In every case (attach-then-quit, decline, or
-    no terminal) the wrapper keeps the shared server in the **foreground** —
-    because the wrapper *is* the sandbox entrypoint, it must not return, or PID 1
-    would exit and the sandbox would stop; and
+  the npm-global bin where the real `opencode` lives). On the interactive
+  `acq run` path the sandbox entrypoint runs the bare command `opencode`, so it
+  runs this wrapper. The wrapper:
+  - with **no arguments** — prints host-connect instructions, then (only on an
+    interactive terminal) offers to attach a TUI right there. If you attach, the
+    TUI runs as a **child** — quitting it returns to the wrapper. After that
+    (declined or TUI quit) the wrapper's behavior depends on whether it is
+    **PID 1**:
+    - **PID 1** (the `acq run` path — the wrapper *is* the sandbox entrypoint):
+      it **holds the terminal open**, because returning would exit PID 1 and stop
+      the sandbox. It prints a note saying to keep the terminal open, and — if
+      you ran `acq run` without meaning to hold a terminal — how to quit and use
+      `acq create` instead.
+    - **not PID 1** (run from a shell inside the sandbox, or via `acq exec`,
+      while a detached `acq create` keeps the sandbox alive): it **exits
+      cleanly** and returns your terminal; the startup script keeps the server +
+      UI running.
+    It does **not** start the server on either branch (the startup script does);
+    and
   - with **any arguments** — passes straight through to the real `opencode`
     (`opencode run …`, `opencode auth login`, etc.).
-- **Install + supervise OpenChamber (one script)** — a `startup`-phase command
-  runs [`files/home/openchamber-start.sh`](files/home/openchamber-start.sh) in
-  the background on every sandbox start. That script:
+
+  On a detached `acq create`, PID 1 is a `tini` keepalive shim and the wrapper
+  does not run at all, so the sandbox stays up without it — you never need to run
+  the wrapper unless you want a terminal TUI.
+- **Install + supervise the shared server AND OpenChamber (one script)** — a
+  `startup`-phase command runs
+  [`files/home/openchamber-start.sh`](files/home/openchamber-start.sh) in the
+  background on every sandbox start (**including a detached `acq create` with
+  nobody attached**, held open by the tini keepalive). That script:
   1. installs the OpenChamber CLI on first boot (only if missing) from a
      **pinned release tag whose `install.sh` is SHA-256-verified before it
      runs** (`OPENCHAMBER_REF` / `OPENCHAMBER_INSTALL_SHA256`, exported by the
      startup command — not `main`), routing the install through the sandbox
      proxy and trusting the sandbox proxy CA so the prebuilt native binary
      downloads instead of trying to compile; and
-  2. supervises OpenChamber bound to `0.0.0.0:3000` in skip-start mode
-     (`OPENCODE_SKIP_START=true` + `OPENCODE_PORT=4096`), so it attaches to the
-     shared server the wrapper brings up rather than starting its own.
-  The install step no-ops when already done. OpenChamber runs under a tiny
+  2. supervises a single shared `opencode serve` on `0.0.0.0:4096`
+     (`supervisor:opencode-serve`) **and** OpenChamber bound to `0.0.0.0:3000`
+     in skip-start mode (`OPENCODE_SKIP_START=true` + `OPENCODE_PORT=4096`,
+     `supervisor:openchamber`), so OpenChamber attaches to the shared server.
+  The install step no-ops when already done. Each service runs under a tiny
   respawn loop — if it exits (e.g. after an interactive self-update, which needs
   a restart to apply, or a crash) it is restarted after a few seconds
-  (`OPENCHAMBER_RESTART_DELAY`, default `5`). No systemd. **The startup script no
-  longer starts `opencode serve` — the wrapper owns that, on demand.**
+  (`OPENCHAMBER_RESTART_DELAY`, default `5`). No systemd. **Because the startup
+  script owns the server, it comes up on its own — no `acq run`/`acq exec` step
+  is needed to start it.**
 - **Published ports** — the sbx backend publishes container ports `3000`
   (OpenChamber) and `4096` (the shared server), each mapped to an ephemeral host
   loopback port at sandbox start (`backend_extras.sbx.publishedPorts`).
@@ -65,10 +85,11 @@ explicitly (see [Usage](#usage)).
 > therefore does a one-time npm install (a few extra seconds); later starts skip
 > it.
 >
-> **OpenChamber shows no server until you run `opencode`.** The shared server is
-> started on demand by the wrapper, not by the startup script. Run `opencode`
-> (no args) once — in the sandbox or via `acq exec <sandbox> -- opencode` — to
-> bring it up; then reload OpenChamber.
+> **The shared server and OpenChamber start on their own.** Both are supervised
+> by the startup script, which fires on every sandbox start — including a
+> detached `acq create` with nobody attached. You do not need to run `opencode`
+> to bring the server up. Reload OpenChamber once the first-boot install
+> finishes (a few seconds).
 
 ## Backend parity
 
@@ -95,20 +116,51 @@ it needs either a neutral port-publish + background vocabulary in `acq` or an
 ## Usage
 
 The kit is applied by remote reference. Apply it as an **extra kit** on top of
-the default GSA kits:
+the default GSA kits. There are two ways to bring it up.
+
+### Terminal-free (recommended): `acq create`
+
+Create the sandbox **detached** — this starts the sandbox in the background
+without attaching your terminal, and the startup script brings up the shared
+server and OpenChamber on its own:
 
 ```bash
-# acq:
 export ACQ_EXTRA_KITS="git+https://github.com/GSA-TTS/agentic-coding-patterns.git#ref=<sha>&dir=integrations/isolation/acq-kits/openchamber"
+acq create --name <sandbox> opencode /path/to/your/project
+acq ports <sandbox>        # find the mapped host ports, then open the browser
+```
+
+That's it — no terminal is left in the foreground, and you never have to run
+`opencode`. Wait a few seconds on first boot for the one-time OpenChamber
+install, then open `http://127.0.0.1:<host-port-for-3000>`.
+
+> **`acq create` prints no connect banner.** The wrapper's "Connect from your
+> HOST" instructions only print when the wrapper *runs* (the `acq run` path
+> below). After a detached `acq create` the wrapper does not run, so use
+> `acq ports <sandbox>` to discover the mapped host ports (see
+> [Reaching it from the host](#reaching-it-from-the-host)).
+
+### Interactive: `acq run`
+
+If you *want* a terminal TUI in the foreground, use `acq run`:
+
+```bash
 acq run opencode /path/to/your/project
 ```
+
+Because `acq run opencode` runs the bare command `opencode`, the kit's wrapper
+takes over: it prints host-connect instructions and offers you a TUI in that
+terminal (the server is already up, started by the startup script). On this path
+the wrapper is the sandbox's PID 1, so after you decline or quit the TUI it
+**keeps the terminal open** — keep it open while you use OpenChamber/OpenCode
+from your browser; closing it stops the sandbox. If you didn't actually want a
+held terminal, quit it and use the detached `acq create` path above instead.
+(Running `opencode` from a shell inside the sandbox or via `acq exec` is not
+PID 1, so it exits cleanly after the prompt and leaves everything running.)
 
 `GSA-TTS/` is already in the default kit-source allowlist, so no
 `ACQ_EXTRA_KIT_SOURCES` change is needed. `<sha>` must be a full 40-character
 commit SHA of this repo (branches and tags are rejected for git kit refs).
-
-Because `acq run opencode` runs the bare command `opencode`, the kit's wrapper
-takes over: it starts the shared server and offers you a TUI in that terminal.
 
 > **Ports are published at create time.** A current `acq` carries the kit's
 > `backend_extras.sbx.publishedPorts` through translation
@@ -156,7 +208,7 @@ acq ports <other-sandbox> --publish 3001:3000  # second sandbox → host 3001
 
 ## Session sharing
 
-The `opencode` wrapper's shared server on `:4096` backs **both** the OpenChamber
+The startup script's shared server on `:4096` backs **both** the OpenChamber
 browser and any attached TUI, so they share **one live, in-flight session** by
 default — no extra steps.
 
@@ -167,7 +219,7 @@ launch a fresh TUI — **attach** to the shared server:
 acq exec <sandbox> -- opencode attach http://127.0.0.1:4096
 ```
 
-(Or just re-run `opencode` inside the sandbox; with no args it reuses the
+(Or run `opencode` inside the sandbox; with no args it reuses the
 already-running server and offers to attach.)
 
 ## Security note
@@ -179,13 +231,16 @@ usable. This is safe **only because the kit runs inside a sandbox** — an
 ephemeral container with a proxied, allow-listed network and no host filesystem
 access. The sandbox is the security boundary.
 
-**Assumes a trusted, single-tenant host.** Unlike the previous design, the
-shared server is now published to the host (container port `4096` → a host
-**loopback** ephemeral port), and it is unauthenticated. The published ports are
-loopback-only, so they are not LAN-reachable; but anyone with access to the
-host's loopback (any local user, or anything you forward those ports to) can
-drive OpenCode without a credential. Only run this on a host you trust as
-single-tenant, and don't forward the mapped ports to a wider interface.
+**Assumes a trusted, single-tenant host.** The shared server is published to the
+host (container port `4096` → a host **loopback** ephemeral port), it is
+unauthenticated, and — because the startup script supervises it — it is
+**live for the whole lifetime of the sandbox**, from first boot, even if you
+never open the UI or attach a TUI. (This is a change from the previous
+on-demand design, where the server only started when you ran `opencode`.) The
+published ports are loopback-only, so they are not LAN-reachable; but anyone with
+access to the host's loopback (any local user, or anything you forward those
+ports to) can drive OpenCode without a credential. Only run this on a host you
+trust as single-tenant, and don't forward the mapped ports to a wider interface.
 
 **The loopback-only guarantee depends on the acq port-publish translation.** The
 "host **loopback** only" claim holds only because the backend publishes the
@@ -214,14 +269,18 @@ python ../validate-kits.py
 # 2. Live end-to-end via acq (preferred). acq translates this neutral kit to an
 #    sbx-v2 kit and applies it, carrying backend_extras.sbx.publishedPorts
 #    (quickstart#221) so ports 3000/4096 publish at create time; the verify
-#    script confirms that, runs the wrapper to bring up the shared server, and
-#    asserts the wrapper, server, OpenChamber, ports, and supervisor. Set a USAi
-#    key first for the :4096 check:
+#    script confirms that and asserts the wrapper, the startup-supervised shared
+#    server, OpenChamber, ports, and both respawn supervisors. Set a USAi key
+#    first for the :4096 check:
 #      acq secret set-custom -g --host api.gsa.usai.gov --env USAI_API_KEY
 RUN_ACQ=1 ./scripts/verify
 RUN_ACQ=1 KEEP=1 ./scripts/verify     # keep the sandbox to poke at it
 
 # ./scripts/verify with no RUN_* flag runs only the offline gate.
+
+# Sanity-check the terminal-free premise on your host (no attach; asserts the
+# sandbox stays running and the startup hook fires on a detached create):
+./scripts/detach-probe
 ```
 
 > **Why not raw `sbx`?** `sbx` parses the sbx-v2 schema, not the neutral
@@ -237,10 +296,11 @@ RUN_ACQ=1 KEEP=1 ./scripts/verify     # keep the sandbox to poke at it
 openchamber/
 ├── spec.yaml                          # the kit (hybrid/v1: caps, files, startup command, backend_extras)
 ├── files/home/
-│   ├── .local/bin/opencode            # opencode wrapper (owns shared server, offers TUI, passthrough)
-│   └── openchamber-start.sh           # install + supervise OpenChamber (dropped into the agent home)
+│   ├── .local/bin/opencode            # opencode wrapper (offers TUI, holds PID 1 on acq run, passthrough)
+│   └── openchamber-start.sh           # install + supervise the shared server + OpenChamber
 ├── README.md                          # this file
 ├── TROUBLESHOOTING.md                 # failure modes
 ├── scripts/verify                     # host-side end-to-end check
+├── scripts/detach-probe               # host-side probe: terminal-free premise
 └── docs/decisions/                    # design records
 ```

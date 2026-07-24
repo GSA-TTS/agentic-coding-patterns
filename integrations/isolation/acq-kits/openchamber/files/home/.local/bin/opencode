@@ -4,37 +4,52 @@
 # The opencode base image's entrypoint runs the bare, unqualified command
 # `opencode`. This wrapper is dropped at ~/.local/bin/opencode, which is FIRST on
 # the image PATH (ahead of the npm-global bin where the real opencode lives), so
-# the sandbox's interactive startup runs THIS instead. It gives OpenChamber (and
-# an optional TUI) a single, shared opencode server to drive.
+# the sandbox's interactive `acq run` startup runs THIS instead. It gives an
+# interactive user a TUI attached to the shared server, and keeps that session's
+# sandbox alive.
+#
+# SERVER OWNERSHIP (redesigned — see docs/decisions/startup-owns-shared-server.md):
+#   This wrapper NO LONGER starts or owns the shared `opencode serve`. The kit's
+#   STARTUP script (openchamber-start.sh) supervises a single shared
+#   `opencode serve` on 0.0.0.0:4096 on every sandbox start — including a
+#   detached `acq create` with nobody attached — held open by the sandbox's tini
+#   keepalive (PID 1), independent of this wrapper. So the server (and
+#   OpenChamber) come up on their own; running this wrapper is only needed to
+#   attach a terminal TUI.
 #
 # Behavior:
-#   opencode                 → (no args) ensure a shared `opencode serve` is up on
-#                              0.0.0.0:4096 (idempotent), print host-connection
-#                              instructions, then OFFER to attach a TUI now.
+#   opencode                 → (no args) print host-connection instructions, then
+#                              OFFER to attach a TUI now (only if interactive).
 #                              yes → run `opencode attach` as a CHILD (same live
-#                              session as the browser); when you QUIT the TUI,
-#                              control returns and the wrapper keeps holding the
-#                              foreground server, so the sandbox stays up.
-#                              no / non-interactive → skip the TUI. EITHER WAY the
-#                              wrapper does NOT return — it holds a FOREGROUND
-#                              server as PID 1 (see the "must stay PID 1" note
-#                              below). A returning wrapper would let the sandbox
-#                              entrypoint exit and the sandbox STOP.
+#                              session as the browser). AFTER the prompt (declined
+#                              or TUI quit), the tail depends on whether WE are
+#                              PID 1:
+#                                • PID 1 (the `acq run` path): we ARE the sandbox
+#                                  entrypoint, so we must NOT return — we hold
+#                                  forever (hold_pid1) and the terminal stays
+#                                  open. The printed note tells the user to keep
+#                                  the terminal open, and what to do instead if
+#                                  they didn't want that (quit + `acq create`).
+#                                • NOT PID 1 (run from a shell / `acq exec`, with
+#                                  a detached `acq create` keeping the sandbox
+#                                  alive): nothing to hold — we EXIT CLEANLY and
+#                                  return the terminal.
 #   opencode <anything...>   → passthrough: exec the REAL opencode with the args
 #                              unchanged (run, auth, tui with a project, etc.).
 #
-# WHY THE WRAPPER MUST NOT RETURN (keep PID 1 alive):
-#   This wrapper IS the sandbox entrypoint (it shadows the base image's bare
-#   `opencode` CMD via PATH). A Docker Sandbox is "running" only while its
-#   entrypoint / PID 1 is alive. If this wrapper backgrounds the server and then
-#   returns — OR execs a TUI that you later quit — PID 1 exits and the sandbox
-#   transitions running -> stopped. So on the no-arg path the wrapper always ends
-#   by BLOCKING FOREVER in hold_pid1: a self-healing loop that keeps a server
-#   answering on :4096 and re-launches it if it ever dies (crash/OOM/lost race),
-#   so a dead server can NEVER let the loop return and stop the sandbox. The TUI,
-#   when requested, runs as a CHILD; quitting it falls through to that same hold.
+# WHY THE WRAPPER MUST NOT RETURN WHEN IT IS PID 1 (keep the sandbox alive):
+#   On the interactive `acq run` path this wrapper IS the sandbox entrypoint (it
+#   shadows the base image's bare `opencode` CMD via PATH). A Docker sandbox is
+#   "running" only while its entrypoint / PID 1 is alive. If this wrapper returns
+#   while it is PID 1 — OR execs a TUI that you later quit — PID 1 exits and the
+#   sandbox transitions running -> stopped. So when `$$` is 1 the no-arg path
+#   ends by BLOCKING FOREVER in hold_pid1. The TUI, when requested, runs as a
+#   CHILD; quitting it falls through to that same hold. On a detached `acq create`
+#   PID 1 is instead a tini keepalive shim and this wrapper is NOT PID 1 (it is
+#   run from a shell / `acq exec`), so it exits cleanly — nothing here is needed
+#   to keep a detached sandbox alive.
 #
-# The managed server is UNSECURED (no OPENCODE_SERVER_PASSWORD): the sandbox — an
+# The shared server is UNSECURED (no OPENCODE_SERVER_PASSWORD): the sandbox — an
 # ephemeral container with proxied, allow-listed egress and no host FS — is the
 # security boundary, and its published ports are host loopback only. See the
 # kit README "Security note".
@@ -44,18 +59,10 @@ set -eu
 OC_PORT=4096
 OC_HOST=0.0.0.0
 
-# Sandbox-local state dir for our log + serve lock. Prefer an XDG-ish per-user
-# location over a predictable /tmp path (the log can echo host-connect details).
-# It is created 0700 and lives for the sandbox's lifetime.
+# The shared server's log is written by the startup script's supervisor. We only
+# reference it here for the "where to look" hint below.
 OC_STATE_DIR="${XDG_STATE_HOME:-${HOME:-/home/agent}/.local/state}/openchamber"
-mkdir -p "$OC_STATE_DIR" 2>/dev/null || OC_STATE_DIR="$(mktemp -d 2>/dev/null || echo /tmp)"
-chmod 0700 "$OC_STATE_DIR" 2>/dev/null || true
 SERVE_LOG="$OC_STATE_DIR/opencode-serve.log"
-# Lock dir guarding the serve launch (mkdir is atomic, so it doubles as a
-# mutex): only one wrapper wins the race to `nohup … serve`, closing the
-# two-starts-both-bind-:4096 TOCTOU. Held only across launch, not for the
-# server's lifetime.
-SERVE_LOCK="$OC_STATE_DIR/serve.lock"
 
 # --- Resolve the REAL opencode (never ourselves). ---------------------------
 # We are ~/.local/bin/opencode and are first on PATH, so `command -v opencode`
@@ -90,75 +97,29 @@ if [ "$#" -gt 0 ]; then
   exec "$real_opencode" "$@"
 fi
 
-# --- No args: bring up the shared server (idempotent), then offer a TUI. -----
+# --- No args: the server is started by the startup script; just report + TUI. -
+# The server answers /global/health once ready. Unsecured, so no auth header.
 serve_up() {
-  # The server answers /global/health once ready. Unsecured, so no auth header.
   curl -fsS "http://127.0.0.1:$OC_PORT/global/health" >/dev/null 2>&1
 }
 
-# Launch a backgrounded `opencode serve` exactly once across racing wrappers.
-# `mkdir` is atomic, so it is our mutex: only the wrapper that creates SERVE_LOCK
-# launches; the others skip the launch and just wait for the port to answer.
-# This closes the TOCTOU where two near-simultaneous no-arg starts both
-# `nohup … serve` and race the :4096 bind (the loser dies). We release the lock
-# once the server answers (or we give up), so a later respawn can re-acquire it.
-#
-# Stale-lock safety: if a lock holder was killed before it could `rmdir`, the
-# lock would otherwise wedge every future launch into the wait-only branch. We
-# record the holder PID and reclaim the lock if that PID is gone. `set -e` never
-# fires here — all the checks are in conditions or `|| true`.
-# Returns 0 if a server is answering by the end, 1 otherwise.
-_serve_wait() {
+# The startup script supervises the shared server, so it should already be up (or
+# coming up). Give it a brief moment so the connect instructions and any TUI
+# attach below are truthful; don't block forever if a provider is misconfigured.
+if serve_up; then
+  echo "opencode: shared server is up on $OC_HOST:$OC_PORT (started by the kit startup script)"
+else
   _i=0
-  while [ "$_i" -lt 30 ]; do
-    serve_up && return 0
+  while [ "$_i" -lt 15 ]; do
+    serve_up && break
     _i=$((_i + 1))
     sleep 1
   done
-  serve_up
-}
-serve_launch_once() {
-  _own=0
-  if mkdir "$SERVE_LOCK" 2>/dev/null; then
-    _own=1
-  else
-    # Lock exists — reclaim it if the recorded holder PID is gone (stale),
-    # so a crashed launch can't wedge us forever.
-    _holder="$(cat "$SERVE_LOCK/pid" 2>/dev/null || true)"
-    if [ -n "$_holder" ] && ! kill -0 "$_holder" 2>/dev/null; then
-      rm -rf "$SERVE_LOCK" 2>/dev/null || true
-      if mkdir "$SERVE_LOCK" 2>/dev/null; then _own=1; fi
-    fi
-  fi
-
-  if [ "$_own" -eq 1 ]; then
-    printf '%s' "$$" >"$SERVE_LOCK/pid" 2>/dev/null || true
-    # Re-check under the lock in case a server came up between the caller's
-    # check and our acquiring the lock.
-    if ! serve_up; then
-      echo "opencode: starting shared server on $OC_HOST:$OC_PORT ..."
-      nohup "$real_opencode" serve --hostname "$OC_HOST" --port "$OC_PORT" \
-        >>"$SERVE_LOG" 2>&1 &
-    fi
-    _serve_wait
-    rm -rf "$SERVE_LOCK" 2>/dev/null || true
-  else
-    # Another (live) wrapper owns the launch; just wait for the port to answer.
-    _serve_wait
-  fi
-  serve_up
-}
-
-# Bring the server up now, so the host-connect instructions and any TUI attach
-# below are truthful. This first start is TEMPORARY: on every no-TUI path we end
-# by holding a foreground server so PID 1 stays alive (see the header note).
-if serve_up; then
-  echo "opencode: shared server already running on 0.0.0.0:$OC_PORT"
-else
-  if serve_launch_once; then
+  if serve_up; then
     echo "opencode: shared server is up on $OC_HOST:$OC_PORT"
   else
-    echo "opencode: server did not answer yet; see $SERVE_LOG" >&2
+    echo "opencode: shared server not answering yet on :$OC_PORT; the startup" >&2
+    echo "          supervisor keeps retrying — see $SERVE_LOG" >&2
   fi
 fi
 
@@ -181,61 +142,81 @@ they share one live session.
 ────────────────────────────────────────────────────────────────────────────
 EOF
 
+# Are WE PID 1? This discriminates the two no-arg situations:
+#   - PID 1 (we ARE the sandbox entrypoint, i.e. the `acq run` path): we MUST NOT
+#     return, or PID 1 exits and the sandbox stops. We hold forever (hold_pid1).
+#   - NOT PID 1 (a detached `acq create` is already keeping the sandbox alive via
+#     its tini keepalive shim, and we were run from a shell / `acq exec`): the
+#     server + UI are already supervised by the startup script, so once we've
+#     shown the instructions and offered a TUI there is nothing for us to hold —
+#     we can EXIT CLEANLY and give the terminal back.
+is_pid1() { [ "$$" -eq 1 ]; }
+
 # Only prompt if we have an interactive terminal; otherwise (e.g. `acq exec`
-# without a TTY) don't hang on the prompt — fall through to the foreground hold.
-# EITHER WAY we end on hold_pid1 below, so the sandbox stays running: a declined
-# prompt AND a TUI you later quit both keep the shared server alive as PID 1.
+# without a TTY) don't hang on the prompt — fall through to the tail below.
 if [ -t 0 ] && [ -t 1 ]; then
   printf 'Connect a TUI in THIS terminal now? [y/N] '
   read -r _ans || _ans=""
   case "$_ans" in
     [yY] | [yY][eE][sS])
       echo "opencode: attaching TUI to the shared server ..."
-      # Run the TUI as a CHILD (not exec): when you quit it, control returns
-      # HERE and we fall through to hold_pid1, so the sandbox — and the browser
-      # UI sharing this server — stays up. `|| true` so a non-zero TUI exit
-      # (e.g. Ctrl-C) under `set -e` doesn't abort the entrypoint.
+      # Run the TUI as a CHILD (not exec): when you quit it, control returns HERE
+      # and we fall through to the tail below. Running it as a child (not exec)
+      # matters on the PID-1 path: if we exec'd, the TUI would BECOME PID 1 and
+      # quitting it would stop the sandbox. `|| true` so a non-zero TUI exit
+      # (e.g. Ctrl-C) under `set -e` doesn't abort us.
       "$real_opencode" attach "http://127.0.0.1:$OC_PORT" || true
-      echo "opencode: TUI exited; keeping the shared server (and sandbox) alive."
+      echo "opencode: TUI exited."
       ;;
   esac
 fi
 
-# --- Keep the sandbox alive by holding a FOREGROUND server as PID 1. ----------
-# Reached on every no-arg path: declined prompt, non-interactive, OR after an
-# attached TUI is quit. We are the sandbox entrypoint; if we returned here PID 1
-# would exit and the sandbox would stop (the running->stopped bug). So loop
-# forever holding a live server in the foreground — and SELF-HEAL if it dies.
-cat <<EOF
-The shared server runs in the FOREGROUND as the sandbox's main process (so the
-sandbox stays running). Attach a TUI to the SAME session any time:
+# --- Tail: hold PID 1 if we are the entrypoint, else exit cleanly. -----------
+if is_pid1; then
+  # We ARE the sandbox entrypoint (the `acq run` path). We CANNOT return — PID 1
+  # exiting would stop the sandbox (the running->stopped bug). So block forever.
+  # We do NOT supervise the server here — the startup script's
+  # supervisor:opencode-serve loop owns that and re-heals it if it dies; we only
+  # keep PID 1 alive.
+  cat <<EOF
 
-    # from the host:
+NOTE: you started this with \`acq run\`, so THIS terminal is the sandbox's main
+process. It will stay held open — keep this terminal open while you use
+OpenChamber / OpenCode from your browser. Closing it stops the sandbox.
+
+Attach a TUI to the SAME session from elsewhere any time:
     acq exec <sandbox> -- opencode attach http://127.0.0.1:$OC_PORT
-    # or open a shell and run \`opencode attach http://127.0.0.1:$OC_PORT\`.
+
+If you did NOT want a held terminal: quit this (Ctrl-C), then bring the sandbox
+up detached instead — it keeps running on its own with no terminal attached:
+    acq create --name <sandbox> opencode <path>
+    acq ports <sandbox>        # find the host port, then open the browser
 
 Server log: $SERVE_LOG
 EOF
 
-# hold_pid1 — never returns; keeps a server answering on :$OC_PORT as long as
-# the sandbox lives. This is a single self-healing loop (no started_here fork):
-# whether we launched the server or another process owns it, if it ever stops
-# answering we (re)launch one and keep going. Crucially, we NEVER let the loop
-# fall through to the end of the script — a returning hold_pid1 would exit PID 1
-# and stop the sandbox, the exact failure this wrapper prevents.
-hold_pid1() {
-  while :; do
-    if serve_up; then
-      # Something owns :$OC_PORT. Park briefly and re-check; if it dies, the
-      # next iteration re-launches. (We can't `wait` on a process we may not
-      # own — a pre-existing server or one from a racing wrapper — so poll.)
-      sleep 5
-      continue
-    fi
-    # No server answering — (re)launch one under the lock, then loop to confirm.
-    echo "opencode: no server on :$OC_PORT; (re)starting in foreground-hold at $(date -u +%FT%TZ)" >>"$SERVE_LOG"
-    serve_launch_once || true
-  done
-}
+  hold_pid1() {
+    # Block forever without spinning. Prefer an inert sleep loop; never return.
+    while :; do
+      sleep 86400
+    done
+  }
 
-hold_pid1
+  hold_pid1
+else
+  # We are NOT PID 1: something else (a detached `acq create`'s tini keepalive)
+  # is keeping the sandbox alive, and the startup script supervises the server +
+  # UI. Nothing for us to hold — exit cleanly and return the terminal.
+  cat <<EOF
+
+The sandbox keeps running on its own; the shared server and OpenChamber are
+supervised by the kit startup script. This command is exiting and returning your
+terminal. Reach OpenChamber from the host with:
+    acq ports <sandbox>        # then open http://127.0.0.1:<host-port-for-3000>
+Attach a TUI to the SAME session any time:
+    acq exec <sandbox> -- opencode attach http://127.0.0.1:$OC_PORT
+
+Server log: $SERVE_LOG
+EOF
+  exit 0
+fi
