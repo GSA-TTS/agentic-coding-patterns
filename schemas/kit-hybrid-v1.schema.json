@@ -73,8 +73,8 @@
         "properties": {
           "path": {
             "type": "string",
-            "pattern": "^/",
-            "description": "Absolute path inside the sandbox."
+            "pattern": "^/[A-Za-z0-9._/-]+$",
+            "description": "Absolute path inside the sandbox. Safe charset only (alphanumerics . _ / -): kit-dropped paths must not contain shell metacharacters, since backend adapters may interpolate the path into a command (e.g. chmod). See #225."
           },
           "mode": {
             "type": "string",

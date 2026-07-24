@@ -54,6 +54,12 @@ KNOWN_BACKENDS = {"sbx", "msb", "ppp"}
 # sanitized the value.
 _ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
+# Safe charset for a kit-dropped absolute path (#225). Adapters may interpolate
+# files[].path into a shell command, so disallow anything that could break out
+# of quoting or introduce a metacharacter — only absolute paths of
+# alphanumerics and . _ / - are permitted. Mirrors the schema's path pattern.
+_SAFE_PATH_RE = re.compile(r"^/[A-Za-z0-9._/-]+$")
+
 # Extensions that indicate a kit-provided payload/script a command expects to
 # have been dropped by files[] (as opposed to a base-image binary, a runtime-
 # generated file, or a system destination path).
@@ -110,6 +116,18 @@ def validate_kit(kit_dir: Path, schema: dict) -> tuple[list[str], list[str]]:
         src = f.get("source")
         if src and not (kit_dir / src).exists():
             errors.append(f"{kit_dir.name}: files[].source not found: {src}")
+        # Defense-in-depth over the schema's path pattern (#225): a backend
+        # adapter may interpolate files[].path into a command (e.g. the msb
+        # adapter's `chmod $mode '$path'` in a root `sh -c`). A path carrying a
+        # shell metacharacter — or a single quote that breaks out of the
+        # adapter's quoting — is a root-command-injection vector. Reject any
+        # path outside the safe charset even if the schema check were bypassed.
+        path = f.get("path")
+        if path is not None and not _SAFE_PATH_RE.match(str(path)):
+            errors.append(
+                f"{kit_dir.name}: files[].path has an unsafe character "
+                f"(allowed: absolute path, alphanumerics . _ / -): {path!r}"
+            )
 
     for section in ("backend_shortcuts", "backend_extras"):
         for backend in (spec.get(section) or {}):
