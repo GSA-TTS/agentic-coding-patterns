@@ -337,20 +337,30 @@ for cport in 3000 4096; do
 done
 printf '%s\n' "$ports_out" | sed 's/^/    | /'
 
-info "8. OpenChamber respawn supervisor running (auto-restart)"
-# OpenChamber runs under a loop marked "supervisor:openchamber" in its argv, so a
 info "8. Respawn supervisors running (auto-restart) — server + OpenChamber"
 # BOTH the shared `opencode serve` and OpenChamber run under respawn loops marked
 # "supervisor:opencode-serve" / "supervisor:openchamber" in their argv, so a
-# process exit (self-update/crash) is followed by a restart. Assert each is alive
-# (guards against duplicates on re-runs too). The startup script now owns the
-# shared server, so there IS an opencode-serve supervisor to check.
-serve_sup="$(in_sbx 'pgrep -c -f "supervisor:opencode-serve" 2>/dev/null')"
-[ "${serve_sup:-0}" -ge 1 ] 2>/dev/null && ok "opencode-serve supervisor running (count=$serve_sup)" \
-  || bad "no opencode-serve supervisor found (shared server auto-restart not active)"
-ch_sup="$(in_sbx 'pgrep -c -f "supervisor:openchamber" 2>/dev/null')"
-[ "${ch_sup:-0}" -ge 1 ] 2>/dev/null && ok "openchamber supervisor running (count=$ch_sup)" \
-  || bad "no openchamber supervisor found (auto-restart not active)"
+# process exit (self-update/crash) is followed by a restart. Assert EXACTLY one
+# of each is alive (guards against a duplicate respawner on re-runs).
+#
+# IMPORTANT: `pgrep -f` matches the whole command line, so a naive
+# `pgrep -f "supervisor:opencode-serve"` also matches THIS probe's own
+# `sh -c '…supervisor:opencode-serve…'` argv — inflating the count by one (the
+# origin of the spurious "count=2"). Break the self-match with the standard
+# bracket trick: `supervisor:opencode[-]serve` matches the running loop's argv
+# but NOT the literal pattern string in our own command line.
+serve_sup="$(in_sbx 'pgrep -c -f "supervisor:opencode[-]serve" 2>/dev/null')"
+case "${serve_sup:-0}" in
+  1) ok "opencode-serve supervisor running (exactly one)" ;;
+  0) bad "no opencode-serve supervisor found (shared server auto-restart not active)" ;;
+  *) bad "found ${serve_sup} opencode-serve supervisors (expected 1 — duplicate respawner?)" ;;
+esac
+ch_sup="$(in_sbx 'pgrep -c -f "supervisor:open[c]hamber" 2>/dev/null')"
+case "${ch_sup:-0}" in
+  1) ok "openchamber supervisor running (exactly one)" ;;
+  0) bad "no openchamber supervisor found (auto-restart not active)" ;;
+  *) bad "found ${ch_sup} openchamber supervisors (expected 1 — duplicate respawner?)" ;;
+esac
 
 info "9. Wrapper holds PID 1 when it IS the entrypoint, exits cleanly otherwise — regression guard"
 # REGRESSION GUARD (the running->stopped bug) for the `acq run` path: there the
