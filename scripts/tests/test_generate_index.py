@@ -179,3 +179,56 @@ class TestCategoryFacet:
         assert "test-skill" in index["categories"]["security"]
         assert "test-skill" in index["categories"]["review"]
         assert index["categories"]["frontend"] == []
+
+
+class TestDeterminism:
+    """#243: INDEX generation must be deterministic (rglob order is FS-dependent)."""
+
+    def test_generation_is_idempotent(self, temp_repo):
+        import yaml
+
+        first = yaml.dump(generate_index(temp_repo), sort_keys=False, allow_unicode=True)
+        second = yaml.dump(generate_index(temp_repo), sort_keys=False, allow_unicode=True)
+        assert first == second
+
+    def test_pattern_lists_sorted_by_id(self, tmp_path):
+        # Two skills whose FS discovery order is not guaranteed; assert sorted by id.
+        for sid in ("zzz-skill", "aaa-skill"):
+            d = tmp_path / "skills" / sid
+            d.mkdir(parents=True)
+            (d / "SKILL.md").write_text(f"---\nid: {sid}\ntitle: {sid}\ntype: skill\nstatus: experimental\n---\n")
+        index = generate_index(tmp_path)
+        ids = [p["id"] for p in index["patterns"]["skills"]]
+        assert ids == sorted(ids)
+
+
+class TestRoutingFacets:
+    """#238: collection + routing reverse facets."""
+
+    def test_reverse_facets_present_and_empty_when_unused(self, temp_repo):
+        index = generate_index(temp_repo)
+        # New top-level facets exist; empty because temp patterns carry no routing.
+        assert index["collections"] == {}
+        assert index["task_types"] == {}
+        assert index["output_artifacts"] == {}
+
+    def test_collection_and_routing_surface_into_facets(self, tmp_path):
+        d = tmp_path / "skills" / "demo"
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text(
+            "---\n"
+            "id: demo\ntitle: Demo\ntype: skill\nstatus: experimental\n"
+            "collection: security\n"
+            "routing:\n"
+            "  task_types: [review]\n"
+            "  output_artifacts: [security-review]\n"
+            "---\n"
+        )
+        index = generate_index(tmp_path)
+        assert index["collections"]["security"] == ["demo"]
+        assert index["task_types"]["review"] == ["demo"]
+        assert index["output_artifacts"]["security-review"] == ["demo"]
+        # Per-entry projection is present too.
+        entry = next(p for p in index["patterns"]["skills"] if p["id"] == "demo")
+        assert entry["collection"] == "security"
+        assert entry["routing"]["task_types"] == ["review"]

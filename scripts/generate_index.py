@@ -28,6 +28,25 @@ def extract_frontmatter(content: str) -> dict | None:
         return None
 
 
+def _index_routing(routing: dict | None) -> dict:
+    """Project the routing block into the compact facets kept in INDEX.yaml.
+
+    Only the shortlist facets are surfaced (task/input/output artifacts +
+    aliases); the full prefer_when/avoid_when/delegates prose stays in the
+    SKILL.md source of truth. Returns {} when the pattern has no routing block.
+    """
+    if not isinstance(routing, dict):
+        return {}
+    projected = {}
+    for facet in ("task_types", "input_artifacts", "output_artifacts", "aliases"):
+        values = routing.get(facet)
+        if values:
+            projected[facet] = sorted(values) if isinstance(values, list) else values
+    if "priority" in routing:
+        projected["priority"] = routing["priority"]
+    return projected
+
+
 def find_patterns(root: Path) -> dict[str, list[dict]]:
     """Find all patterns organized by type."""
     patterns = {
@@ -66,6 +85,8 @@ def find_patterns(root: Path) -> dict[str, list[dict]]:
                         "type": frontmatter.get("type", pattern_type),
                         "status": frontmatter.get("status", "experimental"),
                         "categories": frontmatter.get("categories", []),
+                        "collection": frontmatter.get("collection"),
+                        "routing": _index_routing(frontmatter.get("routing")),
                     }
                 )
 
@@ -85,8 +106,17 @@ def find_patterns(root: Path) -> dict[str, list[dict]]:
                             "type": "agent",
                             "status": frontmatter.get("status", "experimental"),
                             "categories": frontmatter.get("categories", []),
+                            "collection": frontmatter.get("collection"),
+                            "routing": _index_routing(frontmatter.get("routing")),
                         }
                     )
+
+    # Deterministic ordering (#243): rglob order is filesystem-dependent, so sort
+    # every pattern list by id (fallback path) before serialization. Without this
+    # INDEX.yaml diffs are unstable across machines and `--check` can spuriously
+    # fail after a rename or on a different OS.
+    for pattern_type in patterns:
+        patterns[pattern_type].sort(key=lambda p: (p.get("id", ""), p.get("path", "")))
 
     return patterns
 
@@ -124,6 +154,36 @@ def facet_by_category(patterns: dict[str, list[dict]]) -> dict[str, list[str]]:
     return facets
 
 
+def facet_by_collection(patterns: dict[str, list[dict]]) -> dict[str, list[str]]:
+    """Build a collection -> [pattern id] reverse facet (#238).
+
+    Only collections that are actually used appear (unlike the closed category
+    vocab); empty because no pattern carries `collection` until PR3 (#240).
+    """
+    facets: dict[str, list[str]] = {}
+    for items in patterns.values():
+        for item in items:
+            coll = item.get("collection")
+            if coll:
+                facets.setdefault(coll, []).append(item["id"])
+    return {k: sorted(v) for k, v in sorted(facets.items())}
+
+
+def facet_by_routing(patterns: dict[str, list[dict]], key: str) -> dict[str, list[str]]:
+    """Build a routing-facet-value -> [pattern id] reverse facet (#238).
+
+    `key` is one of task_types / input_artifacts / output_artifacts. Empty until
+    patterns carry routing blocks (PR3 #240).
+    """
+    facets: dict[str, list[str]] = {}
+    for items in patterns.values():
+        for item in items:
+            routing = item.get("routing") or {}
+            for value in routing.get(key, []) or []:
+                facets.setdefault(value, []).append(item["id"])
+    return {k: sorted(v) for k, v in sorted(facets.items())}
+
+
 def generate_index(root: Path) -> dict:
     """Generate the INDEX.yaml structure."""
     patterns = find_patterns(root)
@@ -137,6 +197,9 @@ def generate_index(root: Path) -> dict:
         "description": "Community patterns for agentic coding",
         "patterns": patterns,
         "categories": facet_by_category(patterns),
+        "collections": facet_by_collection(patterns),
+        "task_types": facet_by_routing(patterns, "task_types"),
+        "output_artifacts": facet_by_routing(patterns, "output_artifacts"),
         "stats": {
             "total_patterns": total,
             "skills": len(patterns["skills"]),

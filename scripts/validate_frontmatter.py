@@ -111,6 +111,54 @@ def load_schema(schema_path: Path) -> dict[str, Any]:
         return json.load(f)
 
 
+def load_taxonomy(taxonomy_path: Path) -> dict[str, set[str]] | None:
+    """Load the routing taxonomy controlled vocabularies (schemas/taxonomy.yaml).
+
+    Returns {"task_types": {...}, "artifact_types": {...}} of allowed slugs, or
+    None if the file is absent (routing validation is then skipped — the JSON
+    Schema still enforces structure).
+    """
+    if not taxonomy_path.exists():
+        return None
+    data = yaml.safe_load(taxonomy_path.read_text()) or {}
+    return {
+        "task_types": set((data.get("task_types") or {}).keys()),
+        "artifact_types": set((data.get("artifact_types") or {}).keys()),
+    }
+
+
+def check_routing_taxonomy(frontmatter: dict[str, Any], taxonomy: dict[str, set[str]] | None) -> list[str]:
+    """Cross-check routing.* facet values against the controlled vocabularies.
+
+    REJECTS unknown values (does not silently pass) — closes the classifier
+    injection path where an unknown facet could dodge avoid/delegated scoring.
+    No-op if the pattern has no `routing` block or the taxonomy file is absent.
+    """
+    if taxonomy is None:
+        return []
+    routing = frontmatter.get("routing")
+    if not isinstance(routing, dict):
+        return []
+
+    errors: list[str] = []
+    facet_vocab = {
+        "task_types": ("task_types", taxonomy["task_types"]),
+        "input_artifacts": ("artifact_types", taxonomy["artifact_types"]),
+        "output_artifacts": ("artifact_types", taxonomy["artifact_types"]),
+    }
+    for facet, (vocab_name, allowed) in facet_vocab.items():
+        values = routing.get(facet) or []
+        if not isinstance(values, list):
+            continue
+        unknown = [v for v in values if v not in allowed]
+        if unknown:
+            errors.append(
+                f"routing.{facet} contains value(s) not in taxonomy.yaml "
+                f"{vocab_name}: {', '.join(sorted(map(str, unknown)))}"
+            )
+    return errors
+
+
 def extract_frontmatter(content: str) -> dict[str, Any] | None:
     """Extract YAML frontmatter from markdown content."""
     if not content.startswith("---\n"):
@@ -134,7 +182,9 @@ def find_pattern_files(root: Path) -> list[Path]:
     return sorted(patterns)
 
 
-def validate_file(file_path: Path, schema: dict[str, Any]) -> tuple[bool, list[str], list[str]]:
+def validate_file(
+    file_path: Path, schema: dict[str, Any], taxonomy: dict[str, set[str]] | None = None
+) -> tuple[bool, list[str], list[str]]:
     """Validate a single file. Returns (success, errors, warnings)."""
     # Read file
     try:
@@ -160,6 +210,11 @@ def validate_file(file_path: Path, schema: dict[str, Any]) -> tuple[bool, list[s
     if gov_errors:
         return False, gov_errors, gov_warnings
 
+    # Routing facet vocabulary check (#238): reject unknown task/artifact slugs.
+    routing_errors = check_routing_taxonomy(frontmatter, taxonomy)
+    if routing_errors:
+        return False, routing_errors, gov_warnings
+
     return True, [], gov_warnings
 
 
@@ -177,6 +232,7 @@ def main() -> int:
         return 1
 
     schema = load_schema(schema_path)
+    taxonomy = load_taxonomy(root / "schemas" / "taxonomy.yaml")
 
     # Find all pattern files
     files = find_pattern_files(root)
@@ -189,7 +245,7 @@ def main() -> int:
     warned = 0
     for file_path in files:
         rel_path = file_path.relative_to(root)
-        success, errors, warnings = validate_file(file_path, schema)
+        success, errors, warnings = validate_file(file_path, schema, taxonomy)
 
         if success:
             print(f"✓ {rel_path}")

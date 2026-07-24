@@ -63,10 +63,36 @@ def matches_filters(
     persona: str | None,
     tool: str | None,
     query: str | None,
+    collection: str | None = None,
+    ptype: str | None = None,
+    task: str | None = None,
+    input_artifact: str | None = None,
+    output_artifact: str | None = None,
 ) -> bool:
     """Check if pattern matches all filter criteria."""
     # Status filter
     if status and pattern.get("status") != status:
+        return False
+
+    # Collection filter (#238) — read from enriched INDEX, no file reopen needed.
+    if collection and (details.get("collection") or pattern.get("collection")) != collection:
+        return False
+
+    # Pattern-type filter (#238).
+    if ptype and pattern.get("type") != ptype:
+        return False
+
+    # Routing-facet filters (#238). Prefer details (source of truth), fall back
+    # to the INDEX projection.
+    def _routing_values(facet: str) -> list:
+        r = details.get("routing") or pattern.get("routing") or {}
+        return r.get(facet, []) or []
+
+    if task and task not in _routing_values("task_types"):
+        return False
+    if input_artifact and input_artifact not in _routing_values("input_artifacts"):
+        return False
+    if output_artifact and output_artifact not in _routing_values("output_artifacts"):
         return False
 
     # Tag filter
@@ -178,6 +204,11 @@ def search_patterns(
     tool: str | None,
     query: str | None,
     output_json: bool,
+    collection: str | None = None,
+    ptype: str | None = None,
+    task: str | None = None,
+    input_artifact: str | None = None,
+    output_artifact: str | None = None,
 ) -> int:
     """Search patterns and print results. Returns exit code."""
     all_patterns = []
@@ -192,7 +223,20 @@ def search_patterns(
     matching = []
     for pattern in all_patterns:
         details = load_pattern_details(repo_root, pattern.get("path", ""))
-        if matches_filters(pattern, details, tag, status, persona, tool, query):
+        if matches_filters(
+            pattern,
+            details,
+            tag,
+            status,
+            persona,
+            tool,
+            query,
+            collection,
+            ptype,
+            task,
+            input_artifact,
+            output_artifact,
+        ):
             matching.append((pattern, details))
 
     # Output results
@@ -238,6 +282,13 @@ Examples:
   # Keyword search
   %(prog)s --query "code review"
 
+  # Faceted routing filters (#238)
+  %(prog)s --collection communications
+  %(prog)s --task review
+  %(prog)s --input ci-workflow
+  %(prog)s --output slide-deck
+  %(prog)s --type workflow
+
   # Combined filters
   %(prog)s --tag security --status experimental --tool cursor
 
@@ -268,6 +319,31 @@ Examples:
         help="Keyword search in titles and descriptions",
     )
     parser.add_argument(
+        "--collection",
+        choices=["meta", "engineering", "security", "content", "digital-service", "communications"],
+        help="Filter by collection (#238)",
+    )
+    parser.add_argument(
+        "--type",
+        dest="ptype",
+        choices=["skill", "prompt", "workflow", "agent", "lesson"],
+        help="Filter by pattern type (#238)",
+    )
+    parser.add_argument(
+        "--task",
+        help="Filter by routing task type (e.g., review, author) (#238)",
+    )
+    parser.add_argument(
+        "--input",
+        dest="input_artifact",
+        help="Filter by routing input artifact (e.g., ci-workflow) (#238)",
+    )
+    parser.add_argument(
+        "--output",
+        dest="output_artifact",
+        help="Filter by routing output artifact (e.g., slide-deck) (#238)",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="Output results in JSON format",
@@ -291,6 +367,11 @@ Examples:
         args.tool,
         args.query,
         args.json,
+        args.collection,
+        args.ptype,
+        args.task,
+        args.input_artifact,
+        args.output_artifact,
     )
 
     sys.exit(exit_code)

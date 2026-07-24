@@ -6,10 +6,12 @@ from pathlib import Path
 import pytest
 
 from scripts.validate_frontmatter import (
+    check_routing_taxonomy,
     check_security_governance,
     extract_frontmatter,
     find_pattern_files,
     load_schema,
+    load_taxonomy,
     validate_file,
 )
 
@@ -394,3 +396,115 @@ class TestRealSchemaStrictness:
         fm = self._base()
         fm["last_updated"] = "2026-07-01"
         jsonschema.validate(instance=fm, schema=real_schema)
+
+    # --- #238: collection + routing schema acceptance -------------------------
+
+    def test_collection_accepted(self, real_schema):
+        import jsonschema
+
+        fm = self._base()
+        fm["collection"] = "security"
+        jsonschema.validate(instance=fm, schema=real_schema)
+
+    def test_collection_unknown_value_rejected(self, real_schema):
+        import jsonschema
+
+        fm = self._base()
+        fm["collection"] = "not-a-collection"
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(instance=fm, schema=real_schema)
+
+    def test_routing_block_accepted(self, real_schema):
+        import jsonschema
+
+        fm = self._base()
+        fm["routing"] = {
+            "task_types": ["review", "analyze"],
+            "input_artifacts": ["source-code"],
+            "output_artifacts": ["security-review"],
+            "prefer_when": ["asks for vulnerabilities"],
+            "avoid_when": ["only about permissions"],
+            "delegates": [{"pattern": "least-privilege-review", "when": "permissions minimality"}],
+            "aliases": ["vulnerability review"],
+            "priority": 50,
+        }
+        jsonschema.validate(instance=fm, schema=real_schema)
+
+    def test_routing_unknown_subkey_rejected(self, real_schema):
+        """routing is additionalProperties:false — a typo'd sub-key is rejected."""
+        import jsonschema
+
+        fm = self._base()
+        fm["routing"] = {"task_typez": ["review"]}  # typo
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(instance=fm, schema=real_schema)
+
+    def test_routing_delegate_requires_pattern_and_when(self, real_schema):
+        import jsonschema
+
+        fm = self._base()
+        fm["routing"] = {"delegates": [{"pattern": "x"}]}  # missing 'when'
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(instance=fm, schema=real_schema)
+
+
+class TestRoutingTaxonomy:
+    """#238: routing.* facet values are cross-checked against schemas/taxonomy.yaml."""
+
+    @pytest.fixture
+    def taxonomy(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        return load_taxonomy(repo_root / "schemas" / "taxonomy.yaml")
+
+    def test_taxonomy_loads(self, taxonomy):
+        assert taxonomy is not None
+        assert "review" in taxonomy["task_types"]
+        assert "source-code" in taxonomy["artifact_types"]
+
+    def test_no_routing_block_is_noop(self, taxonomy):
+        assert check_routing_taxonomy({"id": "x"}, taxonomy) == []
+
+    def test_known_facets_pass(self, taxonomy):
+        fm = {"routing": {"task_types": ["review"], "output_artifacts": ["security-review"]}}
+        assert check_routing_taxonomy(fm, taxonomy) == []
+
+    def test_unknown_task_type_rejected(self, taxonomy):
+        fm = {"routing": {"task_types": ["frobnicate"]}}
+        errors = check_routing_taxonomy(fm, taxonomy)
+        assert errors and "task_types" in errors[0]
+
+    def test_unknown_artifact_rejected(self, taxonomy):
+        fm = {"routing": {"output_artifacts": ["hologram"]}}
+        errors = check_routing_taxonomy(fm, taxonomy)
+        assert errors and "artifact_types" in errors[0]
+
+    def test_absent_taxonomy_skips(self):
+        fm = {"routing": {"task_types": ["anything"]}}
+        assert check_routing_taxonomy(fm, None) == []
+
+
+class TestSecurityGateUnaffectedByRouting:
+    """Regression (#238): adding a routing block must NOT change the security gate."""
+
+    def test_security_gate_still_fires_with_routing(self):
+        fm = {
+            "categories": ["security"],
+            "routing": {"task_types": ["review"]},
+            # deliberately missing the 6 governance fields
+        }
+        errors, _ = check_security_governance(Path("skills/x/SKILL.md"), fm)
+        assert errors and "security-governance field" in errors[0]
+
+    def test_security_gate_passes_with_routing_and_fields(self):
+        fm = {
+            "categories": ["security"],
+            "routing": {"task_types": ["review"]},
+            "risk_tier": "moderate",
+            "human_review_required": True,
+            "allowed_tools": [],
+            "network_policy": "deny",
+            "write_policy": "deny",
+            "script_policy": "deny",
+        }
+        errors, _ = check_security_governance(Path("skills/x/SKILL.md"), fm)
+        assert errors == []
