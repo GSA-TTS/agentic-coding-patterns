@@ -3,152 +3,6 @@ repo: GSA-TTS/agentic-coding-patterns
 description: Community patterns for agentic coding
 patterns:
   skills:
-  - path: skills/compliance-claim-checker/SKILL.md
-    id: compliance-claim-checker
-    title: Compliance Claim Checker
-    type: skill
-    status: experimental
-    categories:
-    - security
-    - compliance
-    - documentation
-  - path: skills/documentation-review/SKILL.md
-    id: documentation-review
-    title: Documentation Review
-    type: skill
-    status: experimental
-    categories:
-    - documentation
-    - review
-  - path: skills/least-privilege-review/SKILL.md
-    id: least-privilege-review
-    title: Least Privilege Review
-    type: skill
-    status: experimental
-    categories:
-    - security
-    - review
-  - path: skills/untrusted-input-boundary-review/SKILL.md
-    id: untrusted-input-boundary-review
-    title: Untrusted Input Boundary Review
-    type: skill
-    status: experimental
-    categories:
-    - security
-    - review
-  - path: skills/over-engineering-review/SKILL.md
-    id: over-engineering-review
-    title: Over-Engineering Review
-    type: skill
-    status: experimental
-    categories:
-    - review
-    - development
-  - path: skills/dependency-analysis/SKILL.md
-    id: dependency-analysis
-    title: Dependency Security Analysis
-    type: skill
-    status: experimental
-    categories:
-    - security
-    - dependencies
-    - supply-chain
-  - path: skills/safe-shell-script-author/SKILL.md
-    id: safe-shell-script-author
-    title: Safe Shell Script Author
-    type: skill
-    status: experimental
-    categories:
-    - security
-    - development
-  - path: skills/incident-evidence-review/SKILL.md
-    id: incident-evidence-review
-    title: Incident Evidence Review
-    type: skill
-    status: experimental
-    categories:
-    - security
-    - incident-response
-    - review
-  - path: skills/agentic-actions-auditor/SKILL.md
-    id: agentic-actions-auditor
-    title: Agentic Actions Auditor
-    type: skill
-    status: experimental
-    categories:
-    - security
-    - review
-    - supply-chain
-  - path: skills/backdoor-review/SKILL.md
-    id: backdoor-review
-    title: Backdoor Review
-    type: skill
-    status: experimental
-    categories:
-    - security
-    - review
-  - path: skills/test-generation/SKILL.md
-    id: test-generation
-    title: Test Case Generation
-    type: skill
-    status: experimental
-    categories:
-    - testing
-  - path: skills/secure-code-review/SKILL.md
-    id: secure-code-review
-    title: Secure Code Review
-    type: skill
-    status: experimental
-    categories:
-    - security
-    - review
-  - path: skills/outreach/explainer-video/SKILL.md
-    id: explainer-video
-    title: Explainer Video (HTML to MP4)
-    type: skill
-    status: experimental
-    categories:
-    - documentation
-    - supply-chain
-  - path: skills/outreach/explainer-gif/SKILL.md
-    id: explainer-gif
-    title: Explainer GIF (Terminal Screencast)
-    type: skill
-    status: experimental
-    categories:
-    - documentation
-  - path: skills/frontend/uswds-prototype/SKILL.md
-    id: uswds-prototype
-    title: USWDS Front-End Prototype
-    type: skill
-    status: experimental
-    categories:
-    - frontend
-  - path: skills/frontend/uswds-landing-page/SKILL.md
-    id: uswds-landing-page
-    title: USWDS Service Landing Page
-    type: skill
-    status: experimental
-    categories:
-    - frontend
-  - path: skills/frontend/plain-language-review/SKILL.md
-    id: plain-language-review
-    title: Federal Plain Language Review
-    type: skill
-    status: experimental
-    categories:
-    - frontend
-    - documentation
-    - review
-  - path: skills/frontend/federal-service-blueprint/SKILL.md
-    id: federal-service-blueprint
-    title: Federal Service Blueprint
-    type: skill
-    status: experimental
-    categories:
-    - frontend
-    - compliance
-    - documentation
   - path: skills/frontend/accessibility-review/SKILL.md
     id: accessibility-review
     title: Federal Accessibility Review
@@ -158,6 +12,172 @@ patterns:
     - frontend
     - review
     - compliance
+    collection: null
+    routing: {}
+  - path: skills/agentic-actions-auditor/SKILL.md
+    id: agentic-actions-auditor
+    title: Agentic Actions Auditor
+    type: skill
+    status: experimental
+    categories:
+    - security
+    - review
+    - supply-chain
+    collection: null
+    routing: {}
+  - path: skills/backdoor-review/SKILL.md
+    id: backdoor-review
+    title: Backdoor Review
+    type: skill
+    status: experimental
+    categories:
+    - security
+    - review
+    collection: null
+    routing: {}
+  - path: skills/compliance-claim-checker/SKILL.md
+    id: compliance-claim-checker
+    title: Compliance Claim Checker
+    type: skill
+    status: experimental
+    categories:
+    - security
+    - compliance
+    - documentation
+    collection: null
+    routing: {}
+  - path: skills/dependency-analysis/SKILL.md
+    id: dependency-analysis
+    title: Dependency Security Analysis
+    type: skill
+    status: experimental
+    categories:
+    - security
+    - dependencies
+    - supply-chain
+    collection: null
+    routing: {}
+  - path: skills/documentation-review/SKILL.md
+    id: documentation-review
+    title: Documentation Review
+    type: skill
+    status: experimental
+    categories:
+    - documentation
+    - review
+    collection: null
+    routing: {}
+  - path: skills/outreach/explainer-gif/SKILL.md
+    id: explainer-gif
+    title: Explainer GIF (Terminal Screencast)
+    type: skill
+    status: experimental
+    categories:
+    - documentation
+    collection: null
+    routing: {}
+  - path: skills/outreach/explainer-video/SKILL.md
+    id: explainer-video
+    title: Explainer Video (HTML to MP4)
+    type: skill
+    status: experimental
+    categories:
+    - documentation
+    - supply-chain
+    collection: null
+    routing: {}
+  - path: skills/frontend/federal-service-blueprint/SKILL.md
+    id: federal-service-blueprint
+    title: Federal Service Blueprint
+    type: skill
+    status: experimental
+    categories:
+    - frontend
+    - compliance
+    - documentation
+    collection: null
+    routing: {}
+  - path: skills/incident-evidence-review/SKILL.md
+    id: incident-evidence-review
+    title: Incident Evidence Review
+    type: skill
+    status: experimental
+    categories:
+    - security
+    - incident-response
+    - review
+    collection: null
+    routing: {}
+  - path: skills/least-privilege-review/SKILL.md
+    id: least-privilege-review
+    title: Least Privilege Review
+    type: skill
+    status: experimental
+    categories:
+    - security
+    - review
+    collection: null
+    routing: {}
+  - path: skills/over-engineering-review/SKILL.md
+    id: over-engineering-review
+    title: Over-Engineering Review
+    type: skill
+    status: experimental
+    categories:
+    - review
+    - development
+    collection: null
+    routing: {}
+  - path: skills/frontend/plain-language-review/SKILL.md
+    id: plain-language-review
+    title: Federal Plain Language Review
+    type: skill
+    status: experimental
+    categories:
+    - frontend
+    - documentation
+    - review
+    collection: null
+    routing: {}
+  - path: skills/safe-shell-script-author/SKILL.md
+    id: safe-shell-script-author
+    title: Safe Shell Script Author
+    type: skill
+    status: experimental
+    categories:
+    - security
+    - development
+    collection: null
+    routing: {}
+  - path: skills/secure-code-review/SKILL.md
+    id: secure-code-review
+    title: Secure Code Review
+    type: skill
+    status: experimental
+    categories:
+    - security
+    - review
+    collection: null
+    routing: {}
+  - path: skills/test-generation/SKILL.md
+    id: test-generation
+    title: Test Case Generation
+    type: skill
+    status: experimental
+    categories:
+    - testing
+    collection: null
+    routing: {}
+  - path: skills/untrusted-input-boundary-review/SKILL.md
+    id: untrusted-input-boundary-review
+    title: Untrusted Input Boundary Review
+    type: skill
+    status: experimental
+    categories:
+    - security
+    - review
+    collection: null
+    routing: {}
   - path: skills/frontend/uswds-form-flow/SKILL.md
     id: uswds-form-flow
     title: USWDS Accessible Form Flow
@@ -166,7 +186,36 @@ patterns:
     categories:
     - frontend
     - compliance
+    collection: null
+    routing: {}
+  - path: skills/frontend/uswds-landing-page/SKILL.md
+    id: uswds-landing-page
+    title: USWDS Service Landing Page
+    type: skill
+    status: experimental
+    categories:
+    - frontend
+    collection: null
+    routing: {}
+  - path: skills/frontend/uswds-prototype/SKILL.md
+    id: uswds-prototype
+    title: USWDS Front-End Prototype
+    type: skill
+    status: experimental
+    categories:
+    - frontend
+    collection: null
+    routing: {}
   prompts:
+  - path: prompts/planning/implementation-plan/SKILL.md
+    id: implementation-plan
+    title: Implementation Plan Generator
+    type: prompt
+    status: experimental
+    categories:
+    - development
+    collection: null
+    routing: {}
   - path: prompts/review/qa-round/SKILL.md
     id: qa-round
     title: QA Round Review
@@ -175,13 +224,8 @@ patterns:
     categories:
     - testing
     - review
-  - path: prompts/planning/implementation-plan/SKILL.md
-    id: implementation-plan
-    title: Implementation Plan Generator
-    type: prompt
-    status: experimental
-    categories:
-    - development
+    collection: null
+    routing: {}
   - path: prompts/security/safe-code-review/SKILL.md
     id: safe-code-review
     title: Security-Focused Code Review
@@ -190,6 +234,8 @@ patterns:
     categories:
     - security
     - review
+    collection: null
+    routing: {}
   agents:
   - path: agents/documentation/AGENTS.md
     id: documentation-agent
@@ -198,6 +244,8 @@ patterns:
     status: experimental
     categories:
     - documentation
+    collection: null
+    routing: {}
   - path: agents/general/AGENTS.md
     id: general-agent
     title: General Agent Instructions
@@ -205,6 +253,8 @@ patterns:
     status: experimental
     categories:
     - development
+    collection: null
+    routing: {}
   - path: agents/security-review/AGENTS.md
     id: security-review-agent
     title: Security Review Agent Instructions
@@ -213,6 +263,8 @@ patterns:
     categories:
     - security
     - review
+    collection: null
+    routing: {}
   workflows:
   - path: workflows/issue-to-merge-request/SKILL.md
     id: issue-to-merge-request
@@ -223,6 +275,8 @@ patterns:
     - development
     - review
     - testing
+    collection: null
+    routing: {}
   - path: workflows/qa-round/SKILL.md
     id: qa-workflow
     title: QA Round Workflow
@@ -231,6 +285,8 @@ patterns:
     categories:
     - testing
     - review
+    collection: null
+    routing: {}
   - path: workflows/security-scan-review/SKILL.md
     id: security-scan-review
     title: Language-Aware Security Scan & Triage Workflow
@@ -239,6 +295,8 @@ patterns:
     categories:
     - security
     - review
+    collection: null
+    routing: {}
   lessons:
   - path: lessons-learned/example-agentic-session/SKILL.md
     id: example-agentic-session
@@ -248,6 +306,8 @@ patterns:
     categories:
     - security
     - documentation
+    collection: null
+    routing: {}
 categories:
   security:
   - agentic-actions-auditor
@@ -320,6 +380,9 @@ categories:
   - uswds-form-flow
   - uswds-landing-page
   - uswds-prototype
+collections: {}
+task_types: {}
+output_artifacts: {}
 stats:
   total_patterns: 30
   skills: 20

@@ -1,0 +1,134 @@
+# Routing taxonomy — controlled vocabularies for the pattern-router (#237, PR1 #238).
+#
+# WHY a separate file (not baked into skill.schema.json): task_types and
+# artifact_types will grow as the catalog grows. Keeping them here lets the
+# vocabulary evolve via a small data PR without editing the JSON Schema on every
+# addition. The frontmatter validator cross-checks `routing.task_types`,
+# `routing.input_artifacts`, and `routing.output_artifacts` against these lists
+# and REJECTS unknown values (closes the classifier-injection path where an
+# unknown facet could dodge avoid/delegated scoring penalties).
+#
+# `collection` is intentionally NOT here — it is a small, stable enum owned by
+# skill.schema.json. This file owns only the two open-growth vocabularies.
+#
+# Governance: additions require a PR that updates this file plus at least one
+# consuming pattern or router test; new terms start documented here before use.
+
+schema_version: "1.0"
+
+# Controlled task verbs. Small on purpose — prefer reusing a verb over adding one.
+task_types:
+  discover:
+    description: Find or gather information / prior art / candidates.
+    aliases: [research, find, gather, survey]
+  plan:
+    description: Produce a plan, decomposition, or sequence of steps.
+    aliases: [design, decompose, scope]
+  author:
+    description: Create new prose, code, or a first-draft artifact.
+    aliases: [write, create, draft, generate]
+  transform:
+    description: Convert or restructure an existing artifact into another form.
+    aliases: [convert, refactor, migrate, reformat]
+  analyze:
+    description: Inspect and reason about an artifact without changing it.
+    aliases: [assess, evaluate, inspect, examine]
+  review:
+    description: Judge an artifact against criteria and report findings.
+    aliases: [audit, critique, check]
+  test:
+    description: Exercise behavior and assert correctness.
+    aliases: [verify, validate, qa]
+  visualize:
+    description: Design the visual/narrative structure of an artifact.
+    aliases: [storyboard, layout, compose]
+  render:
+    description: Produce a concrete file/output from a design or source.
+    aliases: [build, export, compile]
+  orchestrate:
+    description: Coordinate multiple patterns/stages toward an outcome.
+    aliases: [coordinate, pipeline, workflow]
+
+# Controlled artifact slugs — inputs a pattern consumes and outputs it produces.
+# Grouped by rough domain for human readability; the flat slug is the key.
+artifact_types:
+  # code / engineering
+  source-code:
+    description: Application or library source files.
+    aliases: [code, source]
+  pull-request-diff:
+    description: A unified diff / PR under review.
+    aliases: [diff, pr, changeset]
+  shell-script:
+    description: A shell script (bash/sh/zsh).
+    aliases: [bash-script, sh]
+  ci-workflow:
+    description: A CI/CD workflow definition (e.g. GitHub Actions).
+    aliases: [github-actions, pipeline-config, workflow-file]
+  infrastructure-as-code:
+    description: IaC definitions (Terraform, Helm, etc.).
+    aliases: [iac, terraform, helm]
+  dependency-manifest:
+    description: A package/dependency manifest or lockfile.
+    aliases: [package-manifest, lockfile, sbom-input]
+  # docs / content
+  documentation:
+    description: Developer or user documentation.
+    aliases: [docs, readme]
+  compliance-claim:
+    description: A stated compliance/control assertion to verify.
+    aliases: [control-claim]
+  incident-evidence:
+    description: Logs/artifacts gathered during incident response.
+    aliases: [incident-artifact]
+  # digital service / frontend
+  web-page:
+    description: A generic web page.
+    aliases: [page, html-page]
+  web-prototype:
+    description: An interactive web prototype.
+    aliases: [prototype]
+  landing-page:
+    description: A marketing/landing page.
+    aliases: []
+  form:
+    description: A (multi-step) form flow.
+    aliases: [form-flow]
+  service-blueprint:
+    description: A federal service design blueprint.
+    aliases: [blueprint]
+  # communications / design artifacts
+  artifact-brief:
+    description: Audience/action/message/evidence/constraints brief for a design artifact.
+    aliases: [brief]
+  storyboard:
+    description: An ordered visual/narrative plan.
+    aliases: []
+  diagram:
+    description: A technical diagram.
+    aliases: [technical-diagram]
+  one-pager:
+    description: A single-page executive summary artifact.
+    aliases: []
+  slide-deck:
+    description: A presentation deck.
+    aliases: [deck, slides]
+  marketing-asset:
+    description: A marketing/outreach asset.
+    aliases: [marketing-kit]
+  terminal-demo:
+    description: A recorded terminal demo.
+    aliases: []
+  explainer-video:
+    description: A rendered explainer video.
+    aliases: [promo-video, animated-overview]
+  explainer-gif:
+    description: A rendered explainer GIF.
+    aliases: []
+  # review / QA outputs
+  security-review:
+    description: A security review report.
+    aliases: [security-report]
+  qa-report:
+    description: A QA assessment report.
+    aliases: [qa-assessment]
