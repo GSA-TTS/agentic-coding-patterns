@@ -423,9 +423,18 @@ fi
 
 info "11. Shared server self-heals when it dies — supervisor regression guard"
 # REGRESSION GUARD: if the shared `opencode serve` dies (crash/OOM), the STARTUP
-# script's supervisor:opencode-serve loop must relaunch it. This is now owned by
-# the startup supervisor, NOT the wrapper — so we don't run the wrapper here. We
-# just kill the serve process and confirm a server is answering again afterward.
+# script's supervisor:opencode-serve loop must relaunch it. This is owned by the
+# startup supervisor, NOT the wrapper — so we don't run the wrapper here.
+#
+# CRITICAL: kill ONLY the serve process, never its supervisor. The supervisor
+# loop's argv is `sh -c 'while :; do … opencode serve --hostname … done'
+# supervisor:opencode-serve …`, so it CONTAINS the substring "opencode serve
+# --hostname". A blunt `pkill -f "opencode serve --hostname"` therefore also
+# kills the respawner — defeating the test (and killing indiscriminately). We
+# instead select PIDs whose argv matches the serve pattern but EXCLUDE anything
+# carrying the "supervisor:" marker, and kill just those. We also capture the
+# supervisor PID first and assert it SURVIVES, so a regression that kills the
+# respawner is caught rather than silently passing.
 health='curl -fsS http://127.0.0.1:4096/global/health >/dev/null 2>&1 && echo yes'
 # Confirm a server is up first (step 5 already waited for the startup supervisor).
 heal_pre=""
@@ -438,11 +447,34 @@ done
 if [ -z "$heal_pre" ]; then
   skip "self-heal guard: no server was up to kill (provider/USAi key likely missing)"
 else
-  # Kill the actual `opencode serve` process (not the supervisor loop). pkill -f
-  # matches the serve command line; the supervisor:opencode-serve loop relaunches.
-  in_sbx 'pkill -f "opencode serve --hostname" 2>/dev/null; echo killed'
+  # Record the supervisor PID(s) so we can prove we didn't kill the respawner.
+  sup_before="$(in_sbx 'pgrep -u "$(id -u)" -f "supervisor:opencode-serve" | sort | tr "\n" " "')"
+  # Kill ONLY the serve process: match the serve argv, but drop any PID that also
+  # carries the supervisor marker (the loop) — so the respawner is never touched.
+  # pgrep -f prints matching PIDs; grep -v filters the loop out via a per-PID
+  # /proc/<pid>/cmdline check done inside the sandbox.
+  in_sbx '
+    for pid in $(pgrep -u "$(id -u)" -f "opencode serve --hostname"); do
+      # Skip the supervisor loop: its cmdline contains the marker.
+      if tr "\0" " " </proc/"$pid"/cmdline 2>/dev/null | grep -q "supervisor:opencode-serve"; then
+        continue
+      fi
+      kill "$pid" 2>/dev/null
+    done
+    echo killed
+  '
+  # The supervisor must still be alive after the kill.
+  sup_after="$(in_sbx 'pgrep -u "$(id -u)" -f "supervisor:opencode-serve" | sort | tr "\n" " "')"
+  if [ -z "$sup_after" ]; then
+    bad "the opencode-serve SUPERVISOR was killed by the probe — kill was not precise enough"
+  elif [ "$sup_before" != "$sup_after" ]; then
+    # PID set changed but at least one supervisor survives — note it, don't fail.
+    ok "opencode-serve supervisor survived the kill (before='$sup_before' after='$sup_after')"
+  else
+    ok "opencode-serve supervisor untouched by the kill (only the serve child was killed)"
+  fi
   healed=""
-  heal_deadline=$(( $(date +%s) + 30 ))   # allow restart delay + serve readiness
+  heal_deadline=$(( $(date +%s) + 40 ))   # allow RESTART_DELAY (5s) + serve readiness
   while :; do
     [ "$(in_sbx "$health")" = "yes" ] && { healed=yes; break; }
     [ "$(date +%s)" -ge "$heal_deadline" ] && break
