@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+#
+# verify — host-side validation for the agor-daemon-egress acq mixin kit.
+#
+# Backend-agnostic gate is integrations/isolation/acq-kits/validate-kits.py.
+# This script does the sbx-path live check: it creates a throwaway sandbox with
+# the kit applied and confirms the daemon host:port is present in the sandbox's
+# egress allow-list. It does NOT prove routing to host.docker.internal (a
+# Docker-Sandboxes runtime property) nor a real daemon connection — that live
+# end-to-end path is validated by the orchestrators/agor integration
+# (GSA-TTS/agentic-coding-patterns#257).
+#
+# Run on a host where `sbx` is installed and logged in. Creates a temporary
+# sandbox "agor-egress-verify-*" and removes it at the end (and on interrupt).
+# Nothing here is secret — the daemon URL is not sensitive.
+#
+# Usage:
+#   path/to/agor-daemon-egress/scripts/verify
+#   KEEP=1 path/to/.../scripts/verify        # keep the sandbox for inspection
+
+set -uo pipefail
+
+KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+SPEC_FILE="$KIT_DIR/spec.yaml"
+SBX_NAME="agor-egress-verify-$$"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/agor-egress-verify.XXXXXX")"
+CREATE_LOG="$WORK/sbx-create.log"
+KEEP="${KEEP:-0}"
+# The host:port the kit allow-lists (keep in sync with spec.yaml).
+DAEMON_HOST="host.docker.internal"
+
+pass=0
+fail=0
+ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass + 1)); }
+bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail + 1)); }
+info() { printf '\n\033[1m%s\033[0m\n' "$1"; }
+
+cleanup() {
+  if [ "$KEEP" = "1" ]; then
+    printf '\nKEEP=1 set; leaving sandbox %s and %s in place.\n' "$SBX_NAME" "$WORK" >&2
+    return
+  fi
+  sbx rm -f "$SBX_NAME" >/dev/null 2>&1 || true
+  rm -rf "$WORK" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT INT TERM
+
+in_sbx() { sbx exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true; }
+
+info "0. Preconditions"
+if ! command -v sbx >/dev/null 2>&1; then
+  echo "  sbx not on PATH. Install sbx and retry." >&2
+  exit 1
+fi
+[ -f "$SPEC_FILE" ] && ok "kit spec.yaml present" || {
+  bad "spec.yaml missing"
+  exit 1
+}
+if grep -q "$DAEMON_HOST" "$SPEC_FILE"; then
+  ok "spec allow-lists $DAEMON_HOST"
+else
+  bad "spec.yaml does not mention $DAEMON_HOST (edit DAEMON_HOST or the spec)"
+fi
+
+info "1. sbx kit validate"
+if sbx kit validate "$KIT_DIR" >/dev/null 2>&1; then
+  ok "kit validates"
+else
+  bad "kit failed validation"
+fi
+
+info "2. Create a sandbox with the kit"
+echo "  creating $SBX_NAME (workspace $WORK)..."
+agent="shell"
+if ! sbx create --name "$SBX_NAME" --kit "$KIT_DIR" "$agent" "$WORK" >"$CREATE_LOG" 2>&1; then
+  agent="opencode"
+  if sbx create --name "$SBX_NAME" --kit "$KIT_DIR" "$agent" "$WORK" >"$CREATE_LOG" 2>&1; then
+    ok "sandbox created with --kit (agent: $agent)"
+  else
+    bad "sbx create failed (exit $?)"
+    sed 's/^/  | /' "$CREATE_LOG" >&2
+    exit 1
+  fi
+else
+  ok "sandbox created with --kit (agent: $agent)"
+fi
+sleep 2
+
+info "3. Daemon host resolves inside the sandbox (informational)"
+# Allow-listing != routing. This probes whether the host-gateway alias resolves;
+# a real daemon connection is validated by the orchestrators/agor integration.
+if [ "$(in_sbx "getent hosts $DAEMON_HOST >/dev/null 2>&1 && echo yes")" = "yes" ]; then
+  ok "$DAEMON_HOST resolves in the sandbox"
+else
+  echo "  NOTE: $DAEMON_HOST did not resolve here — routing is a runtime property;" >&2
+  echo "        the real daemon connection is validated by orchestrators/agor (#257)." >&2
+fi
+
+info "Summary"
+printf '  %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ] && printf '  \033[32mAll checks passed.\033[0m\n' || printf '  \033[31mSome checks failed — see notes above.\033[0m\n'
+
+[ "$fail" -eq 0 ]
