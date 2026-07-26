@@ -72,6 +72,12 @@ Env (all optional; none are secrets):
   AGOR_ACQ_AGENT       acq agent mode (default: shell)
   AGOR_SANDBOX_PREFIX  sandbox name prefix (default: agor-)
   AGOR_SANDBOX_DRY_RUN 1 = print the acq commands and exit without creating a sandbox
+  AGOR_DATA_HOME       Agor git-data root (repos/ + worktrees/); used to tell an
+                       Agor-managed repo from a user local repo. Falls back to
+                       AGOR_HOME, then ~/.agor. Export it if your deploy sets
+                       paths.data_home only in config.yaml.
+  AGOR_MANAGED_ROOTS   extra colon-separated managed roots to allow (e.g. an EFS
+                       mount), in addition to AGOR_DATA_HOME
   AGOR_EGRESS_KIT      acq kit ref allow-listing the daemon (local dir or git+https)
   AGOR_USAI_SECRET     1 = provision the per-sandbox `usai` acq secret (default: 1)
   AGOR_USAI_KEY_FILE   file holding the USAi key to pipe to `acq secret set`
@@ -163,21 +169,49 @@ if [[ -f "${WORKTREE_PATH}/.git" ]]; then
   main_repo_dir="${main_git%/.git}"
 
   # v1 safety gate: refuse to mount a LOCAL repo's parent checkout, which would
-  # expose the user's working tree / .env. Heuristic: Agor-managed remote clones
-  # live under ~/.agor/ (repos/ or worktrees/). Anything else is treated as a
-  # local repo and refused, per map #251.
-  case "${main_repo_dir}" in
-  "${HOME}"/.agor/* | /root/.agor/*)
-    # Agor-managed clean clone: safe to mount the main .git's parent.
+  # expose the user's working tree / .env. Agor-managed repos live UNDER
+  # $AGOR_DATA_HOME (its `repos/` bare clones + `worktrees/` trees); anything
+  # else is a user's local repo (`agor repo add-local`) and is refused. Per
+  # map #251, and confirmed against Agor's path model:
+  #   AGOR_DATA_HOME  (env, highest priority)
+  #     else paths.data_home in config.yaml   (not readable here — see NOTE)
+  #     else AGOR_HOME  (env)
+  #     else ~/.agor    (default)
+  # Env-driven so it works for k8s/EFS deployments where data_home != ~/.agor.
+  # NOTE: this wrapper cannot read config.yaml's paths.data_home; if a deploy
+  # sets data_home ONLY in config (not via env), export AGOR_DATA_HOME (or
+  # AGOR_MANAGED_ROOTS) for this wrapper too. See the README.
+  agor_data_home="${AGOR_DATA_HOME:-${AGOR_HOME:-${HOME}/.agor}}"
+  # Allow operators to extend the managed-root allowlist (colon-separated),
+  # e.g. AGOR_MANAGED_ROOTS="/mnt/efs/agor:/srv/agor-data".
+  managed_roots="${agor_data_home}${AGOR_MANAGED_ROOTS:+:${AGOR_MANAGED_ROOTS}}"
+
+  managed=0
+  _IFS_SAVE="${IFS}"
+  IFS=':'
+  for root in ${managed_roots}; do
+    [[ -z "${root}" ]] && continue
+    case "${main_repo_dir}/" in
+    "${root%/}"/*)
+      managed=1
+      break
+      ;;
+    esac
+  done
+  IFS="${_IFS_SAVE}"
+
+  if [[ "${managed}" -eq 1 ]]; then
+    # Agor-managed clean clone under AGOR_DATA_HOME: safe to mount the main .git.
     POSITIONAL_MOUNTS+=("${main_git}")
-    ;;
-  *)
-    echo "ERROR: refusing to mount a local repo's checkout (${main_repo_dir})." >&2
-    echo "       v1 supports Agor-managed remote repos or clone-mode branches only;" >&2
-    echo "       see map #251 (mount strategy)." >&2
+  else
+    echo "ERROR: refusing to mount a non-Agor-managed repo checkout (${main_repo_dir})." >&2
+    echo "       It is outside AGOR_DATA_HOME (${agor_data_home}), so it looks like a" >&2
+    echo "       user's local repo — mounting its parent could expose .env/working files." >&2
+    echo "       v1 supports Agor-managed remote repos or clone-mode branches only." >&2
+    echo "       If this IS Agor-managed, export AGOR_DATA_HOME/AGOR_MANAGED_ROOTS." >&2
+    echo "       See map #251 (mount strategy)." >&2
     exit 5
-    ;;
-  esac
+  fi
 elif [[ -d "${WORKTREE_PATH}/.git" ]]; then
   : # Clone mode: self-contained .git; the worktree mount alone is enough.
 fi

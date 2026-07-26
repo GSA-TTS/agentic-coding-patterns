@@ -96,6 +96,8 @@ All are optional and **none are secrets**:
 | `AGOR_ACQ_AGENT` | `shell` | acq agent mode — a raw box; Agor owns the agent SDK. |
 | `AGOR_SANDBOX_PREFIX` | `agor-` | Sandbox name prefix (`+ first 8 of session id`). |
 | `AGOR_SANDBOX_DRY_RUN` | `0` | `1` = print the planned acq commands and exit. |
+| `AGOR_DATA_HOME` | (Agor default) | Agor's git-data root (`repos/` + `worktrees/`); used to tell an Agor-managed repo from a user's local repo. Falls back to `AGOR_HOME`, then `~/.agor`. **Export it if your deploy sets `paths.data_home` only in `config.yaml`** (this wrapper can't read the config file). |
+| `AGOR_MANAGED_ROOTS` | (unset) | Extra colon-separated managed roots to allow (e.g. an EFS/NFS mount), in addition to `AGOR_DATA_HOME`. |
 | `AGOR_EGRESS_KIT` | (unset) | acq kit ref that allow-lists the daemon (local dir or `git+https…#ref=&dir=`). |
 | `AGOR_USAI_SECRET` | `1` | `1` = set the per-sandbox `usai` acq secret. |
 | `AGOR_USAI_KEY_FILE` | (unset) | File holding the USAi key; piped to `acq secret set` (never argv). |
@@ -125,11 +127,17 @@ tree — including a `.env` with real secrets — into the sandbox. **The wrappe
 refuses this** (exit 5). v1 supports:
 
 - **Agor-managed remote repos** — the main checkout is a clean clone under
-  `~/.agor/` with no user secrets; safe to mount. (This is the default path.)
+  Agor's git-data root (`$AGOR_DATA_HOME/repos/…`, default `~/.agor/`) with no
+  user secrets; safe to mount. (This is the default path.)
 - **Clone-mode branches** — self-contained; only the clone dir is mounted.
 
-> The wrapper detects "Agor-managed" by the `~/.agor/*` path root. If your
-> deployment uses different roots, adjust the gate in the script.
+> The wrapper detects "Agor-managed" by whether the main repo lives under
+> **`AGOR_DATA_HOME`** (falling back to `AGOR_HOME`, then `~/.agor`) — matching
+> Agor's own path model (`AGOR_DATA_HOME` env > `paths.data_home` in config >
+> `AGOR_HOME` > `~/.agor`), so it works for k8s/EFS deployments that relocate the
+> git data. **This wrapper cannot read `config.yaml`**, so if your deploy sets
+> `paths.data_home` only in the config file, export `AGOR_DATA_HOME` (or add the
+> root to `AGOR_MANAGED_ROOTS`) for the wrapper too.
 >
 > **Alternative not taken in v1:** a host-side "`.git`-only staging dir" (bind or
 > copy just `.git` into a throwaway dir and mount *that*) would let local-repo
