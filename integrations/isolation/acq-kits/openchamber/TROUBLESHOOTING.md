@@ -3,6 +3,45 @@
 Failure modes specific to the OpenChamber kit. They assume you applied the kit
 to a sandbox (see [README.md](README.md#usage)).
 
+## "The running turn was stopped before OpenCode could send the next message" / the sandbox auto-stops ~30s after create
+
+**Symptoms:** you `acq create` (detached) with this kit — or only ever `acq exec`
+into the sandbox — the browser UI on the mapped port loads, but any prompt fails
+with *"The running turn was stopped before OpenCode could send the next
+message."* Checking `acq ls` / `sbx inspect` shows the sandbox went `stopped` on
+its own about 30–40 seconds after create, with `Sessions: 0`.
+
+**Cause:** sbx (verified v0.35.0) **auto-stops an agent sandbox ~30 seconds after
+its last session disconnects.** A detached `acq create` has no lasting session:
+the only session is the transient one acq opens to apply the kit, and when that
+disconnects sbx arms a 30s grace timer (`session disconnected, deferring
+auto-stop delay:30000000000` → `auto-stop grace period expired` → `auto-stopped
+runtime after last session disconnected` in the daemon log). Any lone `acq exec`
+does the same. The `tini` PID-1 keepalive does **not** prevent this — sbx measures
+idleness by session connections, not by whether PID 1 is alive — and there is no
+sbx setting or flag to disable/extend the grace (checked in `sbx settings`,
+`sbx create --help`, `sbx run --help`).
+
+**Fix: use `acq run`, which holds a session and keeps the sandbox alive.**
+
+```bash
+acq run --name <sandbox>            # or: acq run opencode /path/to/project
+```
+
+Keep that terminal open while you use OpenChamber from the browser; the attached
+session is what prevents the auto-stop. (The shared server + UI are already up,
+started by the startup script — `acq run` just keeps the sandbox running.) You
+can confirm the mechanism on your host with
+[`scripts/detach-probe`](scripts/detach-probe) (it watches longer than the 30s
+grace, so it observes the stop). Inspect the auto-stop markers directly in the
+sbx daemon log:
+
+```bash
+# macOS:
+grep -E 'auto-stop|session (dis)?connected' \
+  ~/Library/Application\ Support/com.docker.sandboxes/**/daemon.log | grep <sandbox>
+```
+
 ## I don't want `acq run` in the foreground / suspend + `bg` kills the sandbox
 
 **Symptoms:** you `acq run opencode <path>`, decline (or quit) the TUI, and are
@@ -18,21 +57,15 @@ interactive `run` session, so the entrypoint's controlling channel goes away and
 the sandbox stops. `acq run` is the *interactive* path; it is not meant to be
 backgrounded.
 
-**Fix: don't use `acq run` at all — create the sandbox detached.** The shared
-server and OpenChamber are started by the kit's startup script on every sandbox
-start, so a detached `acq create` gives you a fully working OpenChamber with no
-terminal held open:
-
-```bash
-acq create --name <sandbox> opencode /path/to/project   # detached; nothing attached
-acq ports <sandbox>                                      # find the mapped host ports
-# open http://127.0.0.1:<host-port-for-3000>
-```
-
-On the detached path PID 1 is a `tini` keepalive shim (not the wrapper), so the
-sandbox stays `running` on its own — you can confirm with
-[`scripts/detach-probe`](scripts/detach-probe). Attach a TUI later without a
-foreground terminal any time:
+**There is unfortunately no fully terminal-free option on sbx.** A detached
+`acq create` does **not** keep the sandbox alive — sbx auto-stops a session-less
+agent sandbox ~30s after its last session disconnects (see the entry above), and
+there is no sbx knob to disable that. `acq run` (holding a session) is the
+supported way to keep OpenChamber reachable. If you don't want to tie up an
+interactive shell, run `acq run` in a dedicated terminal/tab (e.g. a `tmux`/screen
+window) and leave it attached — that keeps the session alive without occupying
+your working terminal. You can still attach a TUI to the shared session from
+elsewhere any time:
 
 ```bash
 acq exec <sandbox> -- opencode attach http://127.0.0.1:4096

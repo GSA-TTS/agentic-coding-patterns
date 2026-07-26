@@ -1,8 +1,16 @@
 # Decision: the startup script owns the shared server (terminal-free UX)
 
-**Status:** accepted (supersedes the server-ownership decision in
+**Status:** accepted, with a **material correction** — see
+[Correction (2026-07): sbx session-based auto-stop invalidates the terminal-free
+premise](#correction-2026-07-sbx-session-based-auto-stop-invalidates-the-terminal-free-premise)
+below. The decision to move server supervision into the startup script **stands**
+(it is correct and required for the `acq run` path). What does **not** hold is the
+"one-command, terminal-free `acq create` with nobody attached" UX this record
+claimed as its payoff: on sbx v0.35.0 a session-less agent sandbox is auto-stopped
+~30s after its last session disconnects, so a detached `acq create` alone does not
+stay running. Use `acq run`. (Also supersedes the server-ownership decision in
 [`wrapper-entrypoint-owns-server.md`](wrapper-entrypoint-owns-server.md); that
-record's PID-1 reasoning for the interactive `acq run` path still applies)
+record's PID-1 reasoning for the interactive `acq run` path still applies.)
 
 ## Context
 
@@ -102,11 +110,62 @@ remains available for an interactive TUI in that terminal.
   each idempotent (guarded by `supervisor_running`), so repeated startup runs
   don't spawn duplicates.
 
+## Correction (2026-07): sbx session-based auto-stop invalidates the terminal-free premise
+
+The two "pivotal facts" this record relied on — established by an early
+`scripts/detach-probe` run — were **incompletely observed**, and the headline UX
+claim ("a single `acq create` with nobody attached yields a working, persistent
+OpenChamber") is **false on sbx v0.35.0**.
+
+**What is actually true (verified on sbx v0.35.0, macOS, via the daemon log):**
+
+- sbx **auto-stops an agent sandbox ~30 seconds after its *last session*
+  disconnects.** The daemon log shows, in order:
+  `session disconnected, deferring auto-stop  delay:30000000000` (30s in ns),
+  then `auto-stop grace period expired, stopping runtime`, then
+  `auto-stopped runtime after last session disconnected`.
+- A **transient `sbx exec`/attach counts as a session** that connects then
+  disconnects. acq's **kit-apply step performs such an exec/attach**, so on a
+  detached `acq create` the *only* session is that kit-apply attach; when it
+  ends, the 30s timer is armed and nothing re-attaches → the sandbox stops
+  ~30–40s after create. Reproduced minimally with a bare `opencode` sandbox (no
+  kit) plus a single `sbx exec`: it too auto-stops ~30s after the exec.
+- This is **independent of PID 1.** PID 1 is the `tini … sleep infinity`
+  keepalive in all cases (bare and kit); sbx measures idleness by **session
+  connections**, not PID-1 liveness, so tini does **not** prevent the stop.
+- There is **no sbx knob** to disable or extend the grace: neither `sbx settings`
+  nor `sbx create --help` / `sbx run --help` exposes an auto-stop/idle/keep-alive
+  setting or flag (checked on v0.35.0).
+
+**Why the probe missed it.** The original `detach-probe` watched for only 15s —
+*shorter than the 30s grace* — so it saw `running`, saw the startup hook fire, and
+reported "PREMISE HOLDS." The probe now defaults `HOLD_SECONDS=90` (> grace) and
+its messaging names the auto-stop mechanism, so it observes the stop instead of
+missing it.
+
+**What still stands / what changes:**
+
+- **Server supervision in the startup script: KEEP.** Running both supervisors on
+  every start is correct and is exactly what makes the server available the moment
+  a session is attached. Nothing here reverts that.
+- **The wrapper's PID-1 discriminator (hold on `acq run`, exit otherwise): KEEP.**
+  It is still correct for the `acq run` path (verify steps 9–10). It is *not* the
+  cause of the auto-stop — the wrapper does not even run on the detached path.
+- **The terminal-free "`acq create` with nobody attached" UX: DROP.** It is not
+  achievable on sbx v0.35.0. The supported path is **`acq run`**, which holds a
+  session and keeps the sandbox (and `:4096`) alive. README and TROUBLESHOOTING
+  are updated accordingly.
+
+The user-visible symptom of relying on the dropped premise is the browser error
+*"The running turn was stopped before OpenCode could send the next message"* — the
+sandbox behind `:4096` was auto-stopped out from under the UI.
+
 ## Links
 
-- `scripts/detach-probe` — the host-side probe that established the two pivotal
-  facts (detached PID 1 is a tini keepalive; the startup hook fires on
-  `acq create`).
+- `scripts/detach-probe` — host-side probe of the detach/auto-stop behavior.
+  **Note:** its early 15s window under-observed the 30s auto-stop and produced the
+  incorrect "premise holds" reading corrected above; it now watches 90s and names
+  the auto-stop mechanism.
 - [`wrapper-entrypoint-owns-server.md`](wrapper-entrypoint-owns-server.md) — the
   prior decision whose server-ownership choice this record supersedes; its
   PID-1-on-`acq run` reasoning still holds.
@@ -114,3 +173,6 @@ remains available for an interactive TUI in that terminal.
   [`pin-and-verify-installer.md`](pin-and-verify-installer.md) — unchanged; still
   apply to the OpenChamber install the startup script performs.
 - OpenCode `opencode serve` / `opencode attach` — headless server + TUI attach.
+- sbx daemon log (macOS): `~/Library/Application Support/com.docker.sandboxes/**/daemon.log`
+  — where the `deferring auto-stop` / `auto-stop grace period expired` /
+  `auto-stopped runtime after last session disconnected` markers appear.

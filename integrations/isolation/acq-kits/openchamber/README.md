@@ -5,8 +5,19 @@ kit** that runs [OpenChamber](https://github.com/openchamber/openchamber) — a
 browser UI for OpenCode — inside the sandbox, and ships an `opencode` wrapper so
 the browser and an optional terminal TUI share one live OpenCode session. The
 shared server and the UI are started by the kit's startup script on every
-sandbox start, so a single `acq create` brings up a working OpenChamber with
-**no terminal left in the foreground** (see [Usage](#usage)).
+sandbox start.
+
+> [!IMPORTANT]
+> **Use `acq run`, not a detached `acq create` alone.** On sbx (verified on
+> v0.35.0), an agent sandbox with **no attached session** is auto-stopped ~30s
+> after its last session disconnects — so a detached `acq create` (or any
+> sandbox you only `acq exec` into) stops itself about half a minute later,
+> taking the shared server on `:4096` with it. The browser then fails with
+> *"The running turn was stopped before OpenCode could send the next message."*
+> The tini keepalive does **not** prevent this: sbx measures idleness by
+> **session connections**, not by whether PID 1 is alive, and there is no sbx
+> setting or flag to disable or extend the grace. Keep a session attached with
+> `acq run` (see [Usage](#usage) and [`docs/decisions/startup-owns-shared-server.md`](docs/decisions/startup-owns-shared-server.md)).
 
 This kit is **opt-in**. It is *not* one of the default GSA kits; you add it
 explicitly (see [Usage](#usage)).
@@ -51,13 +62,16 @@ explicitly (see [Usage](#usage)).
     (`opencode run …`, `opencode auth login`, etc.).
 
   On a detached `acq create`, PID 1 is a `tini` keepalive shim and the wrapper
-  does not run at all, so the sandbox stays up without it — you never need to run
-  the wrapper unless you want a terminal TUI.
+  does not run at all. The startup script still brings the server + UI up — but
+  note the auto-stop caveat above: a session-less sandbox is stopped ~30s after
+  its last session disconnects, so this path alone does not keep OpenChamber
+  reachable. Use `acq run` to hold a session.
 - **Install + supervise the shared server AND OpenChamber (one script)** — a
   `startup`-phase command runs
   [`files/home/openchamber-start.sh`](files/home/openchamber-start.sh) in the
-  background on every sandbox start (**including a detached `acq create` with
-  nobody attached**, held open by the tini keepalive). That script:
+  background on every sandbox start (including a detached `acq create` with
+  nobody attached, held open by the tini keepalive — though such a session-less
+  sandbox is auto-stopped ~30s later; see the note at the top). That script:
   1. installs the OpenChamber CLI on first boot (only if missing) from a
      **pinned release tag whose `install.sh` is SHA-256-verified before it
      runs** (`OPENCHAMBER_REF` / `OPENCHAMBER_INSTALL_SHA256`, exported by the
@@ -72,8 +86,9 @@ explicitly (see [Usage](#usage)).
   respawn loop — if it exits (e.g. after an interactive self-update, which needs
   a restart to apply, or a crash) it is restarted after a few seconds
   (`OPENCHAMBER_RESTART_DELAY`, default `5`). No systemd. **Because the startup
-  script owns the server, it comes up on its own — no `acq run`/`acq exec` step
-  is needed to start it.**
+  script owns the server, it comes up on its own on every sandbox start — but the
+  sandbox must keep an attached session (`acq run`) to stay running; see the
+  auto-stop note at the top.**
 - **Published ports** — the sbx backend publishes container ports `3000`
   (OpenChamber) and `4096` (the shared server), each mapped to an ephemeral host
   loopback port at sandbox start (`backend_extras.sbx.publishedPorts`).
@@ -89,7 +104,9 @@ explicitly (see [Usage](#usage)).
 > by the startup script, which fires on every sandbox start — including a
 > detached `acq create` with nobody attached. You do not need to run `opencode`
 > to bring the server up. Reload OpenChamber once the first-boot install
-> finishes (a few seconds).
+> finishes (a few seconds). **But** a session-less sandbox is auto-stopped ~30s
+> after its last session disconnects (see the note at the top), so keep a
+> session attached with `acq run` to keep it reachable.
 
 ## Backend parity
 
@@ -116,35 +133,17 @@ it needs either a neutral port-publish + background vocabulary in `acq` or an
 ## Usage
 
 The kit is applied by remote reference. Apply it as an **extra kit** on top of
-the default GSA kits. There are two ways to bring it up.
+the default GSA kits.
 
-### Terminal-free (recommended): `acq create`
+### Recommended: `acq run` (holds a session, stays running)
 
-Create the sandbox **detached** — this starts the sandbox in the background
-without attaching your terminal, and the startup script brings up the shared
-server and OpenChamber on its own:
+`acq run` attaches a session to the sandbox, which is what keeps it alive — sbx
+auto-stops a session-less agent sandbox ~30s after its last session disconnects
+(see the note at the top of this README), so this is the path that actually
+keeps OpenChamber reachable:
 
 ```bash
 export ACQ_EXTRA_KITS="git+https://github.com/GSA-TTS/agentic-coding-patterns.git#ref=<sha>&dir=integrations/isolation/acq-kits/openchamber"
-acq create --name <sandbox> opencode /path/to/your/project
-acq ports <sandbox>        # find the mapped host ports, then open the browser
-```
-
-That's it — no terminal is left in the foreground, and you never have to run
-`opencode`. Wait a few seconds on first boot for the one-time OpenChamber
-install, then open `http://127.0.0.1:<host-port-for-3000>`.
-
-> **`acq create` prints no connect banner.** The wrapper's "Connect from your
-> HOST" instructions only print when the wrapper *runs* (the `acq run` path
-> below). After a detached `acq create` the wrapper does not run, so use
-> `acq ports <sandbox>` to discover the mapped host ports (see
-> [Reaching it from the host](#reaching-it-from-the-host)).
-
-### Interactive: `acq run`
-
-If you *want* a terminal TUI in the foreground, use `acq run`:
-
-```bash
 acq run opencode /path/to/your/project
 ```
 
@@ -153,10 +152,34 @@ takes over: it prints host-connect instructions and offers you a TUI in that
 terminal (the server is already up, started by the startup script). On this path
 the wrapper is the sandbox's PID 1, so after you decline or quit the TUI it
 **keeps the terminal open** — keep it open while you use OpenChamber/OpenCode
-from your browser; closing it stops the sandbox. If you didn't actually want a
-held terminal, quit it and use the detached `acq create` path above instead.
-(Running `opencode` from a shell inside the sandbox or via `acq exec` is not
-PID 1, so it exits cleanly after the prompt and leaves everything running.)
+from your browser; closing it disconnects the session and the sandbox
+auto-stops. Find the mapped host ports with `acq ports <sandbox>` and open
+`http://127.0.0.1:<host-port-for-3000>`. Wait a few seconds on first boot for the
+one-time OpenChamber install.
+
+### `acq create` (detached — NOT sufficient on its own)
+
+> [!WARNING]
+> A detached `acq create` alone does **not** keep the sandbox running on sbx: with
+> no attached session it is auto-stopped ~30s after the kit-apply step's
+> transient session disconnects, and the browser then fails with *"The running
+> turn was stopped before OpenCode could send the next message."* The tini
+> keepalive does not prevent this (sbx keys auto-stop off session connections,
+> not PID 1), and there is no sbx setting/flag to disable or extend the grace.
+> Use `acq run` above, which holds a session. `acq create` is still useful to
+> pre-create/apply the kit, but you must then attach with `acq run` to use it.
+
+```bash
+export ACQ_EXTRA_KITS="git+https://github.com/GSA-TTS/agentic-coding-patterns.git#ref=<sha>&dir=integrations/isolation/acq-kits/openchamber"
+acq create --name <sandbox> opencode /path/to/your/project
+acq run --name <sandbox>   # attach a session so it stays running
+```
+
+> **`acq create` prints no connect banner.** The wrapper's "Connect from your
+> HOST" instructions only print when the wrapper *runs* (the `acq run` path
+> above). After a detached `acq create` the wrapper does not run, so use
+> `acq ports <sandbox>` to discover the mapped host ports (see
+> [Reaching it from the host](#reaching-it-from-the-host)).
 
 `GSA-TTS/` is already in the default kit-source allowlist, so no
 `ACQ_EXTRA_KIT_SOURCES` change is needed. `<sha>` must be a full 40-character
@@ -278,8 +301,9 @@ RUN_ACQ=1 KEEP=1 ./scripts/verify     # keep the sandbox to poke at it
 
 # ./scripts/verify with no RUN_* flag runs only the offline gate.
 
-# Sanity-check the terminal-free premise on your host (no attach; asserts the
-# sandbox stays running and the startup hook fires on a detached create):
+# Probe sbx's session-based auto-stop on your host (no attach): a detached
+# create + one exec is auto-stopped ~30s after the session disconnects. The
+# probe watches longer than the grace so it observes the stop (HOLD_SECONDS=90).
 ./scripts/detach-probe
 ```
 
