@@ -1,6 +1,6 @@
 ---
 title: "Add an integrations/orchestrators/ area; place the Agor + acq integration there"
-status: "proposed"
+status: "accepted"
 date: "2026-07-26"
 decision_makers: ["Bret Mogilefsky", "OpenCode Agent"]
 category: "repository-structure"
@@ -17,10 +17,8 @@ impact_level: "low"
 > between the two — mirroring how `integrations/isolation/` carries its own
 > [area ADR](../../isolation/docs/decisions/0001-neutral-hybrid-v1-acq-kits.md).
 
-> **Status: proposed.** Drafted AFK via the `wayfinder` map
-> ([#247](https://github.com/GSA-TTS/agentic-coding-patterns/issues/247),
-> ticket [#255](https://github.com/GSA-TTS/agentic-coding-patterns/issues/255));
-> pending human confirmation before it is marked `accepted`.
+> **Status: accepted.** Boundary rule and area confirmed by the human owner on
+> 2026-07-26 (review item A).
 
 ## Context and Problem Statement
 
