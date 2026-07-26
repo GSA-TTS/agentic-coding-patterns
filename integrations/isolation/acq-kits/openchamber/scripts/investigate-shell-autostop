@@ -1,0 +1,269 @@
+#!/usr/bin/env bash
+#
+# investigate-shell-autostop — settle WHY a bare `shell` sandbox with the
+# openchamber kit stayed running while an `opencode` sandbox auto-stopped.
+#
+# ESTABLISHED ANSWER (sbx v0.35.0, macOS — this matrix, watched 120s via acq ls):
+#   The premise of the question was a FLUKE. Auto-stop-on-idle is UNIVERSAL and
+#   UNCONDITIONAL: EVERY case below stopped at ~36s with the same 30s-grace
+#   signature — shell and opencode, kit and no kit, exec and no exec. The earlier
+#   one-off "shell+kit stayed up" observation did not reproduce here and is
+#   discarded (it was made via raw `sbx create` without a clean acq-ls watch;
+#   almost certainly a session was still held, or a still-booting state was
+#   misread). The decisive datum is Case A: shell, NO kit, NO exec — it STILL
+#   stopped, because `acq create` ITSELF opens and then disconnects a session
+#   ("session connected" -> "session disconnected, deferring auto-stop
+#   delay:30000000000"), arming the 30s timer. There is no truly session-less
+#   create. The ONLY thing that keeps a sandbox alive is a lasting attached
+#   session (`acq run`). See docs/decisions/startup-owns-shared-server.md
+#   (Correction).
+#
+# Background: sbx auto-stops an agent sandbox ~30s after its LAST SESSION
+# disconnects. This script was written to disambiguate three hypotheses for the
+# "shell+kit stayed up" anomaly:
+#
+#   H1  shell sandboxes are NOT subject to session-based auto-stop.
+#   H2  shell IS subject, but kit-apply/our exec leaves no disconnected session.
+#   H3  shell auto-stops on a LONGER grace than earlier watches saw.
+#
+# The matrix result refuted all three: shell IS subject, on the SAME 30s grace,
+# and even a no-kit/no-exec create arms it. Kept as a lifecycle-regression probe:
+# if a future sbx changes the default or adds a keep-alive knob, a case here will
+# flip to STAYED and flag that the `acq run`-only guidance needs revisiting.
+#
+# It runs a small matrix, each DETACHED (never `acq run`), watches each for
+# WATCH_SECS (default 120s, > the 30s grace) by polling `acq ls` ONLY (never
+# `acq exec`, so the probe never creates extra sessions), then extracts the
+# relevant daemon-log lines per sandbox. Everything lands in ONE report file so
+# there is nothing to copy back except that file (its path is printed at the
+# end).
+#
+#   A. shell,    NO kit,  no exec        — control: does bare shell ever stop?
+#   B. shell,    NO kit,  + one exec     — does an exec arm the timer for shell?
+#   C. shell,    WITH kit (via acq)      — the Control C case to explain.
+#   D. opencode, NO kit,  + one exec     — positive control (known to stop ~30s).
+#
+# Everything is driven through `acq` (matching how the original observation was
+# made: ACQ_EXTRA_KITS=... acq create ...). It is fully CWD-INDEPENDENT: run it
+# from any directory. It needs neither the USAi key nor a provider — it only
+# observes sandbox lifecycle (running/stopped + daemon-log session/auto-stop
+# markers), not the agent itself.
+#
+# USAGE (host with `acq` installed + sbx logged in):
+#   /abs/or/rel/path/to/openchamber/scripts/investigate-shell-autostop
+#   WATCH_SECS=90 .../investigate-shell-autostop      # shorter watch
+#   KEEP=1        .../investigate-shell-autostop      # keep sandboxes to inspect
+#   KIT_DIR=/abs/path/to/openchamber .../investigate-shell-autostop   # override
+#
+# EXIT: 0 if it ran and produced a verdict; 2 if BLOCKED (acq missing / a create
+# failed) — an honest BLOCKED, never a fabricated pass.
+
+set -uo pipefail
+
+# --- config (all resolved to ABSOLUTE paths; CWD does not matter) ------------
+# Resolve the script's own directory so KIT_DIR works from any CWD.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+KIT_DIR="${KIT_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+WATCH_SECS="${WATCH_SECS:-120}"
+POLL_INTERVAL="${POLL_INTERVAL:-3}"
+KEEP="${KEEP:-0}"
+SUFFIX="$$-$(date +%s)"
+STAMP="$(date +%Y%m%d-%H%M%S)"
+REPORT="${TMPDIR:-/tmp}/shell-autostop-$STAMP.txt"
+# A throwaway workspace so we never depend on the CWD being a repo/project.
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/shell-autostop-ws.XXXXXX")"
+
+nameA="autostop-A-shell-nokit-$SUFFIX"
+nameB="autostop-B-shell-exec-$SUFFIX"
+nameC="autostop-C-shell-kit-$SUFFIX"
+nameD="autostop-D-opencode-exec-$SUFFIX"
+NAMES="$nameA $nameB $nameC $nameD"
+
+# --- output helpers (tee to stdout AND the single report file) ---------------
+log()  { printf '%s\n' "$*" | tee -a "$REPORT"; }
+hdr()  { printf '\n=== %s ===\n' "$*" | tee -a "$REPORT"; }
+note() { printf '    %s\n' "$*" | tee -a "$REPORT"; }
+
+cleanup() {
+  if [ "$KEEP" = "1" ]; then
+    printf '\nKEEP=1: leaving sandboxes in place. Remove with:\n' >&2
+    for n in $NAMES; do printf '  acq rm %s\n' "$n" >&2; done
+    printf 'Workspace: %s\n' "$WORK" >&2
+    return
+  fi
+  for n in $NAMES; do acq rm "$n" >/dev/null 2>&1 || true; done
+  rm -rf "$WORK" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT INT TERM
+
+# --- locate the sbx daemon log -----------------------------------------------
+# The sandboxd daemon log lives at a version-dependent DEPTH under the sbx state
+# dir, so we search the KNOWN state roots RECURSIVELY rather than hardcode a
+# depth. Confirmed layout on sbx v0.35.0 (macOS):
+#   ~/Library/Application Support/com.docker.sandboxes/sandboxes/sandboxd/daemon.log
+# Linux (XDG) mirrors this under ~/.local/state/sandboxes/. We deliberately do
+# NOT match ~/.docker/sandboxes/daemon.log — that is a DIFFERENT (decoy) log, not
+# sandboxd's. DAEMON_LOG_HINT lets you override if your install differs.
+find_daemon_log() {
+  # Explicit override wins.
+  if [ -n "${DAEMON_LOG_HINT:-}" ] && [ -f "$DAEMON_LOG_HINT" ]; then
+    printf '%s\n' "$DAEMON_LOG_HINT"; return 0
+  fi
+  local root candidates
+  for root in \
+    "$HOME/Library/Application Support/com.docker.sandboxes" \
+    "${XDG_STATE_HOME:-$HOME/.local/state}/sandboxes"
+  do
+    [ -d "$root" ] || continue
+    # Newest matching daemon.log under this root (bounded depth for speed/safety).
+    candidates="$(find "$root" -maxdepth 4 -name 'daemon.log' -type f 2>/dev/null)"
+    if [ -n "$candidates" ]; then
+      # Pick the most recently modified (the live one), portably.
+      printf '%s\n' "$candidates" \
+        | while IFS= read -r f; do printf '%s\t%s\n' "$(stat -f '%m' "$f" 2>/dev/null || stat -c '%Y' "$f" 2>/dev/null || echo 0)" "$f"; done \
+        | sort -rn | head -n1 | cut -f2-
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Is the named sandbox reported "running" by `acq ls`? (We poll acq ls — NOT
+# acq exec — so the probe itself never opens a session that would reset the
+# auto-stop timer we are trying to measure.)
+is_running() {
+  acq ls 2>/dev/null \
+    | grep -E "(^|[[:space:]])$1([[:space:]]|$)" \
+    | grep -qiw running
+}
+
+# Watch a sandbox's status for WATCH_SECS, polling acq ls only. Prints:
+#   STAYED (running for <n>s)  |  STOPPED@<elapsed>s
+watch_sandbox() {
+  local name="$1" start now elapsed
+  start="$(date +%s)"
+  # Give create a beat to register in acq ls before the first check.
+  sleep 2
+  while :; do
+    now="$(date +%s)"; elapsed=$(( now - start ))
+    if ! is_running "$name"; then
+      # One confirmation poll to avoid a transient acq-ls miss reading as stopped.
+      sleep "$POLL_INTERVAL"
+      if ! is_running "$name"; then
+        printf 'STOPPED@%ss\n' "$elapsed"; return 0
+      fi
+    fi
+    [ "$elapsed" -ge "$WATCH_SECS" ] && { printf 'STAYED (running for %ss)\n' "$WATCH_SECS"; return 0; }
+    sleep "$POLL_INTERVAL"
+  done
+}
+
+# Append the lifecycle-relevant daemon-log lines for one sandbox to the report.
+# This is the AUTHORITATIVE signal (session connect/disconnect, auto-stop
+# deferral + delay in ns, grace expiry). `delay:30000000000` = 30s.
+dump_daemon_lines() {
+  local name="$1" log_path="$2" delay
+  if [ -z "$log_path" ]; then note "(daemon log not found; skipping log extraction)"; return; fi
+  grep -F "$name" "$log_path" 2>/dev/null \
+    | grep -iE 'session (dis)?connected|deferring auto-stop|auto-stop grace|auto-stopped runtime|created runtime' \
+    | sed 's/^/    | /' | tee -a "$REPORT" >/dev/null || true
+  # The delay is a JSON field: "delay":30000000000 (quoted key, colon, ns value).
+  # Extract just the number after the "delay" key. (An earlier version matched a
+  # bare `delay:<n>` and so never found the JSON form, always printing "no ...
+  # armed" even when the lines above clearly showed the armed delay.)
+  delay="$(grep -F "$name" "$log_path" 2>/dev/null | grep -oE '"delay":[0-9]+' | grep -oE '[0-9]+' | head -n1)"
+  if [ -n "$delay" ]; then
+    note "armed auto-stop: delay ${delay} ns ($(( delay / 1000000000 ))s)"
+  else
+    note "no 'deferring auto-stop' armed for $name in the daemon log"
+  fi
+}
+
+# --- preconditions -----------------------------------------------------------
+: >"$REPORT"
+hdr "investigate-shell-autostop  ($STAMP)"
+if ! command -v acq >/dev/null 2>&1; then
+  log "BLOCKED: acq not on PATH. Install acq (and 'sbx login') then re-run."
+  exit 2
+fi
+log "acq:        $(command -v acq)"
+log "sbx:        $(sbx version 2>/dev/null | head -n1 || echo '(sbx version unavailable)')"
+log "kit dir:    $KIT_DIR"
+log "workspace:  $WORK   (throwaway; CWD does not matter)"
+log "watch:      ${WATCH_SECS}s (poll ${POLL_INTERVAL}s via 'acq ls' only — no exec sessions)"
+DAEMON_LOG="$(find_daemon_log || true)"
+if [ -n "$DAEMON_LOG" ]; then log "daemon log: $DAEMON_LOG"; else log "daemon log: NOT FOUND (log extraction skipped)"; fi
+[ -f "$KIT_DIR/spec.yaml" ] || { log "BLOCKED: no spec.yaml under KIT_DIR=$KIT_DIR"; exit 2; }
+
+VA=""; VB=""; VC=""; VD=""
+
+# --- Case A: shell, no kit, NO exec -----------------------------------------
+hdr "A. shell, NO kit, NO exec  (control: does bare shell ever auto-stop?)"
+if acq create --name "$nameA" shell "$WORK" >>"$REPORT" 2>&1; then
+  note "created $nameA; watching (no exec at all)…"
+  VA="$(watch_sandbox "$nameA")"; note "result: $VA"
+  dump_daemon_lines "$nameA" "$DAEMON_LOG"
+else
+  VA="BLOCKED (create failed)"; note "$VA"
+fi
+
+# --- Case B: shell, no kit, + ONE exec --------------------------------------
+hdr "B. shell, NO kit, + one exec  (does a lone exec arm the timer for shell?)"
+if acq create --name "$nameB" shell "$WORK" >>"$REPORT" 2>&1; then
+  note "created $nameB; running ONE transient acq exec (mimics kit-apply's attach)…"
+  acq exec "$nameB" -- sh -c 'echo hi' </dev/null >>"$REPORT" 2>&1 || true
+  note "watching after the exec disconnected…"
+  VB="$(watch_sandbox "$nameB")"; note "result: $VB"
+  dump_daemon_lines "$nameB" "$DAEMON_LOG"
+else
+  VB="BLOCKED (create failed)"; note "$VB"
+fi
+
+# --- Case C: shell, WITH kit (via acq)  (the case to explain) ----------------
+hdr "C. shell, WITH openchamber kit via acq  (the Control C case)"
+note "kit applied through acq (ACQ_EXTRA_KITS=$KIT_DIR) — matches the original repro."
+if ACQ_EXTRA_KITS="$KIT_DIR" acq create --name "$nameC" shell "$WORK" >>"$REPORT" 2>&1; then
+  note "created $nameC; watching (the kit-apply attach is the only session)…"
+  VC="$(watch_sandbox "$nameC")"; note "result: $VC"
+  dump_daemon_lines "$nameC" "$DAEMON_LOG"
+else
+  VC="BLOCKED (create failed)"; note "$VC"
+  note "(If acq refused the shell+kit combo, note the create error above — that"
+  note " itself is informative about whether the kit even applies to shell.)"
+fi
+
+# --- Case D: opencode, no kit, + ONE exec  (positive control) ----------------
+hdr "D. opencode, NO kit, + one exec  (positive control: known to auto-stop ~30s)"
+if acq create --name "$nameD" opencode "$WORK" >>"$REPORT" 2>&1; then
+  note "created $nameD; running ONE transient acq exec…"
+  acq exec "$nameD" -- sh -c 'echo hi' </dev/null >>"$REPORT" 2>&1 || true
+  note "watching after the exec disconnected (expect STOPPED ~30-40s)…"
+  VD="$(watch_sandbox "$nameD")"; note "result: $VD"
+  dump_daemon_lines "$nameD" "$DAEMON_LOG"
+else
+  VD="BLOCKED (create failed)"; note "$VD"
+fi
+
+# --- verdict -----------------------------------------------------------------
+hdr "SUMMARY"
+log "A shell/nokit/noexec : $VA"
+log "B shell/nokit/+exec  : $VB"
+log "C shell/+kit (acq)   : $VC"
+log "D opencode/+exec     : $VD   (positive control — should be STOPPED)"
+log ""
+log "Interpretation (compare B and D — same 'one exec', different agent):"
+log "  * D STOPPED but B STAYED  -> H1: shell is NOT subject to session auto-stop"
+log "                               (agent-type dependent; shell exempt). C staying"
+log "                               is then expected and needs no further cause."
+log "  * B STOPPED (like D)       -> shell IS subject; then C STAYING means the"
+log "                               kit-apply left no disconnected session (H2) —"
+log "                               check C's daemon lines for a 'deferring auto-stop'."
+log "  * B STAYED but its daemon  -> H3: shell auto-stops on a LONGER grace than the"
+log "    lines show a 'deferring     watch window; re-run with a bigger WATCH_SECS."
+log "    auto-stop'"
+log "  * D STAYED                 -> positive control FAILED; environment changed,"
+log "                               do NOT trust the shell conclusion — investigate."
+log ""
+log "Full report (share THIS file): $REPORT"
+printf '\nDone. Report: %s\n' "$REPORT" >&2
+exit 0

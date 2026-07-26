@@ -11,16 +11,19 @@ with *"The running turn was stopped before OpenCode could send the next
 message."* Checking `acq ls` / `sbx inspect` shows the sandbox went `stopped` on
 its own about 30–40 seconds after create, with `Sessions: 0`.
 
-**Cause:** sbx (verified v0.35.0) **auto-stops an agent sandbox ~30 seconds after
-its last session disconnects.** A detached `acq create` has no lasting session:
-the only session is the transient one acq opens to apply the kit, and when that
-disconnects sbx arms a 30s grace timer (`session disconnected, deferring
-auto-stop delay:30000000000` → `auto-stop grace period expired` → `auto-stopped
-runtime after last session disconnected` in the daemon log). Any lone `acq exec`
-does the same. The `tini` PID-1 keepalive does **not** prevent this — sbx measures
-idleness by session connections, not by whether PID 1 is alive — and there is no
-sbx setting or flag to disable/extend the grace (checked in `sbx settings`,
-`sbx create --help`, `sbx run --help`).
+**Cause:** sbx (verified v0.35.0) **auto-stops a sandbox ~30 seconds after its
+last session disconnects** — for any agent, with or without a kit. A detached
+`acq create` is session-less after it returns: `acq create` opens a short-lived
+session and disconnects it, which alone arms a 30s grace timer (`session
+disconnected, deferring auto-stop delay:30000000000` → `auto-stop grace period
+expired` → `auto-stopped runtime after last session disconnected` in the daemon
+log) — this happens **even with no kit and no `acq exec`**. Any lone `acq exec`
+is likewise a transient session that re-arms it. The `tini` PID-1 keepalive does
+**not** prevent this (sbx measures idleness by session connections, not by
+whether PID 1 is alive), and there is no sbx setting or flag to disable/extend
+the grace (checked in `sbx settings`, `sbx create --help`, `sbx run --help`).
+This is universal — confirmed by `scripts/investigate-shell-autostop`, where
+shell/opencode × kit/no-kit × exec/no-exec all stopped at ~36s.
 
 **Fix: use `acq run`, which holds a session and keeps the sandbox alive.**
 
@@ -37,9 +40,10 @@ grace, so it observes the stop). Inspect the auto-stop markers directly in the
 sbx daemon log:
 
 ```bash
-# macOS:
+# macOS (the sandboxd log is a few levels deep under the state dir):
 grep -E 'auto-stop|session (dis)?connected' \
-  ~/Library/Application\ Support/com.docker.sandboxes/**/daemon.log | grep <sandbox>
+  "$HOME/Library/Application Support/com.docker.sandboxes/sandboxes/sandboxd/daemon.log" \
+  | grep <sandbox>
 ```
 
 ## I don't want `acq run` in the foreground / suspend + `bg` kills the sandbox

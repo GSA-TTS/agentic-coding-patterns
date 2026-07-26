@@ -119,17 +119,26 @@ OpenChamber") is **false on sbx v0.35.0**.
 
 **What is actually true (verified on sbx v0.35.0, macOS, via the daemon log):**
 
-- sbx **auto-stops an agent sandbox ~30 seconds after its *last session*
-  disconnects.** The daemon log shows, in order:
+- sbx **auto-stops a sandbox ~30 seconds after its *last session*
+  disconnects** — for **any** agent (`opencode`, `shell`, …), **with or without a
+  kit**. The daemon log shows, in order:
   `session disconnected, deferring auto-stop  delay:30000000000` (30s in ns),
   then `auto-stop grace period expired, stopping runtime`, then
   `auto-stopped runtime after last session disconnected`.
-- A **transient `sbx exec`/attach counts as a session** that connects then
-  disconnects. acq's **kit-apply step performs such an exec/attach**, so on a
-  detached `acq create` the *only* session is that kit-apply attach; when it
-  ends, the 30s timer is armed and nothing re-attaches → the sandbox stops
-  ~30–40s after create. Reproduced minimally with a bare `opencode` sandbox (no
-  kit) plus a single `sbx exec`: it too auto-stops ~30s after the exec.
+- **`acq create` itself is session-less after it returns**, and that alone arms
+  the timer. `acq create` opens a short-lived session and disconnects it (the log
+  shows `session connected` immediately followed by `session disconnected,
+  deferring auto-stop`), so a detached create — **even with no kit and no
+  subsequent `acq exec`** — is auto-stopped ~30s later. Any transient `acq
+  exec`/attach is likewise a session that connects then disconnects; the kit-apply
+  step is one such exec, but it is **not** special — create alone is sufficient.
+- **This is universal, not agent- or kit-specific.** A controlled matrix
+  (`scripts/investigate-shell-autostop`, watched 120s via `acq ls`) had *all four*
+  cases stop at ~36s with the identical 30s-grace signature: `shell`/no-kit/no-exec,
+  `shell`/no-kit/+exec, `shell`/+kit, and `opencode`/+exec. An earlier one-off
+  observation that a `shell`+kit sandbox "stayed up" did **not** reproduce and is
+  discarded (it was made via raw `sbx create` without a clean `acq ls` watch —
+  most likely a session was still held or a still-booting state was misread).
 - This is **independent of PID 1.** PID 1 is the `tini … sleep infinity`
   keepalive in all cases (bare and kit); sbx measures idleness by **session
   connections**, not PID-1 liveness, so tini does **not** prevent the stop.
@@ -166,13 +175,12 @@ sandbox behind `:4096` was auto-stopped out from under the UI.
   **Note:** its early 15s window under-observed the 30s auto-stop and produced the
   incorrect "premise holds" reading corrected above; it now watches 90s and names
   the auto-stop mechanism.
-- [`wrapper-entrypoint-owns-server.md`](wrapper-entrypoint-owns-server.md) — the
-  prior decision whose server-ownership choice this record supersedes; its
-  PID-1-on-`acq run` reasoning still holds.
-- [`install-at-startup.md`](install-at-startup.md),
-  [`pin-and-verify-installer.md`](pin-and-verify-installer.md) — unchanged; still
-  apply to the OpenChamber install the startup script performs.
-- OpenCode `opencode serve` / `opencode attach` — headless server + TUI attach.
-- sbx daemon log (macOS): `~/Library/Application Support/com.docker.sandboxes/**/daemon.log`
-  — where the `deferring auto-stop` / `auto-stop grace period expired` /
-  `auto-stopped runtime after last session disconnected` markers appear.
+- `scripts/investigate-shell-autostop` — the controlled A–D matrix (shell/opencode
+  × kit/no-kit × exec/no-exec) that established the auto-stop is universal: all
+  four cases stopped at ~36s, including `shell`/no-kit/no-exec (proving `acq create`
+  alone arms the timer). Kept as a lifecycle-regression probe.
+- sbx daemon log (macOS): the sandboxd log is a few levels deep at
+  `~/Library/Application Support/com.docker.sandboxes/sandboxes/sandboxd/daemon.log`
+  — where the `session (dis)connected` / `deferring auto-stop` /
+  `auto-stop grace period expired` / `auto-stopped runtime after last session
+  disconnected` markers appear.
