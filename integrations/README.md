@@ -16,6 +16,12 @@ here versus the playbook or quickstart repos.
   [sbx](https://docs.docker.com/ai/sandboxes/) mixin kits that configure an
   agentic-coding sandbox declaratively (provider config, egress, CA trust,
   rules/skills delivery).
+- **Orchestrator integrations** (`orchestrators/<orchestrator>/`) — an
+  orchestrator that *drives* a sandbox tool from the outside (owns the agent +
+  session lifecycle and calls `acq`/`sbx`/`msb`), e.g. Agor running its executor
+  inside an `acq` sandbox. Contrast with isolation kits, which `acq` *applies
+  inside* the sandbox. Direction of control decides the area (see
+  [orchestrators/README](orchestrators/README.md)).
 - **CI / automation recipes** (future: `ci/`, `automation/`) — reusable snippets
   for wiring agentic tooling into pipelines.
 
@@ -38,9 +44,11 @@ integrations/
 │   └── <editor>/
 │       ├── README.md       # setup guide
 │       └── <config files>  # portable config to copy into your project
-└── isolation/
-    └── sbx-kits/
-        └── <kit>/          # an sbx mixin kit (spec.yaml + files/ + docs)
+├── isolation/
+│   └── acq-kits/
+│       └── <kit>/          # an acq mixin kit (spec.yaml + files/ + docs)
+└── orchestrators/
+    └── <orchestrator>/     # a tool that DRIVES acq/sbx/msb (wrapper + setup guide)
 ```
 
 ## Rules
@@ -62,3 +70,4 @@ integrations/
 | [isolation/sbx-kits/playbook-kit](isolation/sbx-kits/playbook-kit/) | sbx | Mixin kit: clone the GSA playbook at sandbox startup and link its AGENTS.md + skills into each agent. |
 | [isolation/sbx-kits/zscaler-ca-certificate](isolation/sbx-kits/zscaler-ca-certificate/) | sbx | Mixin kit: install the public Zscaler Root CA into the sandbox trust store for HTTPS-inspecting proxies. |
 | [isolation/sbx-kits/git-ssh-sign](isolation/sbx-kits/git-ssh-sign/) | sbx | Mixin kit: sign git commits/tags with the host-forwarded SSH key (vendored from sbx-kits-contrib). |
+| [orchestrators/agor](orchestrators/agor/) | Agor → `acq` | Run Agor's executor inside an `acq` sandbox via `executor_command_template`; portable wrapper + setup guide. **v1: sbx backend.** |
