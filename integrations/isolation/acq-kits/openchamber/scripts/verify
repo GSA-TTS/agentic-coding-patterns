@@ -519,7 +519,10 @@ else
   else
     bad "startup script does NOT pass --foreground to openchamber — it will daemonize and crash-loop"
   fi
-  if printf '%s\n' "$start_src" | grep -q 'OPENCHAMBER_NO_DAEMON'; then
+  # Match the env var being SET (`OPENCHAMBER_NO_DAEMON=…`), and ignore comment
+  # lines — the fixed script MENTIONS the dead var in an explanatory comment, and
+  # a bare `grep OPENCHAMBER_NO_DAEMON` would false-positive on that prose.
+  if printf '%s\n' "$start_src" | grep -v '^[[:space:]]*#' | grep -Eq 'OPENCHAMBER_NO_DAEMON[[:space:]]*='; then
     bad "startup script still sets OPENCHAMBER_NO_DAEMON (no such env var — silent no-op; use --foreground)"
   else
     ok "startup script does not rely on the nonexistent OPENCHAMBER_NO_DAEMON env var"
