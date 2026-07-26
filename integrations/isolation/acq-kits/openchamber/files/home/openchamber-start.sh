@@ -133,10 +133,16 @@ if ! supervisor_running opencode-serve; then
     >>"$SERVE_LOG" 2>&1 ) &
 fi
 
-# Start the OpenChamber supervisor unless already running. OpenChamber normally
-# daemonizes; run it with OPENCHAMBER_NO_DAEMON so it stays in the foreground and
-# the supervisor can see it exit (and thus restart it after a self-update). The
-# sandbox is the security boundary, so OpenChamber's own LAN access is
+# Start the OpenChamber supervisor unless already running. OpenChamber
+# DAEMONIZES by default; run it with the `--foreground` FLAG so it stays in the
+# foreground and the supervisor can see it exit (and thus restart it after a
+# self-update). NOTE: there is no `OPENCHAMBER_NO_DAEMON` env var — OpenChamber
+# only honors the `--foreground` (alias `--no-daemon`) command-line flag. Passing
+# the env var (as an earlier version did) was a silent no-op: OpenChamber
+# daemonized, its real server reparented to PID 1 (detaching from this
+# supervisor), the foreground child exited immediately, and every respawn then
+# failed with "OpenChamber is already running on port <N>" in an endless loop.
+# The sandbox is the security boundary, so OpenChamber's own LAN access is
 # unauthenticated.
 # argv to the inner sh -c: $0=marker, $1=RESTART_DELAY, $2=OC_PORT, $3=CHAMBER_PORT.
 if ! supervisor_running openchamber; then
@@ -146,8 +152,7 @@ if ! supervisor_running openchamber; then
         OPENCODE_SKIP_START=true \
         OPENCODE_PORT="$2" \
         OPENCHAMBER_ALLOW_UNAUTHENTICATED_LAN=true \
-        OPENCHAMBER_NO_DAEMON=true \
-          openchamber --lan --port "$3" || true
+          openchamber --lan --port "$3" --foreground || true
         echo "[supervisor] openchamber exited; restarting in ${1}s"
         sleep "$1"
       done

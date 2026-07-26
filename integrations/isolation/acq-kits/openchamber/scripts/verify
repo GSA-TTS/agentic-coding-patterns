@@ -498,6 +498,55 @@ else
   fi
 fi
 
+info "12. OpenChamber runs in the FOREGROUND, not a crash loop — regression guard"
+# REGRESSION GUARD (the "OpenChamber is already running on port <N>" crash loop):
+# OpenChamber DAEMONIZES by default and has NO `OPENCHAMBER_NO_DAEMON` env var —
+# it only honors the `--foreground` (alias `--no-daemon`) command-line FLAG. An
+# earlier version set the (nonexistent) env var, so OpenChamber daemonized: its
+# real server reparented to PID 1, detaching from supervisor:openchamber; the
+# foreground child exited immediately; and every respawn then failed with
+# "OpenChamber is already running on port <N>" ~every RESTART_DELAY seconds,
+# forever. Assert both a SOURCE invariant and the LIVE symptom.
+#
+# (a) source: the startup script must invoke openchamber with `--foreground` and
+#     must NOT rely on the dead OPENCHAMBER_NO_DAEMON env var.
+start_src="$(in_sbx 'cat ~/openchamber-start.sh 2>/dev/null')"
+if [ -z "$start_src" ]; then
+  bad "could not read ~/openchamber-start.sh from the sandbox to check the foreground flag"
+else
+  if printf '%s\n' "$start_src" | grep -Eq 'openchamber .*--foreground|openchamber .*--no-daemon'; then
+    ok "startup script runs openchamber with --foreground (supervisor can see it exit)"
+  else
+    bad "startup script does NOT pass --foreground to openchamber — it will daemonize and crash-loop"
+  fi
+  if printf '%s\n' "$start_src" | grep -q 'OPENCHAMBER_NO_DAEMON'; then
+    bad "startup script still sets OPENCHAMBER_NO_DAEMON (no such env var — silent no-op; use --foreground)"
+  else
+    ok "startup script does not rely on the nonexistent OPENCHAMBER_NO_DAEMON env var"
+  fi
+fi
+# (b) live: sample the OpenChamber log twice, a bit more than RESTART_DELAY apart,
+#     and assert the "already running on port" restart marker is NOT accumulating.
+#     A healthy foreground server produces a stable log; the crash loop appends a
+#     new "[supervisor] starting openchamber" + "already running" pair every cycle.
+crash_re='already running on port'
+c1="$(in_sbx "grep -c '$crash_re' /tmp/openchamber.log 2>/dev/null || echo 0")"
+sleep 8   # > RESTART_DELAY (default 5s): a crash loop would add at least one more
+c2="$(in_sbx "grep -c '$crash_re' /tmp/openchamber.log 2>/dev/null || echo 0")"
+# Normalize to integers (in_sbx can return blank on a transient exec miss).
+c1=${c1:-0}; c2=${c2:-0}
+case "$c1$c2" in *[!0-9]*) c1=0; c2=0 ;; esac
+if [ "$c2" -gt "$c1" ]; then
+  bad "OpenChamber is CRASH-LOOPING ('$crash_re' grew $c1 -> $c2 across ${POLL_INTERVAL}s+) — it daemonized instead of running foreground"
+  in_sbx 'tail -n 12 /tmp/openchamber.log' | sed 's/^/    | /'
+elif [ "$c2" -gt 0 ]; then
+  # Some historical markers may exist from before it settled, but they're not
+  # growing — treat a stable count as healthy (not a fail).
+  ok "OpenChamber not crash-looping (stable '$crash_re' count=$c2, not growing)"
+else
+  ok "OpenChamber not crash-looping (no 'already running on port' markers)"
+fi
+
 info "Summary"
 [ "$fail" -eq 0 ] && printf '  \033[32mAll checks passed.\033[0m\n' || printf '  \033[31mSome checks failed — see notes above.\033[0m\n'
 
