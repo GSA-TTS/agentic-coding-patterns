@@ -10,20 +10,20 @@ impact_level: "low"
 # ADR 0001 (orchestrators) — Add `integrations/orchestrators/` and place Agor + acq there
 
 > Area-scoped ADR for `integrations/orchestrators/`. The repository-wide ADR log
-> is [`docs/decisions/`](../../../docs/decisions/); the area that established
+> is [`docs/decisions/`](../../../../docs/decisions/); the area that established
 > `integrations/` is
-> [`docs/decisions/0001-integrations-area.md`](../../../docs/decisions/0001-integrations-area.md).
+> [`docs/decisions/0001-integrations-area.md`](../../../../docs/decisions/0001-integrations-area.md).
 > This record governs the whole orchestrators integration area, so it sits here
 > between the two — mirroring how `integrations/isolation/` carries its own
-> [area ADR](../../isolation/docs/decisions/0001-neutral-hybrid-v1-acq-kits.md).
-
+> [area ADR](../../../isolation/docs/decisions/0001-neutral-hybrid-v1-acq-kits.md).
+>
 > **Status: accepted.** Boundary rule and area confirmed by the human owner on
 > 2026-07-26 (review item A).
 
 ## Context and Problem Statement
 
 `integrations/` (per the repo-wide
-[ADR 0001](../../../docs/decisions/0001-integrations-area.md)) holds tool/editor
+[ADR 0001](../../../../docs/decisions/0001-integrations-area.md)) holds tool/editor
 integration guides and portable configs. Its first two classes are
 `editors/` and `isolation/` (the `acq`/`sbx` mixin kits).
 
@@ -137,15 +137,15 @@ Adopt **Option 1**.
 ## Links
 
 - Repo-wide area ADR that established `integrations/`:
-  [`docs/decisions/0001-integrations-area.md`](../../../docs/decisions/0001-integrations-area.md).
+  [`docs/decisions/0001-integrations-area.md`](../../../../docs/decisions/0001-integrations-area.md).
 - Sibling area ADR (isolation kits):
-  [`../../isolation/docs/decisions/0001-neutral-hybrid-v1-acq-kits.md`](../../isolation/docs/decisions/0001-neutral-hybrid-v1-acq-kits.md).
+  [`../../isolation/docs/decisions/0001-neutral-hybrid-v1-acq-kits.md`](../../../isolation/docs/decisions/0001-neutral-hybrid-v1-acq-kits.md).
 - Contribution scope:
-  [`docs/contribution-scope.md`](../../../docs/contribution-scope.md).
+  [`docs/contribution-scope.md`](../../../../docs/contribution-scope.md).
 - Wayfinder map:
   [#247](https://github.com/GSA-TTS/agentic-coding-patterns/issues/247);
   boundary decision
   [#250](https://github.com/GSA-TTS/agentic-coding-patterns/issues/250).
 - Source explorations:
-  [`../agor/docs/explorations/sandbox-abstraction.md`](../agor/docs/explorations/sandbox-abstraction.md),
-  [`../agor/docs/explorations/sandbox-acq-analysis.md`](../agor/docs/explorations/sandbox-acq-analysis.md).
+  [`../agor/docs/explorations/sandbox-abstraction.md`](../../agor/docs/explorations/sandbox-abstraction.md),
+  [`../agor/docs/explorations/sandbox-acq-analysis.md`](../../agor/docs/explorations/sandbox-acq-analysis.md).

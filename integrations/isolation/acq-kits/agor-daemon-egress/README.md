@@ -11,7 +11,7 @@ to the daemon over WebSocket/Feathers using its scoped JWT.
 > [orchestrators area boundary](../../../orchestrators/docs/decisions/0001-orchestrators-area-and-agor-acq.md)
 > (drives-vs-applied), a kit lives here under `acq-kits/` even when its only
 > consumer is an orchestrator — the orchestrator merely references it.
-
+>
 > **Neutral (backend-agnostic) kit** (`schemaVersion: "hybrid/v1"`), consumed by
 > `acq`, which selects a backend. See
 > [`../../docs/decisions/0001-neutral-hybrid-v1-acq-kits.md`](../../docs/decisions/0001-neutral-hybrid-v1-acq-kits.md).

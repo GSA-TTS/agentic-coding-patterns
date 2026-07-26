@@ -5,7 +5,7 @@
 
 ## Context
 
-The [`orchestrators/agor`](../../../../orchestrators/agor/) wrapper runs an Agor
+The [`orchestrators/agor`](../../../../../orchestrators/agor/) wrapper runs an Agor
 executor inside an `acq` sandbox. The executor must connect back to the Agor
 daemon over WebSocket. Research
 ([#248](https://github.com/GSA-TTS/agentic-coding-patterns/issues/248),
@@ -22,7 +22,7 @@ governed as a **security** kit.
 ### 1. It is an isolation kit, not an orchestrator artifact
 
 Per the orchestrators-area boundary
-([ADR 0001](../../../../orchestrators/docs/decisions/0001-orchestrators-area-and-agor-acq.md),
+([ADR 0001](../../../../../orchestrators/docs/decisions/0001-orchestrators-area-and-agor-acq.md),
 drives-vs-applied), a kit is something `acq` **applies inside** the sandbox — so
 it lives under `integrations/isolation/acq-kits/`, even though its **only**
 consumer is the `orchestrators/agor` integration. The orchestrator **references**
@@ -45,7 +45,7 @@ fields — those (`categories`, `risk_tier`, `human_review_required`,
 those fields to `spec.yaml`. Instead the security posture is recorded in prose in
 the kit `README.md` (a "Security posture" table) and here, and enforced by
 **human review**, consistent with
-[`docs/security-skill-governance.md`](../../../../../docs/security-skill-governance.md).
+[`docs/security-skill-governance.md`](../../../../../../docs/security-skill-governance.md).
 Approved by the human owner on 2026-07-26.
 
 ## Alternatives considered
