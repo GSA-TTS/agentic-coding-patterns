@@ -39,6 +39,16 @@ def _flatten(index: dict) -> list[dict]:
     return out
 
 
+def _cell(value: str) -> str:
+    """Escape a string for safe inclusion in a Markdown table cell.
+
+    Pattern ids/paths are schema-constrained (kebab-case), but harden anyway:
+    escape pipes and collapse newlines so a stray value can never break the
+    table or inject markdown.
+    """
+    return str(value).replace("|", "\\|").replace("\n", " ").replace("\r", " ")
+
+
 def render_catalog(index: dict) -> str:
     patterns = _flatten(index)
     by_collection: dict[str | None, list[dict]] = {}
@@ -69,7 +79,7 @@ def render_catalog(index: dict) -> str:
     lines.append("")
 
     ordered = [c for c in COLLECTION_ORDER if c in by_collection]
-    ordered += [c for c in by_collection if c not in COLLECTION_ORDER and c is not None]
+    ordered += sorted(c for c in by_collection if c not in COLLECTION_ORDER and c is not None)
     if None in by_collection:
         ordered.append(None)
 
@@ -81,13 +91,13 @@ def render_catalog(index: dict) -> str:
         lines.append("|---------|------|--------|-------|----------|----------|")
         for p in entries:
             routing = p.get("routing") or {}
-            tasks = ", ".join(routing.get("task_types", []) or []) or "—"
-            inputs = ", ".join(routing.get("input_artifacts", []) or []) or "—"
-            outputs = ", ".join(routing.get("output_artifacts", []) or []) or "—"
-            pid = p.get("id", "?")
-            path = p.get("path", "")
+            tasks = _cell(", ".join(routing.get("task_types", []) or []) or "—")
+            inputs = _cell(", ".join(routing.get("input_artifacts", []) or []) or "—")
+            outputs = _cell(", ".join(routing.get("output_artifacts", []) or []) or "—")
+            pid = _cell(p.get("id", "?"))
+            path = _cell(p.get("path", ""))
             lines.append(
-                f"| [`{pid}`]({path}) | {p.get('type', '?')} | {p.get('status', '?')} "
+                f"| [`{pid}`]({path}) | {_cell(p.get('type', '?'))} | {_cell(p.get('status', '?'))} "
                 f"| {tasks} | {inputs} | {outputs} |"
             )
         lines.append("")

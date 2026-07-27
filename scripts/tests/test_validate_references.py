@@ -70,3 +70,30 @@ class TestLiveRepo:
         assert patterns, "expected to find patterns"
         errors = find_reference_errors(patterns)
         assert errors == [], f"live repo has reference errors: {errors}"
+
+
+class TestCatalogEscaping:
+    """CATALOG.md renderer must not let pattern strings break the table (#240 review)."""
+
+    def test_pipe_and_newline_escaped(self):
+        from scripts.generate_catalog import render_catalog
+
+        index = {
+            "patterns": {
+                "skills": [
+                    {
+                        "id": "evil|id",
+                        "type": "skill",
+                        "status": "experimental",
+                        "path": "skills/x/SKILL.md",
+                        "collection": "security",
+                        "routing": {"task_types": ["review"], "output_artifacts": ["a|b"]},
+                    }
+                ]
+            },
+            "stats": {"total_patterns": 1, "skills": 1, "prompts": 0, "agents": 0, "workflows": 0, "lessons": 0},
+        }
+        out = render_catalog(index)
+        # The raw pipe from the id/output must be escaped, not add a column.
+        assert "evil\\|id" in out
+        assert "a\\|b" in out

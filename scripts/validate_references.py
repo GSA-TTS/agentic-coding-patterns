@@ -48,7 +48,11 @@ def collect_patterns(root: Path) -> dict[str, dict]:
             for f in d.rglob(name):
                 if "fixtures" in f.parts:
                     continue
-                fm = extract_frontmatter(f.read_text())
+                try:
+                    text = f.read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError):
+                    continue  # unreadable/binary file → skip, don't crash the run
+                fm = extract_frontmatter(text)
                 if fm and fm.get("id"):
                     patterns[fm["id"]] = fm
     return patterns
