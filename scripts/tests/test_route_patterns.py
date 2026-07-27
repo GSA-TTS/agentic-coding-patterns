@@ -336,3 +336,41 @@ class TestLiveIndexRouting:
         )
         selected = {route["primary"]["id"]} | {s["id"] for s in route["supporting"]}
         assert "safe-code-review" not in selected
+
+    # #241: communications pack — full artifact requests route to the workflow;
+    # narrow skill-level requests route to the renderer skill.
+    def test_executive_one_pager_routes_to_workflow(self):
+        route = self._route(
+            task_types=["author", "render"],
+            output_artifacts=["one-pager"],
+            keywords=["create an executive one-pager explaining the pilot"],
+        )
+        assert route["primary"]["id"] == "design-artifact"
+        assert route["primary"]["type"] == "workflow"
+
+    def test_slide_deck_request_routes_to_workflow(self):
+        route = self._route(
+            task_types=["author"],
+            output_artifacts=["slide-deck"],
+            keywords=["make a slide deck for the review"],
+        )
+        assert route["primary"]["id"] == "design-artifact"
+
+    def test_narrow_render_routes_to_skill_not_workflow(self):
+        # Rendering a one-pager from an existing storyboard is a skill-level op.
+        route = self._route(
+            task_types=["render"],
+            input_artifacts=["storyboard"],
+            output_artifacts=["one-pager"],
+        )
+        assert route["primary"]["id"] == "one-pager"
+        assert route["primary"]["type"] == "skill"
+
+    def test_slide_deck_request_excludes_explainer_video(self):
+        route = self._route(
+            task_types=["author"],
+            output_artifacts=["slide-deck"],
+            keywords=["make a slide deck for the review"],
+        )
+        selected = {route["primary"]["id"]} | {s["id"] for s in route["supporting"]}
+        assert "explainer-video" not in selected

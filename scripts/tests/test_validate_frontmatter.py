@@ -447,6 +447,81 @@ class TestRealSchemaStrictness:
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate(instance=fm, schema=real_schema)
 
+    # --- #241: multi-artifact output ------------------------------------------
+
+    def test_multi_artifact_output_accepted(self, real_schema):
+        import jsonschema
+
+        fm = self._base()
+        fm["output"] = {
+            "format": "multi",
+            "artifacts": [
+                {"role": "source", "media_type": "text/html", "extension": "html"},
+                {"role": "export", "media_type": "application/pdf", "extension": "pdf"},
+            ],
+            "contract": {"required_sections": ["Summary"], "prohibited_content": ["Secrets"]},
+        }
+        jsonschema.validate(instance=fm, schema=real_schema)
+
+    def test_new_media_formats_accepted(self, real_schema):
+        import jsonschema
+
+        for fmt in ("html", "svg", "png", "pdf", "pptx", "gif", "mp4"):
+            fm = self._base()
+            fm["output"]["format"] = fmt
+            jsonschema.validate(instance=fm, schema=real_schema)
+
+    def test_artifact_unknown_role_rejected(self, real_schema):
+        import jsonschema
+
+        fm = self._base()
+        fm["output"] = {
+            "format": "multi",
+            "artifacts": [{"role": "bogus", "media_type": "text/html"}],
+            "contract": {"required_sections": ["Summary"], "prohibited_content": ["Secrets"]},
+        }
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(instance=fm, schema=real_schema)
+
+    def test_multi_without_artifacts_rejected_by_validator(self, real_schema):
+        # Schema alone allows it, but validate_file enforces "multi ⇒ artifacts".
+        from pathlib import Path
+
+        from scripts.validate_frontmatter import load_taxonomy, validate_file
+
+        repo_root = Path(__file__).resolve().parents[2]
+        tax = load_taxonomy(repo_root / "schemas" / "taxonomy.yaml")
+        # Build a temp file with format: multi and no artifacts.
+        import tempfile
+        import textwrap
+
+        content = textwrap.dedent("""\
+            ---
+            id: multi-x
+            version: "1.0.0"
+            title: "Multi X"
+            type: skill
+            status: experimental
+            owners: ["@GSA-TTS/agentic-coding-team"]
+            primary_personas: ["developers"]
+            requires: {anchors: []}
+            output:
+              format: multi
+              contract:
+                required_sections: ["Summary"]
+                prohibited_content: ["Secrets"]
+            quality_gates: {readability_max_grade: 10, citations_required: false}
+            ---
+            # body
+            """)
+        with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
+            f.write(content)
+            path = Path(f.name)
+        ok, errors, _ = validate_file(path, real_schema, tax)
+        path.unlink()
+        assert not ok
+        assert any("multi" in e for e in errors)
+
 
 class TestRoutingTaxonomy:
     """#238: routing.* facet values are cross-checked against schemas/taxonomy.yaml."""
