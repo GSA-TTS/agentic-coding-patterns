@@ -3,6 +3,83 @@
 Failure modes specific to the OpenChamber kit. They assume you applied the kit
 to a sandbox (see [README.md](README.md#usage)).
 
+## "The running turn was stopped before OpenCode could send the next message" / the sandbox auto-stops ~30s after create
+
+**Symptoms:** you `acq create` (detached) with this kit — or only ever `acq exec`
+into the sandbox — the browser UI on the mapped port loads, but any prompt fails
+with *"The running turn was stopped before OpenCode could send the next
+message."* Checking `acq ls` / `sbx inspect` shows the sandbox went `stopped` on
+its own about 30–40 seconds after create, with `Sessions: 0`.
+
+**Cause:** sbx (verified v0.35.0) **auto-stops a sandbox ~30 seconds after its
+last session disconnects** — for any agent, with or without a kit. A detached
+`acq create` is session-less after it returns: `acq create` opens a short-lived
+session and disconnects it, which alone arms a 30s grace timer (`session
+disconnected, deferring auto-stop delay:30000000000` → `auto-stop grace period
+expired` → `auto-stopped runtime after last session disconnected` in the daemon
+log) — this happens **even with no kit and no `acq exec`**. Any lone `acq exec`
+is likewise a transient session that re-arms it. The `tini` PID-1 keepalive does
+**not** prevent this (sbx measures idleness by session connections, not by
+whether PID 1 is alive), and there is no sbx setting or flag to disable/extend
+the grace (checked in `sbx settings`, `sbx create --help`, `sbx run --help`).
+This is universal — confirmed by `scripts/investigate-shell-autostop`, where
+shell/opencode × kit/no-kit × exec/no-exec all stopped at ~36s.
+
+**Fix: use `acq run`, which holds a session and keeps the sandbox alive.**
+
+```bash
+acq run --name <sandbox>            # or: acq run opencode /path/to/project
+```
+
+Keep that terminal open while you use OpenChamber from the browser; the attached
+session is what prevents the auto-stop. (The shared server + UI are already up,
+started by the startup script — `acq run` just keeps the sandbox running.) You
+can confirm the mechanism on your host with
+[`scripts/detach-probe`](scripts/detach-probe) (it watches longer than the 30s
+grace, so it observes the stop). Inspect the auto-stop markers directly in the
+sbx daemon log:
+
+```bash
+# macOS (the sandboxd log is a few levels deep under the state dir):
+grep -E 'auto-stop|session (dis)?connected' \
+  "$HOME/Library/Application Support/com.docker.sandboxes/sandboxes/sandboxd/daemon.log" \
+  | grep <sandbox>
+```
+
+## I don't want `acq run` in the foreground / suspend + `bg` kills the sandbox
+
+**Symptoms:** you `acq run opencode <path>`, decline (or quit) the TUI, and are
+left with the wrapper holding your terminal in the foreground. If you suspend it
+(`Ctrl-Z`) and `bg` it, the sandbox dies — you can't get your terminal back and
+keep the sandbox alive that way.
+
+**Cause:** `acq run` **attaches your terminal to the sandbox entrypoint** (PID
+1), which on this path is the kit's `opencode` wrapper. The wrapper holds the
+foreground on purpose so PID 1 stays alive. Job-control `bg` is not a session
+detach — suspending and backgrounding the attached client tears down the
+interactive `run` session, so the entrypoint's controlling channel goes away and
+the sandbox stops. `acq run` is the *interactive* path; it is not meant to be
+backgrounded.
+
+**There is unfortunately no fully terminal-free option on sbx.** A detached
+`acq create` does **not** keep the sandbox alive — sbx auto-stops a session-less
+agent sandbox ~30s after its last session disconnects (see the entry above), and
+there is no sbx knob to disable that. `acq run` (holding a session) is the
+supported way to keep OpenChamber reachable. If you don't want to tie up an
+interactive shell, run `acq run` in a dedicated terminal/tab (e.g. a `tmux`/screen
+window) and leave it attached — that keeps the session alive without occupying
+your working terminal. You can still attach a TUI to the shared session from
+elsewhere any time:
+
+```bash
+acq exec <sandbox> -- opencode attach http://127.0.0.1:4096
+```
+
+> **`acq create` shows no connect banner.** The wrapper's "Connect from your
+> HOST" banner only prints when the wrapper *runs* (the `acq run` path). After a
+> detached `acq create` the wrapper does not run, so use `acq ports <sandbox>`
+> to discover the mapped host ports.
+
 ## The sandbox stops on its own right after `acq run`
 
 **Symptoms:** you `acq run opencode <path>` with this kit and decline the TUI
@@ -11,18 +88,21 @@ prompt (or run non-interactively); the sandbox briefly shows `running` in
 else started. Starting a *second* sandbox is not the cause; the first had
 already stopped.
 
-**Cause:** the kit's `opencode` **wrapper** is the sandbox entrypoint (it shadows
-the real binary via PATH). A Docker sandbox is "running" only while its entrypoint
-/ PID 1 is alive. An earlier version of the wrapper backgrounded `opencode serve`
-with `nohup … &` and then **returned** on the no-TUI path — so PID 1 exited and
-the sandbox stopped. Fixed by having the wrapper **foreground** the shared server
-(it `wait`s on / `exec`s `opencode serve`) so PID 1 stays alive.
+**Cause:** the kit's `opencode` **wrapper** is the sandbox entrypoint on the
+`acq run` path (it shadows the real binary via PATH). A Docker sandbox is
+"running" only while its entrypoint / PID 1 is alive. An earlier version of the
+wrapper backgrounded `opencode serve` with `nohup … &` and then **returned** on
+the no-TUI path — so PID 1 exited and the sandbox stopped. Fixed by having the
+wrapper **hold PID 1 in the foreground** (it blocks forever in `hold_pid1`) so
+PID 1 stays alive. (This only affects `acq run`; a detached `acq create` uses a
+tini keepalive as PID 1 and is unaffected — prefer `acq create` if you don't want
+a foreground terminal, see the first entry above.)
 
-**Fix / confirm you have the fix:** the shared server should be the sandbox's
-foreground process after a no-arg run. Check the wrapper's tail:
+**Fix / confirm you have the fix:** the wrapper's no-arg path should block (hold
+PID 1) rather than return. Check the wrapper's tail:
 
 ```bash
-grep -n 'wait\|exec .*serve' ~/.local/bin/opencode   # inside the sandbox
+grep -n 'hold_pid1' ~/.local/bin/opencode   # inside the sandbox
 ```
 
 If your copy still ends the no-arg path with `exit 0` after a `nohup … &`, update
@@ -39,8 +119,9 @@ the OpenChamber browser UI goes dark).
 **Cause:** an earlier version of the wrapper `exec`ed `opencode attach`, so the
 TUI *became* the entrypoint / PID 1; quitting it ended PID 1 and stopped the
 sandbox. Fixed: the wrapper now runs the TUI as a **child** and, when you quit,
-falls through to holding the shared server in the foreground — so the sandbox and
-the browser UI survive a TUI exit.
+falls through to holding PID 1 in the foreground — so the sandbox and the
+browser UI survive a TUI exit. (The shared server is separate — it's supervised
+by the startup script — so it is unaffected by the TUI either way.)
 
 **Fix / confirm you have the fix:** the attach line must not use `exec`, and the
 wrapper must end in a `hold_pid1` call:
@@ -79,23 +160,25 @@ Upgrading `acq` to a build that includes quickstart#221 removes the manual step.
 **Symptoms:** the OpenChamber page opens, but there is no live OpenCode server /
 no sessions.
 
-**Cause:** this is expected until the shared server is started. In this kit the
-`opencode` **wrapper** owns the shared `opencode serve` on `:4096` and starts it
-**on demand** — the startup script only manages OpenChamber, not the server.
+**Cause:** the shared `opencode serve` on `:4096` is started and supervised by
+the kit's startup script on every sandbox start, so this should resolve on its
+own within a few seconds. If it persists, either the first-boot install is still
+running, or the shared server is failing to start (most often: no model provider
+configured).
 
-**Fix:** run the wrapper once to bring the server up (no args), then reload
-OpenChamber. The no-arg wrapper foregrounds the server (it holds the process
-open), so run it **detached** from `acq exec`:
-
-```bash
-acq exec <sandbox> -- sh -c 'nohup opencode >/tmp/wrapper-run.log 2>&1 &'  # start shared server on :4096
-# or open a shell in the sandbox and run `opencode` there (it will stay in the foreground)
-```
-
-Then confirm the server answers:
+**Fix:** confirm the shared server is up (the startup supervisor should have
+started it — no manual command needed):
 
 ```bash
 acq exec <sandbox> -- sh -c 'curl -fsS http://127.0.0.1:4096/global/health >/dev/null && echo up'
+```
+
+If it's not up, check the serve log and that a provider is configured (pair this
+kit with the `usai-provider` kit — the default GSA setup does):
+
+```bash
+acq exec <sandbox> -- sh -c 'tail -n 40 ~/.local/state/openchamber/opencode-serve.log'
+acq exec <sandbox> -- sh -c 'pgrep -af "supervisor:opencode-serve"'   # the server's supervisor
 ```
 
 ## OpenChamber didn't start
@@ -111,18 +194,17 @@ one-time npm install), or the install failed.
 ```bash
 acq exec <sandbox> -- sh -c 'cat /tmp/openchamber-install.log'   # first-boot install
 acq exec <sandbox> -- sh -c 'cat /tmp/openchamber.log'
-acq exec <sandbox> -- sh -c 'cat ~/.local/state/openchamber/opencode-serve.log'  # written by the wrapper
+acq exec <sandbox> -- sh -c 'cat ~/.local/state/openchamber/opencode-serve.log'  # shared server (startup supervisor)
 acq exec <sandbox> -- sh -c 'openchamber status'
 ```
 
 If the shared server is failing (see
-`~/.local/state/openchamber/opencode-serve.log`), confirm a
-provider is configured — pair this kit with the `usai-provider` kit (the default
-GSA setup does). OpenChamber runs under a respawn loop, so a transient OpenChamber
-failure self-heals within a few seconds; the shared server is held by the
-wrapper's `hold_pid1` loop, which re-launches it if it dies. To reproduce a
-single run by hand (mirrors what the wrapper and `files/home/openchamber-start.sh`
-do):
+`~/.local/state/openchamber/opencode-serve.log`), confirm a provider is
+configured — pair this kit with the `usai-provider` kit (the default GSA setup
+does). Both the shared server and OpenChamber run under respawn loops
+(`supervisor:opencode-serve`, `supervisor:openchamber`), so a transient failure
+self-heals within a few seconds. To reproduce a single run by hand (mirrors what
+`files/home/openchamber-start.sh` does):
 
 ```bash
 acq exec <sandbox> -- sh -lc '
@@ -152,6 +234,11 @@ To confirm exactly one supervisor is running:
 ```bash
 acq exec <sandbox> -- sh -c 'pgrep -af "supervisor:openchamber"'
 ```
+
+The shared `opencode serve` has its own respawn loop with the same behavior; if
+it crash-loops, `~/.local/state/openchamber/opencode-serve.log` shows
+`[supervisor] opencode serve exited; restarting in 5s`. Confirm its supervisor
+with `pgrep -af "supervisor:opencode-serve"`.
 
 ## OpenChamber failed to install (native build error)
 
@@ -219,7 +306,7 @@ If the hash you compute keeps changing for a fixed tag, treat that as suspicious
 ## `opencode` doesn't run the wrapper (real opencode runs instead)
 
 **Symptoms:** running `opencode` with no args launches the plain TUI instead of
-the wrapper's "start shared server / offer a TUI" flow.
+the wrapper's "connect instructions / offer a TUI" flow.
 
 **Cause:** the wrapper shadows the real `opencode` by being **first on PATH** at
 `~/.local/bin/opencode`. If `~/.local/bin` isn't first on PATH, or the file
@@ -237,23 +324,21 @@ that the kit was applied and recreate the sandbox.
 
 ## A host TUI can't attach to the shared server
 
-**Cause:** the shared server is started **on demand** by the wrapper. If nobody
-has run `opencode` yet, nothing is listening on `:4096`.
+**Cause:** the shared server is supervised by the startup script and should be
+listening on `:4096` shortly after any sandbox start. If nothing answers, it is
+still installing (first boot) or failing to start (usually: no model provider).
 
-**Fix:** start it, then attach. The no-arg wrapper foregrounds the server, so
-start it detached:
+**Fix:** confirm it's listening, then attach — no manual start needed:
 
 ```bash
-acq exec <sandbox> -- sh -c 'nohup opencode >/tmp/wrapper-run.log 2>&1 &'  # start the shared server
+acq exec <sandbox> -- sh -c 'curl -fsS http://127.0.0.1:4096/global/health >/dev/null && echo up'
 acq exec <sandbox> -- opencode attach http://127.0.0.1:4096
 ```
 
 The server is unsecured (no password), so no `OPENCODE_SERVER_PASSWORD` is
-needed. Confirm it's listening:
-
-```bash
-acq exec <sandbox> -- sh -c 'curl -fsS http://127.0.0.1:4096/global/health >/dev/null && echo up'
-```
+needed. If it isn't up, see "OpenChamber loads but shows no server" above (check
+`~/.local/state/openchamber/opencode-serve.log` and that a provider is
+configured).
 
 ## Do multiple sandboxes fight over ports 3000 / 4096?
 

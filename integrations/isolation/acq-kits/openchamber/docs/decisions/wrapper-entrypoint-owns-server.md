@@ -1,7 +1,23 @@
 # Decision: an `opencode` wrapper owns the shared server (from a mixin)
 
-**Status:** accepted (supersedes the core premise of
-[`openchamber-mixin-not-sandbox-kit.md`](openchamber-mixin-not-sandbox-kit.md))
+**Status:** accepted, but the **server-ownership** choice is **superseded** by
+[`startup-owns-shared-server.md`](startup-owns-shared-server.md) — the shared
+`opencode serve` now lives in the startup script, not the wrapper. This record's
+finding that a mixin can own the entrypoint via PATH-shadowing, and its PID-1
+reasoning for the interactive `acq run` path, still stand. (This in turn
+supersedes the core premise of
+[`openchamber-mixin-not-sandbox-kit.md`](openchamber-mixin-not-sandbox-kit.md).)
+
+> **Update (startup-owns-server redesign).** The decision below to have the
+> **wrapper** own an on-demand `opencode serve` was reversed: a host-side probe
+> (`scripts/detach-probe`) showed that on the detached `acq create` path PID 1 is
+> a `tini -- … sleep infinity` keepalive shim (not the wrapper), and that the
+> kit's `startup` command fires on `acq create` with nobody attached. So the
+> server was moved into `openchamber-start.sh` (supervised, always-on), giving a
+> one-command terminal-free UX (`acq create` alone brings up server + UI). The
+> wrapper now only offers a TUI and holds PID 1 on the interactive `acq run`
+> path. See [`startup-owns-shared-server.md`](startup-owns-shared-server.md). The
+> "keep the entrypoint alive on `acq run`" reasoning below is unchanged.
 
 ## Context
 

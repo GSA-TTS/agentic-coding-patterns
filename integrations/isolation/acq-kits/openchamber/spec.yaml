@@ -14,33 +14,37 @@
 # extracted into standalone scripts (files/home/...), matching how
 # agentic-coding-playbook handles its startup script.
 #
-# DESIGN (redesigned — see docs/decisions/wrapper-entrypoint-owns-server.md):
+# DESIGN (redesigned — see docs/decisions/startup-owns-shared-server.md):
+#   - The STARTUP script (openchamber-start.sh) owns the shared server: on every
+#     sandbox start it installs OpenChamber (first boot only) and supervises BOTH
+#     a single shared `opencode serve` on 0.0.0.0:4096 AND OpenChamber (skip-start,
+#     bound to 0.0.0.0:3000, attaching to :4096). Because a `startup` command
+#     fires on EVERY start — including a detached `acq create` with nobody
+#     attached, held open by the sandbox's tini keepalive (PID 1) — the server
+#     and UI come up on their own. A single `acq create` is enough; no `acq exec`
+#     and no `acq run` are needed to bring the server up. There is deliberately
+#     NO install phase — see the install note below.
 #   - The sandbox entrypoint runs the bare command `opencode`. This kit drops an
 #     `opencode` WRAPPER at ~/.local/bin/opencode, which is first on the image
 #     PATH (ahead of the npm-global bin where the real opencode lives), so the
-#     wrapper is what the entrypoint runs. With arguments it passes through to
-#     the real opencode; with NO arguments it idempotently starts a shared
-#     `opencode serve --hostname 0.0.0.0 --port 4096`, prints host-connect
-#     instructions, and offers to attach a TUI now. If you attach, the TUI runs
-#     as a CHILD; quitting it returns to the wrapper, which keeps holding the
-#     foreground server. On "no"/non-interactive the TUI is skipped. In EVERY
-#     no-arg case the wrapper does NOT return — it holds the shared server in the
-#     FOREGROUND as PID 1 so the sandbox stays open (see the "entrypoint must not
-#     exit" note below).
-#   - The STARTUP script manages ONLY OpenChamber (install on first boot, then a
-#     respawn-supervised OpenChamber bound to 0.0.0.0:3000 in skip-start mode,
-#     attaching to the shared server on :4096). It no longer starts or supervises
-#     `opencode serve` — the wrapper owns that, on demand. There is deliberately
-#     NO install phase — see the install note below.
+#     wrapper is what the entrypoint runs on the interactive `acq run` path. With
+#     arguments it passes through to the real opencode; with NO arguments it
+#     prints host-connect instructions and offers to attach a TUI now (only if
+#     interactive). If you attach, the TUI runs as a CHILD; quitting it returns to
+#     the wrapper. In every no-arg case the wrapper does NOT return on `acq run` —
+#     it holds PID 1 in the FOREGROUND so THAT session's sandbox stays open (see
+#     the "entrypoint must not exit" note below). The wrapper NO LONGER starts or
+#     owns the server; the startup script does.
 #
-# WHY THE WRAPPER (entrypoint) MUST NOT RETURN: a Docker sandbox is "running"
-# only while its entrypoint / PID 1 is alive. Because the wrapper IS the
-# entrypoint (via PATH-shadowing), a no-arg path that backgrounds the server and
-# returns — or that execs a TUI you later quit — lets PID 1 exit, so the sandbox
-# transitions running -> stopped. The wrapper therefore always ends the no-arg
-# path by `wait`ing on / exec'ing a foreground `opencode serve` so PID 1 stays
-# alive; an attached TUI runs as a CHILD and quitting it falls through to that
-# hold. See the ADR "Consequences".
+# WHY THE WRAPPER (entrypoint) MUST NOT RETURN on `acq run`: a Docker sandbox is
+# "running" only while its entrypoint / PID 1 is alive. On the interactive
+# `acq run` path the wrapper IS the entrypoint (via PATH-shadowing), so a no-arg
+# path that returns — or that execs a TUI you later quit — lets PID 1 exit and
+# the sandbox transitions running -> stopped. The wrapper therefore ends the
+# no-arg path by BLOCKING forever (hold_pid1); an attached TUI runs as a CHILD
+# and quitting it falls through to that hold. (On the detached `acq create` path
+# PID 1 is instead a tini keepalive shim and the wrapper is not the entrypoint,
+# so nothing here is needed to keep a detached sandbox alive.) See the ADRs.
 #
 # Why the startup script runs in the BACKGROUND: the OpenChamber supervisor loop
 # never exits (it respawns forever), so the startup command must not block
@@ -111,21 +115,22 @@ files:
   - path: /home/agent/.local/bin/opencode
     mode: "0755"
     source: files/home/.local/bin/opencode
-    description: opencode wrapper — owns the shared server, offers a TUI, passes other args through
+    description: opencode wrapper — offers a TUI, holds PID 1 on `acq run`, passes other args through
   - path: /home/agent/openchamber-start.sh
     mode: "0755"
     source: files/home/openchamber-start.sh
-    description: Install (first boot) and supervise OpenChamber (attaches to the wrapper's shared server)
+    description: Install (first boot) and supervise the shared opencode serve + OpenChamber
 
 commands:
   # Run the extracted startup script as the agent user at every start, IN THE
-  # BACKGROUND (trailing `&`) so the never-exiting OpenChamber supervisor loop
-  # doesn't block sandbox start. The OpenChamber release pins are exported here
-  # (the script also carries matching fallback defaults); bump BOTH together with
-  # the script's defaults to adopt a newer release. See docs/decisions/.
+  # BACKGROUND (trailing `&`) so the never-exiting supervisor loops (shared
+  # server + OpenChamber) don't block sandbox start. The OpenChamber release pins
+  # are exported here (the script also carries matching fallback defaults); bump
+  # BOTH together with the script's defaults to adopt a newer release. See
+  # docs/decisions/.
   - phase: startup
     user: "1000"
-    description: Install (first boot) and supervise OpenChamber (background)
+    description: Install (first boot) and supervise the shared server + OpenChamber (background)
     command:
       - sh
       - -c
@@ -138,20 +143,23 @@ agentContext: |
   ## OpenChamber (web UI for OpenCode)
 
   This sandbox runs **OpenChamber**, a browser UI for OpenCode, in the
-  background on container port 3000. It ships an `opencode` **wrapper** (at
-  `~/.local/bin/opencode`, first on PATH) that owns a single **shared**
-  `opencode serve` on `0.0.0.0:4096`. OpenChamber and any attached TUI drive
-  that one server, so they share one live session.
+  background on container port 3000, plus a single **shared** `opencode serve`
+  on `0.0.0.0:4096`. **Both are started and supervised by the kit's startup
+  script on every sandbox start** — including a detached `acq create` with
+  nobody attached — so they come up on their own. OpenChamber and any attached
+  TUI drive that one server, so they share one live session.
 
-  **Starting the shared server.** Running `opencode` with **no arguments**
-  starts the shared server on `:4096` (idempotent — a no-op if it's already up),
-  prints host-connect instructions, and offers to attach a TUI right there.
-  Whether you attach and later quit that TUI, or decline (or there's no
-  terminal), the wrapper keeps the shared server in the **foreground** as the
-  sandbox's main process, so the sandbox stays running either way. Until the
-  server has been started once, OpenChamber loads but shows no live server.
-  Running `opencode <args…>` (e.g. `opencode run …`, `opencode auth login`)
-  passes straight through to the real opencode.
+  **No terminal needed.** You do NOT have to run `opencode` or keep a terminal
+  in the foreground. A single `acq create --name <sandbox> opencode <path>`
+  brings up the server and the UI; then find the host ports with
+  `acq ports <sandbox>` and open the browser. The `opencode` **wrapper** (at
+  `~/.local/bin/opencode`, first on PATH) is only needed if you want a terminal
+  TUI: running it with **no arguments** prints host-connect instructions and, on
+  an interactive terminal, offers to attach a TUI (it then holds the session
+  open so an `acq run` sandbox stays running). Running `opencode <args…>` (e.g.
+  `opencode run …`, `opencode auth login`) passes straight through to the real
+  opencode. Note: the connect instructions only print when you run the wrapper
+  (the `acq run` path) — after a detached `acq create`, use `acq ports`.
 
   **Reaching it from the host.** The kit publishes container ports 3000
   (OpenChamber) and 4096 (the raw server); acq's active backend maps each to an
@@ -164,9 +172,9 @@ agentContext: |
   # host TUI:      opencode attach http://127.0.0.1:<host-port-for-4096>
   ```
 
-  **Session sharing.** Because the wrapper's shared server backs both the
-  browser and any attached TUI, they share one live, in-flight session by
-  default. To attach a TUI from the host to the same session:
+  **Session sharing.** Because the shared server backs both the browser and any
+  attached TUI, they share one live, in-flight session by default. To attach a
+  TUI from the host to the same session:
 
   ```
   acq exec <sandbox> -- opencode attach http://127.0.0.1:4096
@@ -176,11 +184,11 @@ agentContext: |
   boundary and the published ports are host loopback only.
 
   Logs: `/tmp/openchamber.log` (OpenChamber) and
-  `~/.local/state/openchamber/opencode-serve.log` (the shared server, started by
-  the wrapper). OpenChamber runs under a respawn loop, so if it exits — for
-  example after an interactive self-update, which needs a restart to take
-  effect — it comes back a few seconds later on its own; that log shows
-  `[supervisor] ... restarting` lines when it happens.
+  `~/.local/state/openchamber/opencode-serve.log` (the shared server). Both run
+  under respawn loops (`supervisor:opencode-serve`, `supervisor:openchamber`), so
+  if either exits — for example after an interactive self-update, which needs a
+  restart to take effect — it comes back a few seconds later on its own; those
+  logs show `[supervisor] ... restarting` lines when it happens.
 
 # Backend extras: the neutral spec does not model published ports or a
 # background-command flag, so the sbx-native bits live here. These declare the
