@@ -1,0 +1,332 @@
+# Router regression cases (#237, PR2 #239).
+#
+# These cases are DETERMINISTIC and self-contained: each provides an inline set
+# of candidate patterns (with routing metadata) plus a request, and asserts the
+# router's primary/supporting/excluded decision. They do NOT read the live
+# INDEX.yaml — the live patterns do not carry routing blocks until PR3 (#240),
+# and pinning to fixtures keeps the suite stable as the catalog evolves.
+#
+# Each case:
+#   request:          the structured facets a model would produce
+#   candidates:       inline patterns {id,type,status,collection,routing}
+#   expect_primary:   pattern id the router must pick (or null for "no match")
+#   forbid:           pattern ids that must NOT be primary or supporting
+#   expect_supporting (optional): ids that MUST appear as supporting
+#   expect_excluded   (optional): ids that MUST appear as excluded with a reason
+
+cases:
+  # ── Exact-match: security review of a diff ────────────────────────────────
+  - name: vulnerability-review-of-diff
+    request:
+      task_types: [review]
+      input_artifacts: [pull-request-diff]
+      output_artifacts: [security-review]
+      keywords: ["review this PR for vulnerabilities", "owasp"]
+    candidates:
+      - id: secure-code-review
+        type: skill
+        status: experimental
+        collection: security
+        routing:
+          task_types: [review, analyze]
+          input_artifacts: [source-code, pull-request-diff]
+          output_artifacts: [security-review]
+          aliases: ["vulnerability review", "security code review"]
+          avoid_when:
+            - "the request is specifically about an LLM-invoking CI workflow"
+            - "the request is solely about permission minimality"
+          delegates:
+            - pattern: agentic-actions-auditor
+              when: "the target is an agent-invoking CI workflow"
+            - pattern: least-privilege-review
+              when: "the question is specifically whether permissions are minimal"
+      - id: least-privilege-review
+        type: skill
+        status: experimental
+        collection: security
+        routing:
+          task_types: [review]
+          output_artifacts: [security-review]
+          aliases: ["permission review"]
+    expect_primary: secure-code-review
+    forbid: [least-privilege-review]
+
+  # ── Neighboring-ambiguous: CI workflow audit must NOT pick generic review ──
+  - name: workflow-audit-routes-to-auditor
+    request:
+      task_types: [review]
+      input_artifacts: [ci-workflow]
+      output_artifacts: [security-review]
+      keywords: ["audit this GitHub Actions workflow for unsafe pull_request_target", "agent-invoking CI workflow"]
+    candidates:
+      - id: secure-code-review
+        type: skill
+        status: experimental
+        collection: security
+        routing:
+          task_types: [review]
+          input_artifacts: [source-code, pull-request-diff]
+          output_artifacts: [security-review]
+          avoid_when:
+            - "the request is specifically about an LLM-invoking CI workflow"
+          delegates:
+            - pattern: agentic-actions-auditor
+              when: "agent-invoking CI workflow"
+      - id: agentic-actions-auditor
+        type: skill
+        status: experimental
+        collection: security
+        routing:
+          task_types: [review, analyze]
+          input_artifacts: [ci-workflow]
+          output_artifacts: [security-review]
+          aliases: ["github actions audit", "workflow audit"]
+    expect_primary: agentic-actions-auditor
+    forbid: [secure-code-review, least-privilege-review]
+    expect_excluded: [secure-code-review]
+
+  # ── Neighboring-ambiguous: token minimality routes to LPR ─────────────────
+  - name: token-minimality-routes-to-lpr
+    request:
+      task_types: [review]
+      output_artifacts: [security-review]
+      keywords: ["are these GITHUB_TOKEN permissions broader than necessary", "permission minimality"]
+    candidates:
+      - id: agentic-actions-auditor
+        type: skill
+        status: experimental
+        collection: security
+        routing:
+          task_types: [review]
+          input_artifacts: [ci-workflow]
+          output_artifacts: [security-review]
+      - id: least-privilege-review
+        type: skill
+        status: experimental
+        collection: security
+        routing:
+          task_types: [review]
+          output_artifacts: [security-review]
+          aliases: ["permission minimality", "least privilege"]
+    expect_primary: least-privilege-review
+    forbid: [agentic-actions-auditor]
+
+  # ── Composite request → workflow preferred over assembling skills ─────────
+  - name: executive-one-pager-prefers-workflow
+    request:
+      task_types: [author, visualize, render]
+      output_artifacts: [one-pager]
+      keywords: ["create an executive one-pager explaining the pilot"]
+    candidates:
+      - id: design-artifact
+        type: workflow
+        status: experimental
+        collection: communications
+        routing:
+          task_types: [author, visualize, render, orchestrate]
+          output_artifacts: [one-pager, slide-deck]
+          aliases: ["executive one-pager", "design artifact"]
+      - id: artifact-brief
+        type: skill
+        status: experimental
+        collection: communications
+        routing:
+          task_types: [plan]
+          output_artifacts: [artifact-brief]
+    expect_primary: design-artifact
+    forbid: [artifact-brief]
+
+  # ── Deck request must NOT pull in explainer-video ─────────────────────────
+  - name: slide-deck-excludes-video
+    request:
+      task_types: [author, render]
+      output_artifacts: [slide-deck]
+      keywords: ["make a slide deck"]
+    candidates:
+      - id: design-artifact
+        type: workflow
+        status: experimental
+        collection: communications
+        routing:
+          task_types: [author, render]
+          output_artifacts: [one-pager, slide-deck]
+      - id: explainer-video
+        type: skill
+        status: experimental
+        collection: communications
+        routing:
+          task_types: [author, render]
+          output_artifacts: [explainer-video]
+          aliases: ["promo video"]
+    expect_primary: design-artifact
+    forbid: [explainer-video]
+
+  # ── plain-language vs documentation-review (content lane) ─────────────────
+  - name: readability-routes-to-plain-language
+    request:
+      task_types: [review]
+      input_artifacts: [documentation]
+      keywords: ["make this README easier for the public to understand", "readability"]
+    candidates:
+      - id: plain-language-review
+        type: skill
+        status: experimental
+        collection: content
+        routing:
+          task_types: [review]
+          input_artifacts: [documentation]
+          aliases: ["plain language", "readability", "public audience"]
+      - id: documentation-review
+        type: skill
+        status: experimental
+        collection: content
+        routing:
+          task_types: [review]
+          input_artifacts: [documentation]
+          aliases: ["stale commands", "broken links"]
+    expect_primary: plain-language-review
+
+  - name: stale-links-routes-to-documentation-review
+    request:
+      task_types: [review]
+      input_artifacts: [documentation]
+      keywords: ["check this README for stale commands and broken links"]
+    candidates:
+      - id: plain-language-review
+        type: skill
+        status: experimental
+        collection: content
+        routing:
+          task_types: [review]
+          input_artifacts: [documentation]
+          aliases: ["plain language", "readability"]
+      - id: documentation-review
+        type: skill
+        status: experimental
+        collection: content
+        routing:
+          task_types: [review]
+          input_artifacts: [documentation]
+          aliases: ["stale commands", "broken links", "link check"]
+    expect_primary: documentation-review
+
+  # ── Negative case: nothing plausibly matches ──────────────────────────────
+  - name: no-match-returns-nothing
+    request:
+      output_artifacts: [terminal-demo]
+      keywords: ["record a terminal demo of my app"]
+    candidates:
+      - id: secure-code-review
+        type: skill
+        status: experimental
+        collection: security
+        routing:
+          task_types: [review]
+          output_artifacts: [security-review]
+    expect_primary: null
+
+  # ── Deprecated alias must never be selected ───────────────────────────────
+  - name: deprecated-prompt-excluded
+    request:
+      task_types: [review]
+      output_artifacts: [security-review]
+      keywords: ["security code review"]
+    candidates:
+      - id: safe-code-review
+        type: prompt
+        status: deprecated
+        collection: security
+        routing:
+          task_types: [review]
+          output_artifacts: [security-review]
+          aliases: ["security code review"]
+      - id: secure-code-review
+        type: skill
+        status: experimental
+        collection: security
+        routing:
+          task_types: [review]
+          output_artifacts: [security-review]
+          aliases: ["security code review"]
+    expect_primary: secure-code-review
+    forbid: [safe-code-review]
+
+  # ── CRITICAL: router must NOT select every skill sharing a broad category ──
+  # Five security-collection skills, but only one matches the specific facets.
+  - name: does-not-select-whole-category
+    request:
+      task_types: [review]
+      input_artifacts: [dependency-manifest]
+      output_artifacts: [security-review]
+      keywords: ["assess these dependencies for supply-chain risk"]
+    candidates:
+      - id: dependency-analysis
+        type: skill
+        status: experimental
+        collection: security
+        routing:
+          task_types: [review, analyze]
+          input_artifacts: [dependency-manifest]
+          output_artifacts: [security-review]
+          aliases: ["supply chain", "dependency risk"]
+      - id: secure-code-review
+        type: skill
+        status: experimental
+        collection: security
+        routing:
+          task_types: [review]
+          input_artifacts: [source-code]
+          output_artifacts: [security-review]
+      - id: backdoor-review
+        type: skill
+        status: experimental
+        collection: security
+        routing:
+          task_types: [review]
+          input_artifacts: [source-code]
+          output_artifacts: [security-review]
+      - id: least-privilege-review
+        type: skill
+        status: experimental
+        collection: security
+        routing:
+          task_types: [review]
+          output_artifacts: [security-review]
+      - id: agentic-actions-auditor
+        type: skill
+        status: experimental
+        collection: security
+        routing:
+          task_types: [review]
+          input_artifacts: [ci-workflow]
+          output_artifacts: [security-review]
+    expect_primary: dependency-analysis
+    # The three unrelated same-category skills must not be dragged in as support
+    # (they add no distinct output artifact beyond the primary).
+    forbid: [backdoor-review, least-privilege-review, agentic-actions-auditor]
+
+  # ── Workflow-vs-skill precedence on a tie of facets ───────────────────────
+  - name: workflow-wins-tie-over-skill
+    request:
+      task_types: [orchestrate, review]
+      output_artifacts: [qa-report]
+      keywords: ["run the full QA process"]
+    candidates:
+      - id: qa-workflow
+        type: workflow
+        status: experimental
+        collection: engineering
+        routing:
+          task_types: [orchestrate, review]
+          output_artifacts: [qa-report]
+          aliases: ["qa process", "testing cycle"]
+      - id: qa-round
+        type: prompt
+        status: experimental
+        collection: engineering
+        routing:
+          task_types: [review]
+          output_artifacts: [qa-report]
+          aliases: ["qa this diff"]
+    expect_primary: qa-workflow
+    forbid: [qa-round]
