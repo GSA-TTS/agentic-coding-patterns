@@ -49,9 +49,11 @@ scan-shell:  ## Scan shell scripts + markdown bash blocks for unsafe patterns (#
 
 generate:  ## Generate INDEX.yaml from patterns
 	python scripts/generate_index.py
+	python scripts/generate_catalog.py
 
 generate-check:  ## Verify INDEX.yaml is up to date (used in pre-commit)
 	python scripts/generate_index.py --check
+	python scripts/generate_catalog.py --check
 
 search:  ## Search patterns (e.g., make search TAG=security)
 	@if [ -z "$(QUERY)" ] && [ -z "$(TAG)" ] && [ -z "$(STATUS)" ] && [ -z "$(PERSONA)" ] && [ -z "$(TOOL)" ]; then \

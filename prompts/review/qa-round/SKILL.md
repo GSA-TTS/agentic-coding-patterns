@@ -66,6 +66,28 @@ scope:
   exclusions:
     - "Not for performance testing"
     - "Not for security penetration testing"
+
+collection: engineering
+routing:
+  task_types:
+    - "test"
+    - "review"
+  input_artifacts:
+    - "source-code"
+    - "pull-request-diff"
+  output_artifacts:
+    - "qa-report"
+  prefer_when:
+    - "the request is a single-turn QA review of a diff or acceptance criteria"
+  avoid_when:
+    - "the request is to run the full multi-stage QA process (use qa-workflow)"
+  delegates:
+    - pattern: qa-workflow
+      when: "the request is to run the full QA process end to end"
+  aliases:
+    - "qa this diff"
+    - "acceptance check"
+    - "single qa review"
 ---
 
 # Prompt: QA Round Review

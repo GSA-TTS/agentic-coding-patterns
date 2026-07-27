@@ -70,6 +70,30 @@ scope:
     - "Not for complex web applications"
     - "Does not replace design system documentation"
     - "Does not provide final accessibility certification"
+
+collection: digital-service
+routing:
+  task_types:
+    - "author"
+    - "render"
+  input_artifacts:
+    - "artifact-brief"
+  output_artifacts:
+    - "web-prototype"
+    - "source-code"
+  prefer_when:
+    - "the request is a general USWDS page/prototype with no more specific shape"
+  avoid_when:
+    - "the request is specifically a landing page or a form"
+  delegates:
+    - pattern: uswds-landing-page
+      when: "the request is specifically a landing/marketing page"
+    - pattern: uswds-form-flow
+      when: "the request is specifically a multi-step form"
+  aliases:
+    - "uswds prototype"
+    - "federal page"
+    - "html prototype"
 ---
 
 # Skill: USWDS Front-End Prototype

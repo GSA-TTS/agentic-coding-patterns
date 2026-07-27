@@ -66,6 +66,23 @@ scope:
     - "Not a correctness or security review (use secure-code-review for that)"
     - "Not a license to remove validation, error handling, security, or accessibility"
     - "Not a style/formatting linter"
+
+collection: engineering
+routing:
+  task_types:
+    - "review"
+    - "analyze"
+  input_artifacts:
+    - "pull-request-diff"
+    - "source-code"
+  output_artifacts:
+    - "qa-report"
+  prefer_when:
+    - "the concern is unnecessary complexity or speculative generality"
+  aliases:
+    - "simplify review"
+    - "yagni check"
+    - "complexity review"
 ---
 
 # Skill: Over-Engineering Review

@@ -50,6 +50,23 @@ tags:
   - "qa"
   - "testing"
   - "verification"
+
+collection: engineering
+routing:
+  task_types:
+    - "orchestrate"
+    - "test"
+    - "review"
+  input_artifacts:
+    - "source-code"
+  output_artifacts:
+    - "qa-report"
+  prefer_when:
+    - "the request is to run the full preparation/testing/regression/sign-off QA process"
+  aliases:
+    - "qa process"
+    - "testing cycle"
+    - "qa signoff"
 ---
 
 # Workflow: QA Round
