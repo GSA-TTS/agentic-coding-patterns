@@ -62,6 +62,19 @@ scope:
   exclusions:
     - "Not for time estimation (story points only)"
     - "Not for resource allocation"
+
+collection: engineering
+routing:
+  task_types:
+    - "plan"
+  input_artifacts:
+    - "artifact-brief"
+  output_artifacts:
+    - "documentation"
+  aliases:
+    - "implementation plan"
+    - "task breakdown"
+    - "feature plan"
 ---
 
 # Prompt: Implementation Plan Generator

@@ -57,6 +57,19 @@ scope:
     - "Learn from successful use of multiple patterns"
   exclusions:
     - "Not a tutorial or step-by-step guide"
+
+collection: meta
+routing:
+  task_types:
+    - "analyze"
+  input_artifacts:
+    - "documentation"
+  output_artifacts:
+    - "documentation"
+  aliases:
+    - "session lesson"
+    - "multi-pattern example"
+    - "retro"
 ---
 
 # Lesson Learned: Example Agentic Coding Session

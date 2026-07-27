@@ -97,6 +97,26 @@ changelog:
     date: "2026-07-01"
     change_type: minor
     summary: "Initial version — read-only adversarial review of suspicious-pattern classes with strict Evidence/Hypothesis/Confidence separation; conceptual only, no weaponized content."
+
+collection: security
+routing:
+  task_types:
+    - "analyze"
+    - "review"
+  input_artifacts:
+    - "source-code"
+    - "pull-request-diff"
+    - "ci-workflow"
+  output_artifacts:
+    - "security-review"
+  prefer_when:
+    - "the request implies deliberate hidden malice, obfuscation, or an auth-bypass/persistence mechanism"
+  avoid_when:
+    - "the request is a general vulnerability review with no sign of intentional tampering"
+  aliases:
+    - "backdoor scan"
+    - "adversarial review"
+    - "integrity review"
 ---
 
 # Skill: Backdoor Review

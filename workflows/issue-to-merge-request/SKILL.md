@@ -51,6 +51,22 @@ tags:
   - "development"
   - "pr"
   - "git"
+
+collection: engineering
+routing:
+  task_types:
+    - "orchestrate"
+    - "author"
+    - "test"
+  input_artifacts:
+    - "artifact-brief"
+  output_artifacts:
+    - "pull-request-diff"
+    - "source-code"
+  aliases:
+    - "issue to pr"
+    - "dev cycle"
+    - "feature workflow"
 ---
 
 # Workflow: Issue to Merge Request

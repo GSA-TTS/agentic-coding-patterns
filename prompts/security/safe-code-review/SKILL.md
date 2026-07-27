@@ -1,11 +1,18 @@
 ---
 id: safe-code-review
-version: "1.0.0"
+version: "1.1.0"
 title: "Security-Focused Code Review"
 type: prompt
-description: "Prompt for identifying OWASP risks, injection vulnerabilities, and security issues in code"
+description: "DEPRECATED — compatibility prompt. Use the secure-code-review skill; this remains only as a fallback where a skill cannot be loaded."
 
-status: experimental
+status: deprecated
+deprecated:
+  as_of: "2026-07-24"
+  replaces_with: secure-code-review
+  reason: "Superset skill secure-code-review covers the same OWASP/injection scope with structured routing and delegation; colliding triggers caused router ambiguity (#240)."
+  migration_notes:
+    - "Route 'security code review' / 'vulnerability review' requests to secure-code-review."
+    - "Kept for one release as a compatibility fallback for environments that cannot load a SKILL.md skill."
 owners:
   - "@GSA-TTS/agentic-coding-team"
 
@@ -76,9 +83,35 @@ scope:
     - "Not for penetration testing"
     - "Not for creating exploit code"
     - "Not for vulnerability research"
+
+collection: security
+routing:
+  task_types:
+    - review
+    - analyze
+  input_artifacts:
+    - source-code
+    - pull-request-diff
+  output_artifacts:
+    - security-review
+  aliases:
+    - security code review
+    - vulnerability review
+  avoid_when:
+    - always deprecated; route to secure-code-review instead
+  delegates:
+    - pattern: secure-code-review
+      when: any security code review request; this prompt is a deprecated fallback
+  priority: 0
 ---
 
 # Prompt: Security-Focused Code Review
+
+> **⚠️ Deprecated (as of 2026-07-24).** Use the
+> [`secure-code-review`](../../../skills/secure-code-review/SKILL.md) skill,
+> which supersedes this prompt with the same OWASP/injection coverage plus
+> structured routing and delegation. Kept for **one release** as a
+> compatibility fallback for environments that cannot load a SKILL.md skill.
 
 Perform security-focused code review to identify vulnerabilities before they reach production.
 

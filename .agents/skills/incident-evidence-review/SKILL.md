@@ -99,6 +99,23 @@ changelog:
     date: "2026-07-01"
     change_type: minor
     summary: "Initial version — enforces evidence discipline on incident/postmortem write-ups by classifying facts, assumptions, hypotheses, and timeline, and flagging unsupported claims; conducts no investigation and asserts no root cause."
+
+collection: security
+routing:
+  task_types:
+    - "review"
+    - "analyze"
+  input_artifacts:
+    - "incident-evidence"
+    - "documentation"
+  output_artifacts:
+    - "security-review"
+  prefer_when:
+    - "the request is to review incident evidence or a postmortem"
+  aliases:
+    - "postmortem review"
+    - "incident review"
+    - "evidence discipline"
 ---
 
 # Skill: Incident Evidence Review

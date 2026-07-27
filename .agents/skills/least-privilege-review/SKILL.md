@@ -96,6 +96,28 @@ changelog:
     date: "2026-07-01"
     change_type: minor
     summary: "Initial version — enumerates permission surfaces, flags over-broad grants, and suggests least-privilege replacements per NIST AC-6/AC-3, without granting any permission itself."
+
+collection: security
+routing:
+  task_types:
+    - "review"
+    - "analyze"
+  input_artifacts:
+    - "ci-workflow"
+    - "infrastructure-as-code"
+    - "source-code"
+  output_artifacts:
+    - "security-review"
+  prefer_when:
+    - "the question is specifically whether permissions/token scopes/IAM grants are minimal"
+  avoid_when:
+    - "the target is a CI workflow's overall safety (triggers, checkout, prompt construction)"
+  aliases:
+    - "least privilege"
+    - "token scope review"
+    - "iam review"
+    - "permission minimality"
+    - "permissions minimal"
 ---
 
 # Skill: Least Privilege Review

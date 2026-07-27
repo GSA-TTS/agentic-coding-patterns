@@ -156,6 +156,9 @@ jobs:
       - name: Run validation
         run: make validate
 
+      - name: Check generated files are current (INDEX.yaml + CATALOG.md)
+        run: make generate-check
+
       - name: Validate acq-kits (hybrid/v1 schema)
         run: make validate-kits
 
