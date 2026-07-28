@@ -88,11 +88,14 @@ sha256_hex() {
 
 # content_digest DIR — a single sha256 over the CONSUMED content surface of the
 # playbook tree: AGENTS.md plus every regular file under .agents/skills. Built by
-# hashing each file, sorting the "<hash>  <relpath>" lines (stable ordering), and
-# hashing that manifest. REGULAR FILES ONLY (`find -type f` does not follow
-# symlinks for the listing, and we hash file contents), so a symlink planted in
-# the tarball cannot smuggle out-of-tree content into the digest. Echoes the hex
-# digest, or nothing if no sha tool is available.
+# hashing each file, sorting the digest lines (stable ordering via LC_ALL=C), and
+# hashing that manifest. The integrity guarantee comes from THIS digest: any
+# tamper (including a planted symlink, whose target content differs or whose
+# presence perturbs the file set) changes the manifest and fails the pin match,
+# so the tree is rejected before anything is linked. (`find -type f` follows
+# symlinks when classifying, so it is NOT itself the guard — the digest is; and
+# link_skills_into independently refuses symlink/out-of-tree skill entries.)
+# Echoes the hex digest, or nothing if no sha tool is available.
 content_digest() {
   _cd_dir="$1"
   { sha256_of "$_cd_dir/AGENTS.md"
@@ -125,6 +128,10 @@ if [ ! -e "$dir/AGENTS.md" ]; then
   # TLS) is surfaced on failure. This is safe: the token lives in the -K config,
   # never on the URL/argv, so curl's error text cannot contain it.
   #
+  # --connect-timeout / --max-time bound the fetch: curl has NO default overall
+  # timeout, so a black-holing network or MITM could hang startup indefinitely,
+  # violating this script's never-hang / always-exit-0 contract. Bound both.
+  #
   # -L follows the api.github.com -> codeload.github.com 302 redirect. curl
   # re-sends the Authorization header to codeload; on msb (which substitutes the
   # placeholder ONLY for api.github.com) the literal placeholder reaches codeload
@@ -134,12 +141,14 @@ if [ ! -e "$dir/AGENTS.md" ]; then
   if [ -n "$token" ]; then
     printf 'header = "Authorization: Bearer %s"\n' "$token" | \
       curl -fsSL -K - \
+        --connect-timeout 15 --max-time 120 \
         -H "Accept: application/vnd.github+json" \
         -H "X-GitHub-Api-Version: 2022-11-28" \
         -o "$tgz" "$api" 2>"$cerr"
     _fetch_rc=$?
   else
     curl -fsSL \
+      --connect-timeout 15 --max-time 120 \
       -H "Accept: application/vnd.github+json" \
       -H "X-GitHub-Api-Version: 2022-11-28" \
       -o "$tgz" "$api" 2>"$cerr"
@@ -156,42 +165,81 @@ if [ ! -e "$dir/AGENTS.md" ]; then
   fi
   rm -f "$cerr"
 
-  # Extract into a FRESH dir. The tarball's top-level is a single owner-repo-<sha>
-  # directory; --strip-components=1 drops it so files land directly under $dir.
-  # Remove any partial/stale tree first so a prior aborted run can't leave content
-  # we then extract on top of. Distinguish an unwritable target (a mis-provisioned
-  # home, e.g. /home/agent not owned by the agent user) from a corrupt archive —
-  # the messages point at very different fixes.
-  rm -rf "$dir"
-  if ! mkdir -p "$dir" 2>/dev/null; then
-    rm -f "$tgz"
-    warn "cannot create $dir (is \$HOME writable by this user?). Skipping;"
-    warn "  will retry on next start. This usually means the sandbox's agent"
-    warn "  home is not owned by the user running this kit."
-    exit 0
-  fi
-  if ! tar xzf "$tgz" -C "$dir" --strip-components=1 2>/dev/null; then
-    rm -f "$tgz"; rm -rf "$dir"
+  # Extract into a STAGING dir first, verify the content digest there, and only
+  # then move it into place. The tarball's top-level is a single owner-repo-<sha>
+  # directory; --strip-components=1 drops it. Staging (not extracting straight to
+  # $dir) means unverified content never occupies the final path, and if a
+  # traversal-crafted tarball wrote outside the staging dir despite tar's own
+  # `../` rejection, the later reject/rm affects staging only. --no-same-owner /
+  # --no-same-permissions avoid honoring owner/mode bits from the archive.
+  stage="$(mktemp -d "${TMPDIR:-/tmp}/acp-playbook-stage.XXXXXX" 2>/dev/null)" || stage="/tmp/acp-playbook-stage.$$"
+  if ! tar xzf "$tgz" -C "$stage" --strip-components=1 --no-same-owner --no-same-permissions 2>/dev/null; then
+    rm -f "$tgz"; rm -rf "$stage"
     warn "downloaded tarball but extraction failed (corrupt archive?); skipping."
     warn "  Will retry on next start."
     exit 0
   fi
   rm -f "$tgz"
+
+  # AGENTS.md must exist in the staged tree before we bother verifying/moving.
+  if [ ! -f "$stage/AGENTS.md" ]; then
+    rm -rf "$stage"
+    warn "fetched, but AGENTS.md not found in the archive; skipping linking."
+    warn "  Will retry on next start."
+    exit 0
+  fi
+
+  # INTEGRITY (pre-move): verify the CONSUMED content (AGENTS.md + all skill
+  # files) against the pinned sha256 while still in staging. The ref is a mutable
+  # tag over a possibly MITM-inspected path, so content — not just a successful
+  # download — must be checked, and skills (executable agent instructions) must
+  # be covered, not just AGENTS.md. On mismatch, drop staging and never touch the
+  # live path.
+  staged_sha="$(content_digest "$stage")"
+  if [ -z "$staged_sha" ]; then
+    rm -rf "$stage"
+    warn "no sha256 tool (sha256sum/shasum) available; cannot verify integrity."
+    warn "  Refusing to install unverified playbook content."
+    exit 0
+  fi
+  if [ "$staged_sha" != "$agents_sha" ]; then
+    rm -rf "$stage"
+    warn "SECURITY: playbook content sha256 is $staged_sha, expected $agents_sha."
+    warn "  Refusing to install untrusted playbook content."
+    warn "  If you intentionally bumped the playbook, update PLAYBOOK_AGENTS_SHA256."
+    exit 0
+  fi
+
+  # Verified. Atomically-ish replace the live dir with the staged tree. Remove any
+  # partial/stale tree first, then move staging into place. mkdir the parent so a
+  # missing/unwritable home surfaces clearly.
+  if ! mkdir -p "$(dirname "$dir")" 2>/dev/null; then
+    rm -rf "$stage"
+    warn "cannot create $(dirname "$dir") (is \$HOME writable by this user?)."
+    warn "  Skipping; will retry on next start. The sandbox's agent home may not"
+    warn "  be owned by the user running this kit."
+    exit 0
+  fi
+  rm -rf "$dir"
+  if ! mv "$stage" "$dir" 2>/dev/null; then
+    rm -rf "$stage" "$dir"
+    warn "could not install the verified playbook into $dir; skipping."
+    warn "  Will retry on next start."
+    exit 0
+  fi
 fi
 
 agents="$dir/AGENTS.md"
 skills="$dir/.agents/skills"
+
+# Re-verify integrity on EVERY start (not just the fetch-if-missing path): an
+# existing tree could have been tampered with between starts, and this is cheap.
+# On mismatch, drop the tree and skip linking rather than trust it.
 if [ ! -f "$agents" ]; then
-  warn "fetched, but AGENTS.md not found at $agents; removing and skipping linking."
+  warn "playbook present but AGENTS.md missing at $agents; removing and skipping."
   rm -rf "$dir"
   exit 0
 fi
-
-# 2) INTEGRITY: verify the CONSUMED content (AGENTS.md + all skill files) matches
-#    the pinned sha256. The ref is a mutable tag over a possibly MITM-inspected
-#    path, so content — not just a successful download — must be checked, and
-#    skills (executable agent instructions) must be covered, not just AGENTS.md.
-#    On mismatch, drop the tree and skip linking rather than trust it.
 got_sha="$(content_digest "$dir")"
 if [ -z "$got_sha" ]; then
   warn "no sha256 tool (sha256sum/shasum) available; cannot verify integrity."
