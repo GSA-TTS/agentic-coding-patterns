@@ -52,9 +52,13 @@ P_DELEGATED = -100
 P_DEPRECATED = -100
 
 # A workflow that covers the requested outcome is preferred over assembling
-# skills; a prompt is only a fallback. Encoded as a small type nudge so ties
-# resolve toward the right granularity without overriding real facet matches.
-TYPE_NUDGE = {"workflow": 3, "skill": 0, "prompt": -3, "agent": -5, "lesson": -50}
+# skills; a prompt is only a fallback. The workflow nudge is sized to overcome a
+# single extra trigger/alias hit on a competing renderer skill (W_TRIGGER_MATCH),
+# so an outcome-level request ("create an executive one-pager") routes to the
+# design-artifact workflow, while a narrow skill-only request still wins on
+# stronger facet matches. Encoded as a small type nudge, applied only to
+# candidates that already have a substantive match.
+TYPE_NUDGE = {"workflow": 12, "skill": 0, "prompt": -3, "agent": -5, "lesson": -50}
 
 
 @dataclass

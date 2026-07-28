@@ -50,6 +50,44 @@ patterns:
       - ci agent audit
       - github actions security
       - workflow audit
+  - path: skills/communications/artifact-brief/SKILL.md
+    id: artifact-brief
+    title: Artifact Brief
+    type: skill
+    status: experimental
+    categories: []
+    collection: communications
+    routing:
+      task_types:
+      - plan
+      input_artifacts:
+      - documentation
+      output_artifacts:
+      - artifact-brief
+      aliases:
+      - comms brief
+      - message brief
+      priority: 60
+  - path: skills/communications/artifact-qa/SKILL.md
+    id: artifact-qa
+    title: Artifact QA
+    type: skill
+    status: experimental
+    categories: []
+    collection: communications
+    routing:
+      task_types:
+      - review
+      - test
+      input_artifacts:
+      - one-pager
+      - slide-deck
+      output_artifacts:
+      - qa-report
+      aliases:
+      - artifact review
+      - design qa
+      priority: 55
   - path: skills/backdoor-review/SKILL.md
     id: backdoor-review
     title: Backdoor Review
@@ -258,6 +296,46 @@ patterns:
       - permission minimality
       - permissions minimal
       - token scope review
+  - path: skills/communications/narrative-architect/SKILL.md
+    id: narrative-architect
+    title: Narrative Architect
+    type: skill
+    status: experimental
+    categories: []
+    collection: communications
+    routing:
+      task_types:
+      - plan
+      - visualize
+      input_artifacts:
+      - artifact-brief
+      output_artifacts:
+      - storyboard
+      aliases:
+      - outline the argument
+      - story structure
+      priority: 55
+  - path: skills/communications/one-pager/SKILL.md
+    id: one-pager
+    title: One-Pager
+    type: skill
+    status: experimental
+    categories: []
+    collection: communications
+    routing:
+      task_types:
+      - author
+      - render
+      input_artifacts:
+      - artifact-brief
+      - storyboard
+      - visual-contract
+      output_artifacts:
+      - one-pager
+      aliases:
+      - executive one-pager
+      - leave-behind
+      priority: 55
   - path: skills/over-engineering-review/SKILL.md
     id: over-engineering-review
     title: Over-Engineering Review
@@ -361,6 +439,27 @@ patterns:
       - owasp review
       - security code review
       - vulnerability review
+  - path: skills/communications/slide-deck/SKILL.md
+    id: slide-deck
+    title: Slide Deck
+    type: skill
+    status: experimental
+    categories: []
+    collection: communications
+    routing:
+      task_types:
+      - author
+      - render
+      input_artifacts:
+      - artifact-brief
+      - storyboard
+      - visual-contract
+      output_artifacts:
+      - slide-deck
+      aliases:
+      - briefing slides
+      - presentation deck
+      priority: 55
   - path: skills/test-generation/SKILL.md
     id: test-generation
     title: Test Case Generation
@@ -467,6 +566,24 @@ patterns:
       - federal page
       - html prototype
       - uswds prototype
+  - path: skills/communications/visual-direction/SKILL.md
+    id: visual-direction
+    title: Visual Direction
+    type: skill
+    status: experimental
+    categories: []
+    collection: communications
+    routing:
+      task_types:
+      - visualize
+      input_artifacts:
+      - storyboard
+      output_artifacts:
+      - visual-contract
+      aliases:
+      - design system for this artifact
+      - look and feel
+      priority: 55
   prompts:
   - path: prompts/planning/implementation-plan/SKILL.md
     id: implementation-plan
@@ -592,6 +709,30 @@ patterns:
       - security agent
       - vuln review agent
   workflows:
+  - path: workflows/design-artifact/SKILL.md
+    id: design-artifact
+    title: Design Artifact Workflow
+    type: workflow
+    status: experimental
+    categories: []
+    collection: communications
+    routing:
+      task_types:
+      - author
+      - orchestrate
+      - render
+      - review
+      - visualize
+      input_artifacts:
+      - documentation
+      output_artifacts:
+      - one-pager
+      - slide-deck
+      aliases:
+      - design pipeline
+      - executive one-pager
+      - presentation deck
+      priority: 70
   - path: workflows/issue-to-merge-request/SKILL.md
     id: issue-to-merge-request
     title: Issue to Merge Request Workflow
@@ -756,8 +897,15 @@ categories:
   - uswds-prototype
 collections:
   communications:
+  - artifact-brief
+  - artifact-qa
+  - design-artifact
   - explainer-gif
   - explainer-video
+  - narrative-architect
+  - one-pager
+  - slide-deck
+  - visual-direction
   content:
   - documentation-agent
   - documentation-review
@@ -811,12 +959,15 @@ task_types:
   - security-scan-review
   - untrusted-input-boundary-review
   author:
+  - design-artifact
   - documentation-agent
   - explainer-gif
   - explainer-video
   - general-agent
   - issue-to-merge-request
+  - one-pager
   - safe-shell-script-author
+  - slide-deck
   - test-generation
   - uswds-form-flow
   - uswds-landing-page
@@ -825,26 +976,34 @@ task_types:
   - federal-service-blueprint
   - pattern-router
   orchestrate:
+  - design-artifact
   - issue-to-merge-request
   - pattern-router
   - qa-workflow
   - security-scan-review
   plan:
+  - artifact-brief
   - federal-service-blueprint
   - general-agent
   - implementation-plan
+  - narrative-architect
   render:
+  - design-artifact
   - explainer-gif
   - explainer-video
+  - one-pager
+  - slide-deck
   - uswds-form-flow
   - uswds-landing-page
   - uswds-prototype
   review:
   - accessibility-review
   - agentic-actions-auditor
+  - artifact-qa
   - backdoor-review
   - compliance-claim-checker
   - dependency-analysis
+  - design-artifact
   - documentation-agent
   - documentation-review
   - incident-evidence-review
@@ -859,11 +1018,18 @@ task_types:
   - security-scan-review
   - untrusted-input-boundary-review
   test:
+  - artifact-qa
   - issue-to-merge-request
   - qa-round
   - qa-workflow
   - test-generation
+  visualize:
+  - design-artifact
+  - narrative-architect
+  - visual-direction
 output_artifacts:
+  artifact-brief:
+  - artifact-brief
   documentation:
   - documentation-agent
   - example-agentic-session
@@ -879,10 +1045,14 @@ output_artifacts:
   - uswds-landing-page
   marketing-asset:
   - explainer-video
+  one-pager:
+  - design-artifact
+  - one-pager
   pull-request-diff:
   - issue-to-merge-request
   qa-report:
   - accessibility-review
+  - artifact-qa
   - documentation-review
   - over-engineering-review
   - plain-language-review
@@ -905,6 +1075,9 @@ output_artifacts:
   - federal-service-blueprint
   shell-script:
   - safe-shell-script-author
+  slide-deck:
+  - design-artifact
+  - slide-deck
   source-code:
   - general-agent
   - issue-to-merge-request
@@ -912,14 +1085,18 @@ output_artifacts:
   - uswds-form-flow
   - uswds-landing-page
   - uswds-prototype
+  storyboard:
+  - narrative-architect
   terminal-demo:
   - explainer-gif
+  visual-contract:
+  - visual-direction
   web-prototype:
   - uswds-prototype
 stats:
-  total_patterns: 31
-  skills: 21
+  total_patterns: 38
+  skills: 27
   prompts: 3
   agents: 3
-  workflows: 3
+  workflows: 4
   lessons: 1

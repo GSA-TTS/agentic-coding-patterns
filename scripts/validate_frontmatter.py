@@ -215,6 +215,17 @@ def validate_file(
     if routing_errors:
         return False, routing_errors, gov_warnings
 
+    # Multi-artifact output check (#241): format: multi must list artifacts.
+    output = frontmatter.get("output")
+    if isinstance(output, dict) and output.get("format") == "multi":
+        artifacts = output.get("artifacts")
+        if not isinstance(artifacts, list) or not artifacts:
+            return (
+                False,
+                ["output.format is 'multi' but output.artifacts is empty (list at least one produced file)"],
+                gov_warnings,
+            )
+
     return True, [], gov_warnings
 
 
