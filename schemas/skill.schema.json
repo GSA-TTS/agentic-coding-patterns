@@ -100,8 +100,35 @@
       "properties": {
         "format": {
           "type": "string",
-          "enum": ["markdown", "json", "yaml", "text", "unknown"],
+          "description": "Primary output format. 'multi' means the pattern emits a bundle of files described by `artifacts` (#241, design/media patterns).",
+          "enum": ["markdown", "json", "yaml", "text", "html", "svg", "png", "pdf", "pptx", "gif", "mp4", "multi", "unknown"],
           "default": "markdown"
+        },
+        "artifacts": {
+          "type": "array",
+          "description": "Multi-file output description for design/media patterns; each entry names a produced file's role + IANA media type (#241). Use with format: multi.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["role", "media_type"],
+            "properties": {
+              "role": {
+                "type": "string",
+                "description": "What this file is.",
+                "enum": ["source", "export", "preview", "sidecar", "manifest"]
+              },
+              "media_type": {
+                "type": "string",
+                "description": "IANA media type, e.g. text/html, application/pdf, image/png.",
+                "pattern": "^[a-z]+/[a-zA-Z0-9.+-]+$"
+              },
+              "extension": {
+                "type": "string",
+                "description": "File extension without the dot.",
+                "pattern": "^[a-z0-9]+$"
+              }
+            }
+          }
         },
         "contract": {
           "type": "object",

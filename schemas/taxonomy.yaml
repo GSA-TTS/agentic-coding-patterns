@@ -104,6 +104,9 @@ artifact_types:
   storyboard:
     description: An ordered visual/narrative plan.
     aliases: []
+  visual-contract:
+    description: The concrete visual rules (layout, type, color, spacing, asset rules) a renderer follows.
+    aliases: [design-direction]
   diagram:
     description: A technical diagram.
     aliases: [technical-diagram]
