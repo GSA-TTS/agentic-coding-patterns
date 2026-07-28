@@ -116,7 +116,25 @@ if is_compatible(fm, 'opencode'):
 
 ## Pattern Selection Logic
 
-### By User Intent
+> **Prefer the `pattern-router` for selection.** The keyword-matching shown
+> below is the *legacy fallback*. The recommended path is the data-driven
+> router: the `pattern-router` skill (`.agents/skills/meta/pattern-router/`)
+> plus `scripts/route_patterns.py`, which score patterns on their structured
+> `routing.*` metadata (task types, input/output artifacts, aliases,
+> `prefer_when`/`avoid_when`/`delegates`) and return the **smallest appropriate
+> route** with an explanation. Run:
+>
+> ```bash
+> python scripts/route_patterns.py --task review --output security-review --json
+> ```
+>
+> The core rule the router enforces: **prefer a workflow for an outcome, a skill
+> for an operation, and a prompt only when the environment cannot load the
+> corresponding skill.** It will not select every skill sharing a broad
+> category. See the `pattern-router` SKILL.md for the full procedure and the
+> scoring model.
+
+### By User Intent (legacy keyword fallback)
 
 Match user intent to pattern triggers:
 
@@ -201,6 +219,12 @@ if deps['has_dependencies']:
 ```
 
 ## Security Skill Routing
+
+> **These lanes are being moved into structured `routing.delegates` /
+> `avoid_when` metadata** (epic #237, applied in PR3 #240) so the `pattern-router`
+> enforces them mechanically rather than relying on this prose table. Until that
+> lands, the table below remains the reference; afterward it becomes a
+> human-readable mirror of the metadata.
 
 Security skills (`categories: [security]`) overlap by design, so pick by the
 **specific trigger**, not by keyword alone. Map the user's request to one skill:
