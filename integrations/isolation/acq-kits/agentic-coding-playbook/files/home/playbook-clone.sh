@@ -19,6 +19,21 @@
 
 set -u
 
+# NON-INTERACTIVE: this script runs at sandbox startup with no terminal
+# attached. git MUST NOT prompt — a private clone with no credential would
+# otherwise block on "Username for 'https://github.com':" and hang the whole
+# provision. Force git to fail fast instead of prompting, on every path:
+#   - GIT_TERMINAL_PROMPT=0 disables git's own username/password prompt.
+#   - GIT_ASKPASS / SSH_ASKPASS pointed at a non-interactive false so no helper
+#     can pop a prompt either.
+# When the backend injects a github credential on the wire (sbx proxy / msb
+# header substitution) the clone still succeeds; when it can't, the clone fails
+# fast and the kit degrades gracefully (warns + exit 0) as designed.
+export GIT_TERMINAL_PROMPT=0
+export GIT_ASKPASS=/bin/false
+export SSH_ASKPASS=/bin/false
+: "${GIT_CONFIG_NOSYSTEM:=0}"  # leave system config intact (proxy/CA settings)
+
 ref="${PLAYBOOK_REF:-v0.14.0}"
 sha="${PLAYBOOK_SHA:-cfadbc32b079d85c6328a20d3dadc583faa8aef1}"
 repo="https://github.com/GSA-TTS/agentic-coding-playbook.git"
