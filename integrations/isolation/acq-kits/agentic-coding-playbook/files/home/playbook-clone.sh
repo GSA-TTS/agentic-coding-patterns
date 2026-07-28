@@ -106,10 +106,20 @@ if [ ! -e "$dir/AGENTS.md" ]; then
 
   # Extract into a fresh dir. The tarball's top-level is a single owner-repo-<sha>
   # directory; --strip-components=1 drops it so files land directly under $dir.
-  mkdir -p "$dir"
+  # Distinguish an unwritable target (a mis-provisioned home, e.g. /home/agent not
+  # owned by the agent user) from a corrupt archive — the messages point at very
+  # different fixes.
+  if ! mkdir -p "$dir" 2>/dev/null; then
+    rm -f "$tgz"
+    warn "cannot create $dir (is \$HOME writable by this user?). Skipping;"
+    warn "  will retry on next start. This usually means the sandbox's agent"
+    warn "  home is not owned by the user running this kit."
+    exit 0
+  fi
   if ! tar xzf "$tgz" -C "$dir" --strip-components=1 2>/dev/null; then
     rm -f "$tgz"; rm -rf "$dir"
-    warn "downloaded tarball but extraction failed; skipping. Will retry on next start."
+    warn "downloaded tarball but extraction failed (corrupt archive?); skipping."
+    warn "  Will retry on next start."
     exit 0
   fi
   rm -f "$tgz"
