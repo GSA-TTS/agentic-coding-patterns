@@ -69,6 +69,29 @@ scope:
     - "Not for live, unscripted screen captures (use a screen recorder)"
     - "Not for GUI or browser demos (use a video tool; see explainer-video)"
     - "Does not replace prose documentation — pair the GIF with a text summary"
+
+collection: communications
+routing:
+  task_types:
+    - "author"
+    - "render"
+  input_artifacts:
+    - "artifact-brief"
+    - "shell-script"
+  output_artifacts:
+    - "explainer-gif"
+    - "terminal-demo"
+  prefer_when:
+    - "the request is a short terminal screencast/GIF"
+  avoid_when:
+    - "the request is a narrated/animated motion video"
+  delegates:
+    - pattern: explainer-video
+      when: "the request is a full motion/animated explainer video"
+  aliases:
+    - "terminal screencast"
+    - "demo gif"
+    - "vhs tape"
 ---
 
 # Skill: Explainer GIF (Terminal Screencast)

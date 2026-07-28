@@ -87,6 +87,21 @@ changelog:
     date: "2026-07-01"
     change_type: minor
     summary: "Initial version — drafts safe Bash to a clean-script standard (strict mode, mktemp + trap, quoted vars, dry-run default), refuses curl|sh/eval/secret dumps, never executes."
+
+collection: engineering
+routing:
+  task_types:
+    - "author"
+  input_artifacts:
+    - "artifact-brief"
+  output_artifacts:
+    - "shell-script"
+  prefer_when:
+    - "the request is to author a safe shell/bash script"
+  aliases:
+    - "bash author"
+    - "safe script"
+    - "automation script"
 ---
 
 # Skill: Safe Shell Script Author

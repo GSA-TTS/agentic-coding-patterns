@@ -101,6 +101,30 @@ changelog:
     date: "2026-07-01"
     change_type: minor
     summary: "Initial version — audits agent-invoking CI workflows for dangerous trigger/checkout/token/prompt patterns and missing approval gates; describes fixes, ships no working exploit."
+
+collection: security
+routing:
+  task_types:
+    - "analyze"
+    - "review"
+  input_artifacts:
+    - "ci-workflow"
+    - "source-code"
+  output_artifacts:
+    - "security-review"
+  prefer_when:
+    - "the target is a CI/CD workflow that invokes an LLM agent"
+  avoid_when:
+    - "the question is about permission minimality"
+    - "permissions minimal"
+    - "token scope"
+  delegates:
+    - pattern: least-privilege-review
+      when: "permissions minimal token scope minimality"
+  aliases:
+    - "workflow audit"
+    - "github actions security"
+    - "ci agent audit"
 ---
 
 # Skill: Agentic Actions Auditor

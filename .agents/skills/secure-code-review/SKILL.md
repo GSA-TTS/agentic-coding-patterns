@@ -98,6 +98,40 @@ scope:
     - "Agent-invoking or injection-reachable CI triggers: defer to agentic-actions-auditor"
     - "Scope-minimality judgments (GITHUB_TOKEN / IAM scope): defer to least-privilege-review"
     - "Supply-chain / dependency intake: defer to dependency-analysis"
+
+collection: security
+routing:
+  task_types:
+    - "review"
+    - "analyze"
+  input_artifacts:
+    - "source-code"
+    - "pull-request-diff"
+  output_artifacts:
+    - "security-review"
+  prefer_when:
+    - "the request asks for vulnerabilities, insecure behavior, or OWASP risks in ordinary application code"
+  avoid_when:
+    - "the request specifically concerns an LLM-invoking CI workflow"
+    - "the request is solely about permission minimality"
+    - "the request concerns dependency or package risk"
+    - "the request concerns prompt injection crossing a trust boundary"
+    - "the request concerns a deliberate backdoor or hidden malice"
+  delegates:
+    - pattern: agentic-actions-auditor
+      when: "the target is an agent-invoking CI workflow"
+    - pattern: least-privilege-review
+      when: "the question is specifically whether permissions are minimal"
+    - pattern: dependency-analysis
+      when: "the question concerns dependencies or supply-chain intake"
+    - pattern: untrusted-input-boundary-review
+      when: "the question is specifically about untrusted input crossing a trust boundary or prompt injection"
+    - pattern: backdoor-review
+      when: "the ask implies a deliberate backdoor, auth bypass, or hidden persistence"
+  aliases:
+    - "owasp review"
+    - "vulnerability review"
+    - "security code review"
 ---
 
 # Skill: Secure Code Review
@@ -120,6 +154,8 @@ adjacent lanes — flag and defer, do not re-implement them:
 | An agent-invoking or injection-reachable CI trigger (`pull_request_target`, `issue_comment`, `workflow_run` with untrusted checkout, a prompt built from PR/issue text) | **agentic-actions-auditor** |
 | A judgment about whether a granted scope is *minimal* (GITHUB_TOKEN permissions, IAM scope) | **least-privilege-review** |
 | Supply-chain or dependency intake (new packages, CVEs, licenses) | **dependency-analysis** |
+| Untrusted input crossing a trust boundary / prompt injection reaching a sink | **untrusted-input-boundary-review** |
+| Signs of a *deliberate* backdoor, auth bypass, or hidden persistence (not an accidental bug) | **backdoor-review** |
 
 secure-code-review's lane for CI is **general workflow-file code-review hygiene
 plus the blast radius of the changed workflow in the diff** — not a full agent
@@ -434,6 +470,8 @@ document.getElementById('message').textContent = userInput;
 - [dependency-analysis](../dependency-analysis/SKILL.md) - Supply-chain and vulnerable-dependency intake
 - [agentic-actions-auditor](../agentic-actions-auditor/SKILL.md) - Agent-invoking / injection-reachable CI triggers
 - [least-privilege-review](../least-privilege-review/SKILL.md) - Whether a granted scope (token/IAM) is minimal
+- [untrusted-input-boundary-review](../untrusted-input-boundary-review/SKILL.md) - Untrusted input / prompt injection crossing a trust boundary
+- [backdoor-review](../backdoor-review/SKILL.md) - Deliberate backdoors, auth bypasses, or hidden persistence
 - [test-generation](../test-generation/SKILL.md) - Generate security test cases
 
 ## References

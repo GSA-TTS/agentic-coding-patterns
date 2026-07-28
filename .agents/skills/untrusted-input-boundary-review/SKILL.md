@@ -88,6 +88,24 @@ changelog:
     date: "2026-07-01"
     change_type: minor
     summary: "Initial version — maps agent trust boundaries and reviews untrusted-input handling for prompt-injection and tool-poisoning classes; describes attack classes only, never ships a live payload."
+
+collection: security
+routing:
+  task_types:
+    - "review"
+    - "analyze"
+  input_artifacts:
+    - "source-code"
+  output_artifacts:
+    - "security-review"
+  prefer_when:
+    - "the concern is untrusted input or prompt injection crossing a trust boundary"
+  avoid_when:
+    - "the concern is a general code security review"
+  aliases:
+    - "prompt injection review"
+    - "trust boundary review"
+    - "tool poisoning check"
 ---
 
 # Skill: Untrusted Input Boundary Review

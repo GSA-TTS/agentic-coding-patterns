@@ -65,6 +65,23 @@ scope:
   exclusions:
     - "Not for complex web applications"
     - "Does not replace content strategy"
+
+collection: digital-service
+routing:
+  task_types:
+    - "author"
+    - "render"
+  input_artifacts:
+    - "artifact-brief"
+  output_artifacts:
+    - "landing-page"
+    - "source-code"
+  prefer_when:
+    - "the request is to build a marketing/landing/service page"
+  aliases:
+    - "uswds landing"
+    - "service page"
+    - "hero page"
 ---
 
 # Skill: USWDS Service Landing Page

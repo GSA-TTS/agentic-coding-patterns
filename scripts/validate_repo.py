@@ -33,6 +33,7 @@ def main() -> int:
     validators = [
         ("scripts/validate_frontmatter.py", "Frontmatter schema validation"),
         ("scripts/validate_sensitive_terms.py", "Sensitive terms scan"),
+        ("scripts/validate_references.py", "Cross-reference & delegation-cycle validation"),
     ]
 
     failed = []

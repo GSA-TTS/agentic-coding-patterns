@@ -34,6 +34,19 @@ categories:
 quality_gates:
   readability_max_grade: 10
   citations_required: false
+
+collection: content
+routing:
+  task_types:
+    - "author"
+    - "review"
+  input_artifacts:
+    - "documentation"
+  output_artifacts:
+    - "documentation"
+  aliases:
+    - "docs agent"
+    - "tech writer agent"
 ---
 
 # Documentation Agent Instructions

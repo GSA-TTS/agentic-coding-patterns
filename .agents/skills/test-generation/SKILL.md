@@ -65,6 +65,23 @@ scope:
     - "Not for integration/e2e test generation"
     - "Not for performance/load testing"
     - "Not for manual test case writing"
+
+collection: engineering
+routing:
+  task_types:
+    - "author"
+    - "test"
+  input_artifacts:
+    - "source-code"
+  output_artifacts:
+    - "source-code"
+    - "qa-report"
+  prefer_when:
+    - "the request is to generate tests or improve coverage"
+  aliases:
+    - "unit test gen"
+    - "test author"
+    - "coverage analysis"
 ---
 
 # Skill: Test Case Generation

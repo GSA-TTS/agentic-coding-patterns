@@ -72,6 +72,26 @@ scope:
     - "Does not replace professional content design"
     - "Not a replacement for user research"
     - "Does not validate technical accuracy"
+
+collection: content
+routing:
+  task_types:
+    - "review"
+    - "analyze"
+  input_artifacts:
+    - "documentation"
+    - "web-page"
+  output_artifacts:
+    - "qa-report"
+  prefer_when:
+    - "the concern is wording, readability, jargon, or public-audience comprehension"
+  avoid_when:
+    - "the concern is doc correctness/links/staleness rather than wording"
+  aliases:
+    - "plain language"
+    - "readability review"
+    - "clarity edit"
+    - "public audience"
 ---
 
 # Skill: Federal Plain Language Review

@@ -66,6 +66,23 @@ scope:
     - "Not for PRA compliance determination"
     - "Does not replace user testing"
     - "Does not generate backend processing logic"
+
+collection: digital-service
+routing:
+  task_types:
+    - "author"
+    - "render"
+  input_artifacts:
+    - "artifact-brief"
+  output_artifacts:
+    - "form"
+    - "source-code"
+  prefer_when:
+    - "the request is to build a (multi-step) form"
+  aliases:
+    - "uswds form"
+    - "accessible form"
+    - "multi-step form"
 ---
 
 # Skill: USWDS Accessible Form Flow

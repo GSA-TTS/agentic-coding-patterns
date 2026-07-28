@@ -12,8 +12,21 @@ patterns:
     - frontend
     - review
     - compliance
-    collection: null
-    routing: {}
+    collection: digital-service
+    routing:
+      task_types:
+      - analyze
+      - review
+      input_artifacts:
+      - source-code
+      - web-page
+      - web-prototype
+      output_artifacts:
+      - qa-report
+      aliases:
+      - a11y review
+      - section 508 check
+      - wcag audit
   - path: skills/agentic-actions-auditor/SKILL.md
     id: agentic-actions-auditor
     title: Agentic Actions Auditor
@@ -23,8 +36,20 @@ patterns:
     - security
     - review
     - supply-chain
-    collection: null
-    routing: {}
+    collection: security
+    routing:
+      task_types:
+      - analyze
+      - review
+      input_artifacts:
+      - ci-workflow
+      - source-code
+      output_artifacts:
+      - security-review
+      aliases:
+      - ci agent audit
+      - github actions security
+      - workflow audit
   - path: skills/backdoor-review/SKILL.md
     id: backdoor-review
     title: Backdoor Review
@@ -33,8 +58,21 @@ patterns:
     categories:
     - security
     - review
-    collection: null
-    routing: {}
+    collection: security
+    routing:
+      task_types:
+      - analyze
+      - review
+      input_artifacts:
+      - ci-workflow
+      - pull-request-diff
+      - source-code
+      output_artifacts:
+      - security-review
+      aliases:
+      - adversarial review
+      - backdoor scan
+      - integrity review
   - path: skills/compliance-claim-checker/SKILL.md
     id: compliance-claim-checker
     title: Compliance Claim Checker
@@ -44,8 +82,21 @@ patterns:
     - security
     - compliance
     - documentation
-    collection: null
-    routing: {}
+    collection: security
+    routing:
+      task_types:
+      - analyze
+      - review
+      input_artifacts:
+      - compliance-claim
+      - documentation
+      - pull-request-diff
+      output_artifacts:
+      - security-review
+      aliases:
+      - compliance claim review
+      - fedramp claim check
+      - overclaim check
   - path: skills/dependency-analysis/SKILL.md
     id: dependency-analysis
     title: Dependency Security Analysis
@@ -55,8 +106,20 @@ patterns:
     - security
     - dependencies
     - supply-chain
-    collection: null
-    routing: {}
+    collection: security
+    routing:
+      task_types:
+      - analyze
+      - review
+      input_artifacts:
+      - dependency-manifest
+      - source-code
+      output_artifacts:
+      - security-review
+      aliases:
+      - dependency audit
+      - dependency risk
+      - supply chain review
   - path: skills/documentation-review/SKILL.md
     id: documentation-review
     title: Documentation Review
@@ -65,8 +128,20 @@ patterns:
     categories:
     - documentation
     - review
-    collection: null
-    routing: {}
+    collection: content
+    routing:
+      task_types:
+      - analyze
+      - review
+      input_artifacts:
+      - documentation
+      output_artifacts:
+      - qa-report
+      aliases:
+      - broken links
+      - doc quality check
+      - docs review
+      - stale commands
   - path: skills/outreach/explainer-gif/SKILL.md
     id: explainer-gif
     title: Explainer GIF (Terminal Screencast)
@@ -74,8 +149,21 @@ patterns:
     status: experimental
     categories:
     - documentation
-    collection: null
-    routing: {}
+    collection: communications
+    routing:
+      task_types:
+      - author
+      - render
+      input_artifacts:
+      - artifact-brief
+      - shell-script
+      output_artifacts:
+      - explainer-gif
+      - terminal-demo
+      aliases:
+      - demo gif
+      - terminal screencast
+      - vhs tape
   - path: skills/outreach/explainer-video/SKILL.md
     id: explainer-video
     title: Explainer Video (HTML to MP4)
@@ -84,8 +172,21 @@ patterns:
     categories:
     - documentation
     - supply-chain
-    collection: null
-    routing: {}
+    collection: communications
+    routing:
+      task_types:
+      - author
+      - render
+      input_artifacts:
+      - artifact-brief
+      - web-page
+      output_artifacts:
+      - explainer-video
+      - marketing-asset
+      aliases:
+      - html to video
+      - launch video
+      - promo video
   - path: skills/frontend/federal-service-blueprint/SKILL.md
     id: federal-service-blueprint
     title: Federal Service Blueprint
@@ -95,8 +196,20 @@ patterns:
     - frontend
     - compliance
     - documentation
-    collection: null
-    routing: {}
+    collection: digital-service
+    routing:
+      task_types:
+      - discover
+      - plan
+      input_artifacts:
+      - artifact-brief
+      output_artifacts:
+      - documentation
+      - service-blueprint
+      aliases:
+      - blueprint plan
+      - service design
+      - user journey map
   - path: skills/incident-evidence-review/SKILL.md
     id: incident-evidence-review
     title: Incident Evidence Review
@@ -106,8 +219,20 @@ patterns:
     - security
     - incident-response
     - review
-    collection: null
-    routing: {}
+    collection: security
+    routing:
+      task_types:
+      - analyze
+      - review
+      input_artifacts:
+      - documentation
+      - incident-evidence
+      output_artifacts:
+      - security-review
+      aliases:
+      - evidence discipline
+      - incident review
+      - postmortem review
   - path: skills/least-privilege-review/SKILL.md
     id: least-privilege-review
     title: Least Privilege Review
@@ -116,8 +241,23 @@ patterns:
     categories:
     - security
     - review
-    collection: null
-    routing: {}
+    collection: security
+    routing:
+      task_types:
+      - analyze
+      - review
+      input_artifacts:
+      - ci-workflow
+      - infrastructure-as-code
+      - source-code
+      output_artifacts:
+      - security-review
+      aliases:
+      - iam review
+      - least privilege
+      - permission minimality
+      - permissions minimal
+      - token scope review
   - path: skills/over-engineering-review/SKILL.md
     id: over-engineering-review
     title: Over-Engineering Review
@@ -126,8 +266,20 @@ patterns:
     categories:
     - review
     - development
-    collection: null
-    routing: {}
+    collection: engineering
+    routing:
+      task_types:
+      - analyze
+      - review
+      input_artifacts:
+      - pull-request-diff
+      - source-code
+      output_artifacts:
+      - qa-report
+      aliases:
+      - complexity review
+      - simplify review
+      - yagni check
   - path: skills/meta/pattern-router/SKILL.md
     id: pattern-router
     title: Pattern Router
@@ -152,8 +304,21 @@ patterns:
     - frontend
     - documentation
     - review
-    collection: null
-    routing: {}
+    collection: content
+    routing:
+      task_types:
+      - analyze
+      - review
+      input_artifacts:
+      - documentation
+      - web-page
+      output_artifacts:
+      - qa-report
+      aliases:
+      - clarity edit
+      - plain language
+      - public audience
+      - readability review
   - path: skills/safe-shell-script-author/SKILL.md
     id: safe-shell-script-author
     title: Safe Shell Script Author
@@ -162,8 +327,18 @@ patterns:
     categories:
     - security
     - development
-    collection: null
-    routing: {}
+    collection: engineering
+    routing:
+      task_types:
+      - author
+      input_artifacts:
+      - artifact-brief
+      output_artifacts:
+      - shell-script
+      aliases:
+      - automation script
+      - bash author
+      - safe script
   - path: skills/secure-code-review/SKILL.md
     id: secure-code-review
     title: Secure Code Review
@@ -172,8 +347,20 @@ patterns:
     categories:
     - security
     - review
-    collection: null
-    routing: {}
+    collection: security
+    routing:
+      task_types:
+      - analyze
+      - review
+      input_artifacts:
+      - pull-request-diff
+      - source-code
+      output_artifacts:
+      - security-review
+      aliases:
+      - owasp review
+      - security code review
+      - vulnerability review
   - path: skills/test-generation/SKILL.md
     id: test-generation
     title: Test Case Generation
@@ -181,8 +368,20 @@ patterns:
     status: experimental
     categories:
     - testing
-    collection: null
-    routing: {}
+    collection: engineering
+    routing:
+      task_types:
+      - author
+      - test
+      input_artifacts:
+      - source-code
+      output_artifacts:
+      - qa-report
+      - source-code
+      aliases:
+      - coverage analysis
+      - test author
+      - unit test gen
   - path: skills/untrusted-input-boundary-review/SKILL.md
     id: untrusted-input-boundary-review
     title: Untrusted Input Boundary Review
@@ -191,8 +390,19 @@ patterns:
     categories:
     - security
     - review
-    collection: null
-    routing: {}
+    collection: security
+    routing:
+      task_types:
+      - analyze
+      - review
+      input_artifacts:
+      - source-code
+      output_artifacts:
+      - security-review
+      aliases:
+      - prompt injection review
+      - tool poisoning check
+      - trust boundary review
   - path: skills/frontend/uswds-form-flow/SKILL.md
     id: uswds-form-flow
     title: USWDS Accessible Form Flow
@@ -201,8 +411,20 @@ patterns:
     categories:
     - frontend
     - compliance
-    collection: null
-    routing: {}
+    collection: digital-service
+    routing:
+      task_types:
+      - author
+      - render
+      input_artifacts:
+      - artifact-brief
+      output_artifacts:
+      - form
+      - source-code
+      aliases:
+      - accessible form
+      - multi-step form
+      - uswds form
   - path: skills/frontend/uswds-landing-page/SKILL.md
     id: uswds-landing-page
     title: USWDS Service Landing Page
@@ -210,8 +432,20 @@ patterns:
     status: experimental
     categories:
     - frontend
-    collection: null
-    routing: {}
+    collection: digital-service
+    routing:
+      task_types:
+      - author
+      - render
+      input_artifacts:
+      - artifact-brief
+      output_artifacts:
+      - landing-page
+      - source-code
+      aliases:
+      - hero page
+      - service page
+      - uswds landing
   - path: skills/frontend/uswds-prototype/SKILL.md
     id: uswds-prototype
     title: USWDS Front-End Prototype
@@ -219,8 +453,20 @@ patterns:
     status: experimental
     categories:
     - frontend
-    collection: null
-    routing: {}
+    collection: digital-service
+    routing:
+      task_types:
+      - author
+      - render
+      input_artifacts:
+      - artifact-brief
+      output_artifacts:
+      - source-code
+      - web-prototype
+      aliases:
+      - federal page
+      - html prototype
+      - uswds prototype
   prompts:
   - path: prompts/planning/implementation-plan/SKILL.md
     id: implementation-plan
@@ -229,8 +475,18 @@ patterns:
     status: experimental
     categories:
     - development
-    collection: null
-    routing: {}
+    collection: engineering
+    routing:
+      task_types:
+      - plan
+      input_artifacts:
+      - artifact-brief
+      output_artifacts:
+      - documentation
+      aliases:
+      - feature plan
+      - implementation plan
+      - task breakdown
   - path: prompts/review/qa-round/SKILL.md
     id: qa-round
     title: QA Round Review
@@ -239,18 +495,42 @@ patterns:
     categories:
     - testing
     - review
-    collection: null
-    routing: {}
+    collection: engineering
+    routing:
+      task_types:
+      - review
+      - test
+      input_artifacts:
+      - pull-request-diff
+      - source-code
+      output_artifacts:
+      - qa-report
+      aliases:
+      - acceptance check
+      - qa this diff
+      - single qa review
   - path: prompts/security/safe-code-review/SKILL.md
     id: safe-code-review
     title: Security-Focused Code Review
     type: prompt
-    status: experimental
+    status: deprecated
     categories:
     - security
     - review
-    collection: null
-    routing: {}
+    collection: security
+    routing:
+      task_types:
+      - analyze
+      - review
+      input_artifacts:
+      - pull-request-diff
+      - source-code
+      output_artifacts:
+      - security-review
+      aliases:
+      - security code review
+      - vulnerability review
+      priority: 0
   agents:
   - path: agents/documentation/AGENTS.md
     id: documentation-agent
@@ -259,8 +539,18 @@ patterns:
     status: experimental
     categories:
     - documentation
-    collection: null
-    routing: {}
+    collection: content
+    routing:
+      task_types:
+      - author
+      - review
+      input_artifacts:
+      - documentation
+      output_artifacts:
+      - documentation
+      aliases:
+      - docs agent
+      - tech writer agent
   - path: agents/general/AGENTS.md
     id: general-agent
     title: General Agent Instructions
@@ -268,8 +558,18 @@ patterns:
     status: experimental
     categories:
     - development
-    collection: null
-    routing: {}
+    collection: engineering
+    routing:
+      task_types:
+      - author
+      - plan
+      input_artifacts:
+      - source-code
+      output_artifacts:
+      - source-code
+      aliases:
+      - coding agent
+      - general dev agent
   - path: agents/security-review/AGENTS.md
     id: security-review-agent
     title: Security Review Agent Instructions
@@ -278,8 +578,19 @@ patterns:
     categories:
     - security
     - review
-    collection: null
-    routing: {}
+    collection: security
+    routing:
+      task_types:
+      - analyze
+      - review
+      input_artifacts:
+      - pull-request-diff
+      - source-code
+      output_artifacts:
+      - security-review
+      aliases:
+      - security agent
+      - vuln review agent
   workflows:
   - path: workflows/issue-to-merge-request/SKILL.md
     id: issue-to-merge-request
@@ -290,8 +601,21 @@ patterns:
     - development
     - review
     - testing
-    collection: null
-    routing: {}
+    collection: engineering
+    routing:
+      task_types:
+      - author
+      - orchestrate
+      - test
+      input_artifacts:
+      - artifact-brief
+      output_artifacts:
+      - pull-request-diff
+      - source-code
+      aliases:
+      - dev cycle
+      - feature workflow
+      - issue to pr
   - path: workflows/qa-round/SKILL.md
     id: qa-workflow
     title: QA Round Workflow
@@ -300,8 +624,20 @@ patterns:
     categories:
     - testing
     - review
-    collection: null
-    routing: {}
+    collection: engineering
+    routing:
+      task_types:
+      - orchestrate
+      - review
+      - test
+      input_artifacts:
+      - source-code
+      output_artifacts:
+      - qa-report
+      aliases:
+      - qa process
+      - qa signoff
+      - testing cycle
   - path: workflows/security-scan-review/SKILL.md
     id: security-scan-review
     title: Language-Aware Security Scan & Triage Workflow
@@ -310,8 +646,21 @@ patterns:
     categories:
     - security
     - review
-    collection: null
-    routing: {}
+    collection: security
+    routing:
+      task_types:
+      - analyze
+      - orchestrate
+      - review
+      input_artifacts:
+      - dependency-manifest
+      - source-code
+      output_artifacts:
+      - security-review
+      aliases:
+      - language-aware scan
+      - sarif triage
+      - scan triage
   lessons:
   - path: lessons-learned/example-agentic-session/SKILL.md
     id: example-agentic-session
@@ -321,8 +670,18 @@ patterns:
     categories:
     - security
     - documentation
-    collection: null
-    routing: {}
+    collection: meta
+    routing:
+      task_types:
+      - analyze
+      input_artifacts:
+      - documentation
+      output_artifacts:
+      - documentation
+      aliases:
+      - multi-pattern example
+      - retro
+      - session lesson
 categories:
   security:
   - agentic-actions-auditor
@@ -396,14 +755,167 @@ categories:
   - uswds-landing-page
   - uswds-prototype
 collections:
+  communications:
+  - explainer-gif
+  - explainer-video
+  content:
+  - documentation-agent
+  - documentation-review
+  - plain-language-review
+  digital-service:
+  - accessibility-review
+  - federal-service-blueprint
+  - uswds-form-flow
+  - uswds-landing-page
+  - uswds-prototype
+  engineering:
+  - general-agent
+  - implementation-plan
+  - issue-to-merge-request
+  - over-engineering-review
+  - qa-round
+  - qa-workflow
+  - safe-shell-script-author
+  - test-generation
   meta:
+  - example-agentic-session
   - pattern-router
+  security:
+  - agentic-actions-auditor
+  - backdoor-review
+  - compliance-claim-checker
+  - dependency-analysis
+  - incident-evidence-review
+  - least-privilege-review
+  - safe-code-review
+  - secure-code-review
+  - security-review-agent
+  - security-scan-review
+  - untrusted-input-boundary-review
 task_types:
+  analyze:
+  - accessibility-review
+  - agentic-actions-auditor
+  - backdoor-review
+  - compliance-claim-checker
+  - dependency-analysis
+  - documentation-review
+  - example-agentic-session
+  - incident-evidence-review
+  - least-privilege-review
+  - over-engineering-review
+  - plain-language-review
+  - safe-code-review
+  - secure-code-review
+  - security-review-agent
+  - security-scan-review
+  - untrusted-input-boundary-review
+  author:
+  - documentation-agent
+  - explainer-gif
+  - explainer-video
+  - general-agent
+  - issue-to-merge-request
+  - safe-shell-script-author
+  - test-generation
+  - uswds-form-flow
+  - uswds-landing-page
+  - uswds-prototype
   discover:
+  - federal-service-blueprint
   - pattern-router
   orchestrate:
+  - issue-to-merge-request
   - pattern-router
-output_artifacts: {}
+  - qa-workflow
+  - security-scan-review
+  plan:
+  - federal-service-blueprint
+  - general-agent
+  - implementation-plan
+  render:
+  - explainer-gif
+  - explainer-video
+  - uswds-form-flow
+  - uswds-landing-page
+  - uswds-prototype
+  review:
+  - accessibility-review
+  - agentic-actions-auditor
+  - backdoor-review
+  - compliance-claim-checker
+  - dependency-analysis
+  - documentation-agent
+  - documentation-review
+  - incident-evidence-review
+  - least-privilege-review
+  - over-engineering-review
+  - plain-language-review
+  - qa-round
+  - qa-workflow
+  - safe-code-review
+  - secure-code-review
+  - security-review-agent
+  - security-scan-review
+  - untrusted-input-boundary-review
+  test:
+  - issue-to-merge-request
+  - qa-round
+  - qa-workflow
+  - test-generation
+output_artifacts:
+  documentation:
+  - documentation-agent
+  - example-agentic-session
+  - federal-service-blueprint
+  - implementation-plan
+  explainer-gif:
+  - explainer-gif
+  explainer-video:
+  - explainer-video
+  form:
+  - uswds-form-flow
+  landing-page:
+  - uswds-landing-page
+  marketing-asset:
+  - explainer-video
+  pull-request-diff:
+  - issue-to-merge-request
+  qa-report:
+  - accessibility-review
+  - documentation-review
+  - over-engineering-review
+  - plain-language-review
+  - qa-round
+  - qa-workflow
+  - test-generation
+  security-review:
+  - agentic-actions-auditor
+  - backdoor-review
+  - compliance-claim-checker
+  - dependency-analysis
+  - incident-evidence-review
+  - least-privilege-review
+  - safe-code-review
+  - secure-code-review
+  - security-review-agent
+  - security-scan-review
+  - untrusted-input-boundary-review
+  service-blueprint:
+  - federal-service-blueprint
+  shell-script:
+  - safe-shell-script-author
+  source-code:
+  - general-agent
+  - issue-to-merge-request
+  - test-generation
+  - uswds-form-flow
+  - uswds-landing-page
+  - uswds-prototype
+  terminal-demo:
+  - explainer-gif
+  web-prototype:
+  - uswds-prototype
 stats:
   total_patterns: 31
   skills: 21
