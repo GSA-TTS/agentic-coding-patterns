@@ -78,6 +78,22 @@ tags:
 
 portability:
   opencode: true
+
+collection: security
+routing:
+  task_types:
+    - "orchestrate"
+    - "analyze"
+    - "review"
+  input_artifacts:
+    - "source-code"
+    - "dependency-manifest"
+  output_artifacts:
+    - "security-review"
+  aliases:
+    - "scan triage"
+    - "sarif triage"
+    - "language-aware scan"
 ---
 
 # Language-Aware Security Scan & Triage Workflow

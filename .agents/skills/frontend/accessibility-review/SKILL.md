@@ -72,6 +72,24 @@ scope:
     - "Not a legal certification of compliance"
     - "Does not replace screen reader testing"
     - "Does not assess cognitive accessibility fully"
+
+collection: digital-service
+routing:
+  task_types:
+    - "review"
+    - "analyze"
+  input_artifacts:
+    - "source-code"
+    - "web-page"
+    - "web-prototype"
+  output_artifacts:
+    - "qa-report"
+  prefer_when:
+    - "the concern is accessibility/508/WCAG conformance of a UI"
+  aliases:
+    - "a11y review"
+    - "section 508 check"
+    - "wcag audit"
 ---
 
 # Skill: Federal Accessibility Review

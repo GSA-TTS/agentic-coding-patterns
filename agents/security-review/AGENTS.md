@@ -44,6 +44,20 @@ allowed_tools: []
 network_policy: deny
 write_policy: deny
 script_policy: deny
+
+collection: security
+routing:
+  task_types:
+    - "review"
+    - "analyze"
+  input_artifacts:
+    - "source-code"
+    - "pull-request-diff"
+  output_artifacts:
+    - "security-review"
+  aliases:
+    - "security agent"
+    - "vuln review agent"
 ---
 
 # Security Review Agent Instructions

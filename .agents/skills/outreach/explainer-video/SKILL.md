@@ -70,6 +70,26 @@ scope:
     - "Not for hosted-cloud rendering of sensitive content"
     - "Not a replacement for accessible text — pair every video with a text summary"
     - "Not for crawling or capturing arbitrary web pages"
+
+collection: communications
+routing:
+  task_types:
+    - "author"
+    - "render"
+  input_artifacts:
+    - "artifact-brief"
+    - "web-page"
+  output_artifacts:
+    - "explainer-video"
+    - "marketing-asset"
+  prefer_when:
+    - "the request is an animated/narrated explainer video"
+  avoid_when:
+    - "the request is a static slide deck or one-pager"
+  aliases:
+    - "html to video"
+    - "promo video"
+    - "launch video"
 ---
 
 # Skill: Explainer Video (HTML to MP4)

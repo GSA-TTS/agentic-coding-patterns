@@ -64,6 +64,28 @@ scope:
   exclusions:
     - "Not for copyediting or style guide enforcement"
     - "Not for translation review"
+
+collection: content
+routing:
+  task_types:
+    - "review"
+    - "analyze"
+  input_artifacts:
+    - "documentation"
+  output_artifacts:
+    - "qa-report"
+  prefer_when:
+    - "the concern is correctness, completeness, stale commands, broken links, or usability of docs"
+  avoid_when:
+    - "the concern is specifically wording/readability for a public audience"
+  delegates:
+    - pattern: plain-language-review
+      when: "the concern is specifically plain-language readability for a public audience"
+  aliases:
+    - "docs review"
+    - "stale commands"
+    - "broken links"
+    - "doc quality check"
 ---
 
 # Skill: Documentation Review

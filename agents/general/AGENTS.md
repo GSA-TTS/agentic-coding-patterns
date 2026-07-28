@@ -34,6 +34,19 @@ categories:
 quality_gates:
   readability_max_grade: 10
   citations_required: false
+
+collection: engineering
+routing:
+  task_types:
+    - "author"
+    - "plan"
+  input_artifacts:
+    - "source-code"
+  output_artifacts:
+    - "source-code"
+  aliases:
+    - "coding agent"
+    - "general dev agent"
 ---
 
 # General Agent Instructions

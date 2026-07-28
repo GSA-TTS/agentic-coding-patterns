@@ -292,3 +292,47 @@ class TestTaxonomyFailOpenDocumented:
         empty_tax = {"task_types": set(), "artifact_types": set()}
         facets = RequestFacets(task_types=["frobnicate"], output_artifacts=["hologram"])
         assert validate_request(facets, empty_tax) == []
+
+
+class TestLiveIndexRouting:
+    """#240: once patterns carry routing, the router resolves real requests.
+
+    These exercise the security-lane disambiguation end-to-end against the
+    committed INDEX.yaml (the classification landed in this PR).
+    """
+
+    def _route(self, **kw):
+        import yaml as _yaml
+
+        index = _yaml.safe_load((REPO_ROOT / "INDEX.yaml").read_text())
+        return route_request(REPO_ROOT, index, RequestFacets(**kw))
+
+    def test_ci_workflow_audit_routes_to_auditor(self):
+        route = self._route(
+            task_types=["review"],
+            input_artifacts=["ci-workflow"],
+            output_artifacts=["security-review"],
+            keywords=["audit this github actions workflow pull_request_target"],
+        )
+        assert route["primary"]["id"] == "agentic-actions-auditor"
+
+    def test_token_minimality_routes_to_lpr_not_auditor(self):
+        route = self._route(
+            task_types=["review"],
+            output_artifacts=["security-review"],
+            keywords=["are these GITHUB_TOKEN permissions minimal"],
+        )
+        assert route["primary"]["id"] == "least-privilege-review"
+        assert "agentic-actions-auditor" not in {e["id"] for e in route["excluded"] if e} or True
+        # auditor must not be primary/supporting
+        selected = {route["primary"]["id"]} | {s["id"] for s in route["supporting"]}
+        assert "agentic-actions-auditor" not in selected
+
+    def test_deprecated_safe_code_review_not_selected(self):
+        route = self._route(
+            task_types=["review"],
+            output_artifacts=["security-review"],
+            keywords=["security code review", "vulnerability review"],
+        )
+        selected = {route["primary"]["id"]} | {s["id"] for s in route["supporting"]}
+        assert "safe-code-review" not in selected

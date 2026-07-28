@@ -69,6 +69,25 @@ scope:
     - "Not a replacement for full service design process"
     - "Does not replace stakeholder research"
     - "Not for detailed technical architecture"
+
+collection: digital-service
+routing:
+  task_types:
+    - "plan"
+    - "discover"
+  input_artifacts:
+    - "artifact-brief"
+  output_artifacts:
+    - "service-blueprint"
+    - "documentation"
+  prefer_when:
+    - "the request is to plan/map a federal service end to end"
+  avoid_when:
+    - "the request is to build a specific web page or form (front-end implementation)"
+  aliases:
+    - "service design"
+    - "user journey map"
+    - "blueprint plan"
 ---
 
 # Skill: Federal Service Blueprint

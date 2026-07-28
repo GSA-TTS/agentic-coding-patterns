@@ -100,6 +100,25 @@ scope:
     - "Not for performance profiling"
     - "Not for the runtime safety of agent-invoking CI workflows (see agentic-actions-auditor)"
     - "Not for authoring safe shell scripts (see safe-shell-script-author); this skill audits install patterns"
+
+collection: security
+routing:
+  task_types:
+    - "analyze"
+    - "review"
+  input_artifacts:
+    - "dependency-manifest"
+    - "source-code"
+  output_artifacts:
+    - "security-review"
+  prefer_when:
+    - "the concern is dependency, package, or supply-chain intake risk"
+  avoid_when:
+    - "the concern is application code logic rather than dependencies"
+  aliases:
+    - "supply chain review"
+    - "dependency audit"
+    - "dependency risk"
 ---
 
 # Skill: Dependency Security Analysis

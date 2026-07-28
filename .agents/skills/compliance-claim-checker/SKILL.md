@@ -87,6 +87,26 @@ changelog:
     date: "2026-07-01"
     change_type: minor
     summary: "Initial version — flags uncited/overclaimed federal compliance statements, verifies citations against the playbook federal-ai-landscape registry, asserts no compliance itself."
+
+collection: security
+routing:
+  task_types:
+    - "review"
+    - "analyze"
+  input_artifacts:
+    - "compliance-claim"
+    - "documentation"
+    - "pull-request-diff"
+  output_artifacts:
+    - "security-review"
+  prefer_when:
+    - "the request is to verify a stated FedRAMP/NIST/compliance claim"
+  avoid_when:
+    - "the request is a general code security review"
+  aliases:
+    - "compliance claim review"
+    - "fedramp claim check"
+    - "overclaim check"
 ---
 
 # Skill: Compliance Claim Checker
