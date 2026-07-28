@@ -1,70 +1,144 @@
 #!/bin/sh
-# playbook-clone.sh — clone the GSA agentic-coding-playbook at a pinned ref and
+# playbook-clone.sh — fetch the GSA agentic-coding-playbook at a pinned ref and
 # link its AGENTS.md + skills into each supported agent's search paths.
 #
 # Extracted (Phase 2) from the former sbx kit's inline startup command into a
-# standalone, testable script per the acq design doc §6. Behavior is unchanged:
-# idempotent (clone-if-missing, no refetch) and NON-FATAL (any failure warns to
-# stderr and exits 0 so the sandbox still starts; it self-heals on a later start
-# once the clone can run).
+# standalone, testable script per the acq design doc §6. It is idempotent
+# (fetch-if-missing, no refetch) and NON-FATAL (any failure warns to stderr and
+# exits 0 so the sandbox still starts; it self-heals on a later start once the
+# fetch can run).
+#
+# WHY A TARBALL, NOT `git clone` (cross-backend parity):
+#   A `git clone` (or `gh repo clone`, which shells out to git) uses git's
+#   smart-HTTP transport to github.com / codeload.github.com. The msb backend's
+#   on-the-wire secret substitution does NOT cover that transport (verified on
+#   msb 0.6.7: git clone of a private repo fails auth / TLS teardown), so a
+#   private clone could not be authenticated there — the origin of quickstart#203.
+#   The GitHub REST API on api.github.com IS substituted correctly (both the sbx
+#   proxy and msb inject the token there). So we fetch the repo TARBALL via the
+#   REST endpoint (api.github.com -> 302 codeload) with a Bearer token. This uses
+#   the one channel both backends authenticate, needs no `.git`, and needs no
+#   `gh` install. When no token is present the fetch simply fails and the kit
+#   degrades gracefully (warns + exit 0).
 #
 # Pins are provided via the environment, with in-script fallback defaults kept
-# in sync with the kit spec's documented pin:
-#   PLAYBOOK_REF — human-legible release tag to clone (default below)
-#   PLAYBOOK_SHA — exact commit the tag must resolve to (integrity pin)
+# in sync with the kit spec's documented pins:
+#   PLAYBOOK_REF          — release tag to fetch (default below)
+#   PLAYBOOK_AGENTS_SHA256 — sha256 of the extracted AGENTS.md (integrity pin)
 #
-# The tag is a MUTABLE ref over a (possibly Zscaler-MITM-inspected) path, so a
-# tag match is not sufficient: after cloning we VERIFY HEAD == PLAYBOOK_SHA and
-# refuse to link on mismatch.
+# INTEGRITY: a GitHub source tarball is NOT byte-stable (server-side
+# recompression), so we cannot pin the archive bytes. Instead we verify the
+# sha256 of the extracted AGENTS.md — stable content the kit actually consumes —
+# and refuse to link on mismatch. Bump PLAYBOOK_REF and PLAYBOOK_AGENTS_SHA256
+# together (see the kit spec for how to regenerate the hash).
 
 set -u
 
 # NON-INTERACTIVE: this script runs at sandbox startup with no terminal
-# attached. git MUST NOT prompt — a private clone with no credential would
-# otherwise block on "Username for 'https://github.com':" and hang the whole
-# provision. Force git to fail fast instead of prompting, on every path:
-#   - GIT_TERMINAL_PROMPT=0 disables git's own username/password prompt.
-#   - GIT_ASKPASS / SSH_ASKPASS pointed at a non-interactive false so no helper
-#     can pop a prompt either.
-# When the backend injects a github credential on the wire (sbx proxy / msb
-# header substitution) the clone still succeeds; when it can't, the clone fails
-# fast and the kit degrades gracefully (warns + exit 0) as designed.
+# attached. Nothing here should ever prompt. curl is non-interactive by default;
+# keep the git guards too (defense-in-depth, in case any git tooling is invoked
+# by a future edit) so a stray git call fails fast instead of hanging provision.
 export GIT_TERMINAL_PROMPT=0
 export GIT_ASKPASS=/bin/false
 export SSH_ASKPASS=/bin/false
-: "${GIT_CONFIG_NOSYSTEM:=0}"  # leave system config intact (proxy/CA settings)
 
 ref="${PLAYBOOK_REF:-v0.14.0}"
-sha="${PLAYBOOK_SHA:-cfadbc32b079d85c6328a20d3dadc583faa8aef1}"
-repo="https://github.com/GSA-TTS/agentic-coding-playbook.git"
+agents_sha="${PLAYBOOK_AGENTS_SHA256:-5b875f032e021e155faa2a7ee133a65f32aff3f2599b3b7b12384f1124417bba}"
+owner_repo="GSA-TTS/agentic-coding-playbook"
+api="https://api.github.com/repos/${owner_repo}/tarball/${ref}"
 dir="$HOME/.agentic-coding-playbook"
 
 warn() { echo "agentic-coding-playbook: $*" >&2; }
 
-# 1) Clone once (clone-if-missing). Shallow-clone the pinned tag, then VERIFY the
-#    checked-out commit equals PLAYBOOK_SHA. On SHA mismatch we drop the clone and
-#    skip linking rather than trust unexpected content. No refetch on later starts.
-if [ ! -e "$dir/.git" ]; then
-  if ! git clone --quiet --depth 1 --branch "$ref" "$repo" "$dir" 2>/dev/null; then
-    warn "clone of $repo@$ref failed (offline, missing GitHub token, or bad ref?);"
+# The backend injects the github token into this env var (msb --secret
+# GITHUB_TOKEN@api.github.com; the sbx proxy for the built-in github service).
+# Accept either GITHUB_TOKEN or GH_TOKEN. Empty is allowed — the fetch will fail
+# and the kit degrades gracefully.
+token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+
+# sha256 helper: prefer sha256sum, fall back to shasum -a 256. Echoes the hex
+# digest of the file named in $1, or nothing if no tool is available.
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" 2>/dev/null | cut -d' ' -f1
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" 2>/dev/null | cut -d' ' -f1
+  fi
+}
+
+# 1) Fetch once (fetch-if-missing). Download the pinned-ref tarball via the REST
+#    API and extract it. No refetch on later starts (the dir persists).
+if [ ! -e "$dir/AGENTS.md" ]; then
+  if ! command -v curl >/dev/null 2>&1; then
+    warn "curl not found in base image; cannot fetch the playbook."
     warn "  starting WITHOUT playbook rules/skills. Will retry on next start."
-    warn "  Fix: ensure the backend has a github credential and network allows github.com."
     exit 0
   fi
-  got="$(git -C "$dir" rev-parse HEAD 2>/dev/null || echo unknown)"
-  if [ "$got" != "$sha" ]; then
-    warn "SECURITY: cloned $ref resolved to $got, expected $sha."
-    warn "  Refusing to link untrusted playbook content; removing the clone."
-    warn "  If you intentionally bumped the playbook, update PLAYBOOK_SHA."
-    rm -rf "$dir"
+
+  tgz="$(mktemp "${TMPDIR:-/tmp}/acp-playbook.XXXXXX.tgz" 2>/dev/null)" || tgz="/tmp/acp-playbook.$$.tgz"
+  # -f: fail on HTTP error; -sSL: quiet but show errors, follow redirects.
+  # The Authorization header is passed via a config file read from stdin
+  # (curl -K -) rather than an argv flag, so the token never appears in the
+  # process argv (ps) — and so a POSIX sh can't word-split a "Bearer <tok>"
+  # value. When no token is present, no auth line is written (public/anon fetch).
+  if [ -n "$token" ]; then
+    printf 'header = "Authorization: Bearer %s"\n' "$token" | \
+      curl -fsSL -K - \
+        -H "Accept: application/vnd.github+json" \
+        -H "X-GitHub-Api-Version: 2022-11-28" \
+        -o "$tgz" "$api" 2>/dev/null
+    _fetch_rc=$?
+  else
+    curl -fsSL \
+      -H "Accept: application/vnd.github+json" \
+      -H "X-GitHub-Api-Version: 2022-11-28" \
+      -o "$tgz" "$api" 2>/dev/null
+    _fetch_rc=$?
+  fi
+  if [ "$_fetch_rc" -ne 0 ]; then
+    rm -f "$tgz"
+    warn "fetch of ${owner_repo}@${ref} tarball failed (offline, missing/rejected"
+    warn "  GitHub token, or bad ref?). Starting WITHOUT playbook rules/skills;"
+    warn "  will retry on next start. Fix: ensure the backend injects a github"
+    warn "  token to api.github.com and network allows api.github.com + codeload.github.com."
     exit 0
   fi
+
+  # Extract into a fresh dir. The tarball's top-level is a single owner-repo-<sha>
+  # directory; --strip-components=1 drops it so files land directly under $dir.
+  mkdir -p "$dir"
+  if ! tar xzf "$tgz" -C "$dir" --strip-components=1 2>/dev/null; then
+    rm -f "$tgz"; rm -rf "$dir"
+    warn "downloaded tarball but extraction failed; skipping. Will retry on next start."
+    exit 0
+  fi
+  rm -f "$tgz"
 fi
 
 agents="$dir/AGENTS.md"
 skills="$dir/.agents/skills"
 if [ ! -f "$agents" ]; then
-  warn "cloned, but AGENTS.md not found at $agents; skipping linking."
+  warn "fetched, but AGENTS.md not found at $agents; removing and skipping linking."
+  rm -rf "$dir"
+  exit 0
+fi
+
+# 2) INTEGRITY: verify the extracted AGENTS.md matches the pinned sha256. The ref
+#    is a mutable tag over a possibly MITM-inspected path, so content — not just a
+#    successful download — must be checked. On mismatch, drop the tree and skip
+#    linking rather than trust unexpected content.
+got_sha="$(sha256_of "$agents")"
+if [ -z "$got_sha" ]; then
+  warn "no sha256 tool (sha256sum/shasum) available; cannot verify integrity."
+  warn "  Refusing to link unverified playbook content; removing the tree."
+  rm -rf "$dir"
+  exit 0
+fi
+if [ "$got_sha" != "$agents_sha" ]; then
+  warn "SECURITY: AGENTS.md sha256 is $got_sha, expected $agents_sha."
+  warn "  Refusing to link untrusted playbook content; removing the tree."
+  warn "  If you intentionally bumped the playbook, update PLAYBOOK_AGENTS_SHA256."
+  rm -rf "$dir"
   exit 0
 fi
 
@@ -88,7 +162,7 @@ link_skills_into() {
   done
 }
 
-# 2) AGENTS.md per agent. Agents with a known user-level rules path:
+# 3) AGENTS.md per agent. Agents with a known user-level rules path:
 #    OpenCode + Codex + Droid read a literal AGENTS.md; Claude expects CLAUDE.md;
 #    Copilot expects copilot-instructions.md. Cursor, Kiro, and Docker Agent have
 #    no user-level rules FILE convention (rules live in app settings / agent
@@ -99,7 +173,7 @@ link_file "$HOME/.factory/AGENTS.md"                  "$agents"  # Droid (Factor
 link_file "$HOME/.claude/CLAUDE.md"                   "$agents"  # Claude Code
 link_file "$HOME/.copilot/copilot-instructions.md"    "$agents"  # GitHub Copilot CLI
 
-# 3) Skills. ~/.agents/skills is the cross-agent standard root (Codex, OpenCode,
+# 4) Skills. ~/.agents/skills is the cross-agent standard root (Codex, OpenCode,
 #    Docker Agent, Copilot). Per-agent roots follow for agents that only scan
 #    their own dir.
 link_skills_into "$HOME/.agents/skills"      # standard (multi-agent)
