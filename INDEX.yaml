@@ -128,6 +128,21 @@ patterns:
     - development
     collection: null
     routing: {}
+  - path: skills/meta/pattern-router/SKILL.md
+    id: pattern-router
+    title: Pattern Router
+    type: skill
+    status: experimental
+    categories: []
+    collection: meta
+    routing:
+      task_types:
+      - discover
+      - orchestrate
+      aliases:
+      - pattern selection
+      - skill router
+      priority: 90
   - path: skills/frontend/plain-language-review/SKILL.md
     id: plain-language-review
     title: Federal Plain Language Review
@@ -380,12 +395,18 @@ categories:
   - uswds-form-flow
   - uswds-landing-page
   - uswds-prototype
-collections: {}
-task_types: {}
+collections:
+  meta:
+  - pattern-router
+task_types:
+  discover:
+  - pattern-router
+  orchestrate:
+  - pattern-router
 output_artifacts: {}
 stats:
-  total_patterns: 30
-  skills: 20
+  total_patterns: 31
+  skills: 21
   prompts: 3
   agents: 3
   workflows: 3
