@@ -81,6 +81,13 @@ if [ ! -e "$dir/AGENTS.md" ]; then
   # (curl -K -) rather than an argv flag, so the token never appears in the
   # process argv (ps) — and so a POSIX sh can't word-split a "Bearer <tok>"
   # value. When no token is present, no auth line is written (public/anon fetch).
+  #
+  # -L follows the api.github.com -> codeload.github.com 302 redirect. curl
+  # re-sends the Authorization header to codeload; on msb (which substitutes the
+  # placeholder ONLY for api.github.com) the literal placeholder reaches codeload
+  # — harmless in practice because the codeload tarball URL is pre-signed and
+  # ignores the header. If GitHub ever required auth at codeload, the msb fetch
+  # would need codeload added to the --secret host list (see quickstart#203).
   if [ -n "$token" ]; then
     printf 'header = "Authorization: Bearer %s"\n' "$token" | \
       curl -fsSL -K - \
