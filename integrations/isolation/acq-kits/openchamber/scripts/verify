@@ -10,8 +10,8 @@
 #      importable this check reports SKIP (with the fix), not a false FAIL.
 #
 #   2. LIVE END-TO-END (opt-in): create a real sandbox with the kit applied,
-#      then assert the wrapper, the on-demand shared server, OpenChamber, the
-#      published ports, and the respawn supervisor.
+#      then assert the wrapper, the startup-supervised shared server, OpenChamber,
+#      the published ports, and the respawn supervisors (server + OpenChamber).
 #
 #      Preferred driver — RUN_ACQ=1: drive the `acq` CLI. acq translates the
 #      neutral hybrid/v1 spec to an sbx-v2 kit (kit_translate_to_sbx) and applies
@@ -249,9 +249,9 @@ fi
 
 info "3. Wait for startup install + OpenChamber (install up to ${READY_TIMEOUT}s, then ${POST_INSTALL_GRACE}s)"
 # The background startup step installs OpenChamber on first boot, then supervises
-# OpenChamber (skip-start mode). It does NOT start opencode serve — the wrapper
-# owns that on demand (checked separately below). So here we only wait for the
-# install and for OpenChamber to answer.
+# BOTH the shared `opencode serve` (on :4096) and OpenChamber (skip-start mode).
+# The shared server is checked in step 5; here we only wait for the install and
+# for OpenChamber to answer.
 deadline=$(( $(date +%s) + READY_TIMEOUT ))
 installed=""; chamber_up=""; grace_deadline=""
 while :; do
@@ -292,23 +292,21 @@ esac
   && ok "wrapper file is executable" \
   || bad "~/.local/bin/opencode missing or not executable"
 
-info "5. Shared opencode server (started on demand by the wrapper)"
-# The server is on-demand: nothing listens on :4096 until the wrapper runs. The
-# wrapper is the sandbox ENTRYPOINT, so on its no-arg, no-TTY path it does NOT
-# return — it foregrounds `opencode serve` to keep PID 1 (the sandbox) alive.
-# Running it here with a plain `acq exec` would therefore BLOCK forever. Start it
-# DETACHED (background + nohup) — the same lifecycle the entrypoint has — and
-# then probe the port it brings up.
-in_sbx 'nohup opencode >/tmp/wrapper-run.log 2>&1 & echo started'
+info "5. Shared opencode server (started by the startup supervisor, on its own)"
+# The shared `opencode serve` on :4096 is now supervised by the kit's STARTUP
+# script (openchamber-start.sh), which runs on every sandbox start under the
+# sandbox's tini keepalive — independent of the wrapper and of any attach. So it
+# should come up on its own after create, with NO `acq exec opencode` kick. Just
+# probe the port it brings up.
 oc_up=""
-oc_deadline=$(( $(date +%s) + 20 ))
+oc_deadline=$(( $(date +%s) + 30 ))
 while :; do
   [ "$(in_sbx 'curl -fsS http://127.0.0.1:4096/global/health >/dev/null 2>&1 && echo yes')" = "yes" ] && { oc_up=yes; break; }
   [ "$(date +%s)" -ge "$oc_deadline" ] && break
   sleep "$POLL_INTERVAL"
 done
 if [ -n "$oc_up" ]; then
-  ok "shared opencode server answers on 127.0.0.1:4096 after running the wrapper"
+  ok "shared opencode server answers on 127.0.0.1:4096 (started by the startup supervisor)"
 elif [ "$DRIVER" = "acq" ] || [ -n "$USAI_KIT_DIR" ]; then
   # A provider is expected: acq applies usai-provider as a built-in kit, and the
   # sbx path pairs USAI_KIT_DIR. Without a USAi *key* the server may still not
@@ -339,28 +337,58 @@ for cport in 3000 4096; do
 done
 printf '%s\n' "$ports_out" | sed 's/^/    | /'
 
-info "8. OpenChamber respawn supervisor running (auto-restart)"
-# OpenChamber runs under a loop marked "supervisor:openchamber" in its argv, so a
-# process exit (self-update/crash) is followed by a restart. Assert exactly one
-# supervisor is alive (guards against duplicates on re-runs). The shared server is
-# NOT supervised — the wrapper starts one instance on demand — so there is no
-# opencode-serve supervisor to check anymore.
-ch_sup="$(in_sbx 'pgrep -c -f "supervisor:openchamber" 2>/dev/null')"
-[ "${ch_sup:-0}" -ge 1 ] 2>/dev/null && ok "openchamber supervisor running (count=$ch_sup)" \
-  || bad "no openchamber supervisor found (auto-restart not active)"
-
-info "9. Sandbox stays 'running' (wrapper entrypoint does not exit) — regression guard"
-# REGRESSION GUARD (the running->stopped bug): the wrapper IS the sandbox
-# entrypoint. If its no-arg path backgrounds the server and RETURNS, PID 1 exits
-# and the sandbox stops on its own moments after create. The fixed wrapper
-# instead holds a foreground `opencode serve` (waits on / execs it) so PID 1
-# stays alive. We can't easily attach the entrypoint from a test, so we assert
-# the *invariant* that makes the entrypoint safe: running the wrapper no-arg,
-# no-TTY BLOCKS (holds the process open) rather than returning. Do it with a
-# bounded timeout; a return within the window is the BUG, a timeout is the FIX.
+info "8. Respawn supervisors running (auto-restart) — server + OpenChamber"
+# BOTH the shared `opencode serve` and OpenChamber run under respawn loops marked
+# "supervisor:opencode-serve" / "supervisor:openchamber" in their argv, so a
+# process exit (self-update/crash) is followed by a restart. Assert EXACTLY one
+# of each is alive (guards against a duplicate respawner on re-runs).
 #
-# `timeout` may be absent on macOS hosts, but this runs INSIDE the sandbox via
-# `sh -c`, where coreutils `timeout` is present. Exit 124 == timed out (good).
+# IMPORTANT: `pgrep -f` matches the whole command line, so a naive
+# `pgrep -f "supervisor:opencode-serve"` also matches THIS probe's own
+# `sh -c '…supervisor:opencode-serve…'` argv — inflating the count by one (the
+# origin of the spurious "count=2"). Break the self-match with the standard
+# bracket trick: `supervisor:opencode[-]serve` matches the running loop's argv
+# but NOT the literal pattern string in our own command line.
+serve_sup="$(in_sbx 'pgrep -c -f "supervisor:opencode[-]serve" 2>/dev/null')"
+case "${serve_sup:-0}" in
+  1) ok "opencode-serve supervisor running (exactly one)" ;;
+  0) bad "no opencode-serve supervisor found (shared server auto-restart not active)" ;;
+  *) bad "found ${serve_sup} opencode-serve supervisors (expected 1 — duplicate respawner?)" ;;
+esac
+ch_sup="$(in_sbx 'pgrep -c -f "supervisor:open[c]hamber" 2>/dev/null')"
+case "${ch_sup:-0}" in
+  1) ok "openchamber supervisor running (exactly one)" ;;
+  0) bad "no openchamber supervisor found (auto-restart not active)" ;;
+  *) bad "found ${ch_sup} openchamber supervisors (expected 1 — duplicate respawner?)" ;;
+esac
+
+info "9. Wrapper holds PID 1 when it IS the entrypoint, exits cleanly otherwise — regression guard"
+# REGRESSION GUARD (the running->stopped bug) for the `acq run` path: there the
+# wrapper IS the sandbox entrypoint (PID 1). If it RETURNED, PID 1 would exit and
+# the sandbox would stop. The wrapper discriminates on `$$`: when it is PID 1 it
+# blocks forever (hold_pid1); when it is NOT PID 1 (run from a shell / `acq exec`,
+# with a detached create's tini keepalive holding the sandbox) it exits cleanly.
+#
+# We can't make the wrapper be PID 1 from a test (`acq exec` gives us a non-PID-1
+# child), so we assert both halves as source invariants AND confirm the live
+# non-PID-1 behavior:
+#   (a) source: the tail is gated on an `is_pid1`/`$$ -eq 1` check, and hold_pid1
+#       is only reached on the PID-1 branch;
+#   (b) live: running the wrapper no-arg + no-TTY via `acq exec` (NOT PID 1)
+#       RETURNS promptly (does not hang), proving the exit-cleanly path.
+wrapper_src="$(in_sbx 'cat ~/.local/bin/opencode 2>/dev/null')"
+if [ -z "$wrapper_src" ]; then
+  bad "could not read ~/.local/bin/opencode from the sandbox to check the PID-1 discriminator"
+else
+  if printf '%s\n' "$wrapper_src" | grep -Eq '\$\$"?[[:space:]]*-eq[[:space:]]*1'; then
+    ok "wrapper discriminates on PID 1 (\$\$ -eq 1) before deciding to hold vs. exit"
+  else
+    bad "wrapper has no \$\$ -eq 1 check — it cannot tell the acq run (PID 1) path from acq exec"
+  fi
+fi
+# Live: from `acq exec` the wrapper is NOT PID 1, so it must RETURN (exit cleanly)
+# rather than hang. A timeout here (rc=124) would mean it wrongly held; a prompt
+# return is the expected non-PID-1 behavior.
 wrapper_probe="$(in_sbx '
   if command -v timeout >/dev/null 2>&1; then
     timeout 8 opencode </dev/null >/dev/null 2>&1
@@ -371,23 +399,22 @@ wrapper_probe="$(in_sbx '
 ')"
 case "$wrapper_probe" in
   *rc=124*)
-    ok "wrapper no-arg path stays in the foreground (entrypoint won't exit → sandbox stays running)" ;;
+    bad "wrapper HUNG when NOT PID 1 (via acq exec); it should exit cleanly on that path" ;;
   *rc=notimeout*)
-    skip "could not run the entrypoint-liveness probe (no 'timeout' in sandbox)" ;;
+    skip "could not run the wrapper-exit probe (no 'timeout' in sandbox)" ;;
   *)
-    bad "wrapper no-arg path RETURNED (${wrapper_probe}); as the entrypoint this exits PID 1 and stops the sandbox"
-    in_sbx 'tail -n 20 "${XDG_STATE_HOME:-$HOME/.local/state}/openchamber/opencode-serve.log"' | sed 's/^/    | /' ;;
+    ok "wrapper exits cleanly when NOT PID 1 (acq exec path returns; ${wrapper_probe})" ;;
 esac
 
 info "10. Sandbox survives an attached TUI being quit — regression guard"
 # REGRESSION GUARD (the TUI-exit stop bug): on the "yes, attach a TUI" path an
 # earlier wrapper `exec`ed `opencode attach`, so the TUI BECAME PID 1 and quitting
-# it stopped the sandbox. The fix runs the TUI as a CHILD and falls through to the
-# same foreground hold, so a quit TUI returns to the wrapper instead of ending the
-# entrypoint. That path only triggers with a TTY (the prompt is TTY-gated), which
-# `acq exec` doesn't give us, so assert the two source invariants that make it
-# safe: (a) the attach line is NOT exec'd, and (b) the script ends by calling
-# hold_pid1. Read the wrapper file that was actually dropped INTO the sandbox.
+# it stopped the sandbox. The fix runs the TUI as a CHILD and, on the PID-1 path,
+# falls through to hold_pid1 — so a quit TUI returns to the wrapper instead of
+# ending the entrypoint. That path only triggers with a TTY (the prompt is
+# TTY-gated), which `acq exec` doesn't give us, so assert the two source
+# invariants that make it safe: (a) the attach line is NOT exec'd, and (b) the
+# PID-1 branch calls hold_pid1. Read the wrapper file dropped INTO the sandbox.
 wrapper_src="$(in_sbx 'cat ~/.local/bin/opencode 2>/dev/null')"
 if [ -z "$wrapper_src" ]; then
   bad "could not read ~/.local/bin/opencode from the sandbox to check TUI-exit survival"
@@ -398,25 +425,28 @@ else
     ok "wrapper runs 'opencode attach' as a child (not exec) — TUI quit won't end the entrypoint"
   fi
   if printf '%s\n' "$wrapper_src" | grep -Eq '^[[:space:]]*hold_pid1[[:space:]]*$'; then
-    ok "wrapper ends by holding PID 1 (hold_pid1), so a quit TUI falls through to the foreground server"
+    ok "wrapper calls hold_pid1 on the PID-1 branch, so a quit TUI keeps the sandbox alive"
   else
-    bad "wrapper does not end in a hold_pid1 call — a quit TUI may let the entrypoint return"
+    bad "wrapper does not call hold_pid1 — a quit TUI may let the entrypoint return"
   fi
 fi
 
-info "11. Sandbox survives the shared server dying — self-heal regression guard"
-# REGRESSION GUARD (the reviewer's must-fix): if the server hold_pid1 holds ever
-# dies (crash/OOM/lost bind race), the loop must (re)launch a server and keep
-# blocking — it must NEVER return, or PID 1 exits and the sandbox stops. Prove it
-# live: bring the server up, KILL it, and confirm a server is answering again
-# afterward (self-heal) AND the sandbox is still reachable.
+info "11. Shared server self-heals when it dies — supervisor regression guard"
+# REGRESSION GUARD: if the shared `opencode serve` dies (crash/OOM), the STARTUP
+# script's supervisor:opencode-serve loop must relaunch it. This is owned by the
+# startup supervisor, NOT the wrapper — so we don't run the wrapper here.
 #
-# We drive a detached wrapper as the "holder" (its hold_pid1 loop re-launches),
-# then kill the serve process out from under it and re-probe :4096.
+# CRITICAL: kill ONLY the serve process, never its supervisor. The supervisor
+# loop's argv is `sh -c 'while :; do … opencode serve --hostname … done'
+# supervisor:opencode-serve …`, so it CONTAINS the substring "opencode serve
+# --hostname". A blunt `pkill -f "opencode serve --hostname"` therefore also
+# kills the respawner — defeating the test (and killing indiscriminately). We
+# instead select PIDs whose argv matches the serve pattern but EXCLUDE anything
+# carrying the "supervisor:" marker, and kill just those. We also capture the
+# supervisor PID first and assert it SURVIVES, so a regression that kills the
+# respawner is caught rather than silently passing.
 health='curl -fsS http://127.0.0.1:4096/global/health >/dev/null 2>&1 && echo yes'
-# Ensure a holder + server are up (step 5 already ran one; this is idempotent).
-in_sbx 'nohup opencode >/dev/null 2>&1 & echo started'
-# Wait for a server to answer before we try to kill it.
+# Confirm a server is up first (step 5 already waited for the startup supervisor).
 heal_pre=""
 pre_deadline=$(( $(date +%s) + 20 ))
 while :; do
@@ -427,22 +457,97 @@ done
 if [ -z "$heal_pre" ]; then
   skip "self-heal guard: no server was up to kill (provider/USAi key likely missing)"
 else
-  # Kill the actual `opencode serve` process (not the wrapper/holder). pkill -f
-  # matches the serve command line; the wrapper's hold_pid1 should relaunch it.
-  in_sbx 'pkill -f "opencode serve --hostname" 2>/dev/null; echo killed'
+  # Record the supervisor PID(s) so we can prove we didn't kill the respawner.
+  sup_before="$(in_sbx 'pgrep -u "$(id -u)" -f "supervisor:opencode-serve" | sort | tr "\n" " "')"
+  # Kill ONLY the serve process: match the serve argv, but drop any PID that also
+  # carries the supervisor marker (the loop) — so the respawner is never touched.
+  # pgrep -f prints matching PIDs; grep -v filters the loop out via a per-PID
+  # /proc/<pid>/cmdline check done inside the sandbox.
+  in_sbx '
+    for pid in $(pgrep -u "$(id -u)" -f "opencode serve --hostname"); do
+      # Skip the supervisor loop: its cmdline contains the marker.
+      if tr "\0" " " </proc/"$pid"/cmdline 2>/dev/null | grep -q "supervisor:opencode-serve"; then
+        continue
+      fi
+      kill "$pid" 2>/dev/null
+    done
+    echo killed
+  '
+  # The supervisor must still be alive after the kill.
+  sup_after="$(in_sbx 'pgrep -u "$(id -u)" -f "supervisor:opencode-serve" | sort | tr "\n" " "')"
+  if [ -z "$sup_after" ]; then
+    bad "the opencode-serve SUPERVISOR was killed by the probe — kill was not precise enough"
+  elif [ "$sup_before" != "$sup_after" ]; then
+    # PID set changed but at least one supervisor survives — note it, don't fail.
+    ok "opencode-serve supervisor survived the kill (before='$sup_before' after='$sup_after')"
+  else
+    ok "opencode-serve supervisor untouched by the kill (only the serve child was killed)"
+  fi
   healed=""
-  heal_deadline=$(( $(date +%s) + 30 ))   # allow reheal loop + serve readiness
+  heal_deadline=$(( $(date +%s) + 40 ))   # allow RESTART_DELAY (5s) + serve readiness
   while :; do
     [ "$(in_sbx "$health")" = "yes" ] && { healed=yes; break; }
     [ "$(date +%s)" -ge "$heal_deadline" ] && break
     sleep "$POLL_INTERVAL"
   done
   if [ -n "$healed" ]; then
-    ok "shared server was re-launched after being killed (hold_pid1 self-healed; PID 1 held)"
+    ok "shared server was re-launched after being killed (supervisor:opencode-serve self-healed)"
   else
-    bad "shared server did NOT come back after being killed — hold_pid1 may have returned (sandbox would stop)"
+    bad "shared server did NOT come back after being killed — supervisor:opencode-serve not respawning"
     in_sbx 'tail -n 20 "${XDG_STATE_HOME:-$HOME/.local/state}/openchamber/opencode-serve.log"' | sed 's/^/    | /'
   fi
+fi
+
+info "12. OpenChamber runs in the FOREGROUND, not a crash loop — regression guard"
+# REGRESSION GUARD (the "OpenChamber is already running on port <N>" crash loop):
+# OpenChamber DAEMONIZES by default and has NO `OPENCHAMBER_NO_DAEMON` env var —
+# it only honors the `--foreground` (alias `--no-daemon`) command-line FLAG. An
+# earlier version set the (nonexistent) env var, so OpenChamber daemonized: its
+# real server reparented to PID 1, detaching from supervisor:openchamber; the
+# foreground child exited immediately; and every respawn then failed with
+# "OpenChamber is already running on port <N>" ~every RESTART_DELAY seconds,
+# forever. Assert both a SOURCE invariant and the LIVE symptom.
+#
+# (a) source: the startup script must invoke openchamber with `--foreground` and
+#     must NOT rely on the dead OPENCHAMBER_NO_DAEMON env var.
+start_src="$(in_sbx 'cat ~/openchamber-start.sh 2>/dev/null')"
+if [ -z "$start_src" ]; then
+  bad "could not read ~/openchamber-start.sh from the sandbox to check the foreground flag"
+else
+  if printf '%s\n' "$start_src" | grep -Eq 'openchamber .*--foreground|openchamber .*--no-daemon'; then
+    ok "startup script runs openchamber with --foreground (supervisor can see it exit)"
+  else
+    bad "startup script does NOT pass --foreground to openchamber — it will daemonize and crash-loop"
+  fi
+  # Match the env var being SET (`OPENCHAMBER_NO_DAEMON=…`), and ignore comment
+  # lines — the fixed script MENTIONS the dead var in an explanatory comment, and
+  # a bare `grep OPENCHAMBER_NO_DAEMON` would false-positive on that prose.
+  if printf '%s\n' "$start_src" | grep -v '^[[:space:]]*#' | grep -Eq 'OPENCHAMBER_NO_DAEMON[[:space:]]*='; then
+    bad "startup script still sets OPENCHAMBER_NO_DAEMON (no such env var — silent no-op; use --foreground)"
+  else
+    ok "startup script does not rely on the nonexistent OPENCHAMBER_NO_DAEMON env var"
+  fi
+fi
+# (b) live: sample the OpenChamber log twice, a bit more than RESTART_DELAY apart,
+#     and assert the "already running on port" restart marker is NOT accumulating.
+#     A healthy foreground server produces a stable log; the crash loop appends a
+#     new "[supervisor] starting openchamber" + "already running" pair every cycle.
+crash_re='already running on port'
+c1="$(in_sbx "grep -c '$crash_re' /tmp/openchamber.log 2>/dev/null || echo 0")"
+sleep 8   # > RESTART_DELAY (default 5s): a crash loop would add at least one more
+c2="$(in_sbx "grep -c '$crash_re' /tmp/openchamber.log 2>/dev/null || echo 0")"
+# Normalize to integers (in_sbx can return blank on a transient exec miss).
+c1=${c1:-0}; c2=${c2:-0}
+case "$c1$c2" in *[!0-9]*) c1=0; c2=0 ;; esac
+if [ "$c2" -gt "$c1" ]; then
+  bad "OpenChamber is CRASH-LOOPING ('$crash_re' grew $c1 -> $c2 across ${POLL_INTERVAL}s+) — it daemonized instead of running foreground"
+  in_sbx 'tail -n 12 /tmp/openchamber.log' | sed 's/^/    | /'
+elif [ "$c2" -gt 0 ]; then
+  # Some historical markers may exist from before it settled, but they're not
+  # growing — treat a stable count as healthy (not a fail).
+  ok "OpenChamber not crash-looping (stable '$crash_re' count=$c2, not growing)"
+else
+  ok "OpenChamber not crash-looping (no 'already running on port' markers)"
 fi
 
 info "Summary"

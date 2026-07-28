@@ -1,0 +1,279 @@
+#!/usr/bin/env bash
+#
+# detach-probe — settle ONE question empirically, on a real host:
+#
+#   Can we bring this kit's sandbox up WITHOUT gluing it to a foreground
+#   terminal, and does it STAY in the "running" state on its own?
+#
+# ESTABLISHED ANSWER (sbx v0.35.0, macOS): NO. A detached, session-less agent
+# sandbox is AUTO-STOPPED by sbx ~30s after its last session disconnects (the
+# daemon log shows "session disconnected, deferring auto-stop delay:30000000000"
+# -> "auto-stop grace period expired" -> "auto-stopped runtime after last session
+# disconnected"). This is INDEPENDENT of PID 1 (which is a tini keepalive): sbx
+# measures idleness by SESSION CONNECTIONS, not PID-1 liveness, and there is no
+# sbx knob to disable/extend the grace. The supported path is `acq run`, which
+# holds a session. See docs/decisions/startup-owns-shared-server.md (Correction).
+#
+# This probe therefore now serves as a REGRESSION/ENVIRONMENT check: it should
+# observe the auto-stop (PREMISE DOES NOT HOLD) on a stock sbx. If a future sbx
+# adds a keep-alive knob (or changes the default) and a detached sandbox starts
+# staying up, this probe will flip to "PREMISE HOLDS" — a signal to revisit the
+# `acq run`-only guidance. It was originally written expecting the premise to
+# hold; it did not, and the header below is kept as the historical question.
+#
+# It answers four concrete sub-questions and prints a verdict:
+#
+#   Q1. Does `acq create` (no attach) leave the sandbox RUNNING for the whole
+#       window, or does it flip to STOPPED on its own? (Two causes: PID-1 exit
+#       within seconds, OR sbx auto-stop-on-idle at ~30s — see HOLD_SECONDS.)
+#   Q2. With NOBODY attached, does the entrypoint keep PID 1 alive so the
+#       sandbox stays up? (Observation: on the detached `acq create` path PID 1
+#       is a `tini -- sleep infinity` keepalive shim, NOT this kit's wrapper —
+#       the wrapper is only the entrypoint on the interactive `acq run` path.
+#       NOTE: PID 1 staying alive is NOT sufficient — sbx auto-stop ignores it.)
+#   Q3. Does the kit's `startup` COMMAND actually FIRE on the detached create
+#       path (nobody attached)? The whole terminal-free / one-command UX rests
+#       on this: if the startup hook runs on `acq create`, moving the shared
+#       `opencode serve` into it means a single `acq create` brings the server
+#       (and OpenChamber) up with no `acq exec` step. We prove it by looking for
+#       an artifact only `openchamber-start.sh` writes (its install log) and,
+#       corroborating, the OpenChamber supervisor it launches.
+#   Q4. Can we reach the sandbox with `acq exec` (no TTY) while nobody is
+#       attached — i.e. is it usable headless?
+#
+# It deliberately NEVER runs `acq run` (which would attach your terminal).
+# Everything here is detached: `acq create` + `acq exec` + `acq ls`.
+#
+# IMPORTANT (why HOLD_SECONDS defaults high): this probe originally watched for
+# only 15s and so MISSED sbx's AUTO-STOP-ON-IDLE. sbx stops a sandbox that has
+# NO attached session after a grace period (~30-40s on v0.35.0/macOS) — the
+# daemon log shows "auto-stop grace period expired" / "auto-stopped runtime
+# after last session disconnected". This is INDEPENDENT of PID 1: the tini
+# keepalive does NOT prevent it, because sbx measures idleness by session
+# connections, not by whether PID 1 is alive. A 15s window is shorter than the
+# grace, so the probe saw "running" and wrongly reported PREMISE HOLDS. The
+# window now defaults to 90s (> grace) precisely to catch this. If your `acq exec`
+# calls create/refresh a session, avoid polling via `acq exec` here (we poll via
+# `acq ls`) so the probe itself doesn't keep the sandbox artificially alive.
+#
+# This does NOT test OpenChamber, ports, the shared server, or the one-shot
+# script — scripts/verify covers the full end-to-end. This probe is small on
+# purpose: prove (or disprove) the detach premise, nothing else.
+#
+# USAGE (from a host with acq installed + logged in):
+#   path/to/openchamber/scripts/detach-probe            # run the probe
+#   KEEP=1 path/to/.../scripts/detach-probe             # keep the sandbox
+#   HOLD_SECONDS=30 path/to/.../scripts/detach-probe    # watch it longer
+#
+# EXIT: 0 if the detach premise HOLDS (sandbox created detached, stayed
+# running with nobody attached, AND the startup hook fired on its own); 1 if it
+# does not; 2 if it could not be determined (acq missing, create failed, etc.) —
+# an honest BLOCKED, not a false pass.
+
+set -uo pipefail
+
+# --- config ------------------------------------------------------------------
+KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+SBX_NAME="openchamber-detach-probe-$$"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/openchamber-detach.XXXXXX")"
+CREATE_LOG="$WORK/create.log"
+KEEP="${KEEP:-0}"
+# How long to watch the sandbox stay up with NOBODY attached.
+#
+# TWO distinct failure modes can flip a detached sandbox to "stopped", and this
+# window MUST be long enough to catch BOTH:
+#
+#   1. PID-1 exits immediately (the old running->stopped bug): the entrypoint
+#      returns/execs a TUI that quits, PID 1 dies, sandbox stops within SECONDS.
+#      A short window catches this.
+#   2. sbx AUTO-STOP-ON-IDLE (the mode this probe originally MISSED): sbx runs a
+#      grace timer for a sandbox with NO attached session and stops the VM when
+#      it expires. This is INDEPENDENT of PID 1 — a tini keepalive does NOT
+#      prevent it, because "idle" is measured by session connections, not by
+#      whether PID 1 is alive. The daemon log shows
+#      "auto-stop grace period expired, stopping runtime" then
+#      "auto-stopped runtime after last session disconnected".
+#      Observed grace on sbx v0.35.0 (macOS): ~30-40s after a detached create.
+#
+# The default MUST exceed the auto-stop grace, or the probe reports a false
+# "PREMISE HOLDS" (exactly what happened at the old 15s default — shorter than
+# the grace — which is why auto-stop-on-idle went undetected). If sbx's grace is
+# configurable on your host, set HOLD_SECONDS comfortably above it.
+HOLD_SECONDS="${HOLD_SECONDS:-90}"
+POLL_INTERVAL="${POLL_INTERVAL:-2}"
+# How long to wait for evidence the startup hook fired. First boot ALSO installs
+# OpenChamber (npm install of a native dep), which can take a while, so this is
+# generous. We're only checking that the hook RAN, not that OpenChamber is
+# fully up, so the install-log artifact usually appears fast.
+STARTUP_TIMEOUT="${STARTUP_TIMEOUT:-120}"
+
+# --- output helpers ----------------------------------------------------------
+pass=0; fail=0; blocked=0
+ok()    { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass+1)); }
+bad()   { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail+1)); }
+block() { printf '  \033[33mBLOCKED\033[0m %s\n' "$1"; blocked=$((blocked+1)); }
+info()  { printf '\n\033[1m%s\033[0m\n' "$1"; }
+note()  { printf '       %s\n' "$1"; }
+
+cleanup() {
+  if [ "$KEEP" = "1" ]; then
+    printf '\nKEEP=1 set; leaving sandbox %s and %s in place.\n' "$SBX_NAME" "$WORK" >&2
+    printf 'Inspect:  acq ls | grep %s ; acq exec %s -- ps -o pid,ppid,comm\n' "$SBX_NAME" "$SBX_NAME" >&2
+    printf 'Remove:   acq rm %s ; rm -rf %s\n' "$SBX_NAME" "$WORK" >&2
+    return
+  fi
+  acq rm "$SBX_NAME" >/dev/null 2>&1 || true
+  rm -rf "$WORK" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT INT TERM
+
+# --- helpers -----------------------------------------------------------------
+# Print the acq ls status line for our sandbox (empty if it's gone / stopped
+# such that it no longer lists — we handle both).
+sbx_status_line() { acq ls 2>/dev/null | grep -E "(^|[[:space:]])$SBX_NAME([[:space:]]|$)" || true; }
+
+# Is the sandbox currently reported "running"? We look for the word "running"
+# on our sandbox's ls row. (acq ls prints a STATUS column.)
+is_running() {
+  local line; line="$(sbx_status_line)"
+  [ -n "$line" ] || return 1
+  printf '%s' "$line" | grep -qiw running
+}
+
+# --- 0. preconditions --------------------------------------------------------
+info "0. Preconditions"
+if ! command -v acq >/dev/null 2>&1; then
+  block "acq not on PATH — install acq and log in, then re-run. Cannot test the detach premise."
+  info "Verdict"; note "UNDETERMINED (BLOCKED): acq unavailable."
+  exit 2
+fi
+ok "acq is on PATH"
+[ -f "$KIT_DIR/spec.yaml" ] && ok "kit spec.yaml present ($KIT_DIR)" || { bad "spec.yaml missing under $KIT_DIR"; exit 2; }
+
+# --- 1. create the sandbox DETACHED (never `acq run`) ------------------------
+info "1. Create the sandbox with the kit, DETACHED (acq create, no attach)"
+note "This applies the kit and starts the sandbox in the background. Your"
+note "terminal is NEVER attached to the entrypoint — that is the whole point."
+if ACQ_EXTRA_KITS="$KIT_DIR" acq create --name "$SBX_NAME" opencode "$WORK" >"$CREATE_LOG" 2>&1; then
+  ok "acq create returned 0 (sandbox created without attaching)"
+else
+  bad "acq create failed (exit $?). See below; cannot test the premise."
+  sed 's/^/    | /' "$CREATE_LOG" >&2
+  info "Verdict"; note "UNDETERMINED (BLOCKED): create failed before we could observe lifecycle."
+  exit 2
+fi
+
+# --- Q1/Q2. does it STAY running with nobody attached? -----------------------
+info "2. Q1/Q2 — Sandbox stays 'running' on its own (nobody attached)"
+note "Watching '${SBX_NAME}' for ${HOLD_SECONDS}s. The running->stopped bug"
+note "surfaces within seconds of create when the entrypoint returns/exits."
+# First observation: is it running at all right after create?
+if is_running; then
+  ok "sandbox is 'running' immediately after detached create"
+else
+  cur="$(sbx_status_line)"
+  bad "sandbox is NOT running right after create (status line: '${cur:-<not listed>}')"
+  note "The entrypoint may have exited immediately (bare no-TTY wrapper returning)."
+fi
+
+# Watch it hold that state for the full window. Any flip to non-running is the bug.
+deadline=$(( $(date +%s) + HOLD_SECONDS ))
+stayed_up=1
+last_line=""
+while [ "$(date +%s)" -lt "$deadline" ]; do
+  if ! is_running; then
+    stayed_up=0
+    last_line="$(sbx_status_line)"
+    break
+  fi
+  sleep "$POLL_INTERVAL"
+done
+if [ "$stayed_up" -eq 1 ]; then
+  ok "sandbox STAYED 'running' for the full ${HOLD_SECONDS}s with nobody attached"
+else
+  bad "sandbox left 'running' during the watch (status: '${last_line:-<not listed / stopped>}')"
+  note "The detached premise failed. TWO causes are possible — check the daemon log:"
+  note "  1. PID 1 exited (running->stopped bug): sandbox stops within a few SECONDS."
+  note "  2. sbx AUTO-STOP-ON-IDLE: stops ~30-40s in with NO session attached; the"
+  note "     daemon log shows 'auto-stop grace period expired' / 'auto-stopped runtime"
+  note "     after last session disconnected'. tini as PID 1 does NOT prevent this."
+  note "Daemon log (macOS): ~/Library/Application Support/com.docker.sandboxes/**/daemon.log"
+fi
+
+# --- Q3. did the kit's startup COMMAND fire on the detached create path? -----
+info "3. Q3 — Kit 'startup' command fires on detached create (nobody attached)"
+note "The terminal-free one-command UX depends on this: if the startup hook runs"
+note "on 'acq create', the shared 'opencode serve' can live there (no acq exec)."
+note "Evidence = an artifact only openchamber-start.sh writes (its install log),"
+note "plus, corroborating, the OpenChamber supervisor it launches."
+if [ "$stayed_up" -eq 1 ] && is_running; then
+  startup_fired=0
+  startup_deadline=$(( $(date +%s) + STARTUP_TIMEOUT ))
+  while [ "$(date +%s)" -lt "$startup_deadline" ]; do
+    # The install log is written unconditionally by openchamber-start.sh's
+    # first-boot install block (curl ... -o ... 2>/tmp/openchamber-install.log),
+    # so its existence is proof the startup command executed at least that far.
+    if [ -n "$(acq exec "$SBX_NAME" -- sh -c 'test -f /tmp/openchamber-install.log && echo yes' </dev/null 2>/dev/null || true)" ]; then
+      startup_fired=1
+      break
+    fi
+    sleep "$POLL_INTERVAL"
+  done
+  if [ "$startup_fired" -eq 1 ]; then
+    ok "kit startup command fired on detached create (found /tmp/openchamber-install.log)"
+    # Corroborating (informational, not separately scored): the supervisor the
+    # startup script launches. Seeing it strengthens the conclusion that the
+    # hook not only ran but reached its supervise step.
+    if [ -n "$(acq exec "$SBX_NAME" -- sh -c 'pgrep -f "supervisor:openchamber" >/dev/null 2>&1 && echo yes' </dev/null 2>/dev/null || true)" ]; then
+      note "corroborated: OpenChamber supervisor (supervisor:openchamber) is running"
+    else
+      note "note: OpenChamber supervisor not seen yet (install may still be in flight)"
+    fi
+  else
+    bad "no evidence the startup command ran within ${STARTUP_TIMEOUT}s (no install log)"
+    note "If the startup hook does NOT fire on 'acq create', moving the server into"
+    note "it will NOT give a one-command UX — the plan would need a re-think."
+  fi
+else
+  block "skipped: sandbox was not running, so the startup-hook check is moot"
+fi
+
+# --- Q4. is it reachable headless via acq exec? ------------------------------
+info "4. Q4 — Sandbox is usable headless (acq exec works, nobody attached)"
+if [ "$stayed_up" -eq 1 ] && is_running; then
+  # A trivial non-TTY exec. If this returns our sentinel, exec works while
+  # detached. `</dev/null` so it never blocks waiting on stdin.
+  exec_out="$(acq exec "$SBX_NAME" -- sh -c 'echo detach-probe-ok' </dev/null 2>/dev/null || true)"
+  if printf '%s' "$exec_out" | grep -q 'detach-probe-ok'; then
+    ok "acq exec reached the detached sandbox and ran a command"
+    # Bonus (informational, not scored): show PID 1 so you can SEE what is
+    # holding the sandbox open. Useful when interpreting the verdict.
+    pid1="$(acq exec "$SBX_NAME" -- sh -c 'cat /proc/1/comm 2>/dev/null; echo " (args:) "; tr "\0" " " </proc/1/cmdline 2>/dev/null' </dev/null 2>/dev/null || true)"
+    [ -n "$pid1" ] && note "PID 1 in the sandbox: $pid1"
+  else
+    bad "acq exec did not return the sentinel (sandbox not usable headless?)"
+  fi
+else
+  block "skipped: sandbox was not running, so a headless exec check is moot"
+fi
+
+# --- verdict -----------------------------------------------------------------
+info "Verdict"
+if [ "$fail" -eq 0 ] && [ "$pass" -ge 1 ] && [ "$blocked" -eq 0 ]; then
+  printf '  \033[32mPREMISE HOLDS.\033[0m The sandbox came up DETACHED (acq create), stayed\n'
+  printf '  running with nobody attached, AND the kit startup hook fired on its own —\n'
+  printf '  moving the shared server into openchamber-start.sh gives a one-command UX.\n'
+  exit 0
+elif [ "$fail" -eq 0 ] && [ "$blocked" -gt 0 ]; then
+  printf '  \033[33mUNDETERMINED (BLOCKED).\033[0m Some checks could not run (see BLOCKED above).\n'
+  printf '  Re-run on a host where acq is installed/logged in and create succeeds.\n'
+  exit 2
+else
+  printf '  \033[31mPREMISE DOES NOT HOLD.\033[0m A detached sandbox did not stay running on its\n'
+  printf '  own for the full window. Either PID 1 exited (running->stopped bug) OR sbx\n'
+  printf '  AUTO-STOP-ON-IDLE stopped the session-less VM after its grace period (check\n'
+  printf '  the daemon log to tell which — see the note above). If it is auto-stop, the\n'
+  printf '  terminal-free "acq create alone keeps it up" UX is NOT viable on this sbx\n'
+  printf '  without extending/disabling the grace or keeping a session attached (acq run).\n'
+  exit 1
+fi
