@@ -88,3 +88,18 @@ agentContext: |
 backend_shortcuts:
   sbx: {}
   msb: {}
+
+# Bundle provenance (quickstart#235). Declares that this kit is part of the
+# `acq-builtin` bundle so a consumer (acq) can detect an installed sandbox
+# bundle older than the locally approved PATTERNS_KIT_REF and offer a safe
+# refresh. The applied commit SHA + timestamp + backend are recorded by the
+# consumer inside the sandbox at apply time, NOT here.
+provenance:
+  repo: GSA-TTS/agentic-coding-patterns
+  bundle: acq-builtin
+  bundle_version: "1"
+  kit_names:
+    - usai-provider
+    - agentic-coding-playbook
+    - zscaler-ca-certificate
+    - git-ssh-sign
