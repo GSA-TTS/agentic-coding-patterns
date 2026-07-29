@@ -167,6 +167,37 @@
         "msb": { "type": "object" },
         "ppp": { "type": "object" }
       }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional bundle-provenance metadata for the built-in kit bundle (quickstart#235). Declares WHICH bundle this kit belongs to so a consumer (acq) can detect an installed sandbox bundle that is older than the locally approved PATTERNS_KIT_REF and offer a safe refresh. The applied commit SHA, timestamp, and backend are recorded by the CONSUMER inside the sandbox at apply time — NOT here — because the committed spec cannot know the ref it will be fetched at.",
+      "properties": {
+        "repo": {
+          "type": "string",
+          "description": "Source repository in owner/name form (e.g. GSA-TTS/agentic-coding-patterns).",
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+        },
+        "bundle": {
+          "type": "string",
+          "description": "Logical bundle name this kit is part of (e.g. acq-builtin).",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+        },
+        "bundle_version": {
+          "type": "string",
+          "description": "Bundle schema/version string, bumped when the bundle's shape changes in a way consumers must notice (semver or an integer-as-string).",
+          "pattern": "^[0-9]+(?:\\.[0-9]+){0,2}$"
+        },
+        "kit_names": {
+          "type": "array",
+          "description": "The built-in kit names that compose the bundle, for consumer cross-checks.",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          },
+          "uniqueItems": true
+        }
+      }
     }
   }
 }
