@@ -57,7 +57,7 @@ quality_gates:
 triggers:
   - "dependencies"
   - "supply chain"
-  - "vulnerabilities"
+  - "dependency vulnerabilities"
   - "CVE"
   - "npm audit"
   - "pip audit"

@@ -132,6 +132,7 @@ routing:
     - "owasp review"
     - "vulnerability review"
     - "security code review"
+  priority: 60
 ---
 
 # Skill: Secure Code Review
