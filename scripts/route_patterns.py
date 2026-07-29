@@ -51,13 +51,15 @@ P_AVOID = -100
 P_DELEGATED = -100
 P_DEPRECATED = -100
 
-# A workflow that covers the requested outcome is preferred over assembling
-# skills; a prompt is only a fallback. The workflow nudge is sized to overcome a
-# single extra trigger/alias hit on a competing renderer skill (W_TRIGGER_MATCH),
-# so an outcome-level request ("create an executive one-pager") routes to the
-# design-artifact workflow, while a narrow skill-only request still wins on
-# stronger facet matches. Encoded as a small type nudge, applied only to
-# candidates that already have a substantive match.
+# A workflow that covers the requested OUTCOME is preferred over assembling
+# skills; a prompt is only a fallback. The workflow nudge is applied ONLY when
+# the workflow's output artifact matches the request (see score_candidate) — i.e.
+# it genuinely delivers what was asked — so an outcome-level request ("create an
+# executive one-pager") routes to the design-artifact workflow, while a request
+# that merely shares a task/input with a broad workflow (a plain doc review, an
+# OWASP code review) still routes to the specific skill. Sized below one output
+# match (W_OUTPUT_MATCH) so it breaks ties toward the workflow but never overrides
+# a skill that matched an output the workflow did not.
 TYPE_NUDGE = {"workflow": 12, "skill": 0, "prompt": -3, "agent": -5, "lesson": -50}
 
 
@@ -310,17 +312,44 @@ def score_candidate(cand: Candidate, facets: RequestFacets) -> Candidate:
 
     # The type-nudge and recommended bonus are TIE-BREAKERS, not signals — they
     # only apply once the candidate has a real facet/keyword match. Otherwise a
-    # workflow with zero relevance would score +3 and be "selected" (e.g. against
-    # a not-yet-classified INDEX). Require a substantive match first.
+    # workflow with zero relevance would score +nudge and be "selected".
     has_real_match = bool(cand.reasons) and any(
         r.startswith(("output match", "task match", "input match", "alias match", "trigger match"))
         for r in cand.reasons
     )
-    if has_real_match:
-        cand.score += TYPE_NUDGE.get(cand.type, 0)
-    else:
+    if not has_real_match:
         cand.score = 0
         cand.reasons.clear()
+        return cand
+
+    # The workflow nudge implements "prefer the outcome": a workflow wins the
+    # tie-break only when it produces the requested output AND the request looks
+    # like a fresh outcome ask rather than a mid-pipeline skill operation. A
+    # request that already supplies an intermediate input artifact (a storyboard,
+    # a visual-contract — i.e. the caller is mid-pipeline) is a skill-level op, so
+    # the specific renderer skill wins; a request with NO such intermediate input
+    # ("make a slide deck for the review", "orchestrate a scan") is an outcome ask
+    # and routes to the workflow. This keeps a broad review workflow from
+    # displacing a specific review skill on a bare "review" too, since those
+    # requests carry a concrete source input the workflow does not uniquely own.
+    #
+    # Concretely: nudge when the workflow matched the output AND (the request
+    # asked for orchestration OR the request supplied none of this workflow's
+    # declared input artifacts — meaning the caller wants the whole pipeline, not
+    # one stage). Non-workflow nudges (prompt/agent/lesson) always apply.
+    if cand.type == "workflow":
+        r_inputs_set = set(routing.get("input_artifacts") or [])
+        request_inputs = set(facets.input_artifacts)
+        wants_orchestration = "orchestrate" in facets.task_types
+        # "fresh outcome" = the request did not hand us an input this workflow
+        # consumes (so it's not asking for a single mid-pipeline stage) AND it is
+        # not a bare atomic operation on a concrete source the workflow shares.
+        fresh_outcome = not (request_inputs & r_inputs_set) and not request_inputs
+        if matched_outputs and (wants_orchestration or fresh_outcome):
+            cand.score += TYPE_NUDGE["workflow"]
+            cand.reasons.append("workflow delivers requested outcome")
+    else:
+        cand.score += TYPE_NUDGE.get(cand.type, 0)
     return cand
 
 

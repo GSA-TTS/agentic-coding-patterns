@@ -439,6 +439,7 @@ patterns:
       - owasp review
       - security code review
       - vulnerability review
+      priority: 60
   - path: skills/communications/slide-deck/SKILL.md
     id: slide-deck
     title: Slide Deck
