@@ -60,6 +60,14 @@ _ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 # alphanumerics and . _ / - are permitted. Mirrors the schema's path pattern.
 _SAFE_PATH_RE = re.compile(r"^/[A-Za-z0-9._/-]+$")
 
+# Safe charset for a publishedPorts[].name label. Mirrors the schema's name
+# pattern: alphanumerics . _ - only, 1-64 chars. A name may be surfaced by a
+# backend adapter (labels, generated primitives), so keep it metacharacter-free.
+_PORT_NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+
+# Valid transport protocols for a published port (mirrors the schema enum).
+_PORT_PROTOCOLS = {"tcp", "udp"}
+
 # Extensions that indicate a kit-provided payload/script a command expects to
 # have been dropped by files[] (as opposed to a base-image binary, a runtime-
 # generated file, or a system destination path).
@@ -83,6 +91,11 @@ def _referenced_payload_paths(commands: list) -> set[str]:
                 continue
             found.update(_PATH_RE.findall(token))
     return found
+
+
+def _is_valid_port(value: object) -> bool:
+    """A port is an integer in 1..65535. A bool is not a valid port here."""
+    return isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= 65535
 
 
 def validate_kit(kit_dir: Path, schema: dict) -> tuple[list[str], list[str]]:
@@ -152,6 +165,65 @@ def validate_kit(kit_dir: Path, schema: dict) -> tuple[list[str], list[str]]:
 
     if not (kit_dir / "README.md").exists():
         errors.append(f"{kit_dir.name}: missing README.md (parity note required)")
+
+    # publishedPorts[] field-level checks (ADR-0014, quickstart repo). The
+    # schema already constrains these, but — as with environment/path above —
+    # we ALSO check them here so a bad value is reported with a clear per-entry
+    # message at the gate (rather than only a terse jsonschema path). A port
+    # published to the host is a boundary primitive: report offenders, reject.
+    published_ports = spec.get("publishedPorts")
+    if published_ports is not None:
+        if not isinstance(published_ports, list):
+            errors.append(
+                f"{kit_dir.name}: publishedPorts must be an array of port-mapping objects "
+                f"(got {type(published_ports).__name__})"
+            )
+        else:
+            for i, entry in enumerate(published_ports):
+                if not isinstance(entry, dict):
+                    errors.append(
+                        f"{kit_dir.name}: publishedPorts[{i}] must be an object "
+                        f"(got {type(entry).__name__})"
+                    )
+                    continue
+                # guest: required int in 1..65535.
+                if "guest" not in entry:
+                    errors.append(f"{kit_dir.name}: publishedPorts[{i}]: missing required 'guest' port")
+                else:
+                    guest = entry["guest"]
+                    if not _is_valid_port(guest):
+                        errors.append(
+                            f"{kit_dir.name}: publishedPorts[{i}].guest must be an integer 1..65535 "
+                            f"(got {guest!r})"
+                        )
+                # host: optional int in 1..65535 (defaults to guest when omitted).
+                if "host" in entry and not _is_valid_port(entry["host"]):
+                    errors.append(
+                        f"{kit_dir.name}: publishedPorts[{i}].host must be an integer 1..65535 "
+                        f"(got {entry['host']!r})"
+                    )
+                # protocol: optional, tcp|udp (defaults to tcp when omitted).
+                if "protocol" in entry and entry["protocol"] not in _PORT_PROTOCOLS:
+                    errors.append(
+                        f"{kit_dir.name}: publishedPorts[{i}].protocol must be one of "
+                        f"{sorted(_PORT_PROTOCOLS)} (got {entry['protocol']!r})"
+                    )
+                # name: optional, safe charset only.
+                if "name" in entry and not _PORT_NAME_RE.match(str(entry["name"])):
+                    errors.append(
+                        f"{kit_dir.name}: publishedPorts[{i}].name has an unsafe or invalid value "
+                        f"(allowed: alphanumerics . _ -, 1-64 chars): {entry['name']!r}"
+                    )
+
+    # commands[].background field-level check (ADR-0014, quickstart repo). Marks
+    # a startup command that must be detached rather than awaited. Optional; when
+    # present it MUST be a boolean (default false when omitted).
+    for i, c in enumerate(spec.get("commands", []) or []):
+        if isinstance(c, dict) and "background" in c and not isinstance(c["background"], bool):
+            errors.append(
+                f"{kit_dir.name}: commands[{i}].background must be a boolean "
+                f"(got {type(c['background']).__name__})"
+            )
 
     # Best-effort commands[] ↔ files[] consistency: a kit-owned payload path
     # (e.g. /home/agent/foo.sh) referenced by a command but dropped by no

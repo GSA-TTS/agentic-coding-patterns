@@ -129,6 +129,45 @@
               "type": "string"
             },
             "description": "argv form (list of strings). To run a shell snippet, use [\"sh\", \"-c\", \"...\"]."
+          },
+          "background": {
+            "type": "boolean",
+            "default": false,
+            "description": "When true, run this command detached rather than awaited — for a startup command whose process never exits (e.g. a supervisor loop) so it must not block sandbox start. Neutral vocabulary: each backend maps this to its native background/detached hook. Defaults to false (the command is awaited)."
+          }
+        }
+      }
+    },
+    "publishedPorts": {
+      "type": "array",
+      "description": "Guest ports to publish to the host. Each backend maps these to its native port-publish primitive (e.g. sbx port-publish). Host loopback binding and per-sandbox ephemeral host ports are a backend concern; the neutral spec only declares the guest port, optional fixed host port, protocol, and a name.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["guest"],
+        "properties": {
+          "guest": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "description": "Guest (container) port to publish. Required, 1..65535."
+          },
+          "host": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "description": "Fixed host port to bind. Optional; when omitted the backend defaults it to the guest value (or an ephemeral host port, backend's choice). 1..65535."
+          },
+          "protocol": {
+            "type": "string",
+            "enum": ["tcp", "udp"],
+            "default": "tcp",
+            "description": "Transport protocol. Optional; conceptually defaults to \"tcp\" when omitted."
+          },
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$",
+            "description": "Optional human-readable label for the mapping (e.g. \"opencode-server\"). Safe charset only: alphanumerics . _ -, 1-64 chars."
           }
         }
       }
