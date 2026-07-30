@@ -31,8 +31,34 @@ const DISPLAY_NAME_OVERRIDES = {
 
 const DEFAULT_TEMPLATE_PATH = path.join(KIT_ROOT, "files/home/usai-config/opencode.jsonc")
 const DEFAULT_FIXTURE_PATH = path.join(KIT_ROOT, "tests/fixtures/usai-models.json")
-const MODELS_DEV_URL = "https://models.dev/models.json"
+// models.dev/api.json is the nested, PROVIDER-KEYED catalog:
+//   { "<provider>": { id, name, models: { "<modelId>": { limit, cost, ... } } } }
+// We use the nested form (not the flat models.json) so we can source pricing
+// from the SPECIFIC backend USAi routes each vendor through — Anthropic via
+// Amazon Bedrock, OpenAI via Azure, Gemini via Google Vertex — since the same
+// model costs different amounts on different backends.
+const MODELS_DEV_URL = "https://models.dev/api.json"
 const USAI_MODELS_URL = "https://api.gsa.usai.gov/api/v1/models"
+
+// USAi backend routing → models.dev provider key. USAi serves OpenAI models
+// from Azure, Gemini from Vertex, and the rest (incl. Anthropic and Meta) from
+// Bedrock. `fallback` providers are searched if the primary has no match, so
+// limit/cost enrichment never regresses to nothing for a known vendor.
+const VENDOR_PROVIDER_MAP = {
+  anthropic: { primary: "amazon-bedrock", fallback: ["anthropic"] },
+  openai: { primary: "azure", fallback: ["openai"] },
+  google: { primary: "google-vertex", fallback: ["google"] },
+  meta: { primary: "amazon-bedrock", fallback: ["meta", "llama"] },
+  cohere: { primary: "cohere", fallback: [] },
+  other: { primary: null, fallback: [] },
+}
+
+// Cost keys OpenCode's config schema (ConfigProviderV1.Model.cost) accepts.
+// The schema is CLOSED — it rejects any other key — so we must NOT copy
+// models.dev extras like `input_audio`, `output_audio`, `reasoning`, or the
+// `tiers` array, even though models.dev provides them. Only these scalars and
+// the nested `context_over_200k` (same closed key set) are allowed.
+const COST_SCALAR_KEYS = ["input", "output", "cache_read", "cache_write"]
 
 // Network hardening limits (Issue #138). Remote feeds (USAi API, models.dev)
 // are third-party content written into committed config, so we bound time and
@@ -193,6 +219,13 @@ function normalizeModelId(id) {
 
 /**
  * Extract family and version tokens from a model ID.
+ *
+ * Robust to backend-specific prefixes and infixes that models.dev carries for
+ * hosted providers — e.g. Bedrock's `anthropic.claude-opus-4-8` /
+ * `us.meta.llama4-maverick-...` and Vertex's `meta/llama-4-...`. We scan every
+ * token (not just a leading family word) and also detect the family by
+ * substring so a prefixed vendor name (`llama4`, `claude-...`) still resolves.
+ *
  * @param {string} id - Model ID
  * @returns {{ family: string, version: number[], variant: string }}
  */
@@ -206,8 +239,9 @@ function extractModelTokens(id) {
   const versionParts = []
 
   for (const part of parts) {
-    if (/^(claude|gpt|gemini|llama|cohere)$/i.test(part)) {
-      family = part
+    if (/^(claude|gpt|gemini|llama\d*|cohere|command)$/i.test(part)) {
+      // Normalize "llama4"/"command" spellings to the canonical family token.
+      family = /^llama/i.test(part) ? "llama" : /^command$/i.test(part) ? "cohere" : part
     } else if (/^(opus|sonnet|haiku|pro|flash|mini|nano|maverick)$/i.test(part)) {
       variant = part
     } else if (/^\d+$/.test(part)) {
@@ -215,24 +249,37 @@ function extractModelTokens(id) {
     }
   }
 
+  // Fallback: catch a family embedded in a compound token (e.g. "llama4",
+  // "gpt5") that the exact-word test above missed.
+  if (!family) {
+    if (/claude/i.test(normalized)) family = "claude"
+    else if (/gpt/i.test(normalized)) family = "gpt"
+    else if (/gemini/i.test(normalized)) family = "gemini"
+    else if (/llama/i.test(normalized)) family = "llama"
+    else if (/cohere|command/i.test(normalized)) family = "cohere"
+  }
+
   return { family, version: versionParts, variant }
 }
 
 /**
- * Find the best matching model in models.dev catalog for a USAI model ID.
+ * Find the best matching model in a models.dev catalog for a USAI model ID.
  * @param {string} usaiId - USAI model ID (e.g., "claude_4_5_opus")
  * @param {Object} catalog - models.dev catalog keyed by model ID
  * @returns {{ id: string, data: Object } | null}
  */
 function findModelsDevMatch(usaiId, catalog) {
   const usaiTokens = extractModelTokens(usaiId)
+  const usaiNorm = normalizeModelId(usaiId)
+  const usaiHasLite = /lite/.test(usaiNorm)
 
   // Score each catalog entry
   let bestMatch = null
-  let bestScore = 0
+  let bestScore = -Infinity
 
   for (const [catalogId, data] of Object.entries(catalog)) {
     const catalogTokens = extractModelTokens(catalogId)
+    const catalogNorm = normalizeModelId(catalogId)
 
     // Must match family
     if (usaiTokens.family !== catalogTokens.family) continue
@@ -244,10 +291,60 @@ function findModelsDevMatch(usaiId, catalog) {
       score += 50
     }
 
-    // Version match
+    // "-lite" is a distinct SKU, not captured by the variant token set. Require
+    // it to agree so gemini-2.5-flash-lite doesn't match gemini-2.5-flash.
+    const catalogHasLite = /lite/.test(catalogNorm)
+    if (usaiHasLite !== catalogHasLite) {
+      score -= 40
+    }
+
+    // Version match. The USAI version (e.g. [4,5]) must be a leading prefix of
+    // the catalog version — Bedrock appends a release date (e.g.
+    // claude-haiku-4-5-20251001 → [4,5,20251001]) that we ignore for matching.
     const versionMatch = usaiTokens.version.every((v, i) => catalogTokens.version[i] === v)
     if (versionMatch && usaiTokens.version.length > 0) {
       score += 30
+      // Prefer the closest version length (exact generation over a dated SKU).
+      if (catalogTokens.version.length === usaiTokens.version.length) {
+        score += 3
+      }
+    }
+
+    // Penalize modality/SKU suffixes we don't want to price against
+    // (e.g. gemini-2.5-pro-tts, -image, -audio) unless the USAI id also carries
+    // that suffix — the plain chat model should win.
+    for (const suffix of ["tts", "image", "audio", "vision", "embed", "embedding", "search", "realtime"]) {
+      const re = new RegExp(`(^|[.\\-/])${suffix}([.\\-]|$)`)
+      if (re.test(catalogNorm) && !re.test(usaiNorm)) {
+        score -= 60
+      }
+    }
+
+    // Penalize SKU/tier variants (pro, codex, mini, nano) the USAI id doesn't
+    // ask for, so a generic USAI id (e.g. gpt-5.4) maps to the base model rather
+    // than a pricier/cheaper variant (gpt-5.4-pro, gpt-5.4-codex, gpt-5.4-mini).
+    // "lite" has its own stronger check above.
+    for (const variant of ["pro", "codex", "mini", "nano", "max"]) {
+      const re = new RegExp(`(^|[.\\-/])${variant}([.\\-]|$)`)
+      if (re.test(catalogNorm) && !re.test(usaiNorm)) {
+        score -= 20
+      }
+    }
+
+    // Regional pricing preference: USAi uses US/base pricing. Bedrock keys carry
+    // region prefixes (us./eu./au./jp./global.); eu. and au. add a premium, so
+    // demote them and mildly prefer the plain/us./global. entries. The
+    // unprefixed base entry wins ties for a stable, region-neutral default.
+    if (/^(eu|au)\./.test(catalogId)) {
+      score -= 15
+    } else if (/^(us|global)\./.test(catalogId)) {
+      score += 2
+    } else if (/^[a-z]{2}\./.test(catalogId)) {
+      // Any other region prefix (e.g. jp.) — allowed but least preferred.
+      score += 1
+    } else {
+      // No region prefix at all: the canonical base entry.
+      score += 3
     }
 
     // Prefer exact ID prefix match
@@ -261,7 +358,9 @@ function findModelsDevMatch(usaiId, catalog) {
     }
   }
 
-  return bestMatch
+  // Require at least a family match with some positive signal; a purely
+  // penalized "match" is worse than no match (falls through to fallbacks).
+  return bestMatch && bestScore > 0 ? bestMatch : null
 }
 
 /**
@@ -375,14 +474,15 @@ function validateUsaiPayload(payload) {
 export { validateUsaiPayload, fetchJsonBounded }
 
 /**
- * Fetch and parse the models.dev catalog.
- * @returns {Promise<Object>} Catalog keyed by model ID
+ * Fetch and parse the models.dev catalog (nested, provider-keyed api.json).
+ * @returns {Promise<Object>} Catalog keyed by provider id
  */
 async function fetchModelsDevCatalog() {
   try {
     const catalog = await fetchJsonBounded(MODELS_DEV_URL)
-    // models.dev returns an object keyed by id; reject anything else rather
-    // than feeding a malformed catalog into the enrichment matcher.
+    // api.json is an object keyed by provider id, each with a `.models` map;
+    // reject anything else rather than feeding a malformed catalog into the
+    // enrichment matcher.
     if (!catalog || typeof catalog !== "object" || Array.isArray(catalog)) {
       console.error("models.dev catalog has unexpected shape; skipping enrichment")
       return {}
@@ -395,14 +495,82 @@ async function fetchModelsDevCatalog() {
 }
 
 /**
- * Enrich USAI models with metadata from models.dev.
+ * Build the ordered list of models.dev provider `.models` maps to search for a
+ * given USAI vendor, honoring USAi's backend routing (Anthropic→Bedrock,
+ * OpenAI→Azure, Gemini→Vertex, …). Providers absent from the catalog are
+ * silently skipped so enrichment degrades gracefully.
+ *
+ * @param {string} vendor - USAI vendor bucket (anthropic|openai|google|meta|cohere|other)
+ * @param {Object} catalog - provider-keyed models.dev api.json
+ * @returns {Array<Object>} model maps to search, in priority order
+ */
+function providerModelMaps(vendor, catalog) {
+  const mapping = VENDOR_PROVIDER_MAP[vendor] || VENDOR_PROVIDER_MAP.other
+  const providerIds = [mapping.primary, ...mapping.fallback].filter(Boolean)
+  const maps = []
+  for (const id of providerIds) {
+    const models = catalog[id]?.models
+    if (models && typeof models === "object") {
+      maps.push({ providerId: id, models })
+    }
+  }
+  return maps
+}
+
+/**
+ * Copy a models.dev `cost` object into the shape OpenCode's config schema
+ * accepts (ConfigProviderV1.Model.cost). That schema is CLOSED: it allows only
+ * `input`, `output`, `cache_read`, `cache_write`, and a nested
+ * `context_over_200k` with those same four keys. models.dev carries extra keys
+ * (`input_audio`, `output_audio`, `reasoning`) and a `tiers` array that the
+ * schema rejects, so we drop them here — otherwise editors/OpenCode flag
+ * "Property … is not allowed". Context-tier pricing above 200k is preserved via
+ * `context_over_200k`.
+ *
+ * @param {Object} cost - raw models.dev cost object
+ * @returns {Object|null} schema-safe cost object, or null if nothing usable
+ */
+function normalizeCost(cost) {
+  if (!cost || typeof cost !== "object") return null
+  const out = {}
+  for (const key of COST_SCALAR_KEYS) {
+    if (typeof cost[key] === "number") out[key] = cost[key]
+  }
+  if (cost.context_over_200k && typeof cost.context_over_200k === "object") {
+    const over = {}
+    for (const key of COST_SCALAR_KEYS) {
+      if (typeof cost.context_over_200k[key] === "number") over[key] = cost.context_over_200k[key]
+    }
+    if (typeof over.input === "number" && typeof over.output === "number") {
+      out.context_over_200k = over
+    }
+  }
+  // NOTE: models.dev's `tiers` array is intentionally NOT emitted — OpenCode's
+  // config schema has no `tiers` field, so including it would be rejected.
+  return Object.keys(out).length > 0 ? out : null
+}
+
+/**
+ * Enrich USAI models with limits + pricing from models.dev, sourcing each
+ * vendor from the backend USAi actually routes it through.
  * @param {Array} models - Parsed USAI models
- * @param {Object} catalog - models.dev catalog
+ * @param {Object} catalog - provider-keyed models.dev catalog
  * @returns {Array} Enriched models
  */
 function enrichModelsFromCatalog(models, catalog) {
   return models.map((model) => {
-    const match = findModelsDevMatch(model.id, catalog)
+    // Search the vendor's backend provider first, then any fallbacks, and take
+    // the first provider that yields a match.
+    let match = null
+    let matchedProvider = null
+    for (const { providerId, models: providerModels } of providerModelMaps(model.vendor, catalog)) {
+      const candidate = findModelsDevMatch(model.id, providerModels)
+      if (candidate) {
+        match = candidate
+        matchedProvider = providerId
+        break
+      }
+    }
 
     if (match && match.data.limit) {
       return {
@@ -411,16 +579,20 @@ function enrichModelsFromCatalog(models, catalog) {
         maxOutputTokens: model.maxOutputTokens || match.data.limit.output || FALLBACK_LIMITS.output,
         toolCall: match.data.tool_call,
         reasoning: match.data.reasoning,
+        cost: normalizeCost(match.data.cost),
         modelsDevId: match.id,
+        modelsDevProvider: matchedProvider,
       }
     }
 
-    // No match found - use fallbacks
+    // No match found - use fallbacks (no pricing available)
     return {
       ...model,
       contextWindow: model.contextWindow || FALLBACK_LIMITS.context,
       maxOutputTokens: model.maxOutputTokens || FALLBACK_LIMITS.output,
+      cost: null,
       modelsDevId: null,
+      modelsDevProvider: null,
     }
   })
 }
@@ -478,6 +650,29 @@ function selectDefault(models, family, fallbackId) {
   return selected ? `usai/${selected.id}` : fallbackId
 }
 
+/**
+ * Render a normalized `cost` object as indented JSONC lines. The input must
+ * already be schema-safe (produced by normalizeCost) — disallowed keys such as
+ * `tiers`, `input_audio`, and `output_audio` are stripped upstream and will
+ * never appear here. Values are emitted verbatim via JSON.stringify so scalar
+ * prices and the nested `context_over_200k` object round-trip losslessly.
+ *
+ * @param {Object} cost - normalized cost object (see normalizeCost)
+ * @param {string} indent - leading indent for the `"cost": {` line
+ * @returns {string[]} JSONC lines (no trailing comma after the closing brace)
+ */
+function renderCostBlock(cost, indent) {
+  const inner = indent + "  "
+  const entries = Object.entries(cost)
+  const lines = [`${indent}"cost": {`]
+  entries.forEach(([key, value], i) => {
+    const comma = i < entries.length - 1 ? "," : ""
+    lines.push(`${inner}"${key}": ${JSON.stringify(value)}${comma}`)
+  })
+  lines.push(`${indent}}`)
+  return lines
+}
+
 function renderModelBlock(models, eol) {
   const lines = []
   const sortedModels = sortModelsByVendor(models)
@@ -501,6 +696,8 @@ function renderModelBlock(models, eol) {
     lines.push(`        "${model.id}": {`)
     lines.push(`          "name": "${displayName}",`)
 
+    const hasCost = model.cost && Object.keys(model.cost).length > 0
+
     if (model.contextWindow || model.maxOutputTokens) {
       lines.push('          "limit": {')
       if (model.contextWindow) {
@@ -509,9 +706,15 @@ function renderModelBlock(models, eol) {
       if (model.maxOutputTokens) {
         lines.push(`            "output": ${model.maxOutputTokens}`)
       }
-      lines.push("          }")
+      lines.push(`          }${hasCost ? "," : ""}`)
     } else {
-      lines.push('          "limit": {}')
+      lines.push(`          "limit": {}${hasCost ? "," : ""}`)
+    }
+
+    // Cost object (USD per 1M tokens), sourced from the vendor's backend
+    // provider in models.dev. Emitted only when pricing is known.
+    if (hasCost) {
+      renderCostBlock(model.cost, "          ").forEach((line) => lines.push(line))
     }
 
     lines.push("        },")
@@ -588,7 +791,7 @@ export function updateTemplate(templateText, payload, modelsDevCatalog = {}) {
   updatedTemplate = replaceJsonString(
     updatedTemplate,
     "small_model",
-    selectDefault(models, "small", "usai/claude_3_5_haiku"),
+    selectDefault(models, "small", "usai/claude_4_5_haiku"),
   )
   updatedTemplate = replaceCompactionModel(
     updatedTemplate,
