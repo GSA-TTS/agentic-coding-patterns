@@ -15,16 +15,15 @@
 #
 #      Preferred driver — RUN_ACQ=1: drive the `acq` CLI. acq translates the
 #      neutral hybrid/v1 spec to an sbx-v2 kit (kit_translate_to_sbx) and applies
-#      it, so the kit's `files:`/`commands:` land correctly. As of quickstart#221
-#      (merged) acq carries backend_extras.sbx.publishedPorts, so ports 3000/4096
-#      are published at CREATE time — no manual step. This script verifies that
-#      and only falls back to an explicit `acq ports --publish` on an older acq
-#      that predates #221.
+#      it, so the kit's `files:`/`commands:` land correctly. acq reads the kit's
+#      neutral top-level `publishedPorts` and publishes ports 3000/4096 at CREATE
+#      time — no manual step. This script verifies that and only falls back to an
+#      explicit `acq ports --publish` on an older acq that lacks port publishing.
 #
 #      Legacy driver — RUN_SBX=1: drive `sbx` directly on the NEUTRAL spec. sbx
 #      cannot parse the neutral schema (it expects sbx-v2), so `sbx create --kit`
 #      on this kit fails ("field files not found", "cannot unmarshal !!seq into
-#      CommandsPolicy", "field backend_extras not found"). This path therefore
+#      CommandsPolicy", "field publishedPorts not found"). This path therefore
 #      requires a PRE-TRANSLATED sbx-v2 kit dir in SBX_KIT_DIR; without it the
 #      script reports SKIP with guidance rather than a misleading FAIL. Prefer
 #      RUN_ACQ=1.
@@ -181,17 +180,17 @@ if [ "$DRIVER" = "acq" ]; then
     sed 's/^/  | /' "$CREATE_LOG" >&2
     exit 1
   fi
-  # As of quickstart#221 (merged) acq carries backend_extras.sbx.publishedPorts
-  # through translation, so a current acq publishes 3000/4096 at CREATE time — no
-  # manual step. Verify that here: check the mappings exist post-create. If they
-  # don't (an older acq predating #221), fall back to an explicit publish so the
-  # rest of the run still exercises the kit. Step 7 re-asserts the mappings.
-  info "2b. Container ports 3000 and 4096 published at create (quickstart#221)"
+  # acq reads the kit's neutral top-level publishedPorts, so a current acq
+  # publishes 3000/4096 at CREATE time — no manual step. Verify that here: check
+  # the mappings exist post-create. If they don't (an older acq lacking port
+  # publishing), fall back to an explicit publish so the rest of the run still
+  # exercises the kit. Step 7 re-asserts the mappings.
+  info "2b. Container ports 3000 and 4096 published at create (neutral publishedPorts)"
   for cport in 3000 4096; do
     if acq ports "$SBX_NAME" 2>/dev/null | grep -q "$cport"; then
       ok "container $cport auto-published at create"
     else
-      warn "container $cport not auto-published — older acq (pre-#221)? falling back to manual publish"
+      warn "container $cport not auto-published — older acq? falling back to manual publish"
       if acq ports "$SBX_NAME" --publish "${cport}:${cport}" >/dev/null 2>&1; then
         ok "container $cport published via fallback (acq ports --publish)"
       else
@@ -208,7 +207,7 @@ else
     echo "  RUN_SBX=1 needs a PRE-TRANSLATED sbx-v2 kit dir in SBX_KIT_DIR." >&2
     echo "  sbx cannot parse the neutral hybrid/v1 spec directly (it fails with" >&2
     echo "  'field files not found' / 'cannot unmarshal !!seq into CommandsPolicy'" >&2
-    echo "  / 'field backend_extras not found'). Prefer RUN_ACQ=1, which translates" >&2
+    echo "  / 'field publishedPorts not found'). Prefer RUN_ACQ=1, which translates" >&2
     echo "  automatically. To use RUN_SBX, translate first (acq's kit_translate_to_sbx)" >&2
     echo "  and point SBX_KIT_DIR at the output." >&2
     info "Summary"
