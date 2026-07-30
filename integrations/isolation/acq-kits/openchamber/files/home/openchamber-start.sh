@@ -64,6 +64,14 @@ if ! command -v openchamber >/dev/null 2>&1; then
   # Route prebuild-install (and npm) through the sandbox proxy.
   [ -n "${HTTPS_PROXY:-${https_proxy:-}}" ] && export npm_config_https_proxy="${HTTPS_PROXY:-$https_proxy}"
   [ -n "${HTTP_PROXY:-${http_proxy:-}}" ]  && export npm_config_proxy="${HTTP_PROXY:-$http_proxy}"
+  # Force the OpenChamber installer to use npm. Its install.sh auto-detects a
+  # package manager (pnpm > bun > yarn > npm) and would pick `yarn` on the
+  # node:22-bookworm base — but yarn resolves its own registry
+  # (registry.yarnpkg.com), which is NOT on this kit's egress allow-list
+  # (spec.yaml permits registry.npmjs.org, not yarn's). The installer honors
+  # $npm_config_user_agent (an `npm*` value selects npm), and all this kit's
+  # proxy/CA plumbing is npm-oriented, so pin npm explicitly.
+  export npm_config_user_agent="npm"
   # Build a CA bundle for Node-based downloads (the prebuilt native binary).
   # NODE_EXTRA_CA_CERTS *appends* to Node's built-in roots, which lack both the
   # sandbox proxy CA and any HTTPS-inspection CA (e.g. Zscaler). Concatenate BOTH
