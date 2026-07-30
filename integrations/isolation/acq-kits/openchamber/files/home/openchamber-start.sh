@@ -43,6 +43,17 @@ CHAMBER_PORT="${OPENCHAMBER_PORT:-3000}"
 # front so a freshly-installed `openchamber` resolves in THIS shell (otherwise
 # the post-install `command -v openchamber` guard trips and the server section
 # never runs on first boot).
+#
+# SCOPE LIMIT — this PATH addition is PROCESS-LOCAL. It cannot be persisted for
+# other, later `acq exec … sh -c '…'` invocations from here: this script runs as
+# uid 1000, which cannot write the only files a bare non-login `sh -c` would pick
+# up PATH from — /etc/environment and /etc/profile.d/* are root-owned, and a
+# plain `sh -c` sources neither /etc/profile nor ~/.profile anyway. So there is
+# no uid-1000-safe, portable way to make the npm-global bin / ~/.local/bin
+# durably resolvable for a future bare `sh -c`. Callers that exec into the
+# sandbox (e.g. the kit's verify probes) must therefore augment PATH themselves;
+# the verify script's in_sbx() does exactly that. Do NOT attempt an unportable
+# root-only write here.
 NPM_BIN="$(npm prefix -g 2>/dev/null)/bin"
 case ":$PATH:" in *":$NPM_BIN:"*) : ;; *) PATH="$NPM_BIN:$PATH" ;; esac
 export PATH

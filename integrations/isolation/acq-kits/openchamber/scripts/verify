@@ -98,10 +98,34 @@ trap cleanup EXIT INT TERM
 # acq exec NAME -- CMD and sbx exec NAME -- CMD have the same shape; both are
 # non-TTY by default. We swallow transient exec errors so a probe never aborts
 # the run.
+#
+# PATH SCOPING: `acq exec`/`sbx exec` run the probe as a bare non-login `sh -c`
+# (see in_sbx). A bare `sh -c` sources NOTHING — not /etc/profile, not
+# ~/.profile — so its PATH is only whatever `/etc/environment` provides, which
+# does NOT include the npm-global bin (where the real `opencode` and the
+# `openchamber` CLI install) or `~/.local/bin` (where the kit's `opencode`
+# wrapper installs). Without this, `command -v openchamber` / `command -v
+# opencode` / `test -x ~/.local/bin/opencode` come back empty even though the
+# binaries exist and the servers are live — cascading false failures through
+# steps 3-12.
+#
+# The startup script (openchamber-start.sh) can only prepend the npm-global bin
+# to PATH within its OWN process; it runs as uid 1000 and so cannot durably
+# persist PATH for other execs (it can't write /etc/environment or
+# /etc/profile.d — root-only — and `sh -c` won't source any per-user file). So
+# the correct layer for the fix is the PROBE: prepend the npm-global bin and
+# ~/.local/bin to PATH for every remote command. `npm prefix -g` is computed on
+# the guest (the prefix can vary by image). This only makes a PRESENT binary
+# resolvable; it does not weaken what any step asserts.
 in_sbx() {
+  # Wrap the caller's command so it runs with an augmented PATH on the guest.
+  # Compute the npm-global bin on the guest (may be empty if npm is absent — the
+  # ':' fallback keeps the expansion harmless). Keep existing PATH last so we
+  # never shadow system tools, only ADD the dirs the non-login shell was missing.
+  _wrapped='export PATH="$HOME/.local/bin:$(npm prefix -g 2>/dev/null)/bin:$PATH"; '"$1"
   case "${DRIVER:-}" in
-    acq) acq exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true ;;
-    *)   sbx exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true ;;
+    acq) acq exec "$SBX_NAME" -- sh -c "$_wrapped" </dev/null 2>/dev/null || true ;;
+    *)   sbx exec "$SBX_NAME" -- sh -c "$_wrapped" </dev/null 2>/dev/null || true ;;
   esac
 }
 # List published ports for the sandbox.
@@ -185,12 +209,32 @@ if [ "$DRIVER" = "acq" ]; then
   # the mappings exist post-create. If they don't (an older acq lacking port
   # publishing), fall back to an explicit publish so the rest of the run still
   # exercises the kit. Step 7 re-asserts the mappings.
+  #
+  # BOUNDED POLL (not a one-shot): the create-time mapping isn't necessarily
+  # queryable the instant `acq create` returns. On msb the NAT mapping doesn't
+  # show up in `msb inspect` right after create, so a one-shot check races and
+  # misses — it then takes the `--publish` fallback needlessly, and that fallback
+  # pollutes step 7's output with redundant `(post-hoc ssh -L)` lines. Poll for
+  # up to PORTS_PUBLISH_TIMEOUT (~15s), matching the deadline convention step 3
+  # uses, and only fall back after it genuinely times out. Query via the shared
+  # `sbx_ports_out` helper so 2b and step 7 read ports identically.
   info "2b. Container ports 3000 and 4096 published at create (neutral publishedPorts)"
+  PORTS_PUBLISH_TIMEOUT="${PORTS_PUBLISH_TIMEOUT:-15}"
   for cport in 3000 4096; do
-    if acq ports "$SBX_NAME" 2>/dev/null | grep -q "$cport"; then
+    published=""
+    pub_deadline=$(( $(date +%s) + PORTS_PUBLISH_TIMEOUT ))
+    while :; do
+      if sbx_ports_out | grep -q "$cport"; then
+        published=yes
+        break
+      fi
+      [ "$(date +%s)" -ge "$pub_deadline" ] && break
+      sleep 1
+    done
+    if [ -n "$published" ]; then
       ok "container $cport auto-published at create"
     else
-      warn "container $cport not auto-published — older acq? falling back to manual publish"
+      warn "container $cport not auto-published after ${PORTS_PUBLISH_TIMEOUT}s — older acq? falling back to manual publish"
       if acq ports "$SBX_NAME" --publish "${cport}:${cport}" >/dev/null 2>&1; then
         ok "container $cport published via fallback (acq ports --publish)"
       else
