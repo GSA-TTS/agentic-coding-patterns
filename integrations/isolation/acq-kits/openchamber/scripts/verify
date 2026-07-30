@@ -110,8 +110,8 @@ trap cleanup EXIT INT TERM
 # steps 3-12.
 #
 # The startup script (openchamber-start.sh) can only prepend the npm-global bin
-# to PATH within its OWN process; it runs as uid 1000 and so cannot durably
-# persist PATH for other execs (it can't write /etc/environment or
+# to PATH within its OWN process; it runs as the non-root agent user and so
+# cannot durably persist PATH for other execs (it can't write /etc/environment or
 # /etc/profile.d — root-only — and `sh -c` won't source any per-user file). So
 # the correct layer for the fix is the PROBE: prepend the npm-global bin and
 # ~/.local/bin to PATH for every remote command. `npm prefix -g` is computed on
