@@ -296,7 +296,7 @@ info "3. Wait for startup install + OpenChamber (install up to ${READY_TIMEOUT}s
 # The shared server is checked in step 5; here we only wait for the install and
 # for OpenChamber to answer.
 deadline=$(( $(date +%s) + READY_TIMEOUT ))
-installed=""; chamber_up=""; grace_deadline=""
+installed=""; chamber_up=""; grace_deadline=""; install_failed=""; installed_off_path=""
 while :; do
   now=$(date +%s)
   [ -z "$installed" ] && [ -n "$(in_sbx 'command -v openchamber')" ] && {
@@ -304,6 +304,22 @@ while :; do
     # Install done — OpenChamber should appear within POST_INSTALL_GRACE.
     grace_deadline=$(( now + POST_INSTALL_GRACE ))
   }
+  # FAST-FAIL 1: a DEFINITIVE failure marker landed in the install log. Anchor on
+  # the kit's exact phrases (SHA mismatch, or the "openchamber install failed"
+  # marker) — never the bare word "install", so a progress line can't false-hit.
+  [ -z "$installed" ] && [ -z "$install_failed" ] && \
+    [ "$(in_sbx 'grep -Eq "SHA-256 mismatch|refusing to run it|openchamber install failed" /tmp/openchamber-install.log 2>/dev/null && echo yes')" = "yes" ] && {
+      install_failed=yes
+      break
+    }
+  # FAST-FAIL 2: installed BUT not on the probe PATH (npm prefix mismatch). Detect
+  # via a PATH-independent package check; only trip while `command -v openchamber`
+  # is still empty (installed still empty).
+  [ -z "$installed" ] && [ -z "$installed_off_path" ] && \
+    [ "$(in_sbx 'npm ls -g --depth=0 2>/dev/null | grep -q @openchamber/web && echo yes')" = "yes" ] && {
+      installed_off_path=yes
+      break
+    }
   [ -z "$chamber_up" ] && [ "$(in_sbx 'curl -fsS http://127.0.0.1:3000 >/dev/null 2>&1 && echo yes')" = "yes" ] && chamber_up=yes
   [ -n "$installed" ] && [ -n "$chamber_up" ] && break
   # Stop conditions: overall deadline, or the post-install grace elapsed.
@@ -314,6 +330,12 @@ done
 
 if [ -n "$installed" ]; then
   ok "OpenChamber CLI installed by the startup step"
+elif [ -n "$installed_off_path" ]; then
+  bad "openchamber installed but not on the probe PATH — npm prefix mismatch"
+  in_sbx 'echo "npm prefix -g => $(npm prefix -g 2>&1)"; ls -la "$(npm prefix -g 2>/dev/null)/bin" 2>/dev/null | grep -i openchamber' | sed 's/^/    | /'
+elif [ -n "$install_failed" ]; then
+  bad "openchamber install failed early (see /tmp/openchamber-install.log) — fast-failed without waiting out READY_TIMEOUT"
+  in_sbx 'tail -n 25 /tmp/openchamber-install.log' | sed 's/^/    | /'
 else
   bad "openchamber not installed (see /tmp/openchamber-install.log)"
   in_sbx 'tail -n 25 /tmp/openchamber-install.log' | sed 's/^/    | /'

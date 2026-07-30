@@ -97,7 +97,9 @@ if ! command -v openchamber >/dev/null 2>&1; then
   fi
 fi
 command -v openchamber >/dev/null 2>&1 || {
-  echo "openchamber install failed; see /tmp/openchamber-install.log" >&2
+  # Route the marker to BOTH the log (so a log-based fast-fail can see the exact
+  # phrase "openchamber install failed") and stderr.
+  echo "openchamber install failed; see /tmp/openchamber-install.log" | tee -a /tmp/openchamber-install.log >&2
   exit 0   # never fail the sandbox over an optional UI
 }
 
