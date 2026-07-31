@@ -97,7 +97,34 @@ if ! command -v openchamber >/dev/null 2>&1; then
        -o "$_installer" 2>/tmp/openchamber-install.log; then
     _got_sha="$( (sha256sum "$_installer" 2>/dev/null || shasum -a 256 "$_installer" 2>/dev/null) | cut -d' ' -f1)"
     if [ "$_got_sha" = "$_want_sha" ]; then
-      bash "$_installer" >>/tmp/openchamber-install.log 2>&1 || true
+      # Run the (SHA-verified) installer, which internally does
+      # `npm install -g @openchamber/web`. On the sbx-template base the npm
+      # global prefix's lib/ dir is ROOT-owned (as on sbx: the template
+      # provisions global tooling as root), so the agent's `npm install -g`
+      # fails EACCES. Run the whole installer via `sudo -n` (the agent has
+      # passwordless sudo on the template). The sudoers env_keep covers
+      # HTTP(S)_PROXY/NO_PROXY but NOT NODE_EXTRA_CA_CERTS (bare sudo resets it
+      # to msb's default /.msb/tls/ca.pem, dropping the kit's assembled bundle),
+      # so forward proxy + CA + HOME explicitly via `sudo env`. HOME keeps npm
+      # cache/config in the agent home rather than /root. The `${VAR:+NAME=...}`
+      # idiom omits an arg entirely when the var is empty/unset (safe under
+      # set -u), so an empty proxy does not pass an empty npm_config_*. When
+      # sudo is unavailable (a plain-OCI override without the template's sudo),
+      # fall back to an agent-owned per-user npm prefix so the global install
+      # needs no root.
+      if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+        sudo -n env \
+          npm_config_user_agent="${npm_config_user_agent:-npm}" \
+          ${npm_config_https_proxy:+npm_config_https_proxy="$npm_config_https_proxy"} \
+          ${npm_config_proxy:+npm_config_proxy="$npm_config_proxy"} \
+          ${NODE_EXTRA_CA_CERTS:+NODE_EXTRA_CA_CERTS="$NODE_EXTRA_CA_CERTS"} \
+          HOME="$HOME" \
+          bash "$_installer" >>/tmp/openchamber-install.log 2>&1 || true
+      else
+        export npm_config_prefix="$HOME/.npm-global"
+        mkdir -p "$HOME/.npm-global"
+        bash "$_installer" >>/tmp/openchamber-install.log 2>&1 || true
+      fi
     else
       echo "openchamber: install.sh SHA-256 mismatch (got $_got_sha, want $_want_sha) at $_ref; refusing to run it" >>/tmp/openchamber-install.log 2>&1
     fi
