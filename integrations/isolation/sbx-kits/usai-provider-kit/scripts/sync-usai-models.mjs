@@ -471,7 +471,7 @@ function validateUsaiPayload(payload) {
   return payload
 }
 
-export { validateUsaiPayload, fetchJsonBounded }
+export { validateUsaiPayload, fetchJsonBounded, normalizeLimit }
 
 /**
  * Fetch and parse the models.dev catalog (nested, provider-keyed api.json).
@@ -551,6 +551,20 @@ function normalizeCost(cost) {
 }
 
 /**
+ * Coerce an untrusted limit value into one that is safe to render into the
+ * generated JSONC. Accepts only finite positive integers; anything else
+ * (non-numeric, zero/negative, or a string that could inject config keys)
+ * falls back to the caller-supplied default.
+ *
+ * @param {unknown} value - raw limit value
+ * @param {number} fallback - value to use when `value` is not a valid limit
+ * @returns {number} a finite positive integer
+ */
+function normalizeLimit(value, fallback) {
+  return Number.isInteger(value) && value > 0 ? value : fallback
+}
+
+/**
  * Enrich USAI models with limits + pricing from models.dev, sourcing each
  * vendor from the backend USAi actually routes it through.
  * @param {Array} models - Parsed USAI models
@@ -575,8 +589,14 @@ function enrichModelsFromCatalog(models, catalog) {
     if (match && match.data.limit) {
       return {
         ...model,
-        contextWindow: model.contextWindow || match.data.limit.context || FALLBACK_LIMITS.context,
-        maxOutputTokens: model.maxOutputTokens || match.data.limit.output || FALLBACK_LIMITS.output,
+        contextWindow: normalizeLimit(
+          model.contextWindow || match.data.limit.context,
+          FALLBACK_LIMITS.context,
+        ),
+        maxOutputTokens: normalizeLimit(
+          model.maxOutputTokens || match.data.limit.output,
+          FALLBACK_LIMITS.output,
+        ),
         toolCall: match.data.tool_call,
         reasoning: match.data.reasoning,
         cost: normalizeCost(match.data.cost),
@@ -588,8 +608,8 @@ function enrichModelsFromCatalog(models, catalog) {
     // No match found - use fallbacks (no pricing available)
     return {
       ...model,
-      contextWindow: model.contextWindow || FALLBACK_LIMITS.context,
-      maxOutputTokens: model.maxOutputTokens || FALLBACK_LIMITS.output,
+      contextWindow: normalizeLimit(model.contextWindow, FALLBACK_LIMITS.context),
+      maxOutputTokens: normalizeLimit(model.maxOutputTokens, FALLBACK_LIMITS.output),
       cost: null,
       modelsDevId: null,
       modelsDevProvider: null,
@@ -698,18 +718,13 @@ function renderModelBlock(models, eol) {
 
     const hasCost = model.cost && Object.keys(model.cost).length > 0
 
-    if (model.contextWindow || model.maxOutputTokens) {
-      lines.push('          "limit": {')
-      if (model.contextWindow) {
-        lines.push(`            "context": ${model.contextWindow}${model.maxOutputTokens ? "," : ""}`)
-      }
-      if (model.maxOutputTokens) {
-        lines.push(`            "output": ${model.maxOutputTokens}`)
-      }
-      lines.push(`          }${hasCost ? "," : ""}`)
-    } else {
-      lines.push(`          "limit": {}${hasCost ? "," : ""}`)
-    }
+    const contextValue = normalizeLimit(model.contextWindow, FALLBACK_LIMITS.context)
+    const outputValue = normalizeLimit(model.maxOutputTokens, FALLBACK_LIMITS.output)
+
+    lines.push('          "limit": {')
+    lines.push(`            "context": ${contextValue},`)
+    lines.push(`            "output": ${outputValue}`)
+    lines.push(`          }${hasCost ? "," : ""}`)
 
     // Cost object (USD per 1M tokens), sourced from the vendor's backend
     // provider in models.dev. Emitted only when pricing is known.

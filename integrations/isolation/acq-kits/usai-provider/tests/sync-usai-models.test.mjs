@@ -212,6 +212,48 @@ test("updateTemplate emits schema-safe cost blocks and drops disallowed keys", a
   assert.equal("input_audio" in lite.cost, false, "input_audio must be omitted (not in OpenCode schema)")
 })
 
+test("updateTemplate normalizes untrusted limit values", async () => {
+  const templateText = await readFile(templatePath, "utf8")
+  const payload = {
+    data: [
+      { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", owned_by: "Google" },
+      { id: "gemini-2.5-flash-lite", name: "Gemini 2.5 Flash Lite", owned_by: "Google" },
+    ],
+  }
+  const modelsDevCatalog = {
+    "google-vertex": {
+      id: "google-vertex",
+      models: {
+        "gemini-2.5-pro": {
+          id: "gemini-2.5-pro",
+          limit: { context: '1, "pwned": true', output: 65536 },
+          cost: { input: 1, output: 2 },
+        },
+        "gemini-2.5-flash-lite": {
+          id: "gemini-2.5-flash-lite",
+          limit: { context: "not-a-number", output: -5 },
+          cost: { input: 0.1, output: 0.4 },
+        },
+      },
+    },
+  }
+
+  const { updatedTemplate } = updateTemplate(templateText, payload, modelsDevCatalog)
+  const { valid, parsed, error } = validateJsonc(updatedTemplate)
+
+  assert.equal(valid, true, `JSONC validation failed: ${error}`)
+  assert.equal(updatedTemplate.includes("pwned"), false, "injected key must not appear in output")
+
+  const pro = parsed.provider.usai.models["gemini-2.5-pro"]
+  assert.equal(pro.limit.context, 128000, "invalid context must fall back to FALLBACK_LIMITS.context")
+  assert.equal("pwned" in pro.limit, false, "no injected key inside limit")
+  assert.equal(pro.limit.output, 65536, "valid integer output must be preserved")
+
+  const lite = parsed.provider.usai.models["gemini-2.5-flash-lite"]
+  assert.equal(lite.limit.context, 128000, "non-numeric context must fall back")
+  assert.equal(lite.limit.output, 8192, "non-positive output must fall back to FALLBACK_LIMITS.output")
+})
+
 test("enrichment routes each vendor to its USAi backend provider", async () => {
   // OpenAI must pull azure pricing, not the first-party openai catalog.
   const templateText = await readFile(templatePath, "utf8")
