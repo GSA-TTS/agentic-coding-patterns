@@ -79,6 +79,14 @@ if ! command -v openchamber >/dev/null 2>&1; then
   # (populated with the inspection CA by the zscaler-ca-certificate kit at
   # startup) so the full chain validates — the proxy CA alone is not sufficient
   # behind an inspecting proxy.
+  #
+  # ACCEPTED RISK (trust surface): this bundle lives at an AGENT-WRITABLE path and
+  # is forwarded (via `sudo env NODE_EXTRA_CA_CERTS=...`) into the ROOT installer
+  # below. An actor who already controls the agent user could therefore add a
+  # trust anchor the root download honors. This is bounded — that actor already
+  # has agent-level code execution inside the sandbox (the security boundary), and
+  # the installer it feeds is independently SHA-256-pinned — so we accept it here
+  # rather than stage a root-owned bundle before the sudo hand-off.
   _ca="$HOME/.local/state/openchamber/ca-bundle.pem"
   mkdir -p "$(dirname "$_ca")"
   : > "$_ca"
@@ -123,6 +131,12 @@ if ! command -v openchamber >/dev/null 2>&1; then
       else
         export npm_config_prefix="$HOME/.npm-global"
         mkdir -p "$HOME/.npm-global"
+        # NPM_BIN (line 58) was computed from the DEFAULT global prefix, so the
+        # `command -v openchamber` guard below and the supervisor probe would
+        # otherwise never see a package installed under this per-user prefix.
+        # Prepend the per-user bin so the whole no-sudo path is resolvable.
+        case ":$PATH:" in *":$HOME/.npm-global/bin:"*) : ;; *) PATH="$HOME/.npm-global/bin:$PATH" ;; esac
+        export PATH
         bash "$_installer" >>/tmp/openchamber-install.log 2>&1 || true
       fi
     else
@@ -132,8 +146,13 @@ if ! command -v openchamber >/dev/null 2>&1; then
   fi
 fi
 command -v openchamber >/dev/null 2>&1 || {
-  # Route the marker to BOTH the log (so a log-based fast-fail can see the exact
-  # phrase "openchamber install failed") and stderr.
+  # Route the marker to BOTH the log and stderr. NOTE: this marker is written for
+  # ANY unsuccessful install (the installer above runs with `|| true`, so the only
+  # signal is `command -v openchamber`), including TRANSIENT causes (npm/registry
+  # 503, proxy blip). It is therefore NOT a definitive-failure signal — verify's
+  # fast-fail path deliberately does not trip on it, so a transient failure can
+  # ride the normal readiness timeout. Only the SHA-256 refusal above (line ~129)
+  # is definitive.
   echo "openchamber install failed; see /tmp/openchamber-install.log" | tee -a /tmp/openchamber-install.log >&2
   exit 0   # never fail the sandbox over an optional UI
 }

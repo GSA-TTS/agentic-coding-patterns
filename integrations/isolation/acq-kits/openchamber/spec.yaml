@@ -147,6 +147,11 @@ commands:
   # the exact shape that worked on sbx before the migration — so we preserve it
   # rather than risk a start-blocking regression by removing it.
   - phase: startup
+    # Schema-required: the hybrid/v1 `user` field pattern is ^[0-9]+$ (a numeric
+    # uid, NOT a name), so this MUST stay "1000" even though the agent uid is
+    # assigned at provision and is not necessarily 1000 (see the start-script
+    # header). Do not "fix" this to `agent`; the runtime does not rely on the
+    # literal value — acq/the backend runs the startup phase as the agent user.
     user: "1000"
     background: true
     description: Install (first boot) and supervise the shared server + OpenChamber (background)

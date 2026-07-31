@@ -122,7 +122,9 @@ in_sbx() {
   # Compute the npm-global bin on the guest (may be empty if npm is absent — the
   # ':' fallback keeps the expansion harmless). Keep existing PATH last so we
   # never shadow system tools, only ADD the dirs the non-login shell was missing.
-  _wrapped='export PATH="$HOME/.local/bin:$(npm prefix -g 2>/dev/null)/bin:$PATH"; '"$1"
+  # Include $HOME/.npm-global/bin so the no-sudo install fallback (which sets an
+  # agent-owned npm prefix there, not the default global prefix) is also probeable.
+  _wrapped='export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:$(npm prefix -g 2>/dev/null)/bin:$PATH"; '"$1"
   case "${DRIVER:-}" in
     acq) acq exec "$SBX_NAME" -- sh -c "$_wrapped" </dev/null 2>/dev/null || true ;;
     *)   sbx exec "$SBX_NAME" -- sh -c "$_wrapped" </dev/null 2>/dev/null || true ;;
@@ -215,8 +217,9 @@ if [ "$DRIVER" = "acq" ]; then
   # show up in `msb inspect` right after create, so a one-shot check races and
   # misses — it then takes the `--publish` fallback needlessly, and that fallback
   # pollutes step 7's output with redundant `(post-hoc ssh -L)` lines. Poll for
-  # up to PORTS_PUBLISH_TIMEOUT (~15s), matching the deadline convention step 3
-  # uses, and only fall back after it genuinely times out. Query via the shared
+  # up to PORTS_PUBLISH_TIMEOUT (~15s), a bounded-poll convention like step 3's
+  # (step 3 bounds on READY_TIMEOUT/POST_INSTALL_GRACE, not this 15s value), and
+  # only fall back after it genuinely times out. Query via the shared
   # `sbx_ports_out` helper so 2b and step 7 read ports identically.
   info "2b. Container ports 3000 and 4096 published at create (neutral publishedPorts)"
   PORTS_PUBLISH_TIMEOUT="${PORTS_PUBLISH_TIMEOUT:-15}"
@@ -304,11 +307,15 @@ while :; do
     # Install done — OpenChamber should appear within POST_INSTALL_GRACE.
     grace_deadline=$(( now + POST_INSTALL_GRACE ))
   }
-  # FAST-FAIL 1: a DEFINITIVE failure marker landed in the install log. Anchor on
-  # the kit's exact phrases (SHA mismatch, or the "openchamber install failed"
-  # marker) — never the bare word "install", so a progress line can't false-hit.
+  # FAST-FAIL 1: a genuinely DEFINITIVE failure marker landed in the install log.
+  # Anchor ONLY on the SHA-verification refusal ("SHA-256 mismatch" / "refusing to
+  # run it"): a bad installer hash will not fix itself, so waiting out READY_TIMEOUT
+  # is pointless. Do NOT fast-fail on the generic "openchamber install failed"
+  # marker — the installer runs with `|| true`, so that marker is written for
+  # TRANSIENT causes too (npm/registry 503, a proxy blip), which should ride the
+  # normal READY_TIMEOUT and get a chance to succeed, not abort the step.
   [ -z "$installed" ] && [ -z "$install_failed" ] && \
-    [ "$(in_sbx 'grep -Eq "SHA-256 mismatch|refusing to run it|openchamber install failed" /tmp/openchamber-install.log 2>/dev/null && echo yes')" = "yes" ] && {
+    [ "$(in_sbx 'grep -Eq "SHA-256 mismatch|refusing to run it" /tmp/openchamber-install.log 2>/dev/null && echo yes')" = "yes" ] && {
       install_failed=yes
       break
     }
@@ -334,7 +341,7 @@ elif [ -n "$installed_off_path" ]; then
   bad "openchamber installed but not on the probe PATH — npm prefix mismatch"
   in_sbx 'echo "npm prefix -g => $(npm prefix -g 2>&1)"; ls -la "$(npm prefix -g 2>/dev/null)/bin" 2>/dev/null | grep -i openchamber' | sed 's/^/    | /'
 elif [ -n "$install_failed" ]; then
-  bad "openchamber install failed early (see /tmp/openchamber-install.log) — fast-failed without waiting out READY_TIMEOUT"
+  bad "openchamber install refused (installer SHA-256 mismatch — see /tmp/openchamber-install.log); fast-failed without waiting out READY_TIMEOUT"
   in_sbx 'tail -n 25 /tmp/openchamber-install.log' | sed 's/^/    | /'
 else
   bad "openchamber not installed (see /tmp/openchamber-install.log)"
