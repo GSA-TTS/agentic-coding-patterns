@@ -59,6 +59,14 @@ caps:
       # EDIT this if your daemon port/alias differs (see README).
       - host.docker.internal:3030
 
+# Bundle provenance (quickstart#235). Declares the source repo so a consumer
+# (acq) can attribute this kit. Unlike the acq-builtin bundle kits, this egress
+# kit is a standalone integration kit (consumed only by orchestrators/agor), so
+# it declares `repo` but no bundle/kit_names. The applied commit SHA, timestamp,
+# and backend are recorded by the consumer inside the sandbox at apply time.
+provenance:
+  repo: GSA-TTS/agentic-coding-patterns
+
 agentContext: |
   ## Agor daemon egress
 
