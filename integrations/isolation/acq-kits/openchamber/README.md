@@ -62,9 +62,10 @@ terminal tab or a `tmux`/`screen` window and leave it attached.
 ## Reaching it from the host
 
 The kit exposes **container** port `3000` (OpenChamber UI) and `4096` (the shared
-OpenCode server). A current `acq` publishes both to an **ephemeral `127.0.0.1`
-host port per sandbox** at create time, so several sandboxes running this kit at
-once don't collide. Look up the mapping:
+OpenCode server), declared via the neutral `publishedPorts` field in `spec.yaml`.
+`acq` publishes both to an **ephemeral `127.0.0.1` host port per sandbox** at
+create time (on both the sbx and msb backends), so several sandboxes running this
+kit at once don't collide. Look up the mapping:
 
 ```bash
 acq ports <sandbox>
@@ -78,11 +79,6 @@ Want a **fixed** host port instead of the ephemeral one? Publish it explicitly:
 acq ports <sandbox> --publish 3000:3000        # this sandbox → host 3000
 acq ports <other-sandbox> --publish 3001:3000  # another → host 3001
 ```
-
-> On an older `acq` that predates automatic publishing
-> ([quickstart#221](https://github.com/GSA-TTS/agentic-coding-quickstart/pull/221)),
-> the ports are not mapped at create; publish them once per sandbox with the
-> `acq ports … --publish` commands above.
 
 ## Sharing a session with a terminal
 
@@ -116,10 +112,8 @@ local user, or anything you forward those ports to) can drive OpenCode without a
 credential. Don't forward the mapped ports to a wider interface.
 
 > The loopback-only guarantee depends on `acq` publishing the `0.0.0.0:4096`
-> container bind to a loopback-scoped host port (automatic on a current `acq`; on
-> an older `acq` you must publish it yourself). Until published loopback-scoped,
-> treat the unauthenticated bind as reachable to whatever can route to the
-> container.
+> container bind to a loopback-scoped host port. `acq` does this at create time
+> from the kit's neutral `publishedPorts` (on both the sbx and msb backends).
 >
 > The installer is pinned and integrity-checked: the first-boot install fetches
 > OpenChamber's `install.sh` from a pinned release tag and runs it only if its
@@ -131,7 +125,8 @@ credential. Don't forward the mapped ports to a wider interface.
 | Backend | Status |
 |---------|--------|
 | **sbx** | Supported. |
-| **msb**, **ppp** | Not yet — the neutral `hybrid/v1` spec does not model published ports or a background-command flag; both live in `backend_extras.sbx` today. Tracked on [#233](https://github.com/GSA-TTS/agentic-coding-patterns/issues/233). |
+| **msb** | Supported. Ports and the background startup supervisor are declared with the neutral `publishedPorts` + `background` vocabulary (`hybrid/v1`); acq's translator/adapter maps them to each backend's native primitives. |
+| **ppp** | Not yet — arrives with the Phase 3 Podman backend. |
 
 ## Validating
 
@@ -158,7 +153,7 @@ dir and otherwise SKIPs with guidance).
 
 ```text
 openchamber/
-├── spec.yaml                  # the kit (caps, files, startup command, backend_extras)
+├── spec.yaml                  # the kit (caps, files, startup command, publishedPorts)
 ├── files/home/
 │   ├── .local/bin/opencode    # opencode wrapper (TUI attach + PID-1 hold on acq run)
 │   └── openchamber-start.sh   # installs + supervises the shared server + OpenChamber

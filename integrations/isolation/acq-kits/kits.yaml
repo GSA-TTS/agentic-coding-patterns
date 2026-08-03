@@ -44,21 +44,17 @@ kits:
       shortcut — SSH-agent forwarding is the shared mechanism.
 
   openchamber:
-    backends: [sbx]
+    backends: [sbx, msb]
     parity: |
       Opt-in browser UI for OpenCode plus an `opencode` wrapper that owns a
-      single shared OpenCode server (see docs/decisions/). sbx-only for now: the
-      kit needs two published container ports (3000 for OpenChamber, 4096 for the
-      shared server → ephemeral host loopback ports per sandbox) and a background
-      startup hook, both expressed via backend_extras.sbx (publishedPorts +
-      background). The neutral spec models neither port publishing nor a
-      background flag, so msb/ppp support is deferred until acq defines a neutral
-      port-publish + background vocabulary (or the msb adapter grows an
-      equivalent extra). acq's neutral→sbx translator now CARRIES publishedPorts
-      (quickstart#221, merged), so on a current acq the ports are published at
-      create time with no manual step (older acq: fall back to `acq ports
-      --publish`). The install+supervise script (files/home/openchamber-start.sh)
-      and the wrapper (files/home/.local/bin/opencode) are backend-agnostic — the
-      only remaining gap is msb port/background plumbing, tracked as Increment B
-      on #233.
-
+      single shared OpenCode server (see docs/decisions/). Declares BOTH sbx and
+      msb via the neutral vocabulary: the two published container ports (3000 for
+      OpenChamber, 4096 for the shared server) are expressed with the neutral
+      top-level `publishedPorts` list, and the never-exiting startup supervisor is
+      marked with the neutral `background: true` flag (both added to the hybrid/v1
+      schema in #276). acq's translator/adapter maps publishedPorts + background to
+      each backend's native port-publish and detached-hook primitives, so the
+      ports are published and the supervisor is detached at create time on both
+      backends with no manual step. The install+supervise script
+      (files/home/openchamber-start.sh) and the wrapper
+      (files/home/.local/bin/opencode) are backend-agnostic. No backend shortcut.

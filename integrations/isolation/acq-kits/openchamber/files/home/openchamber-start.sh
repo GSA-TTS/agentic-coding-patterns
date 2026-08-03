@@ -22,7 +22,8 @@
 # playbook-clone.sh) from the former sbx kit's inline startup command into a
 # standalone, testable script.
 #
-# Runs as the agent user (uid 1000) in the background on every sandbox start and
+# Runs as the agent user (whose uid is assigned at provision and is not
+# necessarily 1000) in the background on every sandbox start and
 # is fully idempotent: it installs OpenChamber only if missing, then starts a
 # supervisor for the shared server and one for OpenChamber, each only if one
 # isn't already running.
@@ -43,6 +44,17 @@ CHAMBER_PORT="${OPENCHAMBER_PORT:-3000}"
 # front so a freshly-installed `openchamber` resolves in THIS shell (otherwise
 # the post-install `command -v openchamber` guard trips and the server section
 # never runs on first boot).
+#
+# SCOPE LIMIT — this PATH addition is PROCESS-LOCAL. It cannot be persisted for
+# other, later `acq exec … sh -c '…'` invocations from here: this script runs as
+# the non-root agent user, which cannot write the only files a bare non-login
+# `sh -c` would pick up PATH from — /etc/environment and /etc/profile.d/* are
+# root-owned, and a plain `sh -c` sources neither /etc/profile nor ~/.profile
+# anyway. So there is no agent-user-safe, portable way to make the npm-global bin
+# / ~/.local/bin durably resolvable for a future bare `sh -c`. Callers that exec
+# into the sandbox (e.g. the kit's verify probes) must therefore augment PATH
+# themselves; the verify script's in_sbx() does exactly that. Do NOT attempt an
+# unportable root-only write here.
 NPM_BIN="$(npm prefix -g 2>/dev/null)/bin"
 case ":$PATH:" in *":$NPM_BIN:"*) : ;; *) PATH="$NPM_BIN:$PATH" ;; esac
 export PATH
@@ -52,6 +64,14 @@ if ! command -v openchamber >/dev/null 2>&1; then
   # Route prebuild-install (and npm) through the sandbox proxy.
   [ -n "${HTTPS_PROXY:-${https_proxy:-}}" ] && export npm_config_https_proxy="${HTTPS_PROXY:-$https_proxy}"
   [ -n "${HTTP_PROXY:-${http_proxy:-}}" ]  && export npm_config_proxy="${HTTP_PROXY:-$http_proxy}"
+  # Force the OpenChamber installer to use npm. Its install.sh auto-detects a
+  # package manager (pnpm > bun > yarn > npm) and would pick `yarn` on the
+  # node:22-bookworm base — but yarn resolves its own registry
+  # (registry.yarnpkg.com), which is NOT on this kit's egress allow-list
+  # (spec.yaml permits registry.npmjs.org, not yarn's). The installer honors
+  # $npm_config_user_agent (an `npm*` value selects npm), and all this kit's
+  # proxy/CA plumbing is npm-oriented, so pin npm explicitly.
+  export npm_config_user_agent="npm"
   # Build a CA bundle for Node-based downloads (the prebuilt native binary).
   # NODE_EXTRA_CA_CERTS *appends* to Node's built-in roots, which lack both the
   # sandbox proxy CA and any HTTPS-inspection CA (e.g. Zscaler). Concatenate BOTH
@@ -59,6 +79,14 @@ if ! command -v openchamber >/dev/null 2>&1; then
   # (populated with the inspection CA by the zscaler-ca-certificate kit at
   # startup) so the full chain validates — the proxy CA alone is not sufficient
   # behind an inspecting proxy.
+  #
+  # ACCEPTED RISK (trust surface): this bundle lives at an AGENT-WRITABLE path and
+  # is forwarded (via `sudo env NODE_EXTRA_CA_CERTS=...`) into the ROOT installer
+  # below. An actor who already controls the agent user could therefore add a
+  # trust anchor the root download honors. This is bounded — that actor already
+  # has agent-level code execution inside the sandbox (the security boundary), and
+  # the installer it feeds is independently SHA-256-pinned — so we accept it here
+  # rather than stage a root-owned bundle before the sudo hand-off.
   _ca="$HOME/.local/state/openchamber/ca-bundle.pem"
   mkdir -p "$(dirname "$_ca")"
   : > "$_ca"
@@ -77,7 +105,40 @@ if ! command -v openchamber >/dev/null 2>&1; then
        -o "$_installer" 2>/tmp/openchamber-install.log; then
     _got_sha="$( (sha256sum "$_installer" 2>/dev/null || shasum -a 256 "$_installer" 2>/dev/null) | cut -d' ' -f1)"
     if [ "$_got_sha" = "$_want_sha" ]; then
-      bash "$_installer" >>/tmp/openchamber-install.log 2>&1 || true
+      # Run the (SHA-verified) installer, which internally does
+      # `npm install -g @openchamber/web`. On the sbx-template base the npm
+      # global prefix's lib/ dir is ROOT-owned (as on sbx: the template
+      # provisions global tooling as root), so the agent's `npm install -g`
+      # fails EACCES. Run the whole installer via `sudo -n` (the agent has
+      # passwordless sudo on the template). The sudoers env_keep covers
+      # HTTP(S)_PROXY/NO_PROXY but NOT NODE_EXTRA_CA_CERTS (bare sudo resets it
+      # to msb's default /.msb/tls/ca.pem, dropping the kit's assembled bundle),
+      # so forward proxy + CA + HOME explicitly via `sudo env`. HOME keeps npm
+      # cache/config in the agent home rather than /root. The `${VAR:+NAME=...}`
+      # idiom omits an arg entirely when the var is empty/unset (safe under
+      # set -u), so an empty proxy does not pass an empty npm_config_*. When
+      # sudo is unavailable (a plain-OCI override without the template's sudo),
+      # fall back to an agent-owned per-user npm prefix so the global install
+      # needs no root.
+      if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+        sudo -n env \
+          npm_config_user_agent="${npm_config_user_agent:-npm}" \
+          ${npm_config_https_proxy:+npm_config_https_proxy="$npm_config_https_proxy"} \
+          ${npm_config_proxy:+npm_config_proxy="$npm_config_proxy"} \
+          ${NODE_EXTRA_CA_CERTS:+NODE_EXTRA_CA_CERTS="$NODE_EXTRA_CA_CERTS"} \
+          HOME="$HOME" \
+          bash "$_installer" >>/tmp/openchamber-install.log 2>&1 || true
+      else
+        export npm_config_prefix="$HOME/.npm-global"
+        mkdir -p "$HOME/.npm-global"
+        # NPM_BIN (line 58) was computed from the DEFAULT global prefix, so the
+        # `command -v openchamber` guard below and the supervisor probe would
+        # otherwise never see a package installed under this per-user prefix.
+        # Prepend the per-user bin so the whole no-sudo path is resolvable.
+        case ":$PATH:" in *":$HOME/.npm-global/bin:"*) : ;; *) PATH="$HOME/.npm-global/bin:$PATH" ;; esac
+        export PATH
+        bash "$_installer" >>/tmp/openchamber-install.log 2>&1 || true
+      fi
     else
       echo "openchamber: install.sh SHA-256 mismatch (got $_got_sha, want $_want_sha) at $_ref; refusing to run it" >>/tmp/openchamber-install.log 2>&1
     fi
@@ -85,7 +146,14 @@ if ! command -v openchamber >/dev/null 2>&1; then
   fi
 fi
 command -v openchamber >/dev/null 2>&1 || {
-  echo "openchamber install failed; see /tmp/openchamber-install.log" >&2
+  # Route the marker to BOTH the log and stderr. NOTE: this marker is written for
+  # ANY unsuccessful install (the installer above runs with `|| true`, so the only
+  # signal is `command -v openchamber`), including TRANSIENT causes (npm/registry
+  # 503, proxy blip). It is therefore NOT a definitive-failure signal — verify's
+  # fast-fail path deliberately does not trip on it, so a transient failure can
+  # ride the normal readiness timeout. Only the SHA-256 refusal above (line ~129)
+  # is definitive.
+  echo "openchamber install failed; see /tmp/openchamber-install.log" | tee -a /tmp/openchamber-install.log >&2
   exit 0   # never fail the sandbox over an optional UI
 }
 

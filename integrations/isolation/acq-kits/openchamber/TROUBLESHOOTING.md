@@ -140,10 +140,9 @@ still `exec`s the attach, update the kit and recreate the sandbox.
 container port 3000 (or 4096), or the browser can't connect.
 
 **Cause:** on a **current `acq`** the ports are published automatically at create
-time (acq carries the kit's `backend_extras.sbx.publishedPorts` as of
-[quickstart#221](https://github.com/GSA-TTS/agentic-coding-quickstart/pull/221),
-merged). If you see no mapping, you are most likely on an **older `acq`** that
-predates that fix, so it did not publish the ports.
+time (acq reads the kit's neutral top-level `publishedPorts`). If you see no
+mapping, you are most likely on an **older `acq`** that lacks automatic port
+publishing, so it did not publish the ports.
 
 **Fix:** publish the two container ports (once per sandbox):
 
@@ -153,7 +152,7 @@ acq ports <sandbox> --publish 4096:4096    # shared opencode server
 acq ports <sandbox>                        # confirm the mappings
 ```
 
-Upgrading `acq` to a build that includes quickstart#221 removes the manual step.
+Upgrading `acq` to a build with automatic `publishedPorts` publishing removes the manual step.
 
 ## OpenChamber loads but shows no server
 

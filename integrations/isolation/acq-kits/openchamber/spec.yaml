@@ -48,10 +48,13 @@
 #
 # Why the startup script runs in the BACKGROUND: the OpenChamber supervisor loop
 # never exits (it respawns forever), so the startup command must not block
-# sandbox start. The neutral spec has no `background` field, so the backgrounding
-# is expressed two ways: the command backgrounds the script itself
-# (`sh …openchamber-start.sh &`), and backend_extras.sbx.background:true carries
-# the native sbx hint for the sbx adapter.
+# sandbox start. Backgrounding is expressed via the NEUTRAL `background: true`
+# flag on the startup commands[] entry (schema hybrid/v1, added in #276): acq's
+# translator/adapter maps it to each backend's native detached hook — sbx and
+# msb both consume it — so no per-backend `backend_extras` is needed anymore.
+# The startup command ALSO backgrounds the script itself with a trailing `&`
+# (`sh …openchamber-start.sh &`); this is kept deliberately as belt-and-suspenders
+# (see the trailing-`&` decision note on the startup command below).
 #
 # Why install at STARTUP, not an install phase: @openchamber/web depends on
 # better-sqlite3, a NATIVE module whose npm install runs
@@ -69,10 +72,13 @@
 # TUI can attach directly without a credential. See the README "Security note".
 #
 # PORT FORWARDING: OpenChamber binds container port 3000 and the shared server
-# binds container port 4096; BOTH are published to the host. The neutral spec
-# does not model published ports, so the sbx port-publish declaration (map each
-# to an ephemeral host loopback port, per sandbox) lives under backend_extras.sbx.
-# See the README backend-parity note.
+# binds container port 4096; BOTH are published to the host. This is declared via
+# the NEUTRAL top-level `publishedPorts:` list (schema hybrid/v1, added in #276),
+# using the `guest:` port key (host omitted → the backend defaults host to the
+# guest value). acq's translator/adapter maps publishedPorts to each backend's
+# native port-publish primitive — sbx and msb both consume it — so the kit works
+# on both backends with no per-backend `backend_extras`. See the README
+# backend-parity note.
 schemaVersion: "hybrid/v1"
 kind: mixin
 name: openchamber
@@ -122,14 +128,32 @@ files:
     description: Install (first boot) and supervise the shared opencode serve + OpenChamber
 
 commands:
-  # Run the extracted startup script as the agent user at every start, IN THE
-  # BACKGROUND (trailing `&`) so the never-exiting supervisor loops (shared
-  # server + OpenChamber) don't block sandbox start. The OpenChamber release pins
-  # are exported here (the script also carries matching fallback defaults); bump
-  # BOTH together with the script's defaults to adopt a newer release. See
-  # docs/decisions/.
+  # Run the extracted startup script as the agent user at every start. The
+  # never-exiting supervisor loops (shared server + OpenChamber) must not block
+  # sandbox start, so this command is marked neutral `background: true` — acq's
+  # translator/adapter maps that to each backend's native detached hook (sbx and
+  # msb both consume it). The OpenChamber release pins are exported here (the
+  # script also carries matching fallback defaults); bump BOTH together with the
+  # script's defaults to adopt a newer release. See docs/decisions/.
+  #
+  # TRAILING `&` DECISION (kept): the `sh -c` body ALSO ends the script launch
+  # with a trailing `&`. We KEEP it deliberately as belt-and-suspenders. It is NOT
+  # a double-background problem: `background: true` tells the backend to run this
+  # WHOLE command detached (it does not await it); the inner `&` returns the
+  # `sh -c` immediately having spawned the script. Even where a backend awaits the
+  # command's outer process, that process is a short-lived `sh -c` that exits as
+  # soon as the `&` spawns the script, so start never blocks. The two mechanisms
+  # compose safely (they don't fork twice into an orphaned duplicate), and this is
+  # the exact shape that worked on sbx before the migration — so we preserve it
+  # rather than risk a start-blocking regression by removing it.
   - phase: startup
+    # Schema-required: the hybrid/v1 `user` field pattern is ^[0-9]+$ (a numeric
+    # uid, NOT a name), so this MUST stay "1000" even though the agent uid is
+    # assigned at provision and is not necessarily 1000 (see the start-script
+    # header). Do not "fix" this to `agent`; the runtime does not rely on the
+    # literal value — acq/the backend runs the startup phase as the agent user.
     user: "1000"
+    background: true
     description: Install (first boot) and supervise the shared server + OpenChamber (background)
     command:
       - sh
@@ -138,6 +162,22 @@ commands:
         OPENCHAMBER_REF="v1.9.10" \
         OPENCHAMBER_INSTALL_SHA256="aa268c96ddc6d7d53fc54d2e5c2312e689493ecef6ba4f69730a93d50cf33287" \
           sh /home/agent/openchamber-start.sh &
+
+# Neutral published ports (schema hybrid/v1, added in #276). Publish the two
+# container/guest ports the kit binds: 3000 (OpenChamber UI) and 4096 (the shared
+# `opencode serve`). Uses the NEUTRAL shape — each entry declares `guest:` (NOT
+# the old sbx `container:` key), `protocol:`, and a `name:`. Host is omitted, so
+# each backend defaults the host port to the guest value (or an ephemeral host
+# loopback port, backend's choice — matching the prior sbx behavior). acq's
+# translator/adapter maps these to each backend's native port-publish primitive,
+# so sbx and msb both publish the ports at create time with no manual step.
+publishedPorts:
+  - guest: 3000
+    protocol: tcp
+    name: openchamber
+  - guest: 4096
+    protocol: tcp
+    name: opencode-server
 
 agentContext: |
   ## OpenChamber (web UI for OpenCode)
@@ -190,31 +230,13 @@ agentContext: |
   restart to take effect — it comes back a few seconds later on its own; those
   logs show `[supervisor] ... restarting` lines when it happens.
 
-# Backend extras: the neutral spec does not model published ports or a
-# background-command flag, so the sbx-native bits live here. These declare the
-# intent for the sbx adapter: publish container ports 3000 (OpenChamber) and 4096
-# (the shared server), and run the startup command as a background hook.
+# No backend_extras / backend_shortcuts: ports and background are now declared
+# with the NEUTRAL publishedPorts + background vocabulary above (schema hybrid/v1,
+# #276), which acq's translator/adapter feeds to both the sbx and msb backends.
+# Every backend runs the same install+supervise script and the same wrapper.
 #
 # CAVEAT (acq translation): acq's neutral→sbx translator (kit_translate_to_sbx)
-# carries caps/files/commands/environment/agentContext, AND — as of quickstart#221
-# (merged, closes quickstart#219) — publishedPorts. So a current `acq` publishes
-# container ports 3000/4096 to the host at create time with no manual step. On an
-# OLDER acq that predates that fix, applying via `acq` does NOT auto-publish the
-# ports — publish them once per sandbox with `acq ports <sandbox> --publish
-# 3000:3000` and `--publish 4096:4096` (see README "Reaching it from the host").
-# A direct sbx-v2 apply of a pre-translated kit already honors publishedPorts.
-#
-# These are per-backend hints, human-review-only (not schema-enforced); other
-# backends express the same behavior their own way (see the README backend-parity
-# note). No backend_shortcuts: every backend runs the same install+supervise
-# script and the same wrapper.
-backend_extras:
-  sbx:
-    publishedPorts:
-      - container: 3000
-        protocol: tcp
-        name: openchamber
-      - container: 4096
-        protocol: tcp
-        name: opencode-server
-    background: true
+# reads the neutral `publishedPorts` FIRST (only falling back to a legacy
+# backend_extras.sbx.publishedPorts with a deprecation warning — which this kit no
+# longer has). So a current `acq` publishes container ports 3000/4096 to the host
+# at create time with no manual step.

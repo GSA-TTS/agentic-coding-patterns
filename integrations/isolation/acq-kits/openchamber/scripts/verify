@@ -15,16 +15,15 @@
 #
 #      Preferred driver — RUN_ACQ=1: drive the `acq` CLI. acq translates the
 #      neutral hybrid/v1 spec to an sbx-v2 kit (kit_translate_to_sbx) and applies
-#      it, so the kit's `files:`/`commands:` land correctly. As of quickstart#221
-#      (merged) acq carries backend_extras.sbx.publishedPorts, so ports 3000/4096
-#      are published at CREATE time — no manual step. This script verifies that
-#      and only falls back to an explicit `acq ports --publish` on an older acq
-#      that predates #221.
+#      it, so the kit's `files:`/`commands:` land correctly. acq reads the kit's
+#      neutral top-level `publishedPorts` and publishes ports 3000/4096 at CREATE
+#      time — no manual step. This script verifies that and only falls back to an
+#      explicit `acq ports --publish` on an older acq that lacks port publishing.
 #
 #      Legacy driver — RUN_SBX=1: drive `sbx` directly on the NEUTRAL spec. sbx
 #      cannot parse the neutral schema (it expects sbx-v2), so `sbx create --kit`
 #      on this kit fails ("field files not found", "cannot unmarshal !!seq into
-#      CommandsPolicy", "field backend_extras not found"). This path therefore
+#      CommandsPolicy", "field publishedPorts not found"). This path therefore
 #      requires a PRE-TRANSLATED sbx-v2 kit dir in SBX_KIT_DIR; without it the
 #      script reports SKIP with guidance rather than a misleading FAIL. Prefer
 #      RUN_ACQ=1.
@@ -99,10 +98,36 @@ trap cleanup EXIT INT TERM
 # acq exec NAME -- CMD and sbx exec NAME -- CMD have the same shape; both are
 # non-TTY by default. We swallow transient exec errors so a probe never aborts
 # the run.
+#
+# PATH SCOPING: `acq exec`/`sbx exec` run the probe as a bare non-login `sh -c`
+# (see in_sbx). A bare `sh -c` sources NOTHING — not /etc/profile, not
+# ~/.profile — so its PATH is only whatever `/etc/environment` provides, which
+# does NOT include the npm-global bin (where the real `opencode` and the
+# `openchamber` CLI install) or `~/.local/bin` (where the kit's `opencode`
+# wrapper installs). Without this, `command -v openchamber` / `command -v
+# opencode` / `test -x ~/.local/bin/opencode` come back empty even though the
+# binaries exist and the servers are live — cascading false failures through
+# steps 3-12.
+#
+# The startup script (openchamber-start.sh) can only prepend the npm-global bin
+# to PATH within its OWN process; it runs as the non-root agent user and so
+# cannot durably persist PATH for other execs (it can't write /etc/environment or
+# /etc/profile.d — root-only — and `sh -c` won't source any per-user file). So
+# the correct layer for the fix is the PROBE: prepend the npm-global bin and
+# ~/.local/bin to PATH for every remote command. `npm prefix -g` is computed on
+# the guest (the prefix can vary by image). This only makes a PRESENT binary
+# resolvable; it does not weaken what any step asserts.
 in_sbx() {
+  # Wrap the caller's command so it runs with an augmented PATH on the guest.
+  # Compute the npm-global bin on the guest (may be empty if npm is absent — the
+  # ':' fallback keeps the expansion harmless). Keep existing PATH last so we
+  # never shadow system tools, only ADD the dirs the non-login shell was missing.
+  # Include $HOME/.npm-global/bin so the no-sudo install fallback (which sets an
+  # agent-owned npm prefix there, not the default global prefix) is also probeable.
+  _wrapped='export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:$(npm prefix -g 2>/dev/null)/bin:$PATH"; '"$1"
   case "${DRIVER:-}" in
-    acq) acq exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true ;;
-    *)   sbx exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true ;;
+    acq) acq exec "$SBX_NAME" -- sh -c "$_wrapped" </dev/null 2>/dev/null || true ;;
+    *)   sbx exec "$SBX_NAME" -- sh -c "$_wrapped" </dev/null 2>/dev/null || true ;;
   esac
 }
 # List published ports for the sandbox.
@@ -181,17 +206,38 @@ if [ "$DRIVER" = "acq" ]; then
     sed 's/^/  | /' "$CREATE_LOG" >&2
     exit 1
   fi
-  # As of quickstart#221 (merged) acq carries backend_extras.sbx.publishedPorts
-  # through translation, so a current acq publishes 3000/4096 at CREATE time — no
-  # manual step. Verify that here: check the mappings exist post-create. If they
-  # don't (an older acq predating #221), fall back to an explicit publish so the
-  # rest of the run still exercises the kit. Step 7 re-asserts the mappings.
-  info "2b. Container ports 3000 and 4096 published at create (quickstart#221)"
+  # acq reads the kit's neutral top-level publishedPorts, so a current acq
+  # publishes 3000/4096 at CREATE time — no manual step. Verify that here: check
+  # the mappings exist post-create. If they don't (an older acq lacking port
+  # publishing), fall back to an explicit publish so the rest of the run still
+  # exercises the kit. Step 7 re-asserts the mappings.
+  #
+  # BOUNDED POLL (not a one-shot): the create-time mapping isn't necessarily
+  # queryable the instant `acq create` returns. On msb the NAT mapping doesn't
+  # show up in `msb inspect` right after create, so a one-shot check races and
+  # misses — it then takes the `--publish` fallback needlessly, and that fallback
+  # pollutes step 7's output with redundant `(post-hoc ssh -L)` lines. Poll for
+  # up to PORTS_PUBLISH_TIMEOUT (~15s), a bounded-poll convention like step 3's
+  # (step 3 bounds on READY_TIMEOUT/POST_INSTALL_GRACE, not this 15s value), and
+  # only fall back after it genuinely times out. Query via the shared
+  # `sbx_ports_out` helper so 2b and step 7 read ports identically.
+  info "2b. Container ports 3000 and 4096 published at create (neutral publishedPorts)"
+  PORTS_PUBLISH_TIMEOUT="${PORTS_PUBLISH_TIMEOUT:-15}"
   for cport in 3000 4096; do
-    if acq ports "$SBX_NAME" 2>/dev/null | grep -q "$cport"; then
+    published=""
+    pub_deadline=$(( $(date +%s) + PORTS_PUBLISH_TIMEOUT ))
+    while :; do
+      if sbx_ports_out | grep -q "$cport"; then
+        published=yes
+        break
+      fi
+      [ "$(date +%s)" -ge "$pub_deadline" ] && break
+      sleep 1
+    done
+    if [ -n "$published" ]; then
       ok "container $cport auto-published at create"
     else
-      warn "container $cport not auto-published — older acq (pre-#221)? falling back to manual publish"
+      warn "container $cport not auto-published after ${PORTS_PUBLISH_TIMEOUT}s — older acq? falling back to manual publish"
       if acq ports "$SBX_NAME" --publish "${cport}:${cport}" >/dev/null 2>&1; then
         ok "container $cport published via fallback (acq ports --publish)"
       else
@@ -208,7 +254,7 @@ else
     echo "  RUN_SBX=1 needs a PRE-TRANSLATED sbx-v2 kit dir in SBX_KIT_DIR." >&2
     echo "  sbx cannot parse the neutral hybrid/v1 spec directly (it fails with" >&2
     echo "  'field files not found' / 'cannot unmarshal !!seq into CommandsPolicy'" >&2
-    echo "  / 'field backend_extras not found'). Prefer RUN_ACQ=1, which translates" >&2
+    echo "  / 'field publishedPorts not found'). Prefer RUN_ACQ=1, which translates" >&2
     echo "  automatically. To use RUN_SBX, translate first (acq's kit_translate_to_sbx)" >&2
     echo "  and point SBX_KIT_DIR at the output." >&2
     info "Summary"
@@ -253,7 +299,7 @@ info "3. Wait for startup install + OpenChamber (install up to ${READY_TIMEOUT}s
 # The shared server is checked in step 5; here we only wait for the install and
 # for OpenChamber to answer.
 deadline=$(( $(date +%s) + READY_TIMEOUT ))
-installed=""; chamber_up=""; grace_deadline=""
+installed=""; chamber_up=""; grace_deadline=""; install_failed=""; installed_off_path=""
 while :; do
   now=$(date +%s)
   [ -z "$installed" ] && [ -n "$(in_sbx 'command -v openchamber')" ] && {
@@ -261,6 +307,26 @@ while :; do
     # Install done — OpenChamber should appear within POST_INSTALL_GRACE.
     grace_deadline=$(( now + POST_INSTALL_GRACE ))
   }
+  # FAST-FAIL 1: a genuinely DEFINITIVE failure marker landed in the install log.
+  # Anchor ONLY on the SHA-verification refusal ("SHA-256 mismatch" / "refusing to
+  # run it"): a bad installer hash will not fix itself, so waiting out READY_TIMEOUT
+  # is pointless. Do NOT fast-fail on the generic "openchamber install failed"
+  # marker — the installer runs with `|| true`, so that marker is written for
+  # TRANSIENT causes too (npm/registry 503, a proxy blip), which should ride the
+  # normal READY_TIMEOUT and get a chance to succeed, not abort the step.
+  [ -z "$installed" ] && [ -z "$install_failed" ] && \
+    [ "$(in_sbx 'grep -Eq "SHA-256 mismatch|refusing to run it" /tmp/openchamber-install.log 2>/dev/null && echo yes')" = "yes" ] && {
+      install_failed=yes
+      break
+    }
+  # FAST-FAIL 2: installed BUT not on the probe PATH (npm prefix mismatch). Detect
+  # via a PATH-independent package check; only trip while `command -v openchamber`
+  # is still empty (installed still empty).
+  [ -z "$installed" ] && [ -z "$installed_off_path" ] && \
+    [ "$(in_sbx 'npm ls -g --depth=0 2>/dev/null | grep -q @openchamber/web && echo yes')" = "yes" ] && {
+      installed_off_path=yes
+      break
+    }
   [ -z "$chamber_up" ] && [ "$(in_sbx 'curl -fsS http://127.0.0.1:3000 >/dev/null 2>&1 && echo yes')" = "yes" ] && chamber_up=yes
   [ -n "$installed" ] && [ -n "$chamber_up" ] && break
   # Stop conditions: overall deadline, or the post-install grace elapsed.
@@ -271,6 +337,12 @@ done
 
 if [ -n "$installed" ]; then
   ok "OpenChamber CLI installed by the startup step"
+elif [ -n "$installed_off_path" ]; then
+  bad "openchamber installed but not on the probe PATH — npm prefix mismatch"
+  in_sbx 'echo "npm prefix -g => $(npm prefix -g 2>&1)"; ls -la "$(npm prefix -g 2>/dev/null)/bin" 2>/dev/null | grep -i openchamber' | sed 's/^/    | /'
+elif [ -n "$install_failed" ]; then
+  bad "openchamber install refused (installer SHA-256 mismatch — see /tmp/openchamber-install.log); fast-failed without waiting out READY_TIMEOUT"
+  in_sbx 'tail -n 25 /tmp/openchamber-install.log' | sed 's/^/    | /'
 else
   bad "openchamber not installed (see /tmp/openchamber-install.log)"
   in_sbx 'tail -n 25 /tmp/openchamber-install.log' | sed 's/^/    | /'
