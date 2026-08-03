@@ -211,8 +211,8 @@ agent never sees it):
 
 | Backend | v1 | Notes |
 |---|---|---|
-| **sbx** | ✅ | Positional workspaces mount at their absolute host path — required for `gitdir:` resolution and Agor's same-path assumption. |
-| **msb** | ❌ (gap) | `acq`'s msb adapter mounts at a **fixed guest path** (`/home/agent/workspace`), not the host path, breaking the `.git` pointer. Tracked at map [#260](https://github.com/GSA-TTS/agentic-coding-patterns/issues/260). |
+| **sbx** | ✅ validated | Positional workspaces mount at their absolute host path — required for `gitdir:` resolution and Agor's same-path assumption. The live end-to-end run is tracked at map [#257](https://github.com/GSA-TTS/agentic-coding-patterns/issues/257). |
+| **msb** | ✅ code-ready, live-pending | `acq`'s msb adapter now mounts each workspace at its **host path** (sbx-parity) and supports multiple positional mounts ([quickstart#230](https://github.com/GSA-TTS/agentic-coding-quickstart/pull/230), #233), so the `.git` pointer resolves the same way as on sbx. A live msb run still needs a KVM host (msb is not live-verified upstream); that residual is folded into [#257](https://github.com/GSA-TTS/agentic-coding-patterns/issues/257). |
 | **ppp** | ❌ | Future, with msb. |
 
 ## Scope and authority

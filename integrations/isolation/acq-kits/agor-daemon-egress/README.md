@@ -57,8 +57,8 @@ and enforced by **human review**, not by schema fields — consistent with
 
 | Backend | Support | Notes |
 |---|---|---|
-| **sbx** | Supported (v1 target) | `caps.network.allow` is synthesized into the sbx-v2 kit; the full `host.docker.internal:3030` is preserved (quoted). |
-| **msb** | Works, port-stripped | acq emits `--net-rule allow@host.docker.internal` and **drops the `:port`** (msb keys on domain only). Egress is host-wide for that host on msb. Acceptable for v1 (sbx-only); see the msb gap [#260](https://github.com/GSA-TTS/agentic-coding-patterns/issues/260). |
+| **sbx** | Supported (validated) | `caps.network.allow` is synthesized into the sbx-v2 kit; the full `host.docker.internal:3030` is preserved (quoted). |
+| **msb** | Works, port-stripped | acq emits `--net-rule allow@host.docker.internal` and **drops the `:port`** (msb keys on domain only). Egress is host-wide for that host on msb — acceptable. A live msb run is tracked at [#257](https://github.com/GSA-TTS/agentic-coding-patterns/issues/257). |
 | **ppp** (later) | Deferred | Same `caps.network.allow` path as sbx. |
 
 No backend shortcut — every backend uses `caps.network.allow`.

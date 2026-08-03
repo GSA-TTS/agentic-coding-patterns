@@ -64,6 +64,6 @@ Approved by the human owner on 2026-07-26.
   host:port.
 - The kit's static allow entry must be edited for a non-default daemon port/alias
   (a `hybrid/v1` kit cannot template it); documented in the README.
-- On msb the port is stripped (host-wide for that host); acceptable for the
-  sbx-only v1, tracked with the msb gap
-  ([#260](https://github.com/GSA-TTS/agentic-coding-patterns/issues/260)).
+- On msb the port is stripped (host-wide for that host); acceptable — sbx is the
+  validated backend, and a live msb run is tracked at
+  ([#257](https://github.com/GSA-TTS/agentic-coding-patterns/issues/257)).
