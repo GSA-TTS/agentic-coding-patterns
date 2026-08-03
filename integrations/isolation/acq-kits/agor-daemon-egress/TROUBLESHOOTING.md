@@ -25,8 +25,9 @@ WebSocket/connection error to the daemon.
 
 Expected. `acq`'s msb adapter emits `--net-rule allow@host.docker.internal` and
 **strips the `:port`** — msb keys on the domain only, so egress is host-wide for
-that host. v1 targets sbx (which keeps the port); the msb behavior is tracked at
-[#260](https://github.com/GSA-TTS/agentic-coding-patterns/issues/260).
+that host. sbx (the validated backend) keeps the port; the msb port-stripping is
+benign for this single-host egress. A live msb run is tracked at
+[#257](https://github.com/GSA-TTS/agentic-coding-patterns/issues/257).
 
 ## `validate-kits.py` fails for this kit
 

@@ -32,8 +32,8 @@
 #   - sbx: caps.network.allow is synthesized into the sbx-v2 kit; the full
 #     host:port is preserved (quoted). This is the v1 target backend.
 #   - msb: acq emits `--net-rule allow@<host>` and STRIPS the port (msb keys on
-#     domain only) — so egress is host-wide for that host on msb. Acceptable for
-#     v1 (sbx-only, per #251); noted for the msb gap (#260).
+#     domain only) — so egress is host-wide for that host on msb. Acceptable;
+#     sbx is the validated backend, and a live msb run is tracked at #257.
 #
 # DAEMON HOST ALIAS + PORT: defaults below assume the sbx host alias
 # `host.docker.internal` and the Agor default daemon port 3030. If your daemon

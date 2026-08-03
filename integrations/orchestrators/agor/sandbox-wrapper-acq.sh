@@ -29,10 +29,12 @@
 #   before wiring it live. See docs/clean-script-standard.md.
 #
 # SCOPE (v1)
-#   - Backend: sbx only. `acq`'s msb adapter mounts at a FIXED guest path
-#     (/home/agent/workspace), not the host path, which breaks the worktree
-#     `.git` pointer and Agor's same-absolute-path assumption. msb is tracked
-#     as a gap (map #260).
+#   - Backend: sbx is the validated target. `acq`'s msb adapter now mounts each
+#     workspace at its host path (sbx-parity) and supports multiple positional
+#     mounts (quickstart#230, #233), so the worktree `.git` pointer resolves the
+#     same on msb — the wrapper is backend-agnostic here. A live msb run still
+#     needs a KVM host (msb is not live-verified upstream); that live-validation
+#     residual is tracked at map #257.
 #   - Daemon egress is allow-listed via a small acq kit, NOT a flag (acq has no
 #     --net-rule); see AGOR_EGRESS_KIT below and map #259.
 #   - USAi key: provisioned to acq out-of-band by the operator (map #252). Agor
