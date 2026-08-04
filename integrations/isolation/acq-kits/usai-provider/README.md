@@ -160,6 +160,33 @@ The generator only rewrites the region between the `BEGIN/END GENERATED USAI
 MODELS` markers and the default model selection; the ownership marker comment and
 hand-maintained config are preserved. `npm test` covers the generator.
 
+### Token limits and pricing
+
+Each generated model carries a `limit` (context/output tokens) and, when known,
+a `cost` object (USD **per 1M tokens**: `input`, `output`, and where available
+`cache_read`, `cache_write`, plus a `context_over_200k` override for
+context-tiered pricing). Both are sourced from
+[models.dev](https://models.dev)'s `api.json` catalog. Only the cost keys
+OpenCode's config schema accepts are emitted — models.dev extras such as
+`input_audio`, `output_audio`, `reasoning`, and the `tiers` array are dropped so
+the config validates cleanly.
+
+Pricing is **backend-aware**: USAi routes each vendor through a specific
+backend, so the generator pulls each vendor's price from the matching
+models.dev provider rather than the first-party catalog:
+
+| USAi vendor | models.dev provider | fallback |
+| --- | --- | --- |
+| Anthropic (Claude) | `amazon-bedrock` | `anthropic` |
+| OpenAI (GPT) | `azure` | `openai` |
+| Google (Gemini) | `google-vertex` | `google` |
+| Meta (Llama) | `amazon-bedrock` | `meta`, `llama` |
+| Cohere | `cohere` | — |
+
+Bedrock Claude pricing uses the US/base regional entries (the `eu.`/`au.`
+prefixes carry a premium and are deliberately demoted). Models with no
+models.dev match keep their fallback limits and omit `cost`.
+
 ## Verifying
 
 Run the bundled check on a host with a backend CLI (e.g. `sbx`) installed and
