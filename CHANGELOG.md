@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.8.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.7.0...v1.8.0) (2026-08-04)
+
+
+### Features
+
+* **acq-kits:** openchamber wrapper owns a shared opencode server ([#234](https://github.com/GSA-TTS/agentic-coding-patterns/issues/234)) ([0e04073](https://github.com/GSA-TTS/agentic-coding-patterns/commit/0e04073056b792ee07840cbca3bf6f1a794d834f))
+* **acq-kits:** startup script owns the shared server for a terminal-free openchamber ([#246](https://github.com/GSA-TTS/agentic-coding-patterns/issues/246)) ([d27c22b](https://github.com/GSA-TTS/agentic-coding-patterns/commit/d27c22bb068465abfcbbd13260a25bd59683d156))
+* **communications:** design-artifact pack + workflow + multi-artifact output ([#241](https://github.com/GSA-TTS/agentic-coding-patterns/issues/241)) ([#270](https://github.com/GSA-TTS/agentic-coding-patterns/issues/270)) ([74f198e](https://github.com/GSA-TTS/agentic-coding-patterns/commit/74f198e554f62ec42d061d10055ab93571159770)), closes [#237](https://github.com/GSA-TTS/agentic-coding-patterns/issues/237)
+* **integrations:** add backend-aware pricing to USAi provider ([#281](https://github.com/GSA-TTS/agentic-coding-patterns/issues/281)) ([acdfae8](https://github.com/GSA-TTS/agentic-coding-patterns/commit/acdfae88217738f82f6a2a2456fb7b048a565394))
+* **kits:** add bundle provenance schema + permission/drift guards ([#273](https://github.com/GSA-TTS/agentic-coding-patterns/issues/273)) ([#274](https://github.com/GSA-TTS/agentic-coding-patterns/issues/274)) ([5c55bcf](https://github.com/GSA-TTS/agentic-coding-patterns/commit/5c55bcf9fc77947b145a828f75877797ebd6d178))
+* **kits:** add neutral publishedPorts + background to hybrid/v1 schema ([#276](https://github.com/GSA-TTS/agentic-coding-patterns/issues/276)) ([bf8add3](https://github.com/GSA-TTS/agentic-coding-patterns/commit/bf8add33c70191a8e4b6648780dbde480fc4227c))
+* **meta:** add data-driven pattern-router + deterministic scorer ([#239](https://github.com/GSA-TTS/agentic-coding-patterns/issues/239)) ([#266](https://github.com/GSA-TTS/agentic-coding-patterns/issues/266)) ([2a805a9](https://github.com/GSA-TTS/agentic-coding-patterns/commit/2a805a9506a5a3ab2b8c552fc4b0e0ef265c1298)), closes [#237](https://github.com/GSA-TTS/agentic-coding-patterns/issues/237)
+* **openchamber:** adopt neutral publishedPorts + background; sbx+msb parity ([#283](https://github.com/GSA-TTS/agentic-coding-patterns/issues/283)) ([6230faa](https://github.com/GSA-TTS/agentic-coding-patterns/commit/6230faa53ae88e125f04521ab8eee932eeaacdbc))
+* **patterns:** classify patterns + deprecate safe-code-review [MERGE AFTER [#266](https://github.com/GSA-TTS/agentic-coding-patterns/issues/266)] ([#240](https://github.com/GSA-TTS/agentic-coding-patterns/issues/240)) ([#267](https://github.com/GSA-TTS/agentic-coding-patterns/issues/267)) ([ea6ea67](https://github.com/GSA-TTS/agentic-coding-patterns/commit/ea6ea6731ae8af3c3c376b5749c9f3bb3c2099c0))
+* **schema:** add collection + routing taxonomy foundation ([#238](https://github.com/GSA-TTS/agentic-coding-patterns/issues/238)) ([#245](https://github.com/GSA-TTS/agentic-coding-patterns/issues/245)) ([25508e4](https://github.com/GSA-TTS/agentic-coding-patterns/commit/25508e41a8e956016268b6a38ef1c127bcf25b6b)), closes [#237](https://github.com/GSA-TTS/agentic-coding-patterns/issues/237)
+* **workflows:** language-aware security-scan-review workflow ([#229](https://github.com/GSA-TTS/agentic-coding-patterns/issues/229)) [MERGE AFTER playbook[#157](https://github.com/GSA-TTS/agentic-coding-patterns/issues/157)] ([#230](https://github.com/GSA-TTS/agentic-coding-patterns/issues/230)) ([325b5b0](https://github.com/GSA-TTS/agentic-coding-patterns/commit/325b5b0fdbb740efb821186678ebfbef3c7d26e3))
+
+
+### Bug Fixes
+
+* **acq-kits:** reject shell-metachar paths in kit specs ([#225](https://github.com/GSA-TTS/agentic-coding-patterns/issues/225)) ([#236](https://github.com/GSA-TTS/agentic-coding-patterns/issues/236)) ([eb8a68c](https://github.com/GSA-TTS/agentic-coding-patterns/commit/eb8a68c870afa6b810d2b298ea4d3791b67215d8))
+* **playbook-kit:** fetch via GitHub REST tarball for cross-backend auth (quickstart[#203](https://github.com/GSA-TTS/agentic-coding-patterns/issues/203)) ([#269](https://github.com/GSA-TTS/agentic-coding-patterns/issues/269)) ([3fcde8e](https://github.com/GSA-TTS/agentic-coding-patterns/commit/3fcde8ee396bf9841de47f6f7886db088164243d))
+* **router:** stop broad workflow/trigger from displacing specific skills ([#271](https://github.com/GSA-TTS/agentic-coding-patterns/issues/271)) ([#272](https://github.com/GSA-TTS/agentic-coding-patterns/issues/272)) ([c39396d](https://github.com/GSA-TTS/agentic-coding-patterns/commit/c39396dbbee677e70890bb2cc101c18953e733e3))
+
 ## [1.7.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.6.0...v1.7.0) (2026-07-17)
 
 
