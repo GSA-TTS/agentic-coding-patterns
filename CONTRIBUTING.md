@@ -1,6 +1,6 @@
 # Contributing to Agentic Coding Patterns
 
-Thank you for contributing! This is the **community patterns repository** for agentic coding. We welcome patterns, prompts, skills, workflows, and lessons learned from practitioners.
+Thank you for contributing! This is the **community patterns repository** for agentic coding, maintained by and for the federal agentic-coding community. We welcome patterns, prompts, skills, workflows, and lessons learned from federal practitioners.
 
 ## Ecosystem Overview
 
