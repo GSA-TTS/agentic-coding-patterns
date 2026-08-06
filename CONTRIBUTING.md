@@ -16,7 +16,7 @@ This repo is one of three in the agentic coding ecosystem:
 
 ## Getting Help
 
-- **Questions:** Ask in the agentic-coding Slack channel
+- **Questions:** Open a GitHub issue or start a discussion
 - **Bugs/improvements:** Open a GitHub issue or submit a PR
 - **Security issues:** See [SECURITY.md](SECURITY.md) — direct fixes preferred
 
