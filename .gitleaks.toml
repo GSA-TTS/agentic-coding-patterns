@@ -32,6 +32,12 @@ paths = [
   '''docs/test-cases-schema\.md''',
   '''.github/ISSUE_TEMPLATE/.*\.yml''',
   '''.github/pull_request_template\.md''',
+  # Deliberate test fixtures: sample-vulnerable-code the security-review skill
+  # scans for, and the sensitive-terms validator's own test inputs. Fake by
+  # design; flagged by a full-history scan (public-readiness #292).
+  '''skills/secure-code-review/tests/.*''',
+  '''\.agents/skills/secure-code-review/tests/.*''',
+  '''scripts/tests/test_validate_sensitive_terms\.py''',
 ]
 
 # Patterns that explain security issues need example secrets
