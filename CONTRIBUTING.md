@@ -16,7 +16,7 @@ This repo is one of three in the agentic coding ecosystem:
 
 ## Getting Help
 
-- **Questions:** Ask in the agentic-coding Slack channel
+- **Questions:** Open a GitHub issue or start a discussion
 - **Bugs/improvements:** Open a GitHub issue or submit a PR
 - **Security issues:** See [SECURITY.md](SECURITY.md) — direct fixes preferred
 
@@ -695,9 +695,16 @@ Don't delete deprecated patterns — they provide migration guidance.
 
 This is a professional, respectful community. Be kind, be helpful, be patient.
 
-## License
+## Public domain
 
-All contributions are released under [CC0-1.0](LICENSE) (public domain). By contributing, you agree to release your work under this license.
+This project is in the public domain within the United States, and copyright and
+related rights in the work worldwide are waived through the
+[CC0 1.0 Universal public domain dedication](https://creativecommons.org/publicdomain/zero/1.0/).
+See [`LICENSE`](LICENSE) for details.
+
+All contributions to this project will be released under the CC0 dedication. By
+submitting a pull request or issue, you are agreeing to comply with this waiver
+of copyright interest.
 
 ## See Also
 

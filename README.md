@@ -230,7 +230,7 @@ This repository is released under [CC0-1.0](LICENSE) (public domain). Content is
 
 ## Getting Help
 
-- **Questions:** Ask in the agentic-coding Slack channel
+- **Questions:** Open a GitHub issue or start a discussion
 - **Browse docs:** See [docs/](docs/) for guides
 - **Improvement ideas:** Open an issue or submit a PR
 - **Relationship to other repos:** See [docs/repository-ecosystem.md](docs/repository-ecosystem.md)
