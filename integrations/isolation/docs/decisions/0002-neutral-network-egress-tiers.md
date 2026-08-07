@@ -80,19 +80,28 @@ Effective allowlist for a sandbox = **tier baseline ∪ per-kit
   reputation source so a human reviewer sees the signal before approving. It
   never gates runtime egress and never fetches at sandbox-build time.
 
-### Default: fail-safe `strict`, shipped-config `balanced`
+### Default: `balanced`, backend-consistent
 
-Per a 3/3 consensus that weighed the prompt-injection exfiltration threat model:
+A 3/3 consensus flagged the prompt-injection exfiltration threat of an implicit
+`balanced` default and preferred a fail-safe `strict` default. The maintainers
+(human decision, 2026-08-07) **reconciled this to `balanced` as the default**, to
+match the sbx baseline the project already recommends AND the msb baseline that
+quickstart ADR-0018 (`feat/msb-balanced-egress`) already ships as default-on. A
+`strict`-by-omission default would make the two backends behave inconsistently and
+remove the sbx-parity UX that ADR-0018 exists to deliver.
 
-- **The schema / library default (when `network.tier` is unspecified) is
-  `strict`** — a kit or backend that forgets to set a tier fails **closed**, and
-  no sandbox silently gets exfiltration-capable egress by omission.
-- **The shipped quickstart/default configuration explicitly sets
-  `network.tier: balanced`** — so users get the useful baseline out of the box,
-  but as an **explicit, reviewable, auditable choice**, not an implicit grant.
+- **The default (when `network.tier` is unspecified) is `balanced`** — the
+  useful, curated baseline, consistent across sbx and msb.
+- **`balanced` stays deny-by-default + allowlist**, never "allow-all". The
+  exfiltration risk is a **residual**, mitigated by the curated + CODEOWNERS-gated
+  allowlist, the CI reputation check, keeping the list minimal, and an explicit
+  per-sandbox opt-down to `strict` (`ACQ_MSB_BALANCED_EGRESS=0` on msb today).
+- **`strict` and `open` remain explicitly selectable.** GFE / high-assurance
+  deployments SHOULD pin `network.tier: strict`.
 
-This reconciles developer ergonomics (balanced is what users experience) with
-least-privilege (the system fails closed to strict when nothing is specified).
+This favors backend consistency and developer ergonomics (parity with what sbx
+and ADR-0018 msb users already get) while keeping the tightening path a
+first-class, documented option.
 
 ### Backend mapping
 
@@ -114,10 +123,11 @@ create:
 - `balanced` gives a shared, curated, useful baseline that is the same on every
   backend, extensible by the community through a reviewed PR path.
 - Deterministic and offline-safe (SHA-pinned in-repo list, no runtime feed).
-- Fail-safe: unspecified tier ⇒ `strict`; a coerced agent never gets broad egress
-  by default-of-omission.
+- Backend-consistent by default: `balanced` is what both sbx and msb users get,
+  matching quickstart ADR-0018 rather than diverging on the default.
 - Satisfies SC-7 / SC-7(5) (boundary protection, deny-by-default) with documented,
-  version-controlled policy.
+  version-controlled policy — `balanced` is deny-by-default + allowlist, not
+  allow-all.
 
 ### Negative / risks
 
@@ -126,7 +136,8 @@ create:
   each entry (a registry, a model API, a source host) is a potential exfiltration
   channel — `balanced` widens blast radius vs `strict`. Mitigated by: CODEOWNERS +
   security-skill review on additions, the CI reputation check, keeping the list
-  minimal, and the fail-safe `strict` default.
+  minimal, and a first-class opt-down to `strict` (which GFE / high-assurance
+  deployments SHOULD pin).
 - **Maintenance / staleness:** registries and AI endpoints change; the list needs
   periodic review (PR-driven + a scheduled review cadence). No runtime feed means
   freshness depends on us.
@@ -141,10 +152,15 @@ create:
 
 ## Alternatives Considered
 
-- **`balanced` as the true (implicit) default.** Rejected by the security/threat
-  panel: silently grants exfiltration-capable egress to every new agent by
-  omission. We instead ship `balanced` explicitly while the fail-safe default is
-  `strict`.
+- **Fail-safe `strict` default (ship `balanced` only when explicit).** Preferred
+  by the 3/3 security/threat panel over the prompt-injection exfiltration risk of
+  a `balanced`-by-omission default. Reconsidered and **not adopted** by the
+  maintainers: quickstart ADR-0018 already ships msb `balanced`-on by default for
+  sbx parity, so a `strict`-by-omission neutral default would make the backends
+  inconsistent and remove the parity UX. We adopt `balanced` as the default and
+  keep `strict` a first-class, documented opt-down (recommended for GFE). The
+  residual exfiltration risk is mitigated by the curated + CODEOWNERS-gated
+  allowlist rather than by defaulting closed.
 - **Runtime threat-feed blocklist.** Rejected: redundant under deny-by-default,
   breaks offline/deterministic acq, and adds a fetch-time SSRF/poisoning surface.
   Kept as a CI-time check on proposed additions only.
@@ -165,5 +181,10 @@ create:
   allowlist this extends).
 - quickstart `acq.backends/kit-translate.sh` (sbx emit), `acq.backends/msb.sh`
   (`--net-rule` emit) — the adapters that will map the tier.
-- Consensus + tradeoff panel (2026-08-07): design approved 3/3; default
-  reconciled to fail-safe `strict` / shipped `balanced`.
+- quickstart ADR-0018 (`feat/msb-balanced-egress`) — the msb worked example this
+  neutral tier generalizes: vendored sbx-`balanced` host mirror + `--net-default
+  deny` + translated `--net-rule allow@…`, default-on. The follow-up epic adopts
+  its emitter/host-list under this neutral contract rather than re-implementing.
+- Consensus + tradeoff panel (2026-08-07): design approved 3/3. The panel's
+  preferred fail-safe `strict` default was reconsidered by the maintainers and
+  set to `balanced` for sbx/msb backend consistency (see Alternatives).
