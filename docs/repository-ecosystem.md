@@ -198,8 +198,8 @@ If you find patterns diverging between repos:
 ## Cross-Repo Multi-Workspace Patterns
 
 When working with multiple repositories simultaneously, you can mount them into a single sandbox
-using Docker's `sbx` CLI. This enables workflows where an agent can reference one repo while
-editing another.
+via `acq` (the wrapper that runs on either backend — `msb`, the default, or `sbx`). This enables
+workflows where an agent can reference one repo while editing another.
 
 ### Common Cross-Repo Modes
 
@@ -212,13 +212,15 @@ editing another.
 
 ### Repository Ownership
 
-- **Quickstart** owns the detailed `sbx` CLI setup instructions
+- **Quickstart** owns the detailed `acq` backend setup instructions (`msb` and `sbx`)
 - **Patterns** provides high-level guidance on when to use cross-repo workflows
 - **Playbook** defines standards that may be referenced from other repos
 
-For `sbx` command syntax and examples, see the
+For backend command syntax and examples, see the quickstart guide — the neutral
+[Quick Start](https://github.com/GSA-TTS/agentic-coding-quickstart/blob/main/docs/QUICKSTART.md)
+for `acq`, and the sbx-specific
 [Multiple Workspaces](https://github.com/GSA-TTS/agentic-coding-quickstart/blob/main/docs/QUICKSTART_SBX.md#multiple-workspaces)
-section in the quickstart guide.
+section for `sbx` details.
 
 ### Security Best Practice
 

@@ -2,7 +2,7 @@
 #
 # Maps each neutral (schemaVersion: "hybrid/v1") kit to the backends that
 # support it and a prose parity note describing any per-backend capability
-# difference. For Phase 2 the supported backends are sbx and msb; ppp arrives in
+# difference. The supported backends today are msb (the default) and sbx; ppp arrives in
 # Phase 3. Parity is ADVISORY (documented, not machine-enforced) — the source of
 # truth for a per-backend difference is the kit's spec.yaml backend_shortcuts and
 # its README parity note.

@@ -9,8 +9,8 @@ Your **private key never leaves the host** — the sandbox forwards the SSH agen
 and signing resolves the public key from that agent at signing time.
 
 > **Neutral (backend-agnostic) kit.** This is the `schemaVersion: "hybrid/v1"`
-> form consumed by `acq`, which selects an isolation backend (`sbx` today; `msb`
-> from Phase 2). It replaces the former `sbx-kits/git-ssh-sign/` sbx-only spec.
+> form consumed by `acq`, which selects an isolation backend (`msb` — the
+> default — and `sbx` today; `ppp` later). It replaces the former `sbx-kits/git-ssh-sign/` sbx-only spec.
 > See [backend parity](#backend-parity) and
 > [`../../docs/decisions/0001-neutral-hybrid-v1-acq-kits.md`](../../docs/decisions/0001-neutral-hybrid-v1-acq-kits.md).
 >

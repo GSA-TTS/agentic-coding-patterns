@@ -5,7 +5,7 @@ Neutral, backend-agnostic **mixin kits** for
 isolation-backend wrapper. A kit configures an agentic-coding sandbox
 declaratively (network egress, files to drop, lifecycle commands, agent
 context); `acq` translates the neutral spec into whichever backend is active
-(`sbx` today; `msb` from Phase 2; `ppp` later).
+(`msb` — the default — and `sbx` today; `ppp` later).
 
 These are isolation/environment building blocks — they configure the *sandbox*,
 not agent behavior. (Behavioral patterns live in `skills/`, `prompts/`, etc.)

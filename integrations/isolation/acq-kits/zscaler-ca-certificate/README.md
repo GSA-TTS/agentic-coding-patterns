@@ -7,8 +7,8 @@ HTTPS-inspecting proxy — so outbound HTTPS works on networks where Zscaler
 intercepts and re-signs TLS traffic.
 
 > **Neutral (backend-agnostic) kit.** This is the `schemaVersion: "hybrid/v1"`
-> form consumed by `acq`, which selects an isolation backend (`sbx` today; `msb`
-> from Phase 2). It replaces the former `sbx-kits/zscaler-ca-certificate/`
+> form consumed by `acq`, which selects an isolation backend (`msb` — the
+> default — and `sbx` today; `ppp` later). It replaces the former `sbx-kits/zscaler-ca-certificate/`
 > sbx-only spec. See [backend parity](#backend-parity) and
 > [`../../docs/decisions/0001-neutral-hybrid-v1-acq-kits.md`](../../docs/decisions/0001-neutral-hybrid-v1-acq-kits.md).
 

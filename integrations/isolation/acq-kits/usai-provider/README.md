@@ -5,8 +5,8 @@ kit** that configures a coding agent to use the GSA **USAi** OpenAI-compatible
 endpoint as its model provider, with network egress allow-listed.
 
 > **Neutral (backend-agnostic) kit.** This is the `schemaVersion: "hybrid/v1"`
-> form consumed by `acq`, which selects an isolation backend (`sbx` today; `msb`
-> from Phase 2). It replaces the former `sbx-kits/usai-provider-kit/` sbx-only
+> form consumed by `acq`, which selects an isolation backend (`msb` — the
+> default — and `sbx` today; `ppp` later). It replaces the former `sbx-kits/usai-provider-kit/` sbx-only
 > spec. See the [backend parity](#backend-parity) note and
 > [`../../docs/decisions/0001-neutral-hybrid-v1-acq-kits.md`](../../docs/decisions/0001-neutral-hybrid-v1-acq-kits.md).
 
