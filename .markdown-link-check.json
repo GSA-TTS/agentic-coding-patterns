@@ -31,11 +31,32 @@
     {
       "_comment": "Relative links that climb out of the current file's directory (../../docs, ../../../agentic-coding-playbook, ../other-pattern) are mis-resolved by the checker to a 400. Cross-file existence is validated by `make validate`; cross-repo targets live in a sibling repo not present in CI checkout.",
       "pattern": "^\\.\\./"
+    },
+    {
+      "_comment": "Bare same-dir file references (LICENSE, NOTICE) resolve to a 400 in the checker; they are real files in the repo.",
+      "pattern": "^(LICENSE|NOTICE)$"
+    },
+    {
+      "_comment": "cloud-gov/style-management-service is a real GSA repo that is not public YET; the link is correct and will resolve once published. Remove this ignore when the repo goes public.",
+      "pattern": "^https://github\\.com/cloud-gov/style-management-service"
+    },
+    {
+      "_comment": "asciinema.org rejects the checker's HEAD probe (returns 0) but is live in a browser; it is a stable public site.",
+      "pattern": "^https://asciinema\\.org"
     }
   ],
   "replacementPatterns": [],
   "retryOn429": true,
   "retryCount": 3,
   "fallbackRetryDelay": "30s",
-  "aliveStatusCodes": [200, 206, 301, 302, 307, 308]
+  "_comment_alive": "403 = bot-blocked-but-live hosts (claude.ai, webaim.org, and similar) that reject the CI user-agent but resolve in a browser; treat as alive so genuine dead links still fail. asciinema.org returns 0 to the checker's HEAD probe but is live.",
+  "aliveStatusCodes": [
+    200,
+    206,
+    301,
+    302,
+    307,
+    308,
+    403
+  ]
 }
