@@ -4,8 +4,7 @@ Neutral, backend-agnostic **mixin kits** for
 [`acq`](https://github.com/GSA-TTS/agentic-coding-quickstart) — the pluggable
 isolation-backend wrapper. A kit configures an agentic-coding sandbox
 declaratively (network egress, files to drop, lifecycle commands, agent
-context); `acq` translates the neutral spec into whichever backend is active
-(`msb` — the default — and `sbx` today; `ppp` later).
+context); `acq` translates the neutral spec into whichever backend is active.
 
 These are isolation/environment building blocks — they configure the *sandbox*,
 not agent behavior. (Behavioral patterns live in `skills/`, `prompts/`, etc.)

@@ -2,10 +2,10 @@
 #
 # Maps each neutral (schemaVersion: "hybrid/v1") kit to the backends that
 # support it and a prose parity note describing any per-backend capability
-# difference. The supported backends today are msb (the default) and sbx; ppp arrives in
-# Phase 3. Parity is ADVISORY (documented, not machine-enforced) — the source of
-# truth for a per-backend difference is the kit's spec.yaml backend_shortcuts and
-# its README parity note.
+# difference. `acq` abstracts the isolation backend; the authoritative backend
+# set lives in the acq wrapper, not here. Parity is ADVISORY (documented, not
+# machine-enforced) — the source of truth for a per-backend difference is the
+# kit's spec.yaml backend_shortcuts and its README parity note.
 #
 # See integrations/isolation/docs/decisions/0001-neutral-hybrid-v1-acq-kits.md.
 schemaVersion: "acq-kits-registry/v1"

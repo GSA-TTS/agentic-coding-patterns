@@ -198,7 +198,7 @@ If you find patterns diverging between repos:
 ## Cross-Repo Multi-Workspace Patterns
 
 When working with multiple repositories simultaneously, you can mount them into a single sandbox
-via `acq` (the wrapper that runs on either backend — `msb`, the default, or `sbx`). This enables
+via `acq` (the sandboxing wrapper). This enables
 workflows where an agent can reference one repo while editing another.
 
 ### Common Cross-Repo Modes
@@ -212,15 +212,14 @@ workflows where an agent can reference one repo while editing another.
 
 ### Repository Ownership
 
-- **Quickstart** owns the detailed `acq` backend setup instructions (`msb` and `sbx`)
+- **Quickstart** owns the detailed `acq` setup instructions
 - **Patterns** provides high-level guidance on when to use cross-repo workflows
 - **Playbook** defines standards that may be referenced from other repos
 
-For backend command syntax and examples, see the quickstart guide — the neutral
+For command syntax and examples, see the quickstart guide's
 [Quick Start](https://github.com/GSA-TTS/agentic-coding-quickstart/blob/main/docs/QUICKSTART.md)
-for `acq`, and the sbx-specific
-[Multiple Workspaces](https://github.com/GSA-TTS/agentic-coding-quickstart/blob/main/docs/QUICKSTART_SBX.md#multiple-workspaces)
-section for `sbx` details.
+and its [Multiple Workspaces](https://github.com/GSA-TTS/agentic-coding-quickstart/blob/main/docs/QUICKSTART_SBX.md#multiple-workspaces)
+section.
 
 ### Security Best Practice
 
