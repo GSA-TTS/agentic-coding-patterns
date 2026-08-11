@@ -27,6 +27,10 @@
     },
     {
       "pattern": "<[^>]+>"
+    },
+    {
+      "_comment": "Relative links that climb out of the current file's directory (../../docs, ../../../agentic-coding-playbook, ../other-pattern) are mis-resolved by the checker to a 400. Cross-file existence is validated by `make validate`; cross-repo targets live in a sibling repo not present in CI checkout.",
+      "pattern": "^\\.\\./"
     }
   ],
   "replacementPatterns": [],
