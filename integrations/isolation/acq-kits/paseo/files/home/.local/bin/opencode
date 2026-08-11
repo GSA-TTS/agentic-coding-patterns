@@ -1,77 +1,37 @@
 #!/bin/sh
-# opencode — kit-installed wrapper that SHADOWS the real `opencode` binary.
+# opencode — thin, agent-named wrapper that SHADOWS the real `opencode` binary.
 #
 # The opencode base image's entrypoint runs the bare, unqualified command
 # `opencode`. This wrapper is dropped at ~/.local/bin/opencode, which is FIRST on
 # the image PATH (ahead of the npm-global bin where the real opencode lives), so
 # the sandbox's interactive `acq run` startup runs THIS instead.
 #
-# WHAT THIS WRAPPER IS FOR (Paseo kit): the Paseo daemon + web UI are started and
-# supervised by the kit's STARTUP script (paseo-start.sh) on every sandbox start —
-# so the UI comes up on its own, with or without this wrapper. This wrapper does
-# two kit-specific jobs on the interactive `acq run` path, then keeps the sandbox
-# alive:
+# This file is intentionally THIN and is the ONLY agent-specific piece of the
+# kit's entrypoint behavior. It does exactly two things:
 #
-#   1. PIN PASEO'S WORKTREE ROOT to the current project. Paseo keeps agent git
-#      worktrees under a SINGLE GLOBAL root; there is no per-project option, and a
-#      relative root resolves against PASEO_HOME. On `acq run <path>` THIS wrapper
-#      is the entrypoint and runs with cwd = the primary (first mounted) workspace,
-#      so it computes <PWD>/.paseo-worktrees and writes it to
-#      $PASEO_HOME/config.json (via paseo-set-worktrees-root.mjs). The daemon reads
-#      worktrees.root ONLY at boot (no SIGHUP / no runtime reread), so when the
-#      value CHANGES the wrapper bounces the daemon — it kills the supervised
-#      daemon child (never the supervisor), and the startup script's
-#      supervisor:paseo-daemon loop respawns it, re-reading the new root.
+#   opencode <args…>  → PASSTHROUGH: exec the REAL opencode with the args
+#                       unchanged (run, auth, etc.). This MUST stay: it is how the
+#                       real opencode remains reachable both for interactive use
+#                       AND for Paseo itself, which launches `opencode` as a child
+#                       process when opencode is the selected provider. Dropping
+#                       passthrough would break Paseo's opencode provider.
+#   opencode          → (no args) exec the generic, agent-neutral shim
+#                       (paseo-agent-shim), which does all the Paseo/kit work
+#                       (pin worktree root, print connect info, hold PID 1 on the
+#                       `acq run` path). We `exec` it — NOT run it as a child — so
+#                       the shim INHERITS this process's id; when this wrapper was
+#                       the sandbox entrypoint (PID 1), the shim becomes PID 1 and
+#                       its hold actually keeps the sandbox alive.
 #
-#   2. PRINT HOST-CONNECT INSTRUCTIONS and, when it IS PID 1 (the `acq run`
-#      entrypoint), HOLD the foreground so that session's sandbox — and thus the
-#      daemon/UI — stays up.
-#
-# AGENT-GENERIC: aside from resolving the real `opencode` for passthrough, this
-# wrapper says nothing opencode-specific. There is NO shared live session between
-# a terminal TUI and Paseo (Paseo launches its own agent CLIs as children), so the
-# wrapper offers no "attach" — it only pins worktrees, reports, and holds PID 1.
-# That keeps the kit reusable for other agents: the same file could shadow a
-# different agent binary with only the passthrough target changed.
-#
-# Behavior:
-#   opencode                 → (no args) pin the worktree root, print connect info,
-#                              then:
-#                                • PID 1 (the `acq run` path): we ARE the sandbox
-#                                  entrypoint, so we must NOT return — hold forever
-#                                  (hold_pid1) so the terminal/session stays open.
-#                                • NOT PID 1 (a shell / `acq exec`, with a detached
-#                                  `acq create` keeping the sandbox alive): nothing
-#                                  to hold — EXIT CLEANLY and return the terminal.
-#   opencode <anything...>   → passthrough: exec the REAL opencode with the args
-#                              unchanged (run, auth, etc.).
-#
-# WHY THE WRAPPER MUST NOT RETURN WHEN IT IS PID 1 (keep the sandbox alive):
-#   On the interactive `acq run` path this wrapper IS the sandbox entrypoint (it
-#   shadows the base image's bare `opencode` CMD via PATH). A Docker sandbox is
-#   "running" only while its entrypoint / PID 1 is alive. If this wrapper returns
-#   while it is PID 1, PID 1 exits and the sandbox transitions running -> stopped
-#   (taking the Paseo daemon/UI with it). So when `$$` is 1 the no-arg path ends by
-#   BLOCKING FOREVER in hold_pid1. On a detached `acq create` PID 1 is instead a
-#   tini keepalive shim and this wrapper is NOT PID 1 (it is run from a shell /
-#   `acq exec`), so it exits cleanly.
-#
-# The Paseo daemon is UNSECURED (no PASEO_PASSWORD): the sandbox — an ephemeral
-# container with proxied, allow-listed egress and no host FS — is the security
-# boundary, and its published port is host loopback only. See the README
-# "Security note".
+# REUSE FOR ANOTHER AGENT: copy this file to ~/.local/bin/<other-agent> and change
+# only the agent name in the "resolve the real binary" block below. All shared
+# behavior lives in paseo-agent-shim, which knows nothing about any agent. See
+# docs/decisions/paseo-mixin-generic-wrapper.md.
 
 set -eu
 
-# Daemon bind. Keep in sync with the kit spec's PASEO_LISTEN / publishedPorts.
-PASEO_PORT="$(printf '%s' "${PASEO_LISTEN:-0.0.0.0:6767}" | sed -n 's/.*:\([0-9][0-9]*\)$/\1/p')"
-[ -n "$PASEO_PORT" ] || PASEO_PORT=6767
-
 HOME_DIR="${HOME:-/home/agent}"
-PASEO_HOME_DIR="${PASEO_HOME:-$HOME_DIR/.paseo}"
-STATE_DIR="${XDG_STATE_HOME:-$HOME_DIR/.local/state}/paseo"
-DAEMON_LOG="$STATE_DIR/paseo-daemon.log"
-SET_ROOT_SCRIPT="$HOME_DIR/paseo-set-worktrees-root.mjs"
+SHIM="$HOME_DIR/paseo-agent-shim"
 
 # --- Resolve the REAL opencode (never ourselves). ---------------------------
 # We are ~/.local/bin/opencode and are first on PATH, so `command -v opencode`
@@ -93,7 +53,7 @@ IFS="$_ifs"
 
 # --- Passthrough: any arguments go straight to the real opencode. ------------
 # (If the real opencode is missing, only fail on the passthrough path — the
-# no-arg Paseo path below does not need opencode at all.)
+# no-arg shim path below does not need opencode at all.)
 if [ "$#" -gt 0 ]; then
   if [ -z "$real_opencode" ]; then
     echo "opencode wrapper: could not locate the real opencode binary on PATH" >&2
@@ -102,130 +62,9 @@ if [ "$#" -gt 0 ]; then
   exec "$real_opencode" "$@"
 fi
 
-# --- No args: pin the worktree root, report, hold PID 1 if we are entrypoint. -
-
-# 1. Pin Paseo's worktree root to <PWD>/.paseo-worktrees. PWD here is the primary
-#    (first mounted) workspace on the `acq run` path. Use an ABSOLUTE path (Paseo
-#    resolves a relative root against PASEO_HOME, not the project).
-WORKTREES_ROOT="$(pwd -P)/.paseo-worktrees"
-worktrees_changed=""
-if [ -f "$SET_ROOT_SCRIPT" ] && command -v node >/dev/null 2>&1; then
-  # The helper prints "changed" / "unchanged" on success, or "error: ..." + rc=1.
-  _set_out="$(PASEO_HOME="$PASEO_HOME_DIR" node "$SET_ROOT_SCRIPT" --root "$WORKTREES_ROOT" 2>&1 || true)"
-  case "$_set_out" in
-    changed)   worktrees_changed=yes ;;
-    unchanged) : ;;
-    *)         echo "opencode: could not pin Paseo worktree root: $_set_out" >&2 ;;
-  esac
+# --- No args: hand off to the generic shim (exec, to preserve PID for the hold).
+if [ ! -f "$SHIM" ]; then
+  echo "opencode wrapper: kit shim not found at $SHIM" >&2
+  exit 127
 fi
-
-# 2. If the root changed, bounce the daemon so it re-reads config.json. We kill
-#    ONLY the daemon process tree, never the startup script's supervisor loop, so
-#    the supervisor relaunches the daemon with the new worktrees.root. The
-#    supervisor loop's argv carries the marker "supervisor:paseo-daemon"; the
-#    actual daemon is a `paseo daemon start --foreground ...` CHILD of that loop.
-#    We select PIDs whose argv matches the daemon-start pattern but EXCLUDE the
-#    supervisor marker, and kill just those.
-daemon_up() {
-  # /api/health is unauthenticated and returns 200 when the daemon is listening.
-  curl -fsS "http://127.0.0.1:$PASEO_PORT/api/health" >/dev/null 2>&1
-}
-if [ -n "$worktrees_changed" ]; then
-  echo "opencode: pinned Paseo worktree root to $WORKTREES_ROOT; restarting the daemon to apply it ..."
-  for _pid in $(pgrep -u "$(id -u)" -f "paseo daemon start" 2>/dev/null); do
-    # Skip the supervisor loop (its cmdline carries the marker).
-    if tr '\0' ' ' < "/proc/$_pid/cmdline" 2>/dev/null | grep -q "supervisor:paseo-daemon"; then
-      continue
-    fi
-    kill "$_pid" 2>/dev/null || true
-  done
-  # Wait for the supervisor to bring it back on the new root (bounded).
-  _i=0
-  while [ "$_i" -lt 30 ]; do
-    daemon_up && break
-    _i=$((_i + 1))
-    sleep 1
-  done
-fi
-
-# 3. Report status + how to reach it. Give the daemon a brief moment if it is
-#    still coming up (first boot installs the CLI first).
-if daemon_up; then
-  echo "opencode: Paseo daemon + web UI are up on 0.0.0.0:$PASEO_PORT (started by the kit startup script)"
-else
-  _i=0
-  while [ "$_i" -lt 15 ]; do
-    daemon_up && break
-    _i=$((_i + 1))
-    sleep 1
-  done
-  if daemon_up; then
-    echo "opencode: Paseo daemon + web UI are up on 0.0.0.0:$PASEO_PORT"
-  else
-    echo "opencode: Paseo daemon not answering yet on :$PASEO_PORT; the startup" >&2
-    echo "          supervisor keeps retrying — see $DAEMON_LOG" >&2
-  fi
-fi
-
-cat <<EOF
-
-────────────────────────────────────────────────────────────────────────────
-Connect from your HOST
-────────────────────────────────────────────────────────────────────────────
-This sandbox publishes container port $PASEO_PORT (the Paseo daemon API,
-WebSocket, and bundled web UI — all on one port) to a host loopback port. Find
-the mapped host port from your host shell:
-
-    acq ports <sandbox>        # (sbx ports <sandbox>)
-
-  • Paseo web UI → container $PASEO_PORT → open http://127.0.0.1:<host-port>
-
-Paseo launches its own agent CLIs (opencode among them); there is no shared
-live session with a terminal TUI, so drive agents from the browser UI.
-────────────────────────────────────────────────────────────────────────────
-EOF
-
-# Are WE PID 1? This discriminates the two no-arg situations:
-#   - PID 1 (we ARE the sandbox entrypoint, i.e. the `acq run` path): we MUST NOT
-#     return, or PID 1 exits and the sandbox stops. Hold forever (hold_pid1).
-#   - NOT PID 1 (a detached `acq create` is already keeping the sandbox alive via
-#     its tini keepalive shim, and we were run from a shell / `acq exec`): the
-#     daemon + UI are already supervised by the startup script, so there is
-#     nothing for us to hold — EXIT CLEANLY and give the terminal back.
-is_pid1() { [ "$$" -eq 1 ]; }
-
-if is_pid1; then
-  cat <<EOF
-
-NOTE: you started this with \`acq run\`, so THIS terminal is the sandbox's main
-process. It will stay held open — keep this terminal open while you use Paseo
-from your browser. Closing it stops the sandbox.
-
-If you did NOT want a held terminal: quit this (Ctrl-C), then bring the sandbox
-up detached instead — it keeps running on its own with no terminal attached:
-    acq create --name <sandbox> opencode <path>
-    acq ports <sandbox>        # find the host port, then open the browser
-
-Daemon log: $DAEMON_LOG
-EOF
-
-  hold_pid1() {
-    # Block forever without spinning. Prefer an inert sleep loop; never return.
-    while :; do
-      sleep 86400
-    done
-  }
-
-  hold_pid1
-else
-  cat <<EOF
-
-The sandbox keeps running on its own; the Paseo daemon and web UI are supervised
-by the kit startup script. This command is exiting and returning your terminal.
-Reach Paseo from the host with:
-    acq ports <sandbox>        # then open http://127.0.0.1:<host-port-for-$PASEO_PORT>
-
-Daemon log: $DAEMON_LOG
-EOF
-  exit 0
-fi
+exec sh "$SHIM"

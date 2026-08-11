@@ -138,14 +138,14 @@ acq exec <sandbox> -- sh -c 'rm -f "${PASEO_HOME:-$HOME/.paseo}/paseo.pid"'
 
 ## `opencode <args>` behaves oddly
 
-The kit's `opencode` at `~/.local/bin/opencode` is a **wrapper** that shadows the
-real binary (it pins worktrees + holds PID 1 when run with no args). With
-arguments it `exec`s the real opencode unchanged. Confirm the shadow and that the
-real binary resolves:
+The kit's `opencode` at `~/.local/bin/opencode` is a **thin wrapper** that shadows
+the real binary. With arguments it `exec`s the real opencode unchanged; with no
+arguments it `exec`s the generic kit shim (`~/paseo-agent-shim`), which pins
+worktrees + holds PID 1. Confirm the shadow and that the real binary resolves:
 
 ```bash
 acq exec <sandbox> -- sh -c 'command -v opencode'          # should be ~/.local/bin/opencode
-acq exec <sandbox> -- sh -c 'ls -la ~/.local/bin/opencode' # executable?
+acq exec <sandbox> -- sh -c 'ls -la ~/.local/bin/opencode ~/paseo-agent-shim' # both present + executable?
 ```
 
 If `command -v opencode` is empty, the base image PATH or CMD changed (the

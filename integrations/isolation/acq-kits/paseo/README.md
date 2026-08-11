@@ -90,16 +90,16 @@ worktrees inside each project directory is not natively possible.
 This kit does the best achievable thing: it pins the one global root to a
 subdirectory of the **first mounted project directory**. When you run the
 `opencode` wrapper on the `acq run` path (whose working directory is that primary
-workspace), it writes `worktrees.root = <your-project>/.paseo-worktrees` into
-`config.json` and **restarts the daemon** so the change takes effect (Paseo reads
-`worktrees.root` only at daemon startup — there is no signal to reread it). Before
-you run the wrapper once, worktrees default to `$PASEO_HOME/worktrees`.
+workspace), the kit shim writes `worktrees.root = <your-project>/.paseo-worktrees`
+into `config.json` and **restarts the daemon** so the change takes effect (Paseo
+reads `worktrees.root` only at daemon startup — there is no signal to reread it).
+Before you run it once, worktrees default to `$PASEO_HOME/worktrees`.
 
 To override the location, pre-set `worktrees.root` to an absolute path in
-`config.json`; the wrapper only rewrites it when the value actually differs from
+`config.json`; the shim only rewrites it when the value actually differs from
 `<primary-project>/.paseo-worktrees`, so a manual absolute value you set will be
-replaced on the next wrapper run — set it via the wrapper's working directory
-instead, or remove the wrapper's pinning if you need a custom fixed root.
+replaced on the next run — set it via the entrypoint's working directory instead,
+or remove the shim's pinning if you need a custom fixed root.
 
 ## No shared session with a terminal TUI
 
@@ -175,7 +175,8 @@ Validate and drive the kit through `acq`, which translates the neutral
 paseo/
 ├── spec.yaml                       # the kit (caps, files, startup command, publishedPorts, env)
 ├── files/home/
-│   ├── .local/bin/opencode         # agent-generic wrapper: pins worktree root, prints connect info, holds PID 1 on acq run
+│   ├── .local/bin/opencode         # thin agent-named wrapper: passthrough to real opencode, else exec the shim
+│   ├── paseo-agent-shim            # generic kit logic: pins worktree root, prints connect info, holds PID 1 on acq run
 │   ├── paseo-start.sh              # installs + supervises the Paseo daemon + web UI
 │   └── paseo-set-worktrees-root.mjs # idempotent worktrees.root merge into config.json
 ├── README.md                       # this file
@@ -190,5 +191,5 @@ Rationale and the decisions behind this kit's structure live in
 [`docs/decisions/`](docs/decisions/) — notably why one daemon serves everything
 on a single port, why worktrees can only be pinned to the first project dir (and
 why that needs a daemon restart), why the startup script owns the daemon while
-the wrapper pins worktrees, why the install runs at startup, and why the wrapper
-is agent-generic.
+the entrypoint pins worktrees, why the install runs at startup, and why the
+entrypoint is split into a thin agent-named wrapper over a generic kit shim.

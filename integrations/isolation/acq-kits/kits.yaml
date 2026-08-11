@@ -72,8 +72,9 @@ kits:
       primitives, so the port is published and the supervisor is detached at
       create time with no manual step. The install+supervise script
       (files/home/paseo-start.sh), the worktree-root helper
-      (files/home/paseo-set-worktrees-root.mjs), and the agent-generic `opencode`
-      wrapper (files/home/.local/bin/opencode) are backend-agnostic. Unlike
-      openchamber there is NO shared TUI session (Paseo launches its own agent
-      CLIs) and only ONE port. The daemon runs unsecured (no PASEO_PASSWORD); the
-      sandbox is the security boundary and the port is host loopback only.
+      (files/home/paseo-set-worktrees-root.mjs), the generic kit shim
+      (files/home/paseo-agent-shim), and the thin agent-named `opencode` wrapper
+      (files/home/.local/bin/opencode) are backend-agnostic. Unlike openchamber
+      there is NO shared TUI session (Paseo launches its own agent CLIs) and only
+      ONE port. The daemon runs unsecured (no PASEO_PASSWORD); the sandbox is the
+      security boundary and the port is host loopback only.

@@ -22,18 +22,20 @@
 #     start — including a detached `acq create` with nobody attached, held open by
 #     the sandbox's tini keepalive (PID 1) — the daemon + UI come up on their own.
 #     There is deliberately NO install phase (see the install note below).
-#   - The sandbox entrypoint runs the bare command `opencode`. This kit drops an
-#     `opencode` WRAPPER at ~/.local/bin/opencode, which is first on the image
-#     PATH (ahead of the npm-global bin where the real opencode lives), so the
-#     wrapper is what the entrypoint runs on the interactive `acq run` path. With
-#     arguments it passes straight through to the real opencode (so opencode still
-#     works normally as a Paseo provider CLI). With NO arguments it (1) pins
-#     Paseo's worktree root to the current project (see WORKTREES below), (2)
-#     prints host-connect instructions, and (3) — only when it is PID 1 (the
-#     `acq run` entrypoint) — holds the foreground so THAT session's sandbox stays
-#     open. The wrapper is otherwise AGENT-GENERIC: it says nothing opencode-
-#     specific beyond resolving the real opencode for passthrough, so the kit is
-#     reusable with other agents.
+#   - The sandbox entrypoint runs the bare command `opencode`. This kit drops a
+#     THIN, agent-named WRAPPER at ~/.local/bin/opencode, which is first on the
+#     image PATH (ahead of the npm-global bin where the real opencode lives), so
+#     the wrapper is what the entrypoint runs on the interactive `acq run` path.
+#     With arguments it passes straight through to the real opencode (so opencode
+#     still works normally — including as a Paseo provider CLI that Paseo spawns).
+#     With NO arguments it execs the GENERIC shim (/home/agent/paseo-agent-shim),
+#     which does all the kit work: (1) pin Paseo's worktree root to the current
+#     project (see WORKTREES below), (2) print host-connect instructions, and (3) —
+#     only when it is PID 1 (the `acq run` entrypoint) — hold the foreground so
+#     THAT session's sandbox stays open. The wrapper `exec`s the shim so the shim
+#     inherits its process id (PID 1 on the entrypoint path). Only the thin wrapper
+#     is agent-specific; the shim knows nothing about opencode, so the kit is
+#     reusable with other agents by dropping another thin wrapper next to it.
 #
 # NO SHARED SESSION (unlike openchamber): Paseo is NOT an opencode server — it
 # launches its own agent CLIs (opencode among them) as child processes. There is
@@ -43,14 +45,15 @@
 # sandbox (and thus the daemon/UI) alive; that is the only opencode-shaped
 # behavior retained.
 #
-# WHY THE WRAPPER (entrypoint) MUST NOT RETURN on `acq run`: a Docker sandbox is
+# WHY THE ENTRYPOINT MUST NOT RETURN on `acq run`: a Docker sandbox is
 # "running" only while its entrypoint / PID 1 is alive. On the interactive
-# `acq run` path the wrapper IS the entrypoint (via PATH-shadowing), so a no-arg
-# path that returns would let PID 1 exit and flip the sandbox running -> stopped.
-# The wrapper therefore ends the no-arg path by BLOCKING forever (hold_pid1) when
-# it is PID 1. On the detached `acq create` path PID 1 is instead a tini keepalive
-# shim and the wrapper is not the entrypoint, so nothing here is needed to keep a
-# detached sandbox alive. See docs/decisions/paseo-mixin-generic-wrapper.md.
+# `acq run` path the wrapper IS the entrypoint (via PATH-shadowing) and execs the
+# shim, so the shim becomes PID 1; a no-arg path that returns would let PID 1 exit
+# and flip the sandbox running -> stopped. The shim therefore ends the no-arg path
+# by BLOCKING forever (hold_pid1) when it is PID 1. On the detached `acq create`
+# path PID 1 is instead a tini keepalive shim and the wrapper is not the
+# entrypoint, so nothing here is needed to keep a detached sandbox alive. See
+# docs/decisions/paseo-mixin-generic-wrapper.md.
 #
 # WORKTREES: Paseo keeps agent worktrees under a SINGLE GLOBAL root
 # (worktrees.root in $PASEO_HOME/config.json), laid out <root>/<projectHash>/<slug>.
@@ -58,11 +61,11 @@
 # not natively possible. The approved fallback is to point the one global root at
 # a subdir of the FIRST mounted project dir (the working dir when the entrypoint
 # runs). The daemon reads worktrees.root ONCE at boot (no SIGHUP / no runtime
-# reread — verified against the Paseo source), so the wrapper — which runs in the
+# reread — verified against the Paseo source), so the shim — which runs in the
 # primary-workspace cwd on `acq run` — writes worktrees.root = <PWD>/.paseo-worktrees
 # into config.json and BOUNCES the daemon (kills the supervised child; the
 # supervisor respawns it and re-reads config). The supervisor starts the daemon
-# immediately with Paseo's default root; the wrapper rewrites + restarts only when
+# immediately with Paseo's default root; the shim rewrites + restarts only when
 # the value actually changes. See docs/decisions/worktrees-root-global-only.md and
 # supervisor-owns-daemon-wrapper-pins-worktrees.md.
 #
@@ -91,9 +94,9 @@ displayName: Paseo (self-hosted web UI for coding agents)
 description: >
   Runs the Paseo daemon and its bundled browser web UI inside the sandbox and
   publishes it to the host. Installs the Paseo CLI on first boot and supervises
-  the daemon on 0.0.0.0:6767 (API + WebSocket + web UI on one port). Ships an
-  agent-generic `opencode` wrapper that pins Paseo's worktree root under the
-  current project and holds PID 1 on `acq run` so the sandbox (and UI) stay up.
+  the daemon on 0.0.0.0:6767 (API + WebSocket + web UI on one port). Ships a thin
+  `opencode` wrapper over a generic kit shim that pins Paseo's worktree root under
+  the current project and holds PID 1 on `acq run` so the sandbox (and UI) stay up.
   Opt-in mixin; composes with the USAi provider and the other GSA kits.
 
 caps:
@@ -111,12 +114,18 @@ caps:
 
 files:
   # The `opencode` wrapper. Dropped at ~/.local/bin/opencode, which is FIRST on
-  # the base-image PATH, so it shadows the real opencode and is what the sandbox
-  # entrypoint (bare `opencode`) runs. See the header DESIGN note.
+  # the image PATH, so it shadows the real opencode and is what the sandbox
+  # entrypoint (bare `opencode`) runs. It is a THIN, agent-named shell: passthrough
+  # to the real opencode with args, else exec the generic shim. See the header
+  # DESIGN note.
   - path: /home/agent/.local/bin/opencode
     mode: "0755"
     source: files/home/.local/bin/opencode
-    description: opencode wrapper — pins Paseo worktree root, prints connect info, holds PID 1 on `acq run`, passes other args through
+    description: Thin agent-named wrapper — passthrough to the real opencode, else exec the generic kit shim
+  - path: /home/agent/paseo-agent-shim
+    mode: "0755"
+    source: files/home/paseo-agent-shim
+    description: Generic, agent-neutral kit logic — pins Paseo worktree root, prints connect info, holds PID 1 on `acq run`
   - path: /home/agent/paseo-start.sh
     mode: "0755"
     source: files/home/paseo-start.sh
@@ -124,7 +133,7 @@ files:
   - path: /home/agent/paseo-set-worktrees-root.mjs
     mode: "0755"
     source: files/home/paseo-set-worktrees-root.mjs
-    description: Idempotently merge worktrees.root into $PASEO_HOME/config.json (used by the wrapper)
+    description: Idempotently merge worktrees.root into $PASEO_HOME/config.json (used by the shim)
 
 commands:
   # Run the startup script as the agent user at every start. The never-exiting
@@ -188,12 +197,13 @@ agentContext: |
   **No terminal needed to bring it up.** A single
   `acq create --name <sandbox> opencode <path>` starts the daemon + UI; then find
   the host port with `acq ports <sandbox>` and open the browser. The `opencode`
-  **wrapper** (at `~/.local/bin/opencode`, first on PATH) is agent-generic:
-  running it with **no arguments** pins Paseo's worktree root under your project
-  and prints host-connect instructions (and, on the `acq run` path, holds the
-  session open so the sandbox stays running). Running `opencode <args…>` (e.g.
-  `opencode run …`, `opencode auth login`) passes straight through to the real
-  opencode — so opencode still works as one of Paseo's provider CLIs.
+  **wrapper** (at `~/.local/bin/opencode`, first on PATH) is a thin shim over
+  generic kit logic: running it with **no arguments** pins Paseo's worktree root
+  under your project and prints host-connect instructions (and, on the `acq run`
+  path, holds the session open so the sandbox stays running). Running
+  `opencode <args…>` (e.g. `opencode run …`, `opencode auth login`) passes
+  straight through to the real opencode — so opencode still works as one of
+  Paseo's provider CLIs.
 
   **Reaching it from the host.** The kit publishes container port 6767; acq's
   active backend maps it to an ephemeral host loopback port, per sandbox. Find it
@@ -219,12 +229,12 @@ agentContext: |
   the security boundary and the published port is host loopback only.
 
   Logs: `~/.local/state/paseo/paseo-daemon.log`. The daemon runs under a respawn
-  loop (`supervisor:paseo-daemon`), so if it exits — for example after the
-  wrapper bounces it to apply a new worktree root, or after a self-update — it
+  loop (`supervisor:paseo-daemon`), so if it exits — for example after the shim
+  bounces it to apply a new worktree root, or after a self-update — it
   comes back a few seconds later on its own; the log shows
   `[supervisor] ... restarting` lines when it happens.
 
 # No backend_extras / backend_shortcuts: the port and background flag are declared
 # with the NEUTRAL publishedPorts + background vocabulary above, which acq's kit
 # translation feeds to whatever backend it has active. The install+supervise
-# script and the wrapper are backend-agnostic.
+# script, the thin wrapper, and the generic shim are backend-agnostic.

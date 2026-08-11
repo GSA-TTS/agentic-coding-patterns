@@ -41,12 +41,12 @@ HUP would do nothing.
 **Pin the single global `worktrees.root` to `<primary-project>/.paseo-worktrees`
 (absolute), and apply changes by restarting the daemon.**
 
-- The kit's `opencode` wrapper runs as the sandbox entrypoint on `acq run`, whose
-  working directory is the primary (first mounted) workspace. It computes
-  `$(pwd -P)/.paseo-worktrees` and writes it via
+- The kit's entrypoint runs in the primary (first mounted) workspace cwd on
+  `acq run` (the thin `opencode` wrapper execs the generic shim there). The shim
+  computes `$(pwd -P)/.paseo-worktrees` and writes it via
   `paseo-set-worktrees-root.mjs` (idempotent read-modify-write of `config.json`,
   preserving all other keys; refuses a non-absolute root).
-- When the value **changes**, the wrapper bounces the daemon so it re-reads the
+- When the value **changes**, the shim bounces the daemon so it re-reads the
   config (see `supervisor-owns-daemon-wrapper-pins-worktrees.md` for the exact
   kill mechanism). When it is already correct, no restart.
 
@@ -67,12 +67,12 @@ non-absolute `--root` to avoid silently mis-placing them.
 ## Consequences
 
 - Worktrees land under `<primary-project>/.paseo-worktrees/<projectHash>/<slug>`
-  once the wrapper has run once on `acq run`. Before that first run, they default
-  to `$PASEO_HOME/worktrees`.
+  once the entrypoint has run once on `acq run`. Before that first run, they
+  default to `$PASEO_HOME/worktrees`.
 - Applying a new root costs one daemon bounce (a few seconds of downtime while
   the supervisor respawns the daemon). Idempotent: unchanged root ⇒ no bounce.
 - A user who sets a custom absolute `worktrees.root` by hand will have it
-  overwritten on the next wrapper run (the wrapper always targets
+  overwritten on the next run (the shim always targets
   `<primary-project>/.paseo-worktrees`). Documented in the README.
 
 ## Links

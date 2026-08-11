@@ -312,23 +312,37 @@ case "${daemon_sup:-0}" in
   *) bad "found ${daemon_sup} paseo-daemon supervisors (expected 1 — duplicate respawner?)" ;;
 esac
 
-info "8. Wrapper holds PID 1 when it IS the entrypoint, exits cleanly otherwise — regression guard"
-# (a) source invariant: the tail is gated on a `$$ -eq 1` check and calls hold_pid1
-#     only on that branch. (b) live: run the wrapper no-arg + no-TTY via exec (NOT
-#     PID 1) and confirm it RETURNS promptly rather than hanging.
+info "8. Entrypoint holds PID 1 when it IS the entrypoint, exits cleanly otherwise — regression guard"
+# The kit's entrypoint behavior is split: a thin per-agent wrapper
+# (~/.local/bin/opencode) that either passes through to the real agent binary or
+# EXECs the generic shim (~/paseo-agent-shim), and the shim, which carries the
+# PID-1 hold. We check three invariants:
+#   (a) the thin wrapper EXECs the shim on the no-arg path (so the shim inherits
+#       the wrapper's pid — PID 1 on the `acq run` path; a child would break hold);
+#   (b) the shim discriminates on `$$ -eq 1` and calls hold_pid1 on that branch;
+#   (c) live: run the wrapper no-arg + no-TTY via exec (NOT PID 1) and confirm it
+#       RETURNS promptly rather than hanging.
 wrapper_src="$(in_sbx 'cat ~/.local/bin/opencode 2>/dev/null')"
+shim_src="$(in_sbx 'cat ~/paseo-agent-shim 2>/dev/null')"
 if [ -z "$wrapper_src" ]; then
-  bad "could not read ~/.local/bin/opencode from the sandbox to check the PID-1 discriminator"
+  bad "could not read ~/.local/bin/opencode from the sandbox"
+elif printf '%s\n' "$wrapper_src" | grep -Eq 'exec[[:space:]]+sh[[:space:]]+"?\$SHIM"?|exec[[:space:]]+sh[[:space:]]+.*paseo-agent-shim'; then
+  ok "thin wrapper execs the generic shim on the no-arg path (preserves PID for the hold)"
 else
-  if printf '%s\n' "$wrapper_src" | grep -Eq '\$\$"?[[:space:]]*-eq[[:space:]]*1'; then
-    ok "wrapper discriminates on PID 1 (\$\$ -eq 1) before deciding to hold vs. exit"
+  bad "thin wrapper does not exec the shim — no-arg path won't inherit PID 1, breaking the hold"
+fi
+if [ -z "$shim_src" ]; then
+  bad "could not read ~/paseo-agent-shim from the sandbox to check the PID-1 discriminator"
+else
+  if printf '%s\n' "$shim_src" | grep -Eq '\$\$"?[[:space:]]*-eq[[:space:]]*1'; then
+    ok "shim discriminates on PID 1 (\$\$ -eq 1) before deciding to hold vs. exit"
   else
-    bad "wrapper has no \$\$ -eq 1 check — it cannot tell the acq run (PID 1) path from acq exec"
+    bad "shim has no \$\$ -eq 1 check — it cannot tell the acq run (PID 1) path from acq exec"
   fi
-  if printf '%s\n' "$wrapper_src" | grep -Eq '^[[:space:]]*hold_pid1[[:space:]]*$'; then
-    ok "wrapper calls hold_pid1 on the PID-1 branch"
+  if printf '%s\n' "$shim_src" | grep -Eq '^[[:space:]]*hold_pid1[[:space:]]*$'; then
+    ok "shim calls hold_pid1 on the PID-1 branch"
   else
-    bad "wrapper does not call hold_pid1 — the acq run entrypoint could return and stop the sandbox"
+    bad "shim does not call hold_pid1 — the acq run entrypoint could return and stop the sandbox"
   fi
 fi
 wrapper_probe="$(in_sbx '
@@ -340,7 +354,7 @@ wrapper_probe="$(in_sbx '
   fi
 ')"
 case "$wrapper_probe" in
-  *rc=124*)      bad "wrapper HUNG when NOT PID 1 (via exec); it should exit cleanly on that path" ;;
+  *rc=124*)      bad "entrypoint HUNG when NOT PID 1 (via exec); it should exit cleanly on that path" ;;
   *rc=notimeout*) skip "could not run the wrapper-exit probe (no 'timeout' in sandbox)" ;;
   *)             ok "wrapper exits cleanly when NOT PID 1 (${wrapper_probe})" ;;
 esac

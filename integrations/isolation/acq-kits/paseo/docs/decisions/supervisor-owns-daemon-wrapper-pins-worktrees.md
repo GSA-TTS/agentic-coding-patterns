@@ -31,10 +31,12 @@ entrypoint runs in the primary workspace on `acq run`).
   `paseo daemon start --foreground --listen 0.0.0.0:6767 --web-ui` in a respawn
   loop marked `supervisor:paseo-daemon`. The daemon comes up immediately with
   whatever `config.json` currently says (default root on first boot).
-- **The wrapper (`~/.local/bin/opencode`) pins the worktree root.** On `acq run`
-  it runs in the primary-workspace cwd, computes `<PWD>/.paseo-worktrees`, and
-  writes it to `config.json`. **If the value changed**, it restarts the daemon so
-  the new root takes effect.
+- **The entrypoint pins the worktree root.** On `acq run` the thin wrapper
+  (`~/.local/bin/opencode`) execs the generic shim (`~/paseo-agent-shim`), which
+  runs in the primary-workspace cwd, computes `<PWD>/.paseo-worktrees`, and writes
+  it to `config.json`. **If the value changed**, it restarts the daemon so the new
+  root takes effect. (The pin/bounce lives in the shim; see
+  `paseo-mixin-generic-wrapper.md` for the wrapper/shim split.)
 
 ### The bounce mechanism (why it's safe)
 
