@@ -470,7 +470,7 @@ A human MUST verify:
 ## References
 
 - [USWDS Landing Page Template](https://designsystem.digital.gov/templates/landing-page/)
-- [USWDS Hero Component](https://designsystem.digital.gov/components/hero/)
+- [USWDS Components](https://designsystem.digital.gov/components/)
 - [USWDS Card Component](https://designsystem.digital.gov/components/card/)
 - [USWDS Process List](https://designsystem.digital.gov/components/process-list/)
 - [USWDS Accordion](https://designsystem.digital.gov/components/accordion/)

@@ -379,7 +379,7 @@ A human MUST:
 ## References
 
 - [Digital.gov Service Design](https://digital.gov/topics/customer-experience/)
-- [18F Methods](https://methods.18f.gov/)
+- [18F Methods (GitHub source)](https://github.com/18F/methods)
 - [USWDS Design Principles](https://designsystem.digital.gov/design-principles/)
 - [U.S. Digital Service Playbook](https://playbook.cio.gov/)
 - [OMB Circular A-11](https://www.whitehouse.gov/omb/information-for-agencies/circulars/) (PRA guidance)
