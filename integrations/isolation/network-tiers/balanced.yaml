@@ -1,0 +1,261 @@
+# balanced.yaml — curated baseline egress allowlist for the `balanced` network tier
+#
+# STATUS: PROPOSED — pending CODEOWNERS + security-skill review (#301).
+# An agent may PROPOSE entries here; it MUST NOT self-approve. The contents of a
+# federally-shipped default egress allowlist are a human decision.
+#
+# WHAT THIS IS
+#   The neutral, version-controlled source of truth for what the `balanced`
+#   network tier (schemas/kit-hybrid-v1.schema.json `caps.network.tier`) allows,
+#   BEFORE any per-kit `caps.network.allow` or per-sandbox additions. All tiers
+#   are deny-by-default; `balanced` = this baseline ∪ kit allow ∪ sandbox
+#   additions. `strict` uses none of this baseline; `open` ignores it (all
+#   egress). See ADR 0002 (integrations/isolation/docs/decisions).
+#
+#   Pinned in-repo (no runtime fetch): consumers read this at a full-SHA
+#   PATTERNS_KIT_REF, same as every other kit artifact.
+#
+# CORE vs EXTENDED (the deny-by-default judgment)
+#   `core`     — the minimal, vouched-safe set SHIPPED as the `balanced`
+#                default: language/package registries, first-party AI model
+#                APIs, the source-host + container-registry family, OS package
+#                mirrors, and certificate validation (CRL/OCSP). Every entry is
+#                one we vouch a prompt-injectable agent may reach by default.
+#   `extended` — dev-convenience SaaS hosts (design tools, app-platform/BaaS,
+#                third-party AI IDEs). NOT shipped in the default `balanced`
+#                baseline — a wider exfiltration surface than a federal default
+#                should carry. Available as a documented opt-in (a deployment
+#                may include `extended` explicitly). Kept here, justified, so the
+#                decision is auditable rather than silently dropped.
+#
+# ENTRY FORMAT
+#   host[:port]  — port defaults to 443; :80 is used only for plaintext CRL/OCSP.
+#   Wildcards mirror the sbx `balanced` policy and translate per ADR-0018:
+#     `**.h` / `*.h`  -> backend domain-suffix match (apex + any depth)
+#     `crl*.digicert.com` -> intra-label glob; msb cannot express it, so the
+#        adapter BROADENS it to `*.digicert.com` and logs the widened match.
+#   Each entry carries `why` — a one-line justification for review + pruning.
+#
+# RE-SYNC / PROVENANCE
+#   Seeded from quickstart `acq.backends/msb-balanced-hosts.txt`, itself a
+#   verbatim mirror of `sbx policy inspect local-policy`. Re-verify on the
+#   quarterly cadence: diff that mirror's network-allow rows against `core` +
+#   `extended` here and reconcile (a host present in the mirror but absent here
+#   was a deliberate curation choice — keep the `why`/exclusion note).
+
+version: "1.0"
+tier: balanced
+
+core:
+  # --- Language & package registries (toolchain fetch; core to any build) ---
+  - { host: "npmjs.org", why: "npm registry (apex)" }
+  - { host: "npmjs.com", why: "npm registry (web/apex)" }
+  - { host: "registry.npmjs.org", why: "npm package registry API" }
+  - { host: "npm.duckdb.org", why: "DuckDB npm distribution" }
+  - { host: "**.yarnpkg.com", why: "Yarn registry/CDN" }
+  - { host: "yarnpkg.com", why: "Yarn (apex)" }
+  - { host: "**.bun.sh", why: "Bun runtime + registry" }
+  - { host: "bun.sh", why: "Bun (apex)" }
+  - { host: "pypi.org", why: "Python Package Index" }
+  - { host: "pypi.python.org", why: "PyPI legacy host" }
+  - { host: "files.pythonhosted.org", why: "PyPI package files CDN" }
+  - { host: "pythonhosted.org", why: "PyPI package files (apex)" }
+  - { host: "bootstrap.pypa.io", why: "pip/get-pip bootstrap" }
+  - { host: "pypa.io", why: "Python Packaging Authority (apex)" }
+  - { host: "astral.sh", why: "uv / ruff distribution (Astral)" }
+  - { host: "crates.io", why: "Rust crate registry" }
+  - { host: "index.crates.io", why: "Rust crate index" }
+  - { host: "static.crates.io", why: "Rust crate downloads" }
+  - { host: "rustup.rs", why: "Rust toolchain installer" }
+  - { host: "sh.rustup.rs", why: "rustup install script" }
+  - { host: "static.rust-lang.org", why: "Rust toolchain artifacts" }
+  - { host: "proxy.golang.org", why: "Go module proxy" }
+  - { host: "sum.golang.org", why: "Go checksum database" }
+  - { host: "goproxy.io", why: "Go module proxy (mirror)" }
+  - { host: "pkg.go.dev", why: "Go package index" }
+  - { host: "golang.org", why: "Go project + module redirects" }
+  - { host: "rubygems.org", why: "Ruby gem registry" }
+  - { host: "ruby-lang.org", why: "Ruby distribution" }
+  - { host: "rubyonrails.org", why: "Rails distribution" }
+  - { host: "rvm.io", why: "Ruby Version Manager" }
+  - { host: "hex.pm", why: "Elixir/Erlang package registry" }
+  - { host: "nuget.org", why: ".NET package registry" }
+  - { host: "dot.net", why: ".NET installer redirects" }
+  - { host: "dotnet.microsoft.com", why: ".NET SDK downloads" }
+  - { host: "maven.org", why: "Maven Central (apex)" }
+  - { host: "repo.maven.apache.org", why: "Maven Central repository" }
+  - { host: "**.gradle.org", why: "Gradle distribution/plugins" }
+  - { host: "gradle.org", why: "Gradle (apex)" }
+  - { host: "spring.io", why: "Spring dependency metadata" }
+  - { host: "**.packagist.org", why: "PHP Composer registry" }
+  - { host: "packagist.org", why: "Composer registry (apex)" }
+  - { host: "packagist.com", why: "Composer registry (com)" }
+  - { host: "cpan.org", why: "Perl CPAN" }
+  - { host: "metacpan.org", why: "Perl CPAN metadata" }
+  - { host: "pub.dev", why: "Dart/Flutter package registry" }
+  - { host: "swift.org", why: "Swift toolchain" }
+  - { host: "cocoapods.org", why: "CocoaPods (iOS) registry" }
+  - { host: "haskell.org", why: "Haskell toolchain" }
+  - { host: "ziglang.org", why: "Zig toolchain" }
+  - { host: "nodejs.org", why: "Node.js runtime downloads" }
+  - { host: "nodesource.com", why: "NodeSource Node.js distribution" }
+  - { host: "apache.org", why: "Apache project source/dependency host" }
+  - { host: "eclipse.org", why: "Eclipse/Java tooling" }
+  - { host: "java.com", why: "Java runtime downloads" }
+  - { host: "java.net", why: "Java project host" }
+  - { host: "mise.run", why: "mise (dev tool version manager) install" }
+  - { host: "mise-versions.jdx.dev", why: "mise tool version index" }
+  - { host: "tuf-repo-cdn.sigstore.dev", why: "Sigstore TUF root (supply-chain verify)" }
+
+  # --- First-party AI / model APIs (the agent's own model backends) ---
+  - { host: "api.anthropic.com", why: "Anthropic API" }
+  - { host: "claude.com", why: "Anthropic Claude" }
+  - { host: "platform.claude.com", why: "Anthropic platform" }
+  - { host: "downloads.claude.ai", why: "Claude client downloads" }
+  - { host: "mcp-proxy.anthropic.com", why: "Anthropic MCP proxy" }
+  - { host: "statsig.anthropic.com", why: "Anthropic client telemetry/config" }
+  - { host: "**.openai.com", why: "OpenAI API + subdomains" }
+  - { host: "**.oaistatic.com", why: "OpenAI static assets" }
+  - { host: "**.oaiusercontent.com", why: "OpenAI user content" }
+  - { host: "cdn.openaimerge.com", why: "OpenAI CDN" }
+  - { host: "generativelanguage.googleapis.com", why: "Google Gemini API" }
+  - { host: "gemini.google.com", why: "Google Gemini" }
+  - { host: "models.dev", why: "models.dev catalog (used by the usai-provider kit)" }
+
+  # --- Source hosts & container registries ---
+  - { host: "**.github.com", why: "GitHub + subdomains (git/API)" }
+  - { host: "github.com", why: "GitHub (apex)" }
+  - { host: "**.githubusercontent.com", why: "GitHub raw/user content + codeload" }
+  - { host: "**.githubcopilot.com", why: "GitHub Copilot API" }
+  - { host: "**.gitlab.com", why: "GitLab + subdomains" }
+  - { host: "gitlab.com", why: "GitLab (apex)" }
+  - { host: "bitbucket.org", why: "Bitbucket source host" }
+  - { host: "sourceforge.net", why: "SourceForge source/release host" }
+  - { host: "launchpad.net", why: "Launchpad source/PPA host" }
+  - { host: "**.docker.io", why: "Docker Hub registry" }
+  - { host: "docker.io", why: "Docker Hub (apex)" }
+  - { host: "**.docker.com", why: "Docker services + subdomains" }
+  - { host: "docker.com", why: "Docker (apex)" }
+  - { host: "**.production.cloudflare.docker.com", why: "Docker Hub blob CDN (Cloudflare)" }
+  - { host: "**.production.cloudfront.docker.com", why: "Docker Hub blob CDN (CloudFront)" }
+  - { host: "production.cloudflare.docker.com", why: "Docker Hub blob CDN (apex)" }
+  - { host: "production.cloudfront.docker.com", why: "Docker Hub blob CDN (apex)" }
+  - { host: "docker-images-prod.6aa30f8b08e16409b46e0173d6de2f56.r2.cloudflarestorage.com", why: "Docker Hub image blobs (R2)" }
+  - { host: "**.gcr.io", why: "Google Container Registry" }
+  - { host: "gcr.io", why: "GCR (apex)" }
+  - { host: "ghcr.io", why: "GitHub Container Registry" }
+  - { host: "quay.io", why: "Quay container registry" }
+  - { host: "public.ecr.aws", why: "AWS public ECR" }
+  - { host: "mcr.microsoft.com", why: "Microsoft Container Registry" }
+  - { host: "**.data.mcr.microsoft.com", why: "MCR image data CDN" }
+  - { host: "registry.k8s.io", why: "Kubernetes image registry" }
+  - { host: "k8s.io", why: "Kubernetes project redirects" }
+  - { host: "dhi.io", why: "Docker Hardened Images registry" }
+  - { host: "dhi.io:80", why: "Docker Hardened Images (plaintext redirect)" }
+
+  # --- OS package mirrors ---
+  - { host: "**.debian.org", why: "Debian mirrors + subdomains" }
+  - { host: "debian.org", why: "Debian (apex)" }
+  - { host: "ubuntu.com", why: "Ubuntu" }
+  - { host: "archive.ubuntu.com", why: "Ubuntu package archive" }
+  - { host: "archive.ubuntu.com:80", why: "Ubuntu archive (apt plaintext)" }
+  - { host: "security.ubuntu.com", why: "Ubuntu security updates" }
+  - { host: "security.ubuntu.com:80", why: "Ubuntu security (apt plaintext)" }
+  - { host: "ports.ubuntu.com", why: "Ubuntu ports (non-amd64)" }
+  - { host: "ports.ubuntu.com:80", why: "Ubuntu ports (apt plaintext)" }
+  - { host: "alpinelinux.org", why: "Alpine Linux" }
+  - { host: "dl-cdn.alpinelinux.org", why: "Alpine package CDN" }
+  - { host: "archlinux.org", why: "Arch Linux" }
+  - { host: "centos.org", why: "CentOS" }
+  - { host: "fedoraproject.org", why: "Fedora" }
+  - { host: "apt.llvm.org", why: "LLVM apt repository" }
+  - { host: "ppa.launchpad.net", why: "Ubuntu PPA package host" }
+  - { host: "packagecloud.io", why: "packagecloud OS package hosting" }
+  - { host: "packages.microsoft.com", why: "Microsoft apt/yum repositories" }
+
+  # --- Certificate validation (CRL / OCSP; :80 is required, plaintext by spec) ---
+  - { host: "**.amazontrust.com", why: "Amazon Trust CA chain" }
+  - { host: "**.amazontrust.com:80", why: "Amazon Trust CRL/OCSP (plaintext)" }
+  - { host: "**.lencr.org", why: "Let's Encrypt CA" }
+  - { host: "**.lencr.org:80", why: "Let's Encrypt CRL/OCSP (plaintext)" }
+  - { host: "**.pki.goog", why: "Google Trust Services CA" }
+  - { host: "**.pki.goog:80", why: "Google PKI CRL/OCSP (plaintext)" }
+  - { host: "**.pki.microsoft.com", why: "Microsoft PKI CA" }
+  - { host: "**.pki.microsoft.com:80", why: "Microsoft PKI CRL/OCSP (plaintext)" }
+  - { host: "*.one.digicert.com:80", why: "DigiCert OCSP (plaintext)" }
+  - { host: "*.one.au.digicert.com:80", why: "DigiCert OCSP AU (plaintext)" }
+  - { host: "*.one.ch.digicert.com:80", why: "DigiCert OCSP CH (plaintext)" }
+  - { host: "*.one.digicert.co.jp:80", why: "DigiCert OCSP JP (plaintext)" }
+  - { host: "*.one.nl.digicert.com:80", why: "DigiCert OCSP NL (plaintext)" }
+  - { host: "cacerts.digicert.com:80", why: "DigiCert intermediate certs (plaintext)" }
+  - { host: "crl*.digicert.com:80", why: "DigiCert CRL (plaintext; msb broadens to *.digicert.com — logged)" }
+  - { host: "ocsp.digicert.com:80", why: "DigiCert OCSP (plaintext)" }
+  - { host: "crl.comodoca.com:80", why: "Comodo/Sectigo CRL (plaintext)" }
+  - { host: "ocsp.comodoca.com:80", why: "Comodo/Sectigo OCSP (plaintext)" }
+  - { host: "crl.sectigo.com:80", why: "Sectigo CRL (plaintext)" }
+  - { host: "crt.sectigo.com:80", why: "Sectigo intermediate certs (plaintext)" }
+  - { host: "ocsp.sectigo.com:80", why: "Sectigo OCSP (plaintext)" }
+  - { host: "crl.usertrust.com:80", why: "USERTrust CRL (plaintext)" }
+  - { host: "ocsp.usertrust.com:80", why: "USERTrust OCSP (plaintext)" }
+  - { host: "crl.globalsign.com:80", why: "GlobalSign CRL (plaintext)" }
+  - { host: "crl.globalsign.net:80", why: "GlobalSign CRL (plaintext)" }
+  - { host: "ocsp.globalsign.com:80", why: "GlobalSign OCSP (plaintext)" }
+  - { host: "ocsp.globalsign.com", why: "GlobalSign OCSP (TLS)" }
+  - { host: "ocsp2.globalsign.com:80", why: "GlobalSign OCSP secondary (plaintext)" }
+  - { host: "ocsp2.globalsign.com", why: "GlobalSign OCSP secondary (TLS)" }
+  - { host: "isrg.trustid.ocsp.identrust.com:80", why: "IdenTrust OCSP for ISRG root (plaintext)" }
+
+# EXTENDED — opt-in only; NOT part of the shipped `balanced` default (#301).
+# These are dev-convenience SaaS hosts a prompt-injectable agent does not need by
+# default and that widen the exfiltration surface. A deployment may opt in
+# explicitly. Kept here, justified, so the exclusion is auditable — not silently
+# dropped from the sbx-balanced mirror.
+extended:
+  # Design / collaboration SaaS
+  - { host: "figma.com", why: "Figma design assets (opt-in: not core toolchain)" }
+  # App platform / backend-as-a-service (broad egress; opt-in)
+  - { host: "supabase.com", why: "Supabase BaaS (opt-in)" }
+  - { host: "vercel.com", why: "Vercel deploy platform (opt-in)" }
+  - { host: "**.public.blob.vercel-storage.com", why: "Vercel blob storage (opt-in)" }
+  - { host: "clerk.com", why: "Clerk auth SaaS (opt-in)" }
+  - { host: "app.daytona.io", why: "Daytona dev-environment SaaS (opt-in)" }
+  - { host: "binaries.prisma.sh", why: "Prisma engine binaries (opt-in; ORM-specific)" }
+  # Third-party AI IDEs / assistants (not USAi/first-party; opt-in)
+  - { host: "**.cursor.sh", why: "Cursor IDE (third-party AI IDE; opt-in)" }
+  - { host: "cursor.com", why: "Cursor IDE (opt-in)" }
+  - { host: "**.factory.ai", why: "Factory AI IDE (opt-in)" }
+  - { host: "factory.ai", why: "Factory AI (opt-in)" }
+  - { host: "**.chatgpt.com", why: "ChatGPT web app (opt-in; not the API)" }
+  - { host: "chatgpt.com", why: "ChatGPT web (opt-in)" }
+  - { host: "api.perplexity.ai", why: "Perplexity API (opt-in)" }
+  - { host: "api.workos.com", why: "WorkOS auth (opt-in)" }
+  # General cloud/CDN convenience (broad; opt-in). These wildcard cloud
+  # providers are an especially wide surface for a default agent egress.
+  - { host: "**.amazonaws.com", why: "AWS services (very broad; opt-in)" }
+  - { host: "**.blob.core.windows.net", why: "Azure blob storage (broad; opt-in)" }
+  - { host: "**.googleapis.com", why: "Google APIs (very broad; opt-in — first-party model API is in core)" }
+  - { host: "**.googleusercontent.com", why: "Google user content (broad; opt-in)" }
+  - { host: "**.gstatic.com", why: "Google static assets (opt-in)" }
+  - { host: "**.gvt1.com", why: "Google downloads (opt-in)" }
+  - { host: "**.visualstudio.com", why: "Azure DevOps / VS services (opt-in)" }
+  - { host: "**.hashicorp.com", why: "HashiCorp releases (opt-in)" }
+  - { host: "hashicorp.com", why: "HashiCorp (apex; opt-in)" }
+  - { host: "apis.google.com", why: "Google APIs frontend (opt-in)" }
+  - { host: "play.google.com", why: "Google Play (opt-in)" }
+  - { host: "play.googleapis.com", why: "Google Play services (opt-in)" }
+  - { host: "dl.google.com", why: "Google downloads (opt-in)" }
+  - { host: "www.google.com", why: "Google (opt-in)" }
+  - { host: "csp.withgoogle.com", why: "Google CSP reporting (opt-in)" }
+  - { host: "challenges.cloudflare.com", why: "Cloudflare Turnstile (opt-in)" }
+  - { host: "fastly.com", why: "Fastly CDN (opt-in)" }
+  - { host: "jsdelivr.net", why: "jsDelivr CDN (opt-in)" }
+  - { host: "unpkg.com", why: "unpkg CDN (opt-in)" }
+  - { host: "json-schema.org", why: "JSON Schema meta-schemas (opt-in)" }
+  - { host: "json.schemastore.org", why: "SchemaStore (opt-in)" }
+  - { host: "azure.com", why: "Azure (apex; opt-in)" }
+  - { host: "dev.azure.com", why: "Azure DevOps (opt-in)" }
+  - { host: "login.microsoftonline.com", why: "Microsoft Entra login (opt-in)" }
+  - { host: "code.visualstudio.com", why: "VS Code updates/extensions (opt-in)" }
+  - { host: "vscode.dev", why: "VS Code web (opt-in)" }
+  - { host: "vscode.download.prss.microsoft.com", why: "VS Code download CDN (opt-in)" }
+  - { host: "playwright.azureedge.net", why: "Playwright browser downloads (opt-in)" }
