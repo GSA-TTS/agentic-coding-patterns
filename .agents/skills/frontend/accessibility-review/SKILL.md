@@ -389,7 +389,7 @@ A human MUST:
 - [WCAG 2.1 Quick Reference](https://www.w3.org/WAI/WCAG21/quickref/)
 - [WebAIM WCAG 2 Checklist](https://webaim.org/standards/wcag/checklist)
 - [USWDS Accessibility Tests](https://designsystem.digital.gov/documentation/accessibility/)
-- [GSA Government-wide Section 508 Assessment](https://www.section508.gov/manage/annual-assessment/)
+- [GSA Section 508 Program Management](https://www.section508.gov/manage/)
 
 ## Deterministic Tools
 

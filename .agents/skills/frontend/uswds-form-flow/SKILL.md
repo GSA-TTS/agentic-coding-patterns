@@ -342,7 +342,7 @@ A human MUST verify:
 - [USWDS Form Controls](https://designsystem.digital.gov/components/form-controls/)
 - [USWDS Form Templates](https://designsystem.digital.gov/templates/form-templates/)
 - [USWDS Step Indicator](https://designsystem.digital.gov/components/step-indicator/)
-- [Section 508 Forms Guidance](https://www.section508.gov/create/web-software/)
+- [Section 508 Software & Websites Guidance](https://www.section508.gov/create/software-websites/)
 - [WCAG 1.3.1 Info and Relationships](https://www.w3.org/WAI/WCAG21/Understanding/info-and-relationships)
 - [WCAG 3.3.1 Error Identification](https://www.w3.org/WAI/WCAG21/Understanding/error-identification)
 - [WCAG 3.3.2 Labels or Instructions](https://www.w3.org/WAI/WCAG21/Understanding/labels-or-instructions)

@@ -370,7 +370,7 @@ A human MUST:
 
 - [PlainLanguage.gov](https://www.plainlanguage.gov/)
 - [Federal Plain Language Guidelines](https://www.plainlanguage.gov/guidelines/)
-- [18F Content Guide](https://content-guide.18f.gov/)
+- [18F Content Guide (GitHub source)](https://github.com/18F/content-guide)
 - [Plain Language Action and Information Network (PLAIN)](https://www.plainlanguage.gov/about/program-history/)
 - [Plain Writing Act of 2010](https://www.gpo.gov/fdsys/pkg/PLAW-111publ274/pdf/PLAW-111publ274.pdf)
 
