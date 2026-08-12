@@ -43,6 +43,10 @@
     {
       "_comment": "asciinema.org rejects the checker's HEAD probe (returns 0) but is live in a browser; it is a stable public site.",
       "pattern": "^https://asciinema\\.org"
+    },
+    {
+      "_comment": "nvd.nist.gov (NIST National Vulnerability Database) is bot-hostile to the checker's unauthenticated HEAD probe (returns 0) but is a stable live gov site — referenced from the dependency-analysis skill.",
+      "pattern": "^https://nvd\\.nist\\.gov"
     }
   ],
   "replacementPatterns": [],
