@@ -225,9 +225,18 @@ def validate_kit(kit_dir: Path, schema: dict) -> tuple[list[str], list[str]]:
                 f"(got {type(c['background']).__name__})"
             )
 
-    # Best-effort commands[] ↔ files[] consistency: a kit-owned payload path
-    # (e.g. /home/agent/foo.sh) referenced by a command but dropped by no
-    # files[] entry is almost always a re-home typo. WARN, don't ERROR: this is
+    # caps.network.tier field-level check (#300). Optional; when present it MUST
+    # be one of the neutral egress tiers. Omission is valid and means the default
+    # `balanced` posture (documented in the schema; not mutated here). The schema
+    # enum already rejects bad values — this adds a clearer, kit-scoped message.
+    _net = (spec.get("caps") or {}).get("network") or {}
+    if "tier" in _net and _net["tier"] not in ("strict", "balanced", "open"):
+        errors.append(
+            f"{kit_dir.name}: caps.network.tier must be one of "
+            f"strict|balanced|open (got {_net['tier']!r})"
+        )
+
+
     # a heuristic (a command could legitimately create a script at runtime), so
     # it flags for human eyes rather than failing the gate outright.
     dropped = {f.get("path") for f in files if f.get("path")}
