@@ -4,6 +4,15 @@
 # An agent may PROPOSE entries here; it MUST NOT self-approve. The contents of a
 # federally-shipped default egress allowlist are a human decision.
 #
+# ADDING A HOST: `scripts/check_balanced_allowlist_additions.py` (run by
+# `make validate` / CI, #302) is a deterministic, offline risk lint over these
+# hosts — it ERRORS on a raw-IP or public-suffix wildcard and WARNS on punycode,
+# risky TLDs, deep nesting, or unexpected plaintext :80, so a reviewer sees the
+# signal on the PR. It is NOT a runtime blocklist and makes NO network call
+# (a live reputation feed was consensus-rejected as over-engineering + a federal
+# data-sharing concern for a hand-curated list). The lint is an aid; the actual
+# authority for an addition is the per-host `why` + CODEOWNERS/security review.
+#
 # WHAT THIS IS
 #   The neutral, version-controlled source of truth for what the `balanced`
 #   network tier (schemas/kit-hybrid-v1.schema.json `caps.network.tier`) allows,
