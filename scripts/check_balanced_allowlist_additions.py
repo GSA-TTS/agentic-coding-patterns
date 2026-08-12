@@ -50,15 +50,11 @@ DATA = ROOT / "integrations" / "isolation" / "network-tiers" / "balanced.yaml"
 
 # TLDs disproportionately associated with abuse / not expected in a federal
 # toolchain allowlist. Not exhaustive — a signal for the reviewer, not a verdict.
-_RISKY_TLDS = frozenset(
-    {"zip", "mov", "xyz", "top", "click", "link", "gq", "tk", "ml", "cf", "ga", "cn", "ru", "su"}
-)
+_RISKY_TLDS = frozenset({"zip", "mov", "xyz", "top", "click", "link", "gq", "tk", "ml", "cf", "ga", "cn", "ru", "su"})
 # Public-suffix-ish single labels: a wildcard directly on one of these opens a
 # whole TLD/registry. (A wildcard on a normal registrable domain like
 # `**.github.com` is fine — that's the intended use.)
-_PUBLIC_SUFFIXES = frozenset(
-    {"com", "org", "net", "io", "dev", "gov", "edu", "co", "us", "app", "sh", "ai", "cloud"}
-)
+_PUBLIC_SUFFIXES = frozenset({"com", "org", "net", "io", "dev", "gov", "edu", "co", "us", "app", "sh", "ai", "cloud"})
 # Hosts legitimately reached over plaintext :80 (CRL/OCSP/cert distribution must
 # be HTTP per the CA/Browser Forum — TLS on a revocation endpoint is circular),
 # plus OS package mirrors that serve apt/dnf metadata over :80 by design (the

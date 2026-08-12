@@ -71,8 +71,7 @@ def main() -> int:
                 errors.append(f"{grp}: entry {host!r} is missing a `why` justification")
             if host in seen:
                 errors.append(
-                    f"duplicate host {host!r} in {grp} (already in {seen[host]}); "
-                    "a host must live in exactly one tier"
+                    f"duplicate host {host!r} in {grp} (already in {seen[host]}); a host must live in exactly one tier"
                 )
             else:
                 seen[host] = grp
