@@ -11,8 +11,10 @@
 #
 #   2. LIVE END-TO-END (opt-in): create a real sandbox with the kit applied, then
 #      assert the Paseo CLI install, the wrapper, the startup-supervised daemon +
-#      web UI (on one port), the published port, the respawn supervisor, the
-#      PID-1 hold, daemon self-heal, and the worktree-root pin.
+#      web UI (on one port), the published port, that the LARGE UI bundle actually
+#      downloads intact over the HOST port (the black-page regression —
+#      microsandbox#1330), the respawn supervisor, the PID-1 hold, daemon
+#      self-heal, and the worktree-root pin.
 #
 #      Preferred driver — RUN_ACQ=1: drive the `acq` CLI. acq translates the
 #      neutral hybrid/v1 spec to an sbx-v2 kit (kit_translate_to_sbx) and applies
@@ -290,6 +292,58 @@ elif [ -n "$daemon_up" ]; then
   warn "daemon is up but the web UI root did not return 200 (PASEO_WEB_UI_ENABLED / --web-ui?)"
 else
   skip "web UI check (daemon not up)"
+fi
+
+# --- Large-asset delivery over the HOST port (the real black-page regression). --
+# The small entry files (index.html, manifest.json, css) are length-delimited and
+# survive even a relay that mishandles half-close; the big hashed JS bundle
+# (~15 MB, served CHUNKED with no Content-Length) is what truncates over msb's
+# create-time published-port relay (ERR_INCOMPLETE_CHUNKED_ENCODING → black page;
+# see docs/decisions/large-assets-need-ssh-forward.md and microsandbox#1330).
+# Step 5 only proved in-guest health; here we prove the full asset actually
+# arrives END TO END over the published HOST port — the path the browser uses.
+info "5b. Large UI bundle downloads intact over the HOST port (black-page regression guard)"
+# Resolve the host mapping for the container port.
+HOST_HP="$(sbx_ports_out | grep -Eo '127\.0\.0\.1:[0-9]+' | head -1)"
+if [ -z "$daemon_up" ]; then
+  skip "large-asset guard (daemon not up)"
+elif ! command -v curl >/dev/null 2>&1; then
+  skip "large-asset guard (no curl on the HOST to reach the published port)"
+elif [ -z "$HOST_HP" ]; then
+  skip "large-asset guard (could not resolve a 127.0.0.1:<port> host mapping from ports output)"
+else
+  # Discover the hashed bundle path from index.html (served in-guest, reliable).
+  bundle="$(in_sbx "curl -fsS http://127.0.0.1:$PASEO_PORT/ 2>/dev/null" \
+            | grep -oE '/_expo/static/js/web/index-[0-9a-f]+\.js' | head -1)"
+  if [ -z "$bundle" ]; then
+    warn "could not find the /_expo/static/js/web/index-<hash>.js bundle in index.html; skipping large-asset guard"
+  else
+    # In-guest baseline: prove the DAEMON serves the whole bundle (isolates the
+    # relay from the daemon). Capture status + byte count.
+    g_stat="$(in_sbx "curl -fsS -o /dev/null -w '%{http_code} %{size_download}' 'http://127.0.0.1:$PASEO_PORT$bundle' 2>/dev/null")"
+    g_code="${g_stat%% *}"; g_size="${g_stat##* }"
+    if [ "$g_code" = "200" ] && [ "${g_size:-0}" -gt 1000000 ] 2>/dev/null; then
+      ok "in-guest: daemon serves the full bundle ($g_size bytes)"
+    else
+      warn "in-guest bundle fetch was '$g_stat' (expected '200 <big>') — daemon/UI may differ from expectations"
+    fi
+    # HOST end-to-end: fetch the SAME bundle through the published port, requesting
+    # the compression a browser would (so the daemon serves the precompressed,
+    # chunked variant — the exact failing case). Compare the DECODED size to the
+    # in-guest size. A truncated chunked transfer curl-fails (rc≠0) or comes up short.
+    h_out="$(curl -fsS --compressed \
+               -H 'Accept-Encoding: gzip, deflate, br, zstd' \
+               -o /dev/null -w '%{http_code} %{size_download}' \
+               "http://$HOST_HP$bundle" 2>/dev/null)"; h_rc=$?
+    h_code="${h_out%% *}"; h_size="${h_out##* }"
+    if [ "$h_rc" -ne 0 ]; then
+      bad "HOST fetch of the large bundle FAILED (curl rc=$h_rc) — the black-page symptom. See docs/decisions/large-assets-need-ssh-forward.md (microsandbox#1330). Reach the UI via 'acq ports $SBX_NAME --publish $PASEO_PORT:$PASEO_PORT' (ssh -L)."
+    elif [ "$h_code" = "200" ] && { [ -z "$g_size" ] || [ "${h_size:-0}" = "${g_size:-x}" ] || [ "${h_size:-0}" -gt 1000000 ] 2>/dev/null; }; then
+      ok "HOST end-to-end: full bundle delivered over the published port (${h_size} bytes)"
+    else
+      bad "HOST bundle came up SHORT/!=200 (host='$h_out' vs in-guest='$g_stat') — truncated over the publish relay (microsandbox#1330). Reach the UI via 'acq ports $SBX_NAME --publish $PASEO_PORT:$PASEO_PORT' (ssh -L); see docs/decisions/large-assets-need-ssh-forward.md."
+    fi
+  fi
 fi
 
 info "6. Host port published for container $PASEO_PORT"

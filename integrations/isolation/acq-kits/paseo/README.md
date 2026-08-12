@@ -32,14 +32,26 @@ as shown below.
    prints connect instructions, and holds the session open. Closing this terminal
    stops the sandbox.
 
-3. **Open the browser UI.** Find the mapped host port and open it:
+3. **Open the browser UI.** Publish the port over the SSH-forward path and open
+   it:
 
    ```bash
-   acq ports <sandbox>     # look up the host port mapped to container 6767
+   acq ports <sandbox> --publish 6767:6767     # then open http://127.0.0.1:6767
    ```
 
-   Open `http://127.0.0.1:<host-port-for-6767>`. On first boot, wait a few
-   seconds for the one-time Paseo CLI install, then reload.
+   On first boot, wait a few seconds for the one-time Paseo CLI install, then
+   reload.
+
+   > **Use `acq ports … --publish`, not the auto-published ephemeral port, on the
+   > `msb` backend.** The Paseo UI ships a large (~15 MB) JavaScript bundle served
+   > **chunked**. On the current `msb` backend the auto-published (create-time)
+   > port truncates large chunked responses
+   > (`ERR_INCOMPLETE_CHUNKED_ENCODING` → a black page), because msb's
+   > published-port relay does not propagate the server's TCP half-close
+   > (upstream [microsandbox#1330](https://github.com/superradcompany/microsandbox/issues/1330)).
+   > `acq ports … --publish` forwards over an `ssh -L` tunnel that terminates
+   > inside the guest and does not hit that relay, so the whole app loads. See
+   > [`docs/decisions/large-assets-need-ssh-forward.md`](docs/decisions/large-assets-need-ssh-forward.md).
 
 That's the whole flow. The daemon and web UI start automatically; you never run a
 separate command to bring them up.
@@ -63,16 +75,30 @@ terminal tab or a `tmux`/`screen` window and leave it attached.
 
 The kit exposes **container** port `6767` (the Paseo daemon API + WebSocket +
 bundled web UI), declared via the neutral `publishedPorts` field in `spec.yaml`.
-`acq` publishes it to an **ephemeral `127.0.0.1` host port per sandbox** at create
-time, so several sandboxes running this kit at once don't collide. Look up the
-mapping:
+
+> **On the `msb` backend, reach the UI with `acq ports <sandbox> --publish
+> 6767:6767`** and open `http://127.0.0.1:6767`. This uses msb's `ssh -L`
+> forward (which terminates inside the guest at guest-loopback) rather than the
+> create-time published-port relay. The create-time relay currently truncates
+> the UI's large **chunked** JavaScript bundle
+> (`ERR_INCOMPLETE_CHUNKED_ENCODING` → black page) because it does not propagate
+> the server's TCP half-close — upstream
+> [microsandbox#1330](https://github.com/superradcompany/microsandbox/issues/1330).
+> When that is fixed the auto-published ephemeral port below should work
+> directly. Full rationale:
+> [`docs/decisions/large-assets-need-ssh-forward.md`](docs/decisions/large-assets-need-ssh-forward.md).
+
+`acq` also publishes it to an **ephemeral `127.0.0.1` host port per sandbox** at
+create time, so several sandboxes running this kit at once don't collide. Look
+up the mapping (usable once microsandbox#1330 is resolved, or for small
+API-only clients today):
 
 ```bash
 acq ports <sandbox>
 # Paseo web UI:  open http://127.0.0.1:<host-port-for-6767> in a browser
 ```
 
-Want a **fixed** host port instead of the ephemeral one? Publish it explicitly:
+Want a **fixed** host port over the SSH-forward path? Publish it explicitly:
 
 ```bash
 acq ports <sandbox> --publish 6767:6767          # this sandbox → host 6767
