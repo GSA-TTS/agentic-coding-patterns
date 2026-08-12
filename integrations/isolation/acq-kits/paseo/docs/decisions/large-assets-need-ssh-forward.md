@@ -78,6 +78,7 @@ deliberately bypasses the create-time `publisher.rs` relay that carries the bug.
 
 ## Links
 
+- Tracking issue to relax this once upstream is fixed: GSA-TTS/agentic-coding-patterns#318.
 - microsandbox#1330 — HTTP partial responses over a forwarded published port
   stall (the tracking upstream issue).
 - microsandbox#1181 / #1255 — the guest-side half-close fix on the **egress**
