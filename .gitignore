@@ -55,3 +55,4 @@ node_modules/
 # OS
 Thumbs.db
 deleteme/
+.markdown-link-check.ci.json

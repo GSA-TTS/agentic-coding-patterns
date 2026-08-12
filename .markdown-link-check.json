@@ -46,10 +46,17 @@
     }
   ],
   "replacementPatterns": [],
+  "httpHeaders": [
+    {
+      "_comment": "Check github.com links AUTHENTICATED so CI uses the 5000/hr token rate limit instead of the ~60/hr anonymous limit that caused 0/503 throttling false-positives (#316). The CI step substitutes $MLC_GITHUB_TOKEN (the read-only workflow GITHUB_TOKEN) into this file before running; locally, with the env var unset, it becomes an inert 'Bearer ' header (github still answers anonymously).",
+      "urls": ["https://github.com", "https://api.github.com", "https://raw.githubusercontent.com"],
+      "headers": { "Authorization": "Bearer ${MLC_GITHUB_TOKEN}" }
+    }
+  ],
   "retryOn429": true,
-  "retryCount": 3,
+  "retryCount": 5,
   "fallbackRetryDelay": "30s",
-  "_comment_alive": "403 = bot-blocked-but-live hosts (claude.ai, webaim.org, and similar) that reject the CI user-agent but resolve in a browser; treat as alive so genuine dead links still fail. asciinema.org returns 0 to the checker's HEAD probe but is live.",
+  "_comment_alive": "200-family + bot-block 403 + transient throttling 429/503 are treated as alive: a rate-limited probe of a live host must not be reported as a dead link (see #316). asciinema.org returns 0 to the HEAD probe but is live (ignored above).",
   "aliveStatusCodes": [
     200,
     206,
@@ -57,6 +64,8 @@
     302,
     307,
     308,
-    403
+    403,
+    429,
+    503
   ]
 }
