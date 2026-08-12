@@ -195,9 +195,8 @@ agentContext: |
   with nobody attached — so it comes up on its own.
 
   **No terminal needed to bring it up.** A single
-  `acq create --name <sandbox> opencode <path>` starts the daemon + UI; then reach
-  it from the host with `acq ports <sandbox> --publish 6767:6767` and open the
-  browser. The `opencode`
+  `acq create --name <sandbox> opencode <path>` starts the daemon + UI; then find
+  the host port with `acq ports <sandbox>` and open the browser. The `opencode`
   **wrapper** (at `~/.local/bin/opencode`, first on PATH) is a thin shim over
   generic kit logic: running it with **no arguments** pins Paseo's worktree root
   under your project and prints host-connect instructions (and, on the `acq run`
@@ -206,20 +205,14 @@ agentContext: |
   straight through to the real opencode — so opencode still works as one of
   Paseo's provider CLIs.
 
-  **Reaching it from the host.** The kit publishes container port 6767. On the
-  `msb` backend, reach the UI with `acq ports <sandbox> --publish 6767:6767`
-  (an `ssh -L` forward that terminates inside the guest) and open the browser:
+  **Reaching it from the host.** The kit publishes container port 6767; acq's
+  active backend maps it to an ephemeral host loopback port, per sandbox. Find it
+  and open the browser:
 
   ```
-  acq ports <sandbox> --publish 6767:6767   # then open http://127.0.0.1:6767
+  acq ports <sandbox>        # host port for 6767
+  # Paseo web UI:  open http://127.0.0.1:<host-port-for-6767>
   ```
-
-  Use this `--publish` (ssh-forward) path rather than the auto-published
-  ephemeral port: the current `msb` create-time published-port relay truncates
-  the UI's large **chunked** JavaScript bundle (`ERR_INCOMPLETE_CHUNKED_ENCODING`
-  → a black page) because it does not propagate the server's TCP half-close
-  (upstream microsandbox#1330). See
-  `docs/decisions/large-assets-need-ssh-forward.md`.
 
   **No shared session with a terminal TUI.** Unlike a shared-server setup, Paseo
   launches its own agent CLIs as child processes; the terminal OpenCode TUI and

@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+#
+# paseo-probe3 — isolate the BROWSER-only black page. curl proves the static
+# assets arrive byte-complete over every path (see paseo-probe / paseo-probe2),
+# yet a real browser (Chrome, which supports br/zstd) renders black. So the
+# failure is on a path a browser exercises but curl did not: the WebSocket
+# upgrade to the daemon, the injected same-origin connection hint, the service
+# worker / manifest, or an HTTP/2-vs-1.1 difference.
+#
+# This probe is READ-ONLY. It hits the daemon THROUGH the published host port
+# (the browser's path) and, for contrast, in-guest.
+#
+# Usage:  scripts/paseo-probe3 <sandbox-name>
+#         HOST_HP=127.0.0.1:6767  scripts/paseo-probe3 <sandbox-name>   # pin host map
+
+set -uo pipefail
+SBX="${1:-}"; [ -n "$SBX" ] || { echo "usage: $0 <sandbox-name>" >&2; exit 2; }
+CONTAINER_PORT="${CONTAINER_PORT:-6767}"
+
+command -v acq  >/dev/null 2>&1 || { echo "FATAL: acq not on PATH" >&2; exit 2; }
+command -v curl >/dev/null 2>&1 || { echo "FATAL: curl not on PATH" >&2; exit 2; }
+in_guest() { acq exec "$SBX" -- sh -c "$1" </dev/null 2>/dev/null; }
+hdr() { printf '\n=== %s ===\n' "$1"; }
+
+# Resolve the host mapping for the container port (browser's path).
+HOST_HP="${HOST_HP:-$(acq ports "$SBX" 2>/dev/null | grep -Eo '127\.0\.0\.1:[0-9]+' | head -1)}"
+[ -n "$HOST_HP" ] || { echo "FATAL: could not resolve a 127.0.0.1:<port> host mapping" >&2; exit 1; }
+
+hdr "0. Environment"
+echo "sandbox:     $SBX"
+echo "host map:    $HOST_HP  (browser hits this)"
+echo "date:        $(date -u +%FT%TZ)"
+echo -n "host curl:   "; curl -V | head -1
+echo "http2 support: $(curl -V | grep -qi 'HTTP2' && echo yes || echo no)"
+
+hdr "1. index.html over the HOST port — what the browser bootstraps from"
+echo "  response headers:"
+curl -sS -D - -o /dev/null "http://$HOST_HP/" 2>/dev/null \
+  | grep -iE 'HTTP/|content-type|content-length|transfer-encoding|content-security|x-frame|cache-control|set-cookie' | sed 's/^/    /'
+INDEX="$(curl -sS "http://$HOST_HP/" 2>/dev/null)"
+echo "  bytes: $(printf '%s' "$INDEX" | wc -c | tr -d ' ')"
+echo "  injected same-origin daemon connection hint (window.__PASEO_INITIAL_DAEMON_CONNECTION__):"
+printf '%s\n' "$INDEX" | grep -oE '__PASEO_INITIAL_DAEMON_CONNECTION__=[^<]*' | head -1 | sed 's/^/    /' \
+  || echo "    (none found — the app may not know which daemon to dial)"
+echo "  referenced entry scripts:"
+printf '%s\n' "$INDEX" | grep -oE '/_expo/static/js/web/[A-Za-z0-9._-]+\.js' | sort -u | sed 's/^/    /'
+
+hdr "2. Service worker & PWA assets over the HOST port (browser fetches these)"
+for p in /manifest.json /sw.js /service-worker.js /expo-service-worker.js /_expo/static/js/web/sw.js /favicon.ico /pwa-icon-192.png; do
+  code_len="$(curl -sS -o /dev/null -w '%{http_code} %{size_download}' "http://$HOST_HP$p" 2>/dev/null; echo " rc=$?")"
+  printf '    %-40s %s\n' "$p" "$code_len"
+done
+echo "  (index.html references a service worker?):"
+printf '%s\n' "$INDEX" | grep -oiE 'serviceWorker|register\(["'"'"'][^"'"'"']+' | head -5 | sed 's/^/    /' || echo "    (no obvious SW registration string in index.html)"
+
+hdr "3. WebSocket upgrade to the daemon over the HOST port (the prime suspect)"
+# The app connects back to the daemon over WS at /ws. A browser sends Origin +
+# Sec-WebSocket-Key and expects 101. Test WITHOUT and WITH an Origin header, and
+# note the Host the browser would send. A 4xx/403 here (esp. Host/Origin checks)
+# would let the static page load but leave the app unable to connect -> black.
+WS_PATH="${WS_PATH:-/ws}"
+ws_probe() { # ws_probe <label> <extra-headers...>
+  _label="$1"; shift
+  # -N no-buffer, --http1.1 (WS needs 1.1), print status line + upgrade headers.
+  out="$(curl -sS -i -N --http1.1 \
+        -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+        -H 'Sec-WebSocket-Version: 13' \
+        -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+        "$@" \
+        "http://$HOST_HP$WS_PATH" 2>/dev/null | head -20)"
+  echo "  [$_label]"
+  printf '%s\n' "$out" | grep -iE 'HTTP/|upgrade|connection|sec-websocket|error|forbidden|host' | sed 's/^/     /' \
+    || printf '%s\n' "$out" | head -5 | sed 's/^/     /'
+}
+ws_probe "no Origin"                         
+ws_probe "Origin=http://$HOST_HP"            -H "Origin: http://$HOST_HP"
+ws_probe "Origin=http://localhost:$CONTAINER_PORT (browser-typed)" -H "Origin: http://localhost:$CONTAINER_PORT"
+echo "  in-guest WS upgrade (control):"
+in_guest "curl -sS -i -N --http1.1 -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' 'http://127.0.0.1:$CONTAINER_PORT$WS_PATH' 2>/dev/null | head -8" \
+  | grep -iE 'HTTP/|upgrade|sec-websocket|host' | sed 's/^/     /'
+
+hdr "4. Host-header / origin acceptance matrix over the HOST port"
+# Paseo validates the Host header (vite-style). The browser sends whatever you
+# typed in the URL bar. Test the common ones.
+for h in "127.0.0.1:$CONTAINER_PORT" "localhost:$CONTAINER_PORT" "$HOST_HP" "paseo.local"; do
+  code="$(curl -sS -o /dev/null -w '%{http_code}' -H "Host: $h" "http://$HOST_HP/api/health" 2>/dev/null)"
+  printf '    Host: %-28s /api/health -> %s\n' "$h" "$code"
+done
+
+hdr "5. HTTP/2 vs 1.1 for index + big bundle over the HOST port"
+BUNDLE="$(printf '%s' "$INDEX" | grep -oE '/_expo/static/js/web/index-[0-9a-f]+\.js' | head -1)"
+for proto in --http1.1 --http2; do
+  printf '    index %s: ' "$proto"; curl -sS $proto -o /dev/null -w 'http=%{http_code} size=%{size_download}' "http://$HOST_HP/" 2>/dev/null; echo " rc=$?"
+  if [ -n "$BUNDLE" ]; then
+    printf '    bundle %s (identity): ' "$proto"
+    curl -sS $proto -H 'Accept-Encoding: identity' -o /dev/null -w 'http=%{http_code} size=%{size_download}' "http://$HOST_HP$BUNDLE" 2>/dev/null; echo " rc=$?"
+  fi
+done
+
+hdr "6. Interpretation key"
+cat <<'KEY'
+  We already know static assets arrive intact (probe/probe2). So look for:
+   * Section 3 WS upgrade NOT returning 101 over the host port (esp. 403/400, or
+     a Host/Origin rejection) while in-guest returns 101  -> the app loads its JS
+     but cannot open its data channel -> black page. PRIME SUSPECT.
+   * Section 1 missing __PASEO_INITIAL_DAEMON_CONNECTION__ hint -> app doesn't
+     know which daemon to dial from the browser.
+   * Section 4 the Host the user typed (127.0.0.1 / localhost) returning 403 for
+     /api/health -> DNS-rebinding/Host allowlist blocking the browser's calls.
+   * Section 2 a required service worker/manifest 404/erroring.
+   * Section 5 a difference between HTTP/2 and HTTP/1.1 (browsers prefer h2).
+KEY
+echo "Done. Copy sections 0-6 back."

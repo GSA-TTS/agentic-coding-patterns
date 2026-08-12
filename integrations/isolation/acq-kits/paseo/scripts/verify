@@ -11,11 +11,10 @@
 #
 #   2. LIVE END-TO-END (opt-in): create a real sandbox with the kit applied, then
 #      assert the Paseo CLI install, the wrapper, the startup-supervised daemon +
-#      web UI (on one port), the published port, that the LARGE UI bundle actually
-#      downloads intact over BOTH host paths — the auto-published ephemeral port
-#      (the buggy create-time relay, informational) and `acq ports --publish`
-#      (ssh -L, the supported gate) — see microsandbox#1330, the respawn
-#      supervisor, the PID-1 hold, daemon self-heal, and the worktree-root pin.
+#      web UI (on one port), the published port, that the LARGE UI bundle arrives
+#      byte-complete over the host port (identity encoding; integrity guard), the
+#      respawn supervisor, the PID-1 hold, daemon self-heal, and the worktree-root
+#      pin.
 #
 #      Preferred driver — RUN_ACQ=1: drive the `acq` CLI. acq translates the
 #      neutral hybrid/v1 spec to an sbx-v2 kit (kit_translate_to_sbx) and applies
@@ -295,118 +294,54 @@ else
   skip "web UI check (daemon not up)"
 fi
 
-# --- Large-asset delivery over the HOST port (the real black-page regression). --
-# The small entry files (index.html, manifest.json, css) are length-delimited and
-# survive even a relay that mishandles half-close; the big hashed JS bundle
-# (~15 MB, served CHUNKED with no Content-Length) is what truncates over msb's
-# create-time published-port relay (ERR_INCOMPLETE_CHUNKED_ENCODING → black page;
-# see docs/decisions/large-assets-need-ssh-forward.md and microsandbox#1330).
-# Step 5 only proved in-guest health; here we prove the full asset actually
-# arrives END TO END over the HOST — the path the browser uses — and we exercise
-# BOTH host paths to document the contrast in one run:
-#   (A) auto-published ephemeral port (the create-time publisher relay) — the
-#       BUGGY path today; informational (WARN if it truncates, and a loud note if
-#       it unexpectedly SUCCEEDS → msb#1330 likely fixed, time to relax #318).
-#   (B) explicit `acq ports --publish` (ssh -L, terminates inside the guest) — the
-#       supported path today; this is the HARD PASS/FAIL gate.
-info "5b. Large UI bundle downloads intact over the HOST (both paths; ssh -L is the gate)"
-
-# fetch_host_bundle <host:port> <path> -> prints "<rc> <http_code> <decoded_bytes>"
-# Requests browser-style compression so the daemon serves the precompressed,
-# CHUNKED variant (the exact failing case). A truncated chunked transfer either
-# curl-fails (rc≠0) or returns short.
-fetch_host_bundle() {
-  _hp="$1"; _path="$2"
-  _o="$(curl -fsS --compressed -H 'Accept-Encoding: gzip, deflate, br, zstd' \
-          -o /dev/null -w '%{http_code} %{size_download}' \
-          "http://$_hp$_path" 2>/dev/null)"; _rc=$?
-  printf '%s %s' "$_rc" "$_o"
-}
-# bundle_ok <rc> <code> <size> <baseline_size> -> 0 if a full 200 delivery
-bundle_ok() {
-  [ "$1" -eq 0 ] || return 1
-  [ "$2" = "200" ] || return 1
-  # Accept if it matches the in-guest baseline, or (baseline unknown) is clearly big.
-  if [ -n "$4" ] && [ "$4" != "0" ]; then
-    [ "$3" = "$4" ]
-  else
-    [ "${3:-0}" -gt 1000000 ] 2>/dev/null
-  fi
-}
-
+# --- Large-asset delivery over the HOST port (end-to-end integrity guard). -----
+# Prove the big hashed JS bundle (~15 MB) arrives BYTE-COMPLETE over the published
+# host port — the path the browser uses — not just /api/health + /.
+#
+# IMPORTANT test-integrity note (learned the hard way): the daemon serves this
+# asset CHUNKED and offers PRECOMPRESSED variants (.gz/.br). We deliberately fetch
+# with **Accept-Encoding: identity** and **without curl --compressed**, so:
+#   * we get the full uncompressed body whose size we can predict exactly, and
+#   * we never depend on whether THIS curl was built with brotli/zstd. Requesting
+#     br/zstd against a libz-only curl yields CURLE_BAD_CONTENT_ENCODING (rc=61,
+#     size=0) — a CLIENT DECODE failure that must NOT be read as truncation.
+# A genuine truncation shows up as rc=18 (transfer closed) / rc=56 (reset) or a
+# short byte count vs the in-guest identity baseline.
+info "5b. Large UI bundle downloads intact over the HOST port (identity; integrity guard)"
+HOST_HP="$(sbx_ports_out | grep -Eo '127\.0\.0\.1:[0-9]+' | head -1)"
 if [ -z "$daemon_up" ]; then
   skip "large-asset guard (daemon not up)"
 elif ! command -v curl >/dev/null 2>&1; then
   skip "large-asset guard (no curl on the HOST to reach the published port)"
+elif [ -z "$HOST_HP" ]; then
+  skip "large-asset guard (could not resolve a 127.0.0.1:<port> host mapping)"
 else
-  # Discover the hashed bundle path from index.html (served in-guest, reliable).
   bundle="$(in_sbx "curl -fsS http://127.0.0.1:$PASEO_PORT/ 2>/dev/null" \
             | grep -oE '/_expo/static/js/web/index-[0-9a-f]+\.js' | head -1)"
   if [ -z "$bundle" ]; then
-    warn "could not find the /_expo/static/js/web/index-<hash>.js bundle in index.html; skipping large-asset guard"
+    warn "could not find the /_expo/static/js/web/index-<hash>.js bundle in index.html; skipping"
   else
-    # In-guest baseline: prove the DAEMON serves the whole bundle (isolates the
-    # relay from the daemon). Capture status + byte count.
-    g_stat="$(in_sbx "curl -fsS -o /dev/null -w '%{http_code} %{size_download}' 'http://127.0.0.1:$PASEO_PORT$bundle' 2>/dev/null")"
+    # In-guest identity baseline (isolates the daemon from the transport).
+    g_stat="$(in_sbx "curl -fsS -H 'Accept-Encoding: identity' -o /dev/null -w '%{http_code} %{size_download}' 'http://127.0.0.1:$PASEO_PORT$bundle' 2>/dev/null")"
     g_code="${g_stat%% *}"; g_size="${g_stat##* }"
     if [ "$g_code" = "200" ] && [ "${g_size:-0}" -gt 1000000 ] 2>/dev/null; then
-      ok "in-guest: daemon serves the full bundle ($g_size bytes)"
+      ok "in-guest: daemon serves the full identity bundle ($g_size bytes)"
     else
-      warn "in-guest bundle fetch was '$g_stat' (expected '200 <big>') — daemon/UI may differ from expectations"
-      g_size=""   # don't use a bogus baseline for the host comparisons below
+      warn "in-guest identity fetch was '$g_stat' (expected '200 <big>'); using >1MB heuristic for the host check"
+      g_size=""
     fi
-
-    # --- Path (A): auto-published ephemeral port (the create-time relay). --------
-    # Informational: this is the path known-broken until microsandbox#1330 lands.
-    EPHEMERAL_HP="$(sbx_ports_out | grep -Eo '127\.0\.0\.1:[0-9]+' | head -1)"
-    if [ -z "$EPHEMERAL_HP" ]; then
-      skip "path (A) auto-published port: no 127.0.0.1:<port> mapping in ports output"
+    # HOST end-to-end, identity, NO --compressed. Compare bytes to the baseline.
+    h_out="$(curl -fsS -H 'Accept-Encoding: identity' -o /dev/null \
+               -w '%{http_code} %{size_download}' "http://$HOST_HP$bundle" 2>/dev/null)"; h_rc=$?
+    h_code="${h_out%% *}"; h_size="${h_out##* }"
+    if [ "$h_rc" -eq 0 ] && [ "$h_code" = "200" ] && \
+       { { [ -n "$g_size" ] && [ "$h_size" = "$g_size" ]; } || \
+         { [ -z "$g_size" ] && [ "${h_size:-0}" -gt 1000000 ] 2>/dev/null; }; }; then
+      ok "HOST end-to-end: full identity bundle delivered over $HOST_HP (${h_size} bytes)"
     else
-      read -r a_rc a_code a_size <<EOF2
-$(fetch_host_bundle "$EPHEMERAL_HP" "$bundle")
-EOF2
-      if bundle_ok "$a_rc" "$a_code" "$a_size" "$g_size"; then
-        warn "path (A) auto-published port ($EPHEMERAL_HP) delivered the FULL bundle (${a_size} bytes)."
-        warn "     This path was expected to TRUNCATE (microsandbox#1330). If it now works,"
-        warn "     msb#1330 may be FIXED on this host — verify and relax the ssh -L workaround"
-        warn "     (see GSA-TTS/agentic-coding-patterns#318 and docs/decisions/large-assets-need-ssh-forward.md)."
-      else
-        warn "path (A) auto-published port ($EPHEMERAL_HP) truncated/failed (rc=$a_rc code=${a_code:-?} size=${a_size:-?} vs in-guest '${g_size:-?}')."
-        warn "     EXPECTED today — msb create-time relay drops the server half-close (microsandbox#1330)."
-        warn "     Use path (B) below; tracked in GSA-TTS/agentic-coding-patterns#318."
-      fi
-    fi
-
-    # --- Path (B): explicit acq ports --publish (ssh -L). THE GATE. --------------
-    if [ "$DRIVER" != "acq" ]; then
-      skip "path (B) ssh -L gate: needs the acq driver (RUN_ACQ=1) to run 'acq ports --publish'"
-    else
-      # Publish the container port to a FIXED host port over ssh -L. Use a
-      # high, unlikely-to-collide host port so we don't fight the ephemeral map.
-      SSHL_HOST_PORT="${SSHL_HOST_PORT:-16767}"
-      if acq ports "$SBX_NAME" --publish "${SSHL_HOST_PORT}:${PASEO_PORT}" >/dev/null 2>&1; then
-        # Give the forward a moment to come up.
-        _pub_deadline=$(( $(date +%s) + 15 )); _pub_ready=""
-        while :; do
-          if curl -fsS -o /dev/null "http://127.0.0.1:${SSHL_HOST_PORT}/api/health" 2>/dev/null; then _pub_ready=yes; break; fi
-          [ "$(date +%s)" -ge "$_pub_deadline" ] && break
-          sleep 1
-        done
-        if [ -z "$_pub_ready" ]; then
-          bad "path (B) ssh -L: published 127.0.0.1:${SSHL_HOST_PORT} but /api/health never answered — forward didn't come up"
-        else
-          read -r b_rc b_code b_size <<EOF3
-$(fetch_host_bundle "127.0.0.1:${SSHL_HOST_PORT}" "$bundle")
-EOF3
-          if bundle_ok "$b_rc" "$b_code" "$b_size" "$g_size"; then
-            ok "path (B) ssh -L (127.0.0.1:${SSHL_HOST_PORT}): FULL bundle delivered (${b_size} bytes) — the supported path works"
-          else
-            bad "path (B) ssh -L (127.0.0.1:${SSHL_HOST_PORT}) FAILED (rc=$b_rc code=${b_code:-?} size=${b_size:-?} vs in-guest '${g_size:-?}'). The ssh -L path is supposed to bypass the buggy relay — investigate. See docs/decisions/large-assets-need-ssh-forward.md."
-          fi
-        fi
-      else
-        bad "path (B) ssh -L: 'acq ports $SBX_NAME --publish ${SSHL_HOST_PORT}:${PASEO_PORT}' failed"
-      fi
+      # rc=18/56 or a short count = real truncation; rc!=0 with size 0 on identity
+      # is a transport error (identity needs no decoder), so it IS meaningful here.
+      bad "HOST identity bundle FAILED/short over $HOST_HP (host='$h_out' rc=$h_rc vs in-guest '$g_stat'). This is a genuine transport problem (identity needs no client decoder)."
     fi
   fi
 fi

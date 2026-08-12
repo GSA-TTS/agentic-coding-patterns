@@ -133,13 +133,12 @@ cat <<EOF
 Connect from your HOST
 ────────────────────────────────────────────────────────────────────────────
 This sandbox publishes container port $PASEO_PORT (the Paseo daemon API,
-WebSocket, and bundled web UI — all on one port). On the msb backend, reach the
-UI over the ssh-forward path (it loads the UI's large chunked JS bundle
-reliably; the auto-published port currently truncates it — see the kit README):
+WebSocket, and bundled web UI — all on one port) to a host loopback port. Find
+the mapped host port from your host shell:
 
-    acq ports <sandbox> --publish $PASEO_PORT:$PASEO_PORT
+    acq ports <sandbox>
 
-  • Paseo web UI → open http://127.0.0.1:$PASEO_PORT
+  • Paseo web UI → container $PASEO_PORT → open http://127.0.0.1:<host-port>
 
 Paseo launches its own agent CLIs; there is no shared live session with a
 terminal TUI, so drive agents from the browser UI.
@@ -184,7 +183,7 @@ else
 The sandbox keeps running on its own; the Paseo daemon and web UI are supervised
 by the kit startup script. This command is exiting and returning your terminal.
 Reach Paseo from the host with:
-    acq ports <sandbox> --publish $PASEO_PORT:$PASEO_PORT   # then open http://127.0.0.1:$PASEO_PORT
+    acq ports <sandbox>        # then open http://127.0.0.1:<host-port-for-$PASEO_PORT>
 
 Daemon log: $DAEMON_LOG
 EOF

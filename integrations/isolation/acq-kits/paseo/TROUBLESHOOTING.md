@@ -30,43 +30,6 @@ acq exec <sandbox> -- sh -c 'curl -fsS http://127.0.0.1:6767/api/health && echo 
   acq exec <sandbox> -- sh -c 'tail -n 40 ~/.local/state/paseo/paseo-install.log'
   ```
 
-## Black page: `ERR_INCOMPLETE_CHUNKED_ENCODING` on the big JS bundle (msb)
-
-**Symptom.** The page is black. In the browser console `index.html`,
-`manifest.json`, and a CSS file return `200 OK`, but the large app bundle
-(`/_expo/static/js/web/index-<hash>.js`, ~15 MB) fails with
-`net::ERR_INCOMPLETE_CHUNKED_ENCODING 200 (OK)`, and `/favicon.ico` /
-`/pwa-icon-192.png` show `ERR_CONNECTION_REFUSED`.
-
-**Cause.** Not the daemon and not the Host header. The daemon serves that bundle
-**chunked** (no `Content-Length`); the current `msb` create-time published-port
-relay doesn't propagate the server's TCP half-close, so a chunked response
-truncates while the small length-delimited files succeed (upstream
-[microsandbox#1330](https://github.com/superradcompany/microsandbox/issues/1330)).
-Confirm the daemon itself is fine — inside the guest the same asset downloads in
-full:
-
-```bash
-acq exec <sandbox> -- sh -c \
-  'curl -fsS -o /dev/null -w "%{http_code} %{size_download}\n" \
-   http://127.0.0.1:6767/_expo/static/js/web/$(curl -fsS http://127.0.0.1:6767/ | grep -oE "index-[0-9a-f]+\.js" | head -1)'
-# expect: 200 <~15000000+ bytes>
-```
-
-**Fix.** Reach the UI over the SSH-forward path instead of the auto-published
-port:
-
-```bash
-acq ports <sandbox> --publish 6767:6767      # then open http://127.0.0.1:6767
-```
-
-`acq ports … --publish` forwards over `ssh -L` (terminating inside the guest),
-which does not use the create-time relay and delivers the large chunked bundle
-intact. See
-[`docs/decisions/large-assets-need-ssh-forward.md`](docs/decisions/large-assets-need-ssh-forward.md).
-When microsandbox#1330 is fixed, the auto-published ephemeral port should work
-directly.
-
 ## "The sandbox stopped" shortly after `acq create`
 
 A session-less sandbox is **auto-stopped shortly after** the last session
