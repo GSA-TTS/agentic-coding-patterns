@@ -126,9 +126,21 @@ jobs:
         with:
           persist-credentials: false
 
+      # Substitute the read-only workflow token into the link-check config so
+      # github.com links are checked AUTHENTICATED (5000/hr) instead of at the
+      # ~60/hr anonymous limit that produced 0/503 throttling false-positives
+      # (#316). envsubst only touches the ${MLC_GITHUB_TOKEN} placeholder.
+      - name: Authenticate link-check for github.com rate limits
+        env:
+          MLC_GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          MLC_GITHUB_TOKEN="$MLC_GITHUB_TOKEN" \
+            envsubst '${MLC_GITHUB_TOKEN}' \
+            < .markdown-link-check.json > .markdown-link-check.ci.json
+
       - uses: tcort/github-action-markdown-link-check@e047c5b37f24ab722bbef1a27b6fab7f96bc4068 # v1.1.3
         with:
-          config-file: ".markdown-link-check.json"
+          config-file: ".markdown-link-check.ci.json"
           use-quiet-mode: "yes"
           folder-path: "."
 
