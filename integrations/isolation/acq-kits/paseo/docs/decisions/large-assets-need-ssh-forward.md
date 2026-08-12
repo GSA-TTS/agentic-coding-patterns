@@ -73,8 +73,12 @@ deliberately bypasses the create-time `publisher.rs` relay that carries the bug.
 - When microsandbox#1330 lands, the ephemeral create-time port should work
   directly and this steer can be relaxed; tracked so it is not forgotten.
 - `scripts/verify` now fetches the **large hashed JS asset in full** (not just
-  `/api/health` + `/`), so a regression that only manifests on large/chunked
-  assets is caught rather than passing on the small files alone.
+  `/api/health` + `/`) over **both** host paths in one run: the auto-published
+  ephemeral port (the buggy create-time relay — informational, and it emits a
+  loud note if it *unexpectedly succeeds*, which signals #1330 is fixed and the
+  workaround can be relaxed) and the `acq ports --publish` `ssh -L` path (the
+  hard PASS/FAIL gate). This catches a regression that only manifests on
+  large/chunked assets, and documents the contrast between the two paths.
 
 ## Links
 
