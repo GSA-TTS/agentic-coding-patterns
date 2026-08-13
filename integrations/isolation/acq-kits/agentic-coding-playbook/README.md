@@ -6,8 +6,7 @@ kit** that delivers the GSA
 the federal `AGENTS.md` rules and the Agent Skills — into a sandbox.
 
 > **Neutral (backend-agnostic) kit.** This is the `schemaVersion: "hybrid/v1"`
-> form consumed by `acq`, which selects an isolation backend (`sbx` today; `msb`
-> from Phase 2). It replaces the former `sbx-kits/playbook-kit/` sbx-only spec.
+> form consumed by `acq`, which abstracts the isolation backend. It replaces the former `sbx-kits/playbook-kit/` sbx-only spec.
 > See [backend parity](#backend-parity) and
 > [`../../docs/decisions/0001-neutral-hybrid-v1-acq-kits.md`](../../docs/decisions/0001-neutral-hybrid-v1-acq-kits.md).
 

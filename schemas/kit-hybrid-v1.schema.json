@@ -47,6 +47,12 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
+            "tier": {
+              "type": "string",
+              "enum": ["strict", "balanced", "open"],
+              "default": "balanced",
+              "description": "Neutral egress posture, mapped by each backend to its native primitive. ALL tiers are deny-by-default; the tier only sizes the baseline allowlist. `strict` = no baseline (kit `allow` only); `balanced` = a curated shared baseline ∪ the kit `allow` (the default when unspecified); `open` = unrestricted egress (testing only, never for GFE). The effective allowlist is: tier baseline ∪ this kit's `allow` ∪ per-sandbox additions."
+            },
             "allow": {
               "type": "array",
               "description": "Outbound egress allow-list. Hostnames, optionally with :port (default 443). Each backend maps these to its native egress primitive.",
