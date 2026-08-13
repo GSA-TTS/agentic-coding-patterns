@@ -30,6 +30,51 @@ acq exec <sandbox> -- sh -c 'curl -fsS http://127.0.0.1:6767/api/health && echo 
   acq exec <sandbox> -- sh -c 'tail -n 40 ~/.local/state/paseo/paseo-install.log'
   ```
 
+## Black page that persists on reload (`ERR_CONTENT_DECODING_FAILED`)
+
+**Symptom.** The page is black. DevTools ▸ Console shows the entry bundle failing:
+
+```
+GET .../_expo/static/js/web/index-<hash>.js  net::ERR_CONTENT_DECODING_FAILED  200 (OK)
+```
+
+and DevTools ▸ Network shows that request with `Content-Encoding: br` and
+`Cache-Control: … immutable`, often stuck "pending" then failing.
+
+**Cause — a poisoned browser cache from a first-load race, NOT a server bug.**
+The web UI's hashed assets are served `immutable`. If the browser loaded the page
+during the **boot window** — after `/api/health` answers but before the daemon was
+fully serving the large (~15 MB) JS bundle — Chrome can cache a partial/broken
+`br` response. Because the entry is `immutable`, Chrome keeps replaying that broken
+body and fails to decode it on every later reload, even after the server is
+healthy. The bytes on the server are fine: fetched over the same host port they
+are byte-identical to the on-disk artifact and Brotli-decode correctly — so this
+is purely a stale client cache.
+
+**Fix (once).** Clear the poisoned entry:
+
+- DevTools ▸ **Network** ▸ check **"Disable cache"**, then hard-reload
+  (⌘/Ctrl-Shift-R); or
+- open the URL in a **private/Incognito** window once.
+
+The app then renders and normal reloads work.
+
+**Prevention.** The kit's startup now waits for the **bundle to be fully
+serveable** (not just `/api/health`) before it prints "safe to open," and warns
+you to wait / hard-reload if you open during boot. If you scripted the open,
+gate it on the bundle rather than `/api/health` — compare the bytes received to
+the daemon's on-disk precompressed artifact (the bundle is served chunked, so
+there is no `Content-Length` to compare against):
+
+```bash
+acq exec <sandbox> -- sh -c '
+  b=$(curl -fsS http://127.0.0.1:6767/ | grep -oE "/_expo/static/js/web/index-[0-9a-f]+\.js" | head -1)
+  brf=$(find / -path "*/web-ui$b.br" 2>/dev/null | head -1)
+  exp=$(wc -c < "$brf" 2>/dev/null | tr -d " ")
+  got=$(curl -fsS -H "Accept-Encoding: br" -o /dev/null -w "%{size_download}" "http://127.0.0.1:6767$b")
+  [ -n "$exp" ] && [ "$got" = "$exp" ] && echo READY || echo "NOT READY (got=$got exp=$exp)"'
+```
+
 ## "The sandbox stopped" shortly after `acq create`
 
 A session-less sandbox is **auto-stopped shortly after** the last session

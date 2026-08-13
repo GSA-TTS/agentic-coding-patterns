@@ -59,25 +59,88 @@ hdr "3. WebSocket upgrade to the daemon over the HOST port (the prime suspect)"
 # note the Host the browser would send. A 4xx/403 here (esp. Host/Origin checks)
 # would let the static page load but leave the app unable to connect -> black.
 WS_PATH="${WS_PATH:-/ws}"
+# BOUNDED handshake probe: if the daemon returns 101 it will hold the socket open
+# for WS frames, so we MUST cap the time and only read the response headers.
+# curl --max-time bounds it; a 101 shows up in the status line before the hang.
+# We treat rc=28 (timeout) AFTER seeing "101" as success, not failure.
 ws_probe() { # ws_probe <label> <extra-headers...>
   _label="$1"; shift
-  # -N no-buffer, --http1.1 (WS needs 1.1), print status line + upgrade headers.
-  out="$(curl -sS -i -N --http1.1 \
+  out="$(curl -sS -i -N --http1.1 --max-time 4 \
         -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
         -H 'Sec-WebSocket-Version: 13' \
         -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
         "$@" \
-        "http://$HOST_HP$WS_PATH" 2>/dev/null | head -20)"
-  echo "  [$_label]"
-  printf '%s\n' "$out" | grep -iE 'HTTP/|upgrade|connection|sec-websocket|error|forbidden|host' | sed 's/^/     /' \
-    || printf '%s\n' "$out" | head -5 | sed 's/^/     /'
+        "http://$HOST_HP$WS_PATH" 2>/dev/null)"; _rc=$?
+  _status="$(printf '%s\n' "$out" | grep -iE 'HTTP/|upgrade|connection|sec-websocket|error|forbidden|invalid|host' | sed 's/^/       /')"
+  if printf '%s' "$out" | grep -qiE 'HTTP/1\.1 101'; then
+    echo "  [$_label] -> 101 Switching Protocols (WS accepted; curl rc=$_rc after headers)"
+  elif [ -n "$_status" ]; then
+    echo "  [$_label] -> NOT 101 (rc=$_rc):"
+    printf '%s\n' "$_status"
+  else
+    echo "  [$_label] -> no HTTP status captured (rc=$_rc)"
+    printf '%s\n' "$out" | head -4 | sed 's/^/       /'
+  fi
 }
-ws_probe "no Origin"                         
+ws_probe "no Origin"
 ws_probe "Origin=http://$HOST_HP"            -H "Origin: http://$HOST_HP"
 ws_probe "Origin=http://localhost:$CONTAINER_PORT (browser-typed)" -H "Origin: http://localhost:$CONTAINER_PORT"
 echo "  in-guest WS upgrade (control):"
-in_guest "curl -sS -i -N --http1.1 -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' 'http://127.0.0.1:$CONTAINER_PORT$WS_PATH' 2>/dev/null | head -8" \
-  | grep -iE 'HTTP/|upgrade|sec-websocket|host' | sed 's/^/     /'
+_g="$(in_guest "curl -sS -i -N --http1.1 --max-time 4 -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' 'http://127.0.0.1:$CONTAINER_PORT$WS_PATH' 2>/dev/null")"
+if printf '%s' "$_g" | grep -qiE 'HTTP/1\.1 101'; then
+  echo "     -> 101 Switching Protocols (WS accepted in-guest)"
+else
+  printf '%s\n' "$_g" | grep -iE 'HTTP/|upgrade|sec-websocket|invalid|forbidden|host' | sed 's/^/     /' || echo "     (no status captured)"
+fi
+
+# Real end-to-end WS handshake with python (macOS ships python3). This actually
+# completes the RFC6455 handshake and reports the daemon's response, WITH the
+# browser's Origin — the exact call the SPA makes. Bounded by a socket timeout.
+hdr "3b. End-to-end WebSocket handshake via python (browser-accurate, Origin set)"
+if command -v python3 >/dev/null 2>&1; then
+  PROBE_HOST_HP="$HOST_HP" PROBE_WS_PATH="$WS_PATH" PROBE_CONTAINER_PORT="$CONTAINER_PORT" python3 - <<'PY'
+import os, socket, base64, sys
+
+hp = os.environ["PROBE_HOST_HP"]; path = os.environ["PROBE_WS_PATH"]
+host, port = hp.rsplit(":", 1); port = int(port)
+
+def handshake(origin_label, origin_value, host_header):
+    key = base64.b64encode(b"0123456789abcdef").decode()
+    req = (
+        f"GET {path} HTTP/1.1\r\n"
+        f"Host: {host_header}\r\n"
+        "Connection: Upgrade\r\nUpgrade: websocket\r\n"
+        "Sec-WebSocket-Version: 13\r\n"
+        f"Sec-WebSocket-Key: {key}\r\n"
+    )
+    if origin_value:
+        req += f"Origin: {origin_value}\r\n"
+    req += "\r\n"
+    try:
+        s = socket.create_connection((host, port), timeout=4)
+        s.settimeout(4)
+        s.sendall(req.encode())
+        data = s.recv(4096).decode("latin1", "replace")
+        s.close()
+    except Exception as e:
+        print(f"     [{origin_label}] ERROR: {e!r}")
+        return
+    status = data.split("\r\n", 1)[0]
+    interesting = [l for l in data.split("\r\n")
+                   if l[:4].lower() == "sec-" or "upgrade" in l.lower()
+                   or "forbidden" in l.lower() or "invalid" in l.lower() or "host" in l.lower()]
+    print(f"     [{origin_label}] {status}")
+    for l in interesting:
+        print(f"         {l}")
+
+# The SPA is told (connection hint) to dial the same origin the page came from.
+handshake("Host+Origin = host map", f"http://{hp}", hp)
+handshake("Host+Origin = localhost", f"http://localhost:{port}", f"localhost:{port}")
+handshake("Host = 127.0.0.1, NO Origin", None, f"127.0.0.1:{port}")
+PY
+else
+  echo "     (python3 not on PATH — skipping the end-to-end handshake)"
+fi
 
 hdr "4. Host-header / origin acceptance matrix over the HOST port"
 # Paseo validates the Host header (vite-style). The browser sends whatever you

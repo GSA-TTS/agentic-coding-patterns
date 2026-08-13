@@ -90,6 +90,44 @@ daemon_up() {
   # /api/health is unauthenticated and returns 200 when the daemon is listening.
   curl -fsS "http://127.0.0.1:$PASEO_PORT/api/health" >/dev/null 2>&1
 }
+
+# ui_ready: is the BROWSER UI fully serveable, not just the API? This is stronger
+# than daemon_up() on purpose. The web UI ships content-hashed assets served with
+# `Cache-Control: immutable`, so if a browser loads the page during the boot
+# window — after /api/health answers but before the daemon is actually serving the
+# hashed JS bundle intact — Chrome can cache a bad/partial response FOREVER
+# (immutable), and every later reload black-pages with ERR_CONTENT_DECODING_FAILED
+# until the cache is cleared. To avoid steering users to open the browser too
+# early, we confirm the entry bundle referenced by index.html downloads COMPLETE.
+#
+# The bundle is served CHUNKED (no Content-Length), so we can't compare against a
+# response header. Instead we compare the bytes actually received on the wire to
+# the size of the daemon's own on-disk precompressed artifact (the .br file it
+# serves for `Accept-Encoding: br`, what a browser sends). curl codec support is
+# irrelevant — we never decode, only count bytes. Returns 0 only when the full
+# body is delivered.
+ui_ready() {
+  daemon_up || return 1
+  _idx="$(curl -fsS "http://127.0.0.1:$PASEO_PORT/" 2>/dev/null)" || return 1
+  _bundle="$(printf '%s' "$_idx" \
+    | grep -oE '/_expo/static/js/web/index-[0-9a-f]+\.js' | head -1)"
+  # No hashed bundle in index.html => can't assert; treat "root serves HTML" as
+  # the best available readiness signal rather than blocking forever.
+  [ -n "$_bundle" ] || return 0
+  # Locate the on-disk .br the daemon would serve; its size is the expected wire
+  # length for an Accept-Encoding: br fetch.
+  _brfile="$(find / -path "*/web-ui$_bundle.br" 2>/dev/null | head -1)"
+  _got="$(curl -fsS -H 'Accept-Encoding: br' -o /dev/null \
+      -w '%{size_download}' "http://127.0.0.1:$PASEO_PORT$_bundle" 2>/dev/null)" || return 1
+  if [ -n "$_brfile" ] && [ -r "$_brfile" ]; then
+    _expected="$(wc -c < "$_brfile" 2>/dev/null | tr -d ' ')"
+    [ -n "$_expected" ] && [ "$_got" = "$_expected" ]
+  else
+    # Can't find the artifact to size-check against: fall back to "got a
+    # non-trivial body" rather than blocking readiness forever.
+    [ "${_got:-0}" -gt 100000 ] 2>/dev/null
+  fi
+}
 if [ -n "$worktrees_changed" ]; then
   echo "paseo: pinned Paseo worktree root to $WORKTREES_ROOT; restarting the daemon to apply it ..."
   for _pid in $(pgrep -u "$(id -u)" -f "paseo daemon start" 2>/dev/null); do
@@ -109,18 +147,30 @@ if [ -n "$worktrees_changed" ]; then
 fi
 
 # 3. Report status + how to reach it. Give the daemon a brief moment if it is
-#    still coming up (first boot installs the CLI first).
-if daemon_up; then
+#    still coming up (first boot installs the CLI first), and — importantly — wait
+#    until the browser UI is FULLY serveable, not just /api/health, before telling
+#    the user to open it. Opening during the boot window can poison Chrome's
+#    immutable asset cache (see ui_ready() above), which black-pages every later
+#    reload until the cache is cleared.
+ui_is_ready=""
+if ui_ready; then
+  ui_is_ready=yes
   echo "paseo: Paseo daemon + web UI are up on 0.0.0.0:$PASEO_PORT (started by the kit startup script)"
 else
+  # Wait for full UI readiness (bundle serveable), not just the API. First boot
+  # also installs the CLI, so allow a generous window.
   _i=0
-  while [ "$_i" -lt 15 ]; do
-    daemon_up && break
+  while [ "$_i" -lt 60 ]; do
+    if ui_ready; then ui_is_ready=yes; break; fi
     _i=$((_i + 1))
     sleep 1
   done
-  if daemon_up; then
+  if [ -n "$ui_is_ready" ]; then
     echo "paseo: Paseo daemon + web UI are up on 0.0.0.0:$PASEO_PORT"
+  elif daemon_up; then
+    echo "paseo: daemon API is up on :$PASEO_PORT but the web UI bundle isn't fully" >&2
+    echo "       serveable yet — WAIT for it to finish before opening the browser," >&2
+    echo "       or you may cache a broken asset (hard-reload fixes it). See $DAEMON_LOG" >&2
   else
     echo "paseo: Paseo daemon not answering yet on :$PASEO_PORT; the startup" >&2
     echo "       supervisor keeps retrying — see $DAEMON_LOG" >&2
@@ -142,6 +192,20 @@ the mapped host port from your host shell:
 
 Paseo launches its own agent CLIs; there is no shared live session with a
 terminal TUI, so drive agents from the browser UI.
+EOF
+
+if [ -n "$ui_is_ready" ]; then
+  echo "The web UI is READY now — safe to open."
+else
+  cat <<'EOF'
+The web UI is still coming up. WAIT until it finishes before opening the browser:
+opening during startup can make the browser cache a broken bundle (a black page
+that persists on reload). If that happens, do ONE hard reload with cache
+disabled — DevTools ▸ Network ▸ "Disable cache", then ⌘/Ctrl-Shift-R — or open
+the URL in a private/Incognito window once.
+EOF
+fi
+cat <<'EOF'
 ────────────────────────────────────────────────────────────────────────────
 EOF
 

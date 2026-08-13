@@ -307,7 +307,7 @@ fi
 #     size=0) — a CLIENT DECODE failure that must NOT be read as truncation.
 # A genuine truncation shows up as rc=18 (transfer closed) / rc=56 (reset) or a
 # short byte count vs the in-guest identity baseline.
-info "5b. Large UI bundle downloads intact over the HOST port (identity; integrity guard)"
+info "5b. Large UI bundle downloads intact over the HOST port (identity + br-decode)"
 HOST_HP="$(sbx_ports_out | grep -Eo '127\.0\.0\.1:[0-9]+' | head -1)"
 if [ -z "$daemon_up" ]; then
   skip "large-asset guard (daemon not up)"
@@ -343,6 +343,40 @@ else
       # is a transport error (identity needs no decoder), so it IS meaningful here.
       bad "HOST identity bundle FAILED/short over $HOST_HP (host='$h_out' rc=$h_rc vs in-guest '$g_stat'). This is a genuine transport problem (identity needs no client decoder)."
     fi
+
+    # BROWSER-ACCURATE check: fetch the bundle with Accept-Encoding: br (what
+    # Chrome sends) and actually BROTLI-DECODE it, asserting the decoded length
+    # equals the identity baseline. This is the check that models the real failure
+    # mode (ERR_CONTENT_DECODING_FAILED). We do the decode with node's zlib
+    # (brotliDecompressSync), which the kit already depends on, so it never
+    # silently SKIPs for lack of a br decoder. The host curl's own codec support
+    # is irrelevant because we save the raw br bytes and decode them ourselves.
+    tmp_br="$WORK/bundle.br"
+    hb_out="$(curl -fsS -H 'Accept-Encoding: br' -o "$tmp_br" \
+                -w '%{http_code} %{size_download}' "http://$HOST_HP$bundle" 2>/dev/null)"; hb_rc=$?
+    hb_code="${hb_out%% *}"; hb_wire="${hb_out##* }"
+    if [ "$hb_rc" -ne 0 ] || [ "$hb_code" != "200" ]; then
+      bad "HOST br fetch failed (rc=$hb_rc code=${hb_code:-?} wire=${hb_wire:-?}) over $HOST_HP — the browser would see this as a failed asset load."
+    elif ! command -v node >/dev/null 2>&1; then
+      skip "br-decode check (node not on the HOST to brotli-decode; raw br wire=${hb_wire} bytes received)"
+    else
+      dec_len="$(BR="$tmp_br" node -e 'const z=require("zlib"),fs=require("fs");try{process.stdout.write(String(z.brotliDecompressSync(fs.readFileSync(process.env.BR)).length))}catch(e){process.stdout.write("ERR:"+e.message)}' 2>/dev/null)"
+      case "$dec_len" in
+        ERR:*)
+          bad "HOST br bundle does NOT brotli-decode ($dec_len) — this is the ERR_CONTENT_DECODING_FAILED / black-page condition over $HOST_HP." ;;
+        '' )
+          skip "br-decode check (node produced no output)" ;;
+        *)
+          if [ -n "$g_size" ] && [ "$dec_len" != "$g_size" ]; then
+            bad "HOST br bundle decoded to $dec_len bytes, expected $g_size (identity baseline) — corrupt/short br body; browser would black-page."
+          elif [ "${dec_len:-0}" -gt 1000000 ] 2>/dev/null; then
+            ok "HOST br bundle decodes cleanly to $dec_len bytes over $HOST_HP (models Chrome; no ERR_CONTENT_DECODING_FAILED)"
+          else
+            bad "HOST br bundle decoded to only $dec_len bytes over $HOST_HP — too small; browser would black-page."
+          fi ;;
+      esac
+    fi
+    rm -f "$tmp_br" 2>/dev/null || true
   fi
 fi
 
