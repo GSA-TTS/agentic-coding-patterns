@@ -157,6 +157,45 @@ rewrites `config.json` when the value differs. If you need a custom fixed root,
 don't rely on the wrapper's pin — the current kit does not expose an override env
 var.
 
+## Endless `relay_error` / `relay_control_disconnected` in the daemon log
+
+**Symptom.** The daemon log fills with, every ~30s:
+
+```
+… "msg":"relay_error" … "host":"relay.paseo.sh","port":443 … "code":"ECONNRESET"
+… "msg":"relay_control_disconnected" … "url":"wss://relay.paseo.sh/ws?…&role=server&v=2"
+```
+
+TCP to `relay.paseo.sh:443` opens but the TLS handshake dies mid-flight
+(`unexpected eof while reading`, 0 bytes read).
+
+**Cause — the cloud relay is not on this kit's egress allow-list, and is not
+needed.** Paseo defaults its cloud relay ON and dials `wss://relay.paseo.sh` on a
+retry loop. This kit only allow-lists `registry.npmjs.org`, so the sandbox proxy
+resets the relay's TLS handshake. The relay exists to reach a daemon that has no
+inbound path; here the host reaches the web UI directly over the loopback-
+published port (see README "Reaching it from the host"), so the relay is pure
+noise.
+
+**This does NOT affect the web UI.** The daemon still binds `0.0.0.0:6767` and
+serves the API + WebSocket + UI locally; `curl http://127.0.0.1:6767/api/health`
+returns 200 throughout. If the **host** browser sees a refused connection, that is
+a port-mapping issue (see "The browser UI never loads" above), not the relay.
+
+**Fix.** The kit now sets `PASEO_RELAY_ENABLED=false` in `spec.yaml` (read at
+daemon config load, precedence over persisted config, survives restarts/self-
+updates), so the relay is off by default. If you are running an older sandbox that
+predates this, disable it live and bounce the daemon:
+
+```bash
+acq exec <sandbox> -- sh -c '
+  node -e "const f=process.env.HOME+\"/.paseo/config.json\";const c=require(f);(c.daemon??={}).relay={enabled:false};require(\"fs\").writeFileSync(f,JSON.stringify(c,null,2)+\"\n\",{mode:0o600})"
+  for pid in $(pgrep -u "$(id -u)" -f "paseo daemon start"); do
+    tr "\0" " " </proc/"$pid"/cmdline | grep -q "supervisor:paseo-daemon" && continue
+    kill "$pid"
+  done'
+```
+
 ## The daemon keeps restarting in the logs
 
 `[supervisor] ... restarting` lines are normal after:

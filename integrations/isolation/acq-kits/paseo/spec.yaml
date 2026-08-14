@@ -180,9 +180,21 @@ publishedPorts:
 # image and keeps the voice dep's install from attempting an onnxruntime fetch.
 # No secret goes here (PASEO_PASSWORD is intentionally unset — unsecured; see
 # AUTH note above).
+#
+# PASEO_RELAY_ENABLED=false disables Paseo's cloud relay (wss://relay.paseo.sh).
+# The daemon defaults relay to ON and, absent this, dials the relay on a ~30s
+# retry loop forever. The relay host is NOT on this kit's egress allow-list (only
+# registry.npmjs.org is), so the sandbox proxy resets the TLS handshake and the
+# daemon logs an endless stream of `relay_error` / `relay_control_disconnected`
+# (ECONNRESET). The relay is unnecessary here — the host reaches the web UI over
+# the loopback-published port (see publishedPorts + README "Reaching it from the
+# host"), not through Paseo's cloud relay. The env var is read at daemon config
+# load (server/config.js) and takes precedence over persisted config, so it holds
+# across daemon restarts/self-updates without editing config.json.
 environment:
   PASEO_WEB_UI_ENABLED: "true"
   PASEO_LISTEN: "0.0.0.0:6767"
+  PASEO_RELAY_ENABLED: "false"
   ONNXRUNTIME_NODE_INSTALL: "skip"
 
 agentContext: |
