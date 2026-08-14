@@ -2,7 +2,7 @@
 
 > **Generated file — do not edit by hand.** Run `make generate` (regenerates INDEX.yaml + CATALOG.md). Source of truth is each pattern's `SKILL.md`/`AGENTS.md` frontmatter.
 
-38 patterns — 27 skills, 3 prompts, 3 agents, 4 workflows, 1 lessons.
+41 patterns — 30 skills, 3 prompts, 3 agents, 4 workflows, 1 lessons.
 
 For machine routing use the [`pattern-router`](.agents/skills/meta/pattern-router/SKILL.md) skill + `scripts/route_patterns.py`; this catalog is the human view.
 
@@ -64,12 +64,15 @@ For machine routing use the [`pattern-router`](.agents/skills/meta/pattern-route
 
 | Pattern | Type | Status | Tasks | Consumes | Produces |
 |---------|------|--------|-------|----------|----------|
+| [`agentic-value-analyst`](skills/communications/agentic-value-analyst/SKILL.md) | skill | experimental | analyze, author | documentation | documentation |
 | [`artifact-brief`](skills/communications/artifact-brief/SKILL.md) | skill | experimental | plan | documentation | artifact-brief |
 | [`artifact-qa`](skills/communications/artifact-qa/SKILL.md) | skill | experimental | review, test | one-pager, slide-deck | qa-report |
-| [`design-artifact`](workflows/design-artifact/SKILL.md) | workflow | experimental | author, orchestrate, render, review, visualize | documentation | one-pager, slide-deck |
+| [`design-artifact`](workflows/design-artifact/SKILL.md) | workflow | experimental | author, orchestrate, render, review, visualize | documentation | one-pager, slide-deck, technical-explainer |
 | [`explainer-gif`](skills/outreach/explainer-gif/SKILL.md) | skill | experimental | author, render | artifact-brief, shell-script | explainer-gif, terminal-demo |
 | [`explainer-video`](skills/outreach/explainer-video/SKILL.md) | skill | experimental | author, render | artifact-brief, web-page | explainer-video, marketing-asset |
 | [`narrative-architect`](skills/communications/narrative-architect/SKILL.md) | skill | experimental | plan, visualize | artifact-brief | storyboard |
 | [`one-pager`](skills/communications/one-pager/SKILL.md) | skill | experimental | author, render | artifact-brief, storyboard, visual-contract | one-pager |
 | [`slide-deck`](skills/communications/slide-deck/SKILL.md) | skill | experimental | author, render | artifact-brief, storyboard, visual-contract | slide-deck |
+| [`software-delivery-explainer`](skills/communications/software-delivery-explainer/SKILL.md) | skill | experimental | author, transform | documentation | documentation |
+| [`technical-concept-translator`](skills/communications/technical-concept-translator/SKILL.md) | skill | experimental | author, transform | documentation | documentation |
 | [`visual-direction`](skills/communications/visual-direction/SKILL.md) | skill | experimental | visualize | storyboard | visual-contract |

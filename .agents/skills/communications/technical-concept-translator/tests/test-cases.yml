@@ -1,0 +1,113 @@
+suite:
+  pattern_id: technical-concept-translator
+  pattern_version: "0.1.0"
+  description: "Tests for the technical-concept-translator skill (accuracy + audience-appropriateness). Inputs are literal exemplar outputs; assertions pin the honesty-critical properties."
+
+test_cases:
+  - id: pull-request-for-ses
+    name: "Explains a pull request accurately with a 'what it is not'"
+    description: "A PR explanation for a non-technical SES must include the bounding 'what it is not' and not imply auto-merge."
+    input:
+      type: literal
+      content: |
+        ## Concept
+        Pull request (PR)
+        ## Plain-Language Explanation
+        A proposal to add a set of changes to the official code, opened so people can review it before anything is accepted.
+        ## Why It Matters
+        It is the checkpoint where a person inspects and approves a change before it becomes part of the system.
+        ## What It Is Not
+        It is not an automatic change and not a release; opening one changes nothing live by itself.
+        ## Where It Fits
+        After work on a separate branch and after automated checks; before the change is merged.
+    assertions:
+      - type: has_sections
+        sections:
+          - "Concept"
+          - "Plain-Language Explanation"
+          - "Why It Matters"
+          - "What It Is Not"
+          - "Where It Fits"
+      - type: not_contains
+        pattern: "merges automatically"
+        case_sensitive: false
+
+  - id: model-vs-agent-vs-harness
+    name: "Distinguishes model, agent, harness, AGENTS.md, and skill"
+    description: "The five-way contrast must keep the model as non-acting and AGENTS.md as a guide not enforcement."
+    input:
+      type: literal
+      content: |
+        The model is the raw intelligence and takes no action on its own.
+        The agent uses the model plus tools to do work in a loop.
+        The harness is the program that runs the agent and enforces its tool limits.
+        AGENTS.md is the rules file the harness reads; it is a behavioral guide, not a technical enforcement mechanism.
+        A skill is a reusable instruction set the agent loads for a specific task.
+    assertions:
+      - type: contains
+        pattern: "takes no action"
+        case_sensitive: false
+      - type: contains
+        pattern: "guide, not a technical enforcement"
+        case_sensitive: false
+
+  - id: sandbox-honest-limits
+    name: "Sandbox explanation states its limits, not a perfect guarantee"
+    description: "Sandbox must be bounded — image-provenance/authority caveat present; no absolute-guarantee language."
+    input:
+      type: literal
+      content: |
+        ## Concept
+        Sandbox
+        ## Plain-Language Explanation
+        An isolated environment where an agent does development work with limited, controlled capabilities, separated from the employee's computer.
+        ## Why It Matters
+        It contains the blast radius — mistakes stay inside a disposable box.
+        ## What It Is Not
+        Not a perfect security guarantee: it does not verify the integrity of the base image it runs, and it does not stop an authenticated agent from acting with a credential it legitimately holds.
+        ## Where It Fits
+        Where the agent runs and edits code, between the developer's machine and any external service.
+    assertions:
+      - type: has_sections
+        sections:
+          - "What It Is Not"
+      - type: contains
+        pattern: "not a perfect security guarantee"
+        case_sensitive: false
+      - type: not_contains
+        pattern: "completely secure"
+        case_sensitive: false
+
+  - id: secrets-caveat-precise
+    name: "Secrets explanation does not overclaim 'never enter the sandbox'"
+    description: "The secrets concept must reflect the msb vs sbx/USAi caveat, not a blanket guarantee."
+    input:
+      type: literal
+      content: |
+        Real secret values live in a host-side store and never appear in the sandbox's command line or logs.
+        On the default (msb) backend, the guest holds only a placeholder and the real value is swapped in on the wire, so it never enters the guest.
+        On the sbx backend the USAi key is a custom, unproxied secret that IS present in the sandbox and readable by the agent; there it is protected by isolation and policy, not by proxying.
+    assertions:
+      - type: contains
+        pattern: "custom, unproxied secret"
+        case_sensitive: false
+      - type: not_contains
+        pattern: "secrets never enter the sandbox"
+        case_sensitive: false
+
+  - id: unknown-concept-says-not-in-source
+    name: "An ungrounded concept is flagged, not fabricated"
+    description: "Anti-fabrication: when a concept is not in the library or a cited source, the skill says so instead of inventing facts."
+    input:
+      type: literal
+      content: |
+        The requested concept is not in the executive concept library and I could not
+        find it in a cited playbook or quickstart source, so I will not invent a
+        definition. Please point me at a source or confirm the concept name.
+    assertions:
+      - type: contains
+        pattern: "not in the executive concept library"
+        case_sensitive: false
+      - type: contains
+        pattern: "will not invent"
+        case_sensitive: false

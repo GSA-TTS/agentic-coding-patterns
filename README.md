@@ -182,6 +182,30 @@ references it rather than restating it.
 > change to a security skill require human sign-off — see the
 > [human-review gates](docs/security-skill-governance.md#human-review-gates).
 
+## Executive Technical Explainer Skills
+
+A set of `communications` skills for explaining software development, agentic
+coding, and security controls to **executive / non-engineering audiences** —
+accurately, without hype, and without making an engineer wince at the
+inaccuracies. They are evidence-grounded: security and process claims cite the
+[playbook](https://github.com/GSA-TTS/agentic-coding-playbook) and
+[quickstart](https://github.com/GSA-TTS/agentic-coding-quickstart) as ground
+truth, and they preserve the honest limits (the sandbox is isolation, not a
+perfect guarantee; the precise secrets caveat; the agent cannot approve or merge
+its own work).
+
+| Skill | Use it for |
+|-------|------------|
+| [`technical-concept-translator`](skills/communications/technical-concept-translator/) | Explaining one concept (PR, sandbox, agent vs. model vs. harness, AGENTS.md, secret) to an executive |
+| [`software-delivery-explainer`](skills/communications/software-delivery-explainer/) | Showing where agents act and where the human control points are in the delivery process |
+| [`agentic-value-analyst`](skills/communications/agentic-value-analyst/) | Framing organizational value without hype; evidence-labeled claims, defensible metrics |
+
+These compose into the `design-artifact` workflow's **`technical-explainer`**
+profile. Any team can use them independently of a leadership-briefing use case —
+they are a reusable capability for turning technical material into accurate
+executive explanations. Reference material (an executive concept library, six
+audience profiles, and evidence/measurement guidance) ships alongside the skills.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.

@@ -50,6 +50,25 @@ patterns:
       - ci agent audit
       - github actions security
       - workflow audit
+  - path: skills/communications/agentic-value-analyst/SKILL.md
+    id: agentic-value-analyst
+    title: Agentic Value Analyst
+    type: skill
+    status: experimental
+    categories: []
+    collection: communications
+    routing:
+      task_types:
+      - analyze
+      - author
+      input_artifacts:
+      - documentation
+      output_artifacts:
+      - documentation
+      aliases:
+      - ROI framing without hype
+      - value framing
+      priority: 55
   - path: skills/communications/artifact-brief/SKILL.md
     id: artifact-brief
     title: Artifact Brief
@@ -461,6 +480,44 @@ patterns:
       - briefing slides
       - presentation deck
       priority: 55
+  - path: skills/communications/software-delivery-explainer/SKILL.md
+    id: software-delivery-explainer
+    title: Software Delivery Explainer
+    type: skill
+    status: experimental
+    categories: []
+    collection: communications
+    routing:
+      task_types:
+      - author
+      - transform
+      input_artifacts:
+      - documentation
+      output_artifacts:
+      - documentation
+      aliases:
+      - agentic workflow explainer
+      - delivery pipeline explainer
+      priority: 55
+  - path: skills/communications/technical-concept-translator/SKILL.md
+    id: technical-concept-translator
+    title: Technical Concept Translator
+    type: skill
+    status: experimental
+    categories: []
+    collection: communications
+    routing:
+      task_types:
+      - author
+      - transform
+      input_artifacts:
+      - documentation
+      output_artifacts:
+      - documentation
+      aliases:
+      - concept explainer
+      - executive glossary
+      priority: 55
   - path: skills/test-generation/SKILL.md
     id: test-generation
     title: Test Case Generation
@@ -729,6 +786,7 @@ patterns:
       output_artifacts:
       - one-pager
       - slide-deck
+      - technical-explainer
       aliases:
       - design pipeline
       - executive one-pager
@@ -898,6 +956,7 @@ categories:
   - uswds-prototype
 collections:
   communications:
+  - agentic-value-analyst
   - artifact-brief
   - artifact-qa
   - design-artifact
@@ -906,6 +965,8 @@ collections:
   - narrative-architect
   - one-pager
   - slide-deck
+  - software-delivery-explainer
+  - technical-concept-translator
   - visual-direction
   content:
   - documentation-agent
@@ -945,6 +1006,7 @@ task_types:
   analyze:
   - accessibility-review
   - agentic-actions-auditor
+  - agentic-value-analyst
   - backdoor-review
   - compliance-claim-checker
   - dependency-analysis
@@ -960,6 +1022,7 @@ task_types:
   - security-scan-review
   - untrusted-input-boundary-review
   author:
+  - agentic-value-analyst
   - design-artifact
   - documentation-agent
   - explainer-gif
@@ -969,6 +1032,8 @@ task_types:
   - one-pager
   - safe-shell-script-author
   - slide-deck
+  - software-delivery-explainer
+  - technical-concept-translator
   - test-generation
   - uswds-form-flow
   - uswds-landing-page
@@ -1024,6 +1089,9 @@ task_types:
   - qa-round
   - qa-workflow
   - test-generation
+  transform:
+  - software-delivery-explainer
+  - technical-concept-translator
   visualize:
   - design-artifact
   - narrative-architect
@@ -1032,10 +1100,13 @@ output_artifacts:
   artifact-brief:
   - artifact-brief
   documentation:
+  - agentic-value-analyst
   - documentation-agent
   - example-agentic-session
   - federal-service-blueprint
   - implementation-plan
+  - software-delivery-explainer
+  - technical-concept-translator
   explainer-gif:
   - explainer-gif
   explainer-video:
@@ -1088,6 +1159,8 @@ output_artifacts:
   - uswds-prototype
   storyboard:
   - narrative-architect
+  technical-explainer:
+  - design-artifact
   terminal-demo:
   - explainer-gif
   visual-contract:
@@ -1095,8 +1168,8 @@ output_artifacts:
   web-prototype:
   - uswds-prototype
 stats:
-  total_patterns: 38
-  skills: 27
+  total_patterns: 41
+  skills: 30
   prompts: 3
   agents: 3
   workflows: 4
