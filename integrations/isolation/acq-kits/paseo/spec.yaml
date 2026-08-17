@@ -16,7 +16,7 @@
 # DESIGN (see docs/decisions/):
 #   - The STARTUP script (paseo-start.sh) owns the daemon: on every sandbox start
 #     it installs the Paseo CLI (first boot only) and supervises the daemon with
-#     `paseo daemon start --foreground --listen 0.0.0.0:6767 --web-ui`. A single
+#     `paseo daemon start --foreground --listen 127.0.0.1:6767 --web-ui`. A single
 #     Paseo process serves the daemon API, the WebSocket, AND the bundled web UI,
 #     all on ONE container port (6767). Because a `startup` command fires on EVERY
 #     start — including a detached `acq create` with nobody attached, held open by
@@ -94,7 +94,7 @@ displayName: Paseo (self-hosted web UI for coding agents)
 description: >
   Runs the Paseo daemon and its bundled browser web UI inside the sandbox and
   publishes it to the host. Installs the Paseo CLI on first boot and supervises
-  the daemon on 0.0.0.0:6767 (API + WebSocket + web UI on one port). Ships a thin
+  the daemon on 127.0.0.1:6767 (API + WebSocket + web UI on one port). Ships a thin
   `opencode` wrapper over a generic kit shim that pins Paseo's worktree root under
   the current project and holds PID 1 on `acq run` so the sandbox (and UI) stay up.
   Opt-in mixin; composes with the USAi provider and the other GSA kits.
@@ -181,6 +181,18 @@ publishedPorts:
 # No secret goes here (PASEO_PASSWORD is intentionally unset — unsecured; see
 # AUTH note above).
 #
+# IN-GUEST BIND IS LOOPBACK (127.0.0.1:6767), a defense-in-depth win over binding
+# 0.0.0.0 in-guest (wz-gsa hardening #1): the daemon is single-consumer and the
+# only thing that must reach it is acq's port-publish, which forwards from a host
+# loopback port to the guest. acq's backends publish via a userland forwarder that
+# dials the guest over its LOOPBACK interface (the forwarder runs in the guest's
+# network namespace), so a 127.0.0.1 in-guest bind is still reachable from the
+# published host port while removing any exposure on the guest's external
+# interface. If a future acq backend instead dials the guest's eth0 IP, the health
+# probe/publish check in scripts/verify (step 5/6) will catch it — flip this back
+# to 0.0.0.0:6767 and rely on the README loopback-only disclosure. Verified live:
+# see scripts/verify "in-guest bind" assertion.
+#
 # PASEO_RELAY_ENABLED=false disables Paseo's cloud relay (wss://relay.paseo.sh).
 # The daemon defaults relay to ON and, absent this, dials the relay on a ~30s
 # retry loop forever. The relay host is NOT on this kit's egress allow-list (only
@@ -193,7 +205,7 @@ publishedPorts:
 # across daemon restarts/self-updates without editing config.json.
 environment:
   PASEO_WEB_UI_ENABLED: "true"
-  PASEO_LISTEN: "0.0.0.0:6767"
+  PASEO_LISTEN: "127.0.0.1:6767"
   PASEO_RELAY_ENABLED: "false"
   ONNXRUNTIME_NODE_INSTALL: "skip"
 

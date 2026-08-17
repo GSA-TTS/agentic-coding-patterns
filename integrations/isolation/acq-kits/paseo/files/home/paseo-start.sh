@@ -4,7 +4,7 @@
 # so it auto-restarts if it exits.
 #
 # SCOPE: this startup script manages the Paseo daemon only. It supervises a single
-# `paseo daemon start --foreground --listen 0.0.0.0:6767 --web-ui`. The daemon
+# `paseo daemon start --foreground --listen 127.0.0.1:6767 --web-ui`. The daemon
 # runs under a respawn loop, so a crash, a self-update, or a wrapper-triggered
 # bounce (to apply a new worktrees.root) self-heals. Because this script runs as a
 # `startup` command — which fires on EVERY sandbox start, including a detached
@@ -26,15 +26,18 @@
 # Pins are provided via the environment, with an in-script fallback default kept
 # in sync with the kit spec's documented pin:
 #   PASEO_CLI_VERSION   — @getpaseo/cli version to install (default 0.4.0)
-#   PASEO_LISTEN        — daemon bind address (default 0.0.0.0:6767)
+#   PASEO_LISTEN        — daemon bind address (default 127.0.0.1:6767)
 #   PASEO_RESTART_DELAY — seconds to wait before respawning the daemon (default 5)
 
 set -eu
 
 # Daemon bind. Keep in sync with the kit spec's publishedPorts guest port (6767)
 # and PASEO_LISTEN env. We derive the port from PASEO_LISTEN so a single override
-# moves both the bind and the health probe.
-PASEO_LISTEN="${PASEO_LISTEN:-0.0.0.0:6767}"
+# moves both the bind and the health probe. The default is LOOPBACK (127.0.0.1) —
+# the daemon is single-consumer and only acq's port-publish must reach it, which
+# it does over the guest loopback interface; binding loopback removes any exposure
+# on the guest's external interface (defense in depth). See spec.yaml environment.
+PASEO_LISTEN="${PASEO_LISTEN:-127.0.0.1:6767}"
 PASEO_PORT="$(printf '%s' "$PASEO_LISTEN" | sed -n 's/.*:\([0-9][0-9]*\)$/\1/p')"
 [ -n "$PASEO_PORT" ] || PASEO_PORT=6767
 
@@ -63,6 +66,18 @@ if ! command -v paseo >/dev/null 2>&1; then
   [ -n "${HTTPS_PROXY:-${https_proxy:-}}" ] && export npm_config_https_proxy="${HTTPS_PROXY:-$https_proxy}"
   [ -n "${HTTP_PROXY:-${http_proxy:-}}" ]  && export npm_config_proxy="${HTTP_PROXY:-$http_proxy}"
   export npm_config_user_agent="npm"
+  # Block install-time lifecycle scripts (preinstall/install/postinstall) across
+  # the whole tree (wz-gsa hardening #2). @getpaseo/cli + @getpaseo/server are
+  # plain JS packages and sherpa-onnx-node resolves via platform PREBUILT
+  # optionalDependencies (no build step), so nothing in this tree NEEDS a
+  # lifecycle script to be usable — cutting them removes the postinstall
+  # arbitrary-code-execution vector at install time. `bin` symlinks for the
+  # top-level `paseo` command are created by npm regardless of --ignore-scripts,
+  # so the CLI still resolves. If a future @getpaseo release grows a required
+  # postinstall, the `command -v paseo` guard below trips and verify step 3
+  # (Paseo CLI installed) fails — drop --ignore-scripts then. Verified live: see
+  # scripts/verify (install + daemon-up assertions run with this in place).
+  export npm_config_ignore_scripts="true"
   # Build a CA bundle for Node-based downloads. NODE_EXTRA_CA_CERTS *appends* to
   # Node's built-in roots, which lack both the sandbox proxy CA and any
   # HTTPS-inspection CA (e.g. Zscaler). Concatenate the sandbox proxy CA
@@ -88,6 +103,7 @@ if ! command -v paseo >/dev/null 2>&1; then
   if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
     sudo -n env \
       npm_config_user_agent="${npm_config_user_agent:-npm}" \
+      npm_config_ignore_scripts="${npm_config_ignore_scripts:-true}" \
       ${npm_config_https_proxy:+npm_config_https_proxy="$npm_config_https_proxy"} \
       ${npm_config_proxy:+npm_config_proxy="$npm_config_proxy"} \
       ${NODE_EXTRA_CA_CERTS:+NODE_EXTRA_CA_CERTS="$NODE_EXTRA_CA_CERTS"} \

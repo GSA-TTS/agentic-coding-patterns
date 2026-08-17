@@ -55,7 +55,7 @@
 set -eu
 
 # Daemon bind. Keep in sync with the kit spec's PASEO_LISTEN / publishedPorts.
-PASEO_PORT="$(printf '%s' "${PASEO_LISTEN:-0.0.0.0:6767}" | sed -n 's/.*:\([0-9][0-9]*\)$/\1/p')"
+PASEO_PORT="$(printf '%s' "${PASEO_LISTEN:-127.0.0.1:6767}" | sed -n 's/.*:\([0-9][0-9]*\)$/\1/p')"
 [ -n "$PASEO_PORT" ] || PASEO_PORT=6767
 
 HOME_DIR="${HOME:-/home/agent}"
@@ -155,7 +155,7 @@ fi
 ui_is_ready=""
 if ui_ready; then
   ui_is_ready=yes
-  echo "paseo: Paseo daemon + web UI are up on 0.0.0.0:$PASEO_PORT (started by the kit startup script)"
+  echo "paseo: Paseo daemon + web UI are up on 127.0.0.1:$PASEO_PORT (started by the kit startup script)"
 else
   # Wait for full UI readiness (bundle serveable), not just the API. First boot
   # also installs the CLI, so allow a generous window.
@@ -166,7 +166,7 @@ else
     sleep 1
   done
   if [ -n "$ui_is_ready" ]; then
-    echo "paseo: Paseo daemon + web UI are up on 0.0.0.0:$PASEO_PORT"
+    echo "paseo: Paseo daemon + web UI are up on 127.0.0.1:$PASEO_PORT"
   elif daemon_up; then
     echo "paseo: daemon API is up on :$PASEO_PORT but the web UI bundle isn't fully" >&2
     echo "       serveable yet — WAIT for it to finish before opening the browser," >&2

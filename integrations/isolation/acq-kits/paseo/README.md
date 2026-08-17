@@ -122,6 +122,15 @@ through the browser UI. Running `opencode <args…>` in the sandbox still works
 (the wrapper passes it through to the real opencode), so opencode remains usable
 as one of Paseo's provider CLIs.
 
+> **Enabling this kit shadows `opencode` in-sandbox.** The kit drops a thin
+> `opencode` wrapper at `~/.local/bin/opencode` (first on PATH) that shadows the
+> real binary for **all** in-sandbox invocations. Calls with arguments pass
+> straight through to the real opencode unchanged, so normal flows (including
+> Paseo spawning `opencode` as a provider CLI) are unaffected; only a **no-arg**
+> `opencode` is redirected to the kit shim (pin worktree root, hold PID 1). This
+> applies only inside a sandbox with the kit enabled — it does not touch your host
+> opencode.
+
 ## HTTPS-inspected networks (e.g. Zscaler)
 
 Paseo's first-boot install is a plain `npm install -g @getpaseo/cli`. Behind an
@@ -134,9 +143,13 @@ no extra kit is needed.
 ## Security
 
 The Paseo daemon runs **unsecured** (no `PASEO_PASSWORD`) and is bound to
-`0.0.0.0` inside the sandbox. This is safe **only because the sandbox is the
-security boundary** — an ephemeral container with a proxied, allow-listed network
-and no host filesystem access.
+**`127.0.0.1` (loopback)** inside the sandbox. This is safe **only because the
+sandbox is the security boundary** — an ephemeral container with a proxied,
+allow-listed network and no host filesystem access. The in-guest loopback bind is
+a defense-in-depth choice (over binding `0.0.0.0` in-guest): the daemon is
+single-consumer, and the only thing that must reach it — `acq`'s port-publish —
+forwards from the host loopback port to the guest over the guest's loopback
+interface, so the daemon is never exposed on the guest's external interface.
 
 **Run this only on a trusted, single-tenant host.** The daemon is published to a
 host **loopback** port and is live for the sandbox's whole lifetime. Loopback
@@ -145,9 +158,9 @@ local user, or anything you forward that port to) can drive Paseo — and the
 agents it launches — without a credential. Don't forward the mapped port to a
 wider interface.
 
-> The loopback-only guarantee depends on `acq` publishing the `0.0.0.0:6767`
-> container bind to a loopback-scoped host port, which it does at create time
-> from the kit's neutral `publishedPorts`.
+> The loopback-only guarantee depends on `acq` publishing the guest
+> `127.0.0.1:6767` daemon bind to a loopback-scoped host port, which it does at
+> create time from the kit's neutral `publishedPorts`.
 >
 > Paseo's bundled web UI static files are public on the daemon origin; the daemon
 > API and WebSocket would be password-protected if `PASEO_PASSWORD` were set. We

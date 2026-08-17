@@ -301,7 +301,7 @@ inbound path; here the host reaches the web UI directly over the loopback-
 published port (see README "Reaching it from the host"), so the relay is pure
 noise.
 
-**This does NOT affect the web UI.** The daemon still binds `0.0.0.0:6767` and
+**This does NOT affect the web UI.** The daemon still binds `127.0.0.1:6767` and
 serves the API + WebSocket + UI locally; `curl http://127.0.0.1:6767/api/health`
 returns 200 throughout. If the **host** browser sees a refused connection, that is
 a port-mapping issue (see "The browser UI never loads" above), not the relay.
