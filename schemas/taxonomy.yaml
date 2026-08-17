@@ -116,6 +116,9 @@ artifact_types:
   slide-deck:
     description: A presentation deck.
     aliases: [deck, slides]
+  technical-explainer:
+    description: A longer explanatory document that translates technical/agentic/security concepts for a non-engineering executive audience.
+    aliases: [executive-explainer, concept-explainer]
   marketing-asset:
     description: A marketing/outreach asset.
     aliases: [marketing-kit]

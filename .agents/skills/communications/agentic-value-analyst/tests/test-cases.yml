@@ -1,0 +1,81 @@
+suite:
+  pattern_id: agentic-value-analyst
+  pattern_version: "0.1.0"
+  description: "Tests for agentic-value-analyst — evidence-labeled claims, vanity-metric rejection, honest handling of the '50% faster' question."
+
+test_cases:
+  - id: fifty-percent-faster-qualified
+    name: "Answers 'does AI make devs 50% faster' with a qualified, ranged answer"
+    description: "Must refuse the bare multiplier and explain what it depends on."
+    input:
+      type: literal
+      content: |
+        There is no honest single number. External research is mixed and time-sensitive:
+        some controlled studies found AI slowing experienced developers on familiar tasks,
+        while later self-reports show gains. The effect depends on the task, the tool, and
+        the developer's experience. Measure our own delivery metrics rather than adopt a
+        fixed multiplier. (Evidence class: published research, conflicting.)
+    assertions:
+      - type: contains
+        pattern: "no honest single number"
+        case_sensitive: false
+      - type: contains
+        pattern: "depends on"
+        case_sensitive: false
+      - type: contains
+        pattern: "Evidence class"
+        case_sensitive: false
+
+  - id: vanity-metric-rejected
+    name: "Rejects lines-of-code as a value metric"
+    description: "Lines of AI-generated code must be flagged as misleading and replaced."
+    input:
+      type: literal
+      content: |
+        ## Metrics
+        Lines of AI-generated code is a misleading metric — more code is a cost, not an outcome.
+        Prefer defensible delivery metrics: pull-request cycle time, change-failure rate, and
+        defects caught before merge.
+    assertions:
+      - type: has_sections
+        sections:
+          - "Metrics"
+      - type: contains
+        pattern: "misleading metric"
+        case_sensitive: false
+      - type: contains
+        pattern: "cycle time"
+        case_sensitive: false
+
+  - id: claims-carry-evidence-class
+    name: "Value claims are labeled by evidence class"
+    input:
+      type: literal
+      content: |
+        ## Evidence Basis
+        Measured local: our repositories show 446 merged pull requests as of a dated GitHub pull.
+        Hypothesis: we expect onboarding time to fall, but have not measured it.
+    assertions:
+      - type: has_sections
+        sections:
+          - "Evidence Basis"
+      - type: contains
+        pattern: "Measured local"
+        case_sensitive: false
+      - type: contains
+        pattern: "Hypothesis"
+        case_sensitive: false
+
+  - id: no-unsupported-multiplier
+    name: "Does not present a fixed productivity multiplier as fact"
+    input:
+      type: literal
+      content: |
+        We avoid claiming a fixed multiplier such as a guaranteed productivity gain; the evidence does not support one.
+    assertions:
+      - type: not_contains
+        pattern: "guarantees a 50% productivity"
+        case_sensitive: false
+      - type: not_contains
+        pattern: "makes developers twice as productive"
+        case_sensitive: false

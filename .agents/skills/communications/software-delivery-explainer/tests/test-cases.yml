@@ -1,0 +1,62 @@
+suite:
+  pattern_id: software-delivery-explainer
+  pattern_version: "0.1.0"
+  description: "Tests for software-delivery-explainer — control points named, no implied agent autonomy, pipeline framed as common not universal."
+
+test_cases:
+  - id: control-points-named
+    name: "Names the human control points"
+    description: "Review, merge, and deployment must appear as human-held control points."
+    input:
+      type: literal
+      content: |
+        ## Summary
+        Software moves from a need to production through a common (not universal) set of steps.
+        ## The Delivery Process
+        need -> issue -> branch -> implementation -> automated tests -> pull request -> CI/security checks -> human review -> merge -> deployment
+        ## Where Agents Participate
+        The agent investigates the repository, drafts changes in the sandbox, runs tests, and prepares the pull request.
+        ## Human Control Points
+        Human review approves the change (author is not the approver); merge is human-gated; deployment applies separate human-approved release controls.
+    assertions:
+      - type: has_sections
+        sections:
+          - "Summary"
+          - "The Delivery Process"
+          - "Where Agents Participate"
+          - "Human Control Points"
+      - type: contains
+        pattern: "human review"
+        case_sensitive: false
+      - type: contains
+        pattern: "author is not the approver"
+        case_sensitive: false
+
+  - id: no-autonomous-merge
+    name: "Does not imply the agent approves or merges its own work"
+    description: "Honesty guard against overclaiming autonomy."
+    input:
+      type: literal
+      content: |
+        The agent does more of the work between the control points. It cannot approve its own code or merge its own pull request; a human does that.
+    assertions:
+      - type: not_contains
+        pattern: "the agent merges its own"
+        case_sensitive: false
+      - type: not_contains
+        pattern: "the agent approves its own"
+        case_sensitive: false
+      - type: contains
+        pattern: "between the control points"
+        case_sensitive: false
+
+  - id: pipeline-not-universal
+    name: "Frames the pipeline as common, not the one true workflow"
+    input:
+      type: literal
+      content: |
+        This is a common shape, not the one workflow every organization uses; teams differ.
+    assertions:
+      - type: contains
+        pattern: "not the one workflow"
+        case_sensitive: false
