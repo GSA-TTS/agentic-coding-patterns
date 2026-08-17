@@ -22,18 +22,14 @@ and signing resolves the public key from that agent at signing time.
 ## Backend parity
 
 The config half (system gitconfig) and the key-resolution script are identical
-across backends. The only per-backend difference is **how the host SSH agent is
-forwarded into the guest** — SSH-agent forwarding is the shared mechanism, with
-no spec shortcut:
-
-| Backend | SSH-agent forwarding |
-|---------|----------------------|
-| **sbx** | The SSH agent socket is forwarded into the sandbox. |
-| **msb** | `msb ssh authorize` registers the key with the sandbox's host-controlled sshd; attach forwards the agent. |
-| **ppp** (later) | `podman machine ssh -A` propagates `SSH_AUTH_SOCK`. |
+across backends — this kit carries no per-backend logic and no spec shortcut.
+Forwarding the host SSH agent into the sandbox is handled by `acq`, which does
+it on every supported backend whenever the host `SSH_AUTH_SOCK` is set; the
+per-backend plumbing is `acq`'s concern, not the kit's.
 
 **Behavioral parity:** git signs commits/tags with the forwarded host key on
-every backend; the private key never enters the guest.
+every backend; the signing key is resolved from the agent at signing time and
+the private key never enters the guest.
 
 ## Prerequisites
 
