@@ -19,10 +19,10 @@
 #     when the forwarded agent may not be connected yet.
 #
 # If no SSH agent / key is available, git signing fails with a clear error
-# (fail-closed). No backend shortcut: SSH-agent forwarding is the common
-# mechanism, and each backend enables it its own way (sbx forwards the agent
-# socket; msb uses `msb ssh authorize` + agent forwarding; ppp uses
-# `podman machine ssh -A`) — documented, not a spec shortcut.
+# (fail-closed). No backend shortcut: SSH-agent forwarding is the shared
+# mechanism. `acq` forwards the host SSH agent into the sandbox (whenever the
+# host SSH_AUTH_SOCK is set); how it does so per backend is acq's concern, not
+# this kit's — documented in the acq wrapper, not a spec shortcut.
 schemaVersion: "hybrid/v1"
 kind: mixin
 name: git-ssh-sign
@@ -65,8 +65,9 @@ agentContext: |
   Commits and tags are signed automatically. Use `git log --show-signature`
   to verify signatures on existing commits.
 
-# No backend shortcuts: SSH-agent forwarding is the shared mechanism; each
-# backend enables it natively (documented in README, not a spec shortcut).
+# No backend shortcuts: SSH-agent forwarding is the shared mechanism, resolved
+# at signing time. `acq` forwards the host SSH agent into the sandbox on each
+# backend (documented in the acq wrapper, not a spec shortcut).
 backend_shortcuts:
   sbx: {}
   msb: {}
