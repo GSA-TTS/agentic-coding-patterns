@@ -223,8 +223,13 @@ agentContext: |
 
   ```
   acq ports <sandbox>        # host port for 6767
-  # Paseo web UI:  open http://127.0.0.1:<host-port-for-6767>
+  # Paseo web UI:  open http://localhost:<host-port-for-6767>
   ```
+
+  Prefer the `localhost` hostname over `127.0.0.1`: the daemon self-advertises as
+  a local host over the same origin (no relay), and the UI keys that host on
+  `localhost:<port>`, so a `127.0.0.1` address bar can show "no hosts" with a
+  `ws://…/ws` reconnect loop. See TROUBLESHOOTING.md.
 
   **No shared session with a terminal TUI.** Unlike a shared-server setup, Paseo
   launches its own agent CLIs as child processes; the terminal OpenCode TUI and

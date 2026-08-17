@@ -30,6 +30,68 @@ acq exec <sandbox> -- sh -c 'curl -fsS http://127.0.0.1:6767/api/health && echo 
   acq exec <sandbox> -- sh -c 'tail -n 40 ~/.local/state/paseo/paseo-install.log'
   ```
 
+## "No hosts configured" and/or a repeating `ws://…/ws` connect loop
+
+**Symptom.** The UI loads at `http://127.0.0.1:<host-port>`, but shows **no hosts**,
+and the browser's Network tab shows repeated `ws://<host>:<port>/ws` requests, each
+`101 Switching Protocols`, opening and closing every few seconds (the interval
+grows: ~2s → 4s → … → ~30s). The daemon log shows the matching cycle:
+
+```
+"msg":"Client connected via hello" … "resumed":true
+… seconds later …
+"msg":"Client disconnected; waiting for reconnect"  code:1000 reason:"Client closed"
+```
+
+**This is not a daemon fault.** `code:1000 "Client closed"` is a clean,
+*client*-initiated close — the browser is tearing down and reopening its own
+control socket (the growing interval is client-side reconnect backoff). The daemon
+accepts every upgrade (`101`); `paseo daemon status` shows `running` and
+`/api/health` returns 200 throughout.
+
+**Background — how a local "host" is established (no relay needed).** A Paseo
+"host" is a daemon the UI attaches its session to. With the relay disabled (this
+kit's default), the daemon self-advertises over the **same origin**: it injects
+`window.__PASEO_INITIAL_DAEMON_CONNECTION__` into the served `index.html`
+(`server/web-ui.js` `injectConnectionHint`), built from the request's `Host`
+header, and the client bootstraps a local host from it. So the daemon already
+registers itself; you do **not** need to add a host or enable the relay.
+
+**Fixes, in order of preference.**
+
+1. **Open the UI via `localhost`, not `127.0.0.1`.** The client's built-in local
+   daemon key and the injected hint's endpoint both resolve to `localhost:<port>`
+   (the client normalizes `127.0.0.1`/`::1`/`0.0.0.0` → `localhost`), so a
+   `localhost` address bar gives the cleanest first attach:
+
+   ```bash
+   acq ports <sandbox>        # host port for 6767
+   # open http://localhost:<host-port-for-6767>   (localhost, not 127.0.0.1)
+   ```
+
+2. **Clear stale client-side host state.** The host registry lives in the
+   **browser**, not the daemon — a stale entry from an earlier session (a
+   different port/label, or a prior relay-based host) can keep the client cycling.
+   In DevTools ▸ **Application** ▸ **Local Storage** for the origin, delete the
+   `@paseo:daemon-registry` (and `@paseo:replica-cache`) keys, then hard-reload.
+   An Incognito window is a quick way to prove this — it starts with empty
+   storage, so if the loop disappears there, it was stale client state.
+
+3. **Confirm the daemon is actually advertising itself** (it should be, by
+   default):
+
+   ```bash
+   acq exec <sandbox> -- sh -c 'curl -fsS http://127.0.0.1:6767/ | grep -o "__PASEO_INITIAL_DAEMON_CONNECTION__[^<]*"'
+   # → __PASEO_INITIAL_DAEMON_CONNECTION__={"listen":"…:6767","useTls":false,"label":"…"}
+   ```
+
+   If that line is present and health is 200, the server side is correct and the
+   remaining variable is the browser (fixes 1–2).
+
+Note the `daemon.get_status` `ws_slow_request` entries in the log (a few hundred ms
+at boot, while git subprocesses warm up) are unrelated to this loop — they are
+one-time and do not recur on the reconnect cadence.
+
 ## Black page that persists on reload (`ERR_CONTENT_DECODING_FAILED`)
 
 **Symptom.** The page is black. DevTools ▸ Console shows the entry bundle failing:

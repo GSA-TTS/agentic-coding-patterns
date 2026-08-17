@@ -38,8 +38,14 @@ as shown below.
    acq ports <sandbox>     # look up the host port mapped to container 6767
    ```
 
-   Open `http://127.0.0.1:<host-port-for-6767>`. On first boot, wait a few
+   Open `http://localhost:<host-port-for-6767>`. On first boot, wait a few
    seconds for the one-time Paseo CLI install, then reload.
+
+   > Prefer the `localhost` hostname over `127.0.0.1`. The daemon self-advertises
+   > as a local "host" over the same origin (no relay needed), and the web UI keys
+   > that local host on `localhost:<port>`. Opening via `127.0.0.1` can leave the
+   > UI showing **no hosts** with a repeating `ws://…/ws` reconnect loop — see
+   > TROUBLESHOOTING.md "No hosts configured".
 
 That's the whole flow. The daemon and web UI start automatically; you never run a
 separate command to bring them up.
@@ -69,8 +75,13 @@ mapping:
 
 ```bash
 acq ports <sandbox>
-# Paseo web UI:  open http://127.0.0.1:<host-port-for-6767> in a browser
+# Paseo web UI:  open http://localhost:<host-port-for-6767> in a browser
 ```
+
+Prefer the `localhost` hostname over `127.0.0.1` — the web UI keys its
+self-advertised local daemon on `localhost:<port>`, so a `127.0.0.1` address bar
+can leave it showing "no hosts" with a `ws://…/ws` reconnect loop (see
+TROUBLESHOOTING.md).
 
 Want a **fixed** host port instead of the ephemeral one? Publish it explicitly:
 
