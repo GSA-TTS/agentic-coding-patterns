@@ -31,9 +31,9 @@ skills read these profiles to choose emphasis, not to change the facts.
   separation of duties, what happens when something is compromised.
 - **Needs to understand:** the sandbox isolates work and bounds blast radius but
   is not a perfect guarantee (image-provenance/SI-7 caveat); deny-by-default
-  egress; that secrets are proxied into the sandbox on both backends in the
-  default setup (msb swap-on-wire; sbx proxy / `set-custom`), so the agent does
-  not hold raw key material; the agent cannot self-approve or self-merge; audit trail.
+  egress; that secrets are proxied into the sandbox in the default setup, so the
+  agent does not hold raw key material; the agent cannot self-approve or
+  self-merge; audit trail.
 - **Needs the detail:** the specific controls (AC-5, AC-6, SC-7, AU-2/3/12) and
   their honest limits.
 - **Does not need:** narrative/business-value framing up front.

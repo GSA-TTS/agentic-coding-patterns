@@ -212,11 +212,11 @@ source: Playbook SECURITY-CONTROLS.md IA-5; CODING_PRACTICES.md §4; Quickstart 
 concept: Secrets proxy / injection
 plain_language: A mechanism that lets the sandbox use a credential without the raw secret value ever being placed inside it.
 why_it_matters: The agent can call an authenticated service, but a compromised or curious agent has no raw key to read or leak.
-what_it_is_not: Not the same as putting the key in an environment variable for the agent to read. In the sanctioned setup the agent works with a placeholder or a proxied binding, not the real value.
+what_it_is_not: Not the same as putting the key in an environment variable for the agent to read. The agent works with a placeholder or a proxied binding, not the real value.
 where_it_fits: Between the host secret store and the service the agent calls.
-controls: Real values live in a host store, never in argv or logs. Both backends proxy secrets in the default setup — msb swaps a placeholder for the real value on the wire (ENV@HOST), and sbx injects credentials via its proxy for built-in services and via `secret set-custom` for custom endpoints like USAi — so the agent does not hold the raw key material. GitHub tokens are additionally downscoped per sandbox to only the mounted repositories (least privilege, AC-6). Maps to IA-5, SC-28.
-example: On msb, the guest holds a placeholder like $MSB_GITHUB_TOKEN and msb substitutes the real token on the wire; on sbx, USAi is configured with `sbx secret set-custom --host api.gsa.usai.gov --env USAI_API_KEY` so the credential is injected without the agent holding the raw value.
-source: Quickstart acq.backends/secret-store.sh + acq.backends/sbx.sh (set-custom); AGENTS.md Network Access / "No Secrets Exposure" note; BACKEND_GUIDE.md (swap-on-wire); docs/adr/0013 (downscoping).
+controls: Real values live in a host secret store, never in the sandbox's command line or logs. The sandbox tooling proxies secrets into the sandbox in the default setup, so the agent does not hold the raw key material. Access tokens are additionally scoped to only what a sandbox needs (least privilege, AC-6). Maps to IA-5, SC-28.
+example: The agent's environment holds a placeholder; the sandbox tooling substitutes the real credential when the request reaches the allowed service, so the raw value never enters the sandbox.
+source: Quickstart secret-handling docs (AGENTS.md "No Secrets Exposure"; BACKEND_GUIDE; per-sandbox token downscoping, docs/adr/0013).
 ```
 
 ```yaml
@@ -273,7 +273,7 @@ plain_language: The underlying trained system that generates text or code from a
 why_it_matters: It is the raw capability — but on its own it only produces output; it takes no actions.
 what_it_is_not: Not an agent. A model does not read your repository, run commands, or open pull requests by itself.
 where_it_fits: The engine an agent calls; reached here through the USAi endpoint.
-controls: Model access is authenticated and, in the sandbox, mediated so the raw key is protected (see secrets proxy — proxied on both backends in the default setup).
+controls: Model access is authenticated and, in the sandbox, mediated so the raw key is protected (see secrets proxy — the credential is proxied into the sandbox in the default setup).
 example: A large language model accessed via the USAi API answers a coding question.
 source: Quickstart docs/adr/0001 (USAi endpoint).
 ```
