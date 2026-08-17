@@ -38,10 +38,11 @@ kits:
   git-ssh-sign:
     backends: [sbx, msb]
     parity: |
-      Both backends forward the host SSH agent (sbx forwards the agent socket;
-      msb uses `msb ssh authorize` + agent forwarding). The signing key is
-      resolved at signing time; no key material is written at create. No backend
-      shortcut — SSH-agent forwarding is the shared mechanism.
+      `acq` forwards the host SSH agent into the sandbox on both backends
+      whenever the host SSH_AUTH_SOCK is set (the per-backend plumbing is acq's
+      concern, not the kit's). The signing key is resolved at signing time; no
+      key material is written at create. No backend shortcut — SSH-agent
+      forwarding is the shared mechanism.
 
   openchamber:
     backends: [sbx, msb]
