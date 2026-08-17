@@ -58,3 +58,17 @@ kits:
       backends with no manual step. The install+supervise script
       (files/home/openchamber-start.sh) and the wrapper
       (files/home/.local/bin/opencode) are backend-agnostic. No backend shortcut.
+
+  agor-daemon-egress:
+    backends: [sbx, msb]
+    parity: |
+      Allow-lists outbound egress to the Agor daemon control-plane
+      (host.docker.internal:3030 by default) so an Agor executor running in the
+      sandbox (via the orchestrators/agor integration) can connect back to the
+      daemon. No backend shortcut — both use caps.network.allow. sbx PRESERVES
+      the full host:port; msb STRIPS the port (--net-rule allow@<host>, domain
+      only), so egress is host-wide for that host on msb. v1 targets sbx (see
+      GSA-TTS/agentic-coding-patterns#251); msb port behavior tracked with the
+      msb gap GSA-TTS/agentic-coding-patterns#260. Security-relevant (widens
+      egress) — governed by human review, not schema fields (the kit schema
+      models no governance frontmatter); see the kit README + its ADR.

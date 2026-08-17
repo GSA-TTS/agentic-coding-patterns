@@ -1,0 +1,82 @@
+# spec.yaml — agor-daemon-egress (a neutral acq mixin kit, hybrid/v1)
+#
+# Allow-lists outbound egress to the Agor DAEMON from inside the sandbox, so an
+# Agor executor running in the sandbox (via the orchestrators/agor wrapper) can
+# connect back to the daemon over WebSocket/Feathers using its scoped JWT.
+#
+# WHY A KIT (not a flag): acq has NO per-invocation network flag (`--net-rule`,
+# `--allow`, `acq policy` do not exist at the acq level). The ONLY acq-native
+# egress mechanism is a kit's caps.network.allow. sbx is default-deny for
+# arbitrary hosts, so without this the executor cannot reach the daemon and the
+# session never streams results. See:
+#   integrations/orchestrators/agor/  (the consumer)
+#   integrations/orchestrators/docs/decisions/0001-orchestrators-area-and-agor-acq.md
+#   GSA-TTS/agentic-coding-patterns#259  (the decision), #247 (the map)
+#
+# COMPOSITION (per the #250 drives-vs-applied boundary): this is an ISOLATION kit
+# (acq applies it INSIDE the sandbox), so it lives here under acq-kits/ even
+# though its sole consumer is the orchestrators/agor integration, which merely
+# REFERENCES it (e.g. AGOR_EGRESS_KIT=<this dir> or a git+https ref).
+#
+# SECURITY NOTE (this kit widens network egress — reviewed as a security kit):
+#   - It allow-lists exactly ONE host:port — the Agor daemon control-plane on the
+#     backend's host alias. It grants no filesystem access, drops no files, runs
+#     no commands, and carries no secret. The daemon URL is NOT sensitive.
+#   - The `hybrid/v1` kit schema is additionalProperties:false and models no
+#     security-governance frontmatter (those fields live on skill patterns, not
+#     kit specs). The governance posture is therefore documented in README.md +
+#     the kit's ADR and enforced by human review (needs-human-review on the PR),
+#     not by schema fields. See docs/security-skill-governance.md for the model.
+#
+# BACKEND PARITY:
+#   - sbx: caps.network.allow is synthesized into the sbx-v2 kit; the full
+#     host:port is preserved (quoted). This is the v1 target backend.
+#   - msb: acq emits `--net-rule allow@<host>` and STRIPS the port (msb keys on
+#     domain only) — so egress is host-wide for that host on msb. Acceptable;
+#     sbx is the validated backend, and a live msb run is tracked at #257.
+#
+# DAEMON HOST ALIAS + PORT: defaults below assume the sbx host alias
+# `host.docker.internal` and the Agor default daemon port 3030. If your daemon
+# uses a different port or the deploy exposes it under a different alias, EDIT the
+# allow entry to match (the wrapper can read the real daemonUrl from the payload;
+# a static kit cannot template it). See README "Adjusting the allow entry".
+schemaVersion: "hybrid/v1"
+kind: mixin
+name: agor-daemon-egress
+displayName: Agor Daemon Egress
+description: >
+  Allow-list outbound egress to the Agor daemon control-plane from inside the
+  sandbox, so an Agor executor running in the sandbox can connect back to the
+  daemon over WebSocket. acq has no per-invocation egress flag, so daemon
+  reachability must be expressed as a kit caps.network.allow entry. Defaults to
+  the sbx host alias host.docker.internal:3030 (the Agor default port); edit the
+  allow entry for a non-default port or alias.
+
+caps:
+  network:
+    allow:
+      # The Agor daemon control-plane. sbx keeps the :port; msb strips it.
+      # EDIT this if your daemon port/alias differs (see README).
+      - host.docker.internal:3030
+
+# Bundle provenance (quickstart#235). Declares the source repo so a consumer
+# (acq) can attribute this kit. Unlike the acq-builtin bundle kits, this egress
+# kit is a standalone integration kit (consumed only by orchestrators/agor), so
+# it declares `repo` but no bundle/kit_names. The applied commit SHA, timestamp,
+# and backend are recorded by the consumer inside the sandbox at apply time.
+provenance:
+  repo: GSA-TTS/agentic-coding-patterns
+
+agentContext: |
+  ## Agor daemon egress
+
+  This sandbox is allowed to reach the Agor daemon control-plane
+  (`host.docker.internal:3030` by default). That is how the in-sandbox
+  `agor-executor` streams task results back to the daemon. No action is needed
+  from you; this kit only opens that one egress path.
+
+# No backend shortcut: every backend uses caps.network.allow. sbx preserves the
+# host:port; msb strips the port (domain-only) — documented in README parity.
+backend_shortcuts:
+  sbx: {}
+  msb: {}
