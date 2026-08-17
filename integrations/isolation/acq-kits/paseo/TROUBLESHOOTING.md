@@ -71,9 +71,19 @@ registers itself; you do **not** need to add a host or enable the relay.
 
 2. **Clear stale client-side host state.** The host registry lives in the
    **browser**, not the daemon — a stale entry from an earlier session (a
-   different port/label, or a prior relay-based host) can keep the client cycling.
-   In DevTools ▸ **Application** ▸ **Local Storage** for the origin, delete the
-   `@paseo:daemon-registry` (and `@paseo:replica-cache`) keys, then hard-reload.
+   different port/label, a prior relay-based host, or an incompatible persisted
+   cache from a different client version — see "handshake succeeds but the socket
+   is torn down" below) can keep the client cycling. In DevTools ▸ **Application**
+   ▸ **Local Storage** for the origin, delete the `@paseo:daemon-registry` (and
+   `@paseo:replica-cache`) keys, then reload.
+
+   > **"Empty Cache and Hard Reload" is NOT enough here.** That Chrome action
+   > clears only the **HTTP cache** (JS/CSS/network responses); it does **not**
+   > clear **Local Storage** or **IndexedDB**, which is exactly where Paseo keeps
+   > this host state. Use DevTools ▸ **Application** ▸ **Storage** ▸ **Clear site
+   > data** (which does clear Local Storage + IndexedDB), or delete the keys above
+   > by hand.
+
    An Incognito window is a quick way to prove this — it starts with empty
    storage, so if the loop disappears there, it was stale client state.
 
@@ -91,6 +101,58 @@ registers itself; you do **not** need to add a host or enable the relay.
 Note the `daemon.get_status` `ws_slow_request` entries in the log (a few hundred ms
 at boot, while git subprocesses warm up) are unrelated to this loop — they are
 one-time and do not recur on the reconnect cadence.
+
+## Handshake succeeds but the socket is torn down every ~30s (incompatible client cache / version skew)
+
+**Symptom.** A close relative of the "No hosts" loop above, but with a distinct
+signature. The `hello` handshake *succeeds* (`"msg":"Client connected via hello"`,
+`"resumed":true`), yet the socket is closed by the **client** with
+`code:1000 "Client closed"` on a **flat ~30s cadence** (not the growing backoff of
+the benign case), and the client never advances past `hello` — the daemon's
+`inboundMessageTypesTop` stays `["hello", …]` only, never a session subscribe. The
+UI sits on a spinner. Two tells distinguish this from the benign loop:
+
+- The reconnect interval is **fixed ~30s**, not exponentially growing. That is the
+  client's **liveness heartbeat** (a `ping` on a ~10s timer with a ~15s timeout;
+  **2** consecutive missed `pong`s force a transport dispose + reconnect), not
+  reconnect backoff.
+- The daemon log shows a client whose `appVersion` **differs from the daemon
+  version**, and/or a client that only ever sends `hello`.
+
+**Cause — a client whose persisted cache or protocol is incompatible with the
+daemon.** Two forms seen in the wild:
+
+1. **A newer client attached to an older daemon** (e.g. a Paseo **desktop app**
+   `0.4.0`, `origin: paseo://app`, talking to this kit's pinned `0.3.1` daemon).
+   The `hello` is version-tolerant enough to complete, but the post-hello liveness
+   contract differs, the `ping` is never answered, liveness fails, and the client
+   tears the socket down and retries forever. **Fix:** stop the mismatched client
+   (or match its version — see the version pin below); drive the UI from the
+   daemon-served bundle at `http://localhost:<host-port>` so client and daemon are
+   the same version.
+
+2. **An incompatible persisted cache in your normal browser window.** Paseo `0.3.1`
+   can get stuck on a stale/incompatible client cache in **Local Storage /
+   IndexedDB** (`@paseo:daemon-registry`, `@paseo:replica-cache`). This is fixed
+   upstream in **0.4.0** ("Fixed crash when persisted cache was incompatible",
+   [getpaseo/paseo#3289](https://github.com/getpaseo/paseo/pull/3289)). **Fix:**
+   clear the site's storage — DevTools ▸ **Application** ▸ **Storage** ▸ **Clear
+   site data** (an "Empty Cache and Hard Reload" is **not** enough — it leaves
+   Local Storage/IndexedDB intact), or run a version-matched client. An Incognito
+   window (empty storage) proves it: if the loop disappears there but your normal
+   window still loops after a hard reload, it is this incompatible-cache case, and
+   "Clear site data" resolves it.
+
+**Diagnose which is which** — compare the client `appVersion` in the log against
+the daemon version:
+
+```bash
+acq exec <sandbox> -- sh -c '
+  grep -o "\"appVersion\":\"[^\"]*\"" ~/.local/state/paseo/paseo-daemon.log | sort | uniq -c
+  paseo daemon status 2>/dev/null | grep -E "Daemon Version|CLI"'
+# A single appVersion equal to the daemon version → not a skew; suspect the cache
+# (form 2). A second, different appVersion → a mismatched client is attached (form 1).
+```
 
 ## Black page that persists on reload (`ERR_CONTENT_DECODING_FAILED`)
 

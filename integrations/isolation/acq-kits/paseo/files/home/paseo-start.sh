@@ -25,7 +25,7 @@
 #
 # Pins are provided via the environment, with an in-script fallback default kept
 # in sync with the kit spec's documented pin:
-#   PASEO_CLI_VERSION   — @getpaseo/cli version to install (default 0.3.1)
+#   PASEO_CLI_VERSION   — @getpaseo/cli version to install (default 0.4.0)
 #   PASEO_LISTEN        — daemon bind address (default 0.0.0.0:6767)
 #   PASEO_RESTART_DELAY — seconds to wait before respawning the daemon (default 5)
 
@@ -56,7 +56,7 @@ export PATH
 
 # --- Install the Paseo CLI if it isn't present yet (first boot). -------------
 if ! command -v paseo >/dev/null 2>&1; then
-  _ver="${PASEO_CLI_VERSION:-0.3.1}"
+  _ver="${PASEO_CLI_VERSION:-0.4.0}"
   # Route npm through the sandbox proxy. npm honors HTTP(S)_PROXY automatically,
   # but be explicit so any Node-side downloads (none expected for the sherpa
   # prebuilt, which is a plain npm tarball) also proxy.
