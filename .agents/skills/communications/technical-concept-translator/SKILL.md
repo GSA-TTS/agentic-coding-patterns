@@ -130,9 +130,10 @@ language, never the truth.
    the honest word; define it in one clause.
 5. **Preserve the honesty caveats.** For the sandbox, secrets, and agent-autonomy
    concepts, carry the "what it is not" limits from the concept library verbatim
-   in spirit — especially: secrets handling differs by backend (the msb vs.
-   sbx/USAi caveat), the sandbox does not verify image integrity, and the agent
-   cannot approve or merge its own work.
+   in spirit — especially: secrets are proxied into the sandbox on both backends
+   in the default setup (the agent does not hold raw key material), the sandbox
+   does not verify image integrity, and the agent cannot approve or merge its own
+   work.
 
 ## Verification
 

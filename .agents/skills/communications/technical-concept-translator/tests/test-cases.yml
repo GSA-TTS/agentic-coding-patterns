@@ -79,20 +79,27 @@ test_cases:
         case_sensitive: false
 
   - id: secrets-caveat-precise
-    name: "Secrets explanation does not overclaim 'never enter the sandbox'"
-    description: "The secrets concept must reflect the msb vs sbx/USAi caveat, not a blanket guarantee."
+    name: "Secrets explanation reflects proxying on both backends, no raw key in the sandbox"
+    description: "The secrets concept must state secrets are proxied into both backends in the default setup, and must NOT claim the agent holds the raw key or that secrets are unproxied on sbx."
     input:
       type: literal
       content: |
         Real secret values live in a host-side store and never appear in the sandbox's command line or logs.
-        On the default (msb) backend, the guest holds only a placeholder and the real value is swapped in on the wire, so it never enters the guest.
-        On the sbx backend the USAi key is a custom, unproxied secret that IS present in the sandbox and readable by the agent; there it is protected by isolation and policy, not by proxying.
+        Both backends proxy secrets in the default setup: on msb the guest holds a placeholder and the real
+        value is swapped in on the wire; on sbx credentials are injected via the proxy for built-in services
+        and via `secret set-custom` for custom endpoints like USAi. The agent does not hold the raw key material.
     assertions:
       - type: contains
-        pattern: "custom, unproxied secret"
+        pattern: "does not hold the raw key"
+        case_sensitive: false
+      - type: contains
+        pattern: "set-custom"
         case_sensitive: false
       - type: not_contains
-        pattern: "secrets never enter the sandbox"
+        pattern: "unproxied secret"
+        case_sensitive: false
+      - type: not_contains
+        pattern: "readable by the agent"
         case_sensitive: false
 
   - id: unknown-concept-says-not-in-source

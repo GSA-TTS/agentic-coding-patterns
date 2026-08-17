@@ -211,12 +211,12 @@ source: Playbook SECURITY-CONTROLS.md IA-5; CODING_PRACTICES.md §4; Quickstart 
 ```yaml
 concept: Secrets proxy / injection
 plain_language: A mechanism that lets the sandbox use a credential without the raw secret value ever being placed inside it.
-why_it_matters: The agent can call an authenticated service, but a compromised or curious agent has no raw key to read or leak — for the paths where proxying applies.
-what_it_is_not: NOT a blanket "secrets never enter the sandbox" guarantee. It is true on the default (msb) backend and for sbx's proxied built-in services, but on the sbx backend the USAi key is a custom (unproxied) secret that IS present in the sandbox and readable by the agent — there it is protected by isolation and policy, not by proxying.
+why_it_matters: The agent can call an authenticated service, but a compromised or curious agent has no raw key to read or leak.
+what_it_is_not: Not the same as putting the key in an environment variable for the agent to read. In the sanctioned setup the agent works with a placeholder or a proxied binding, not the real value.
 where_it_fits: Between the host secret store and the service the agent calls.
-controls: Real values live in a host store, never in argv or logs; msb swaps a placeholder for the real value on the wire; GitHub tokens are additionally downscoped per sandbox to only the mounted repositories (least privilege, AC-6).
-example: On msb, the guest holds a placeholder like $MSB_GITHUB_TOKEN; msb substitutes the real token on the wire to github.com, so the token never enters the guest.
-source: Quickstart acq.backends/secret-store.sh; BACKEND_GUIDE.md (swap-on-wire); KNOWN_FAILURE_MODES.md §14 (USAi-on-sbx exception); docs/adr/0013 (downscoping).
+controls: Real values live in a host store, never in argv or logs. Both backends proxy secrets in the default setup — msb swaps a placeholder for the real value on the wire (ENV@HOST), and sbx injects credentials via its proxy for built-in services and via `secret set-custom` for custom endpoints like USAi — so the agent does not hold the raw key material. GitHub tokens are additionally downscoped per sandbox to only the mounted repositories (least privilege, AC-6). Maps to IA-5, SC-28.
+example: On msb, the guest holds a placeholder like $MSB_GITHUB_TOKEN and msb substitutes the real token on the wire; on sbx, USAi is configured with `sbx secret set-custom --host api.gsa.usai.gov --env USAI_API_KEY` so the credential is injected without the agent holding the raw value.
+source: Quickstart acq.backends/secret-store.sh + acq.backends/sbx.sh (set-custom); AGENTS.md Network Access / "No Secrets Exposure" note; BACKEND_GUIDE.md (swap-on-wire); docs/adr/0013 (downscoping).
 ```
 
 ```yaml
@@ -273,7 +273,7 @@ plain_language: The underlying trained system that generates text or code from a
 why_it_matters: It is the raw capability — but on its own it only produces output; it takes no actions.
 what_it_is_not: Not an agent. A model does not read your repository, run commands, or open pull requests by itself.
 where_it_fits: The engine an agent calls; reached here through the USAi endpoint.
-controls: Model access is authenticated and, in the sandbox, mediated so the raw key is protected (see secrets proxy, with the sbx/USAi caveat).
+controls: Model access is authenticated and, in the sandbox, mediated so the raw key is protected (see secrets proxy — proxied on both backends in the default setup).
 example: A large language model accessed via the USAi API answers a coding question.
 source: Quickstart docs/adr/0001 (USAi endpoint).
 ```
@@ -302,12 +302,12 @@ source: Quickstart AGENTS.md (authorized agents: OpenCode, Claude Code, GitHub C
 
 ```yaml
 concept: AGENTS.md
-plain_language: A file in the repository that tells AI coding agents the rules to follow for that project.
+plain_language: A file in the repository that tells AI coding agents the rules and practices to follow for that project.
 why_it_matters: It is how an organization's practices and guardrails travel with the code and are applied consistently by any compatible agent.
-what_it_is_not: NOT a technical enforcement mechanism. It is a behavioral guide that relies on the agent honoring it; real enforcement comes from branch protection, CI checks, sandbox limits, and human review.
+what_it_is_not: NOT a technical enforcement mechanism. It is a behavioral guide that relies on the agent honoring it; the actual enforcement comes from branch protection, CI checks, sandbox limits, and human review — AGENTS.md sets expectations, those controls hold the line.
 where_it_fits: Read automatically by the harness at the start of work; a tool-agnostic convention supported by many agents.
-controls: Encodes the priority order (safety > correctness > compliance > simplicity > performance), the approval gates, and the prohibited actions — but must be backed by the technical controls to be effective.
-example: The playbook's universal AGENTS.md defines what an agent must never do; the quickstart applies a project-specific one in the sandbox.
+controls: Encodes the priority order (safety > correctness > compliance > simplicity > performance), the approval expectations, and the discouraged actions — but because it is guidance rather than a hard boundary, it must be backed by the technical controls to be effective.
+example: The playbook's universal AGENTS.md sets the behavioral expectations an agent should follow; the technical controls (branch protection, CI, the sandbox) are what actually enforce them.
 source: Playbook docs/GETTING-STARTED.md ("AGENTS.md is a behavioral guide, not enforcement").
 ```
 
@@ -339,7 +339,7 @@ plain_language: The authenticated gateway through which the agent reaches an app
 why_it_matters: It is the approved, governed path to model capability — not an arbitrary third-party call.
 what_it_is_not: Not a separate "broker" component with policy of its own in this setup; it is an authenticated endpoint the agent's harness is configured to use.
 where_it_fits: The model endpoint the harness calls from inside the sandbox.
-controls: Authenticated with a key that is protected via the secrets mechanism (with the documented sbx/USAi caveat); egress to the endpoint is on the allowlist.
+controls: Authenticated with a key that is protected via the secrets mechanism (proxied into the sandbox on both backends in the default setup); egress to the endpoint is on the allowlist.
 example: The agent reaches models through the USAi OpenAI-compatible endpoint configured by the usai-provider kit.
 source: Quickstart docs/adr/0001; README (usai-provider kit).
 ```
