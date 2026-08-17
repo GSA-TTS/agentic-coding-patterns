@@ -2,7 +2,7 @@
 id: design-artifact
 version: "1.0.0"
 title: "Design Artifact Workflow"
-description: "End-to-end workflow to produce a QA'd communication artifact — brief, narrative, visual direction, render, validate — selecting an output profile (one-pager or slide-deck) so one shared pipeline serves every format."
+description: "End-to-end workflow to produce a QA'd communication artifact — brief, narrative, visual direction, render, validate — selecting an output profile (one-pager, slide-deck, or technical-explainer) so one shared pipeline serves every format."
 type: workflow
 status: experimental
 owners:
@@ -20,6 +20,9 @@ requires:
     - one-pager
     - slide-deck
     - artifact-qa
+    - technical-concept-translator
+    - software-delivery-explainer
+    - agentic-value-analyst
 output:
   format: markdown
   contract:
@@ -57,6 +60,7 @@ routing:
   output_artifacts:
     - one-pager
     - slide-deck
+    - technical-explainer
   aliases:
     - "executive one-pager"
     - "presentation deck"
@@ -103,13 +107,27 @@ narrative, and QA don't get duplicated across four separate workflows.
 profiles:
   - one-pager            # → skills/communications/one-pager
   - slide-deck           # → skills/communications/slide-deck
-  - technical-explainer  # (future) longer explanatory doc
+  - technical-explainer  # → longer explanatory doc for executives (implemented)
   - marketing-kit        # (future) multi-asset outreach bundle
 ```
 
-The profile is chosen from the brief's `constraints.profile`. `one-pager` and
-`slide-deck` are implemented today; the other two are placeholders for future
-renderers and should route to the closest implemented profile until they exist.
+The profile is chosen from the brief's `constraints.profile`. `one-pager`,
+`slide-deck`, and `technical-explainer` are implemented today; `marketing-kit` is
+a placeholder for a future renderer and should route to the closest implemented
+profile until it exists.
+
+The **`technical-explainer`** profile produces an accurate, executive-facing
+explanatory document (not a one-pager or a deck). Its content is sourced from the
+three explainer skills rather than a new renderer skill:
+[`technical-concept-translator`](../../skills/communications/technical-concept-translator/SKILL.md)
+(concept mental models),
+[`software-delivery-explainer`](../../skills/communications/software-delivery-explainer/SKILL.md)
+(process + control points), and
+[`agentic-value-analyst`](../../skills/communications/agentic-value-analyst/SKILL.md)
+(evidence-labeled value). It carries a hard accuracy bar: no overclaimed agent
+autonomy, no overclaimed sandbox guarantees, and the precise secrets caveat (msb
+vs. sbx/USAi). Run `plain-language-review` for readability and `artifact-qa` for
+the output contract.
 
 ## Procedure
 
@@ -122,6 +140,10 @@ renderers and should route to the closest implemented profile until they exist.
 4. **Render** — dispatch to the profile's renderer:
    - `one-pager` → `one-pager` skill
    - `slide-deck` → `slide-deck` skill
+   - `technical-explainer` → compose `technical-concept-translator` +
+     `software-delivery-explainer` + `agentic-value-analyst` into an explanatory
+     document; run `plain-language-review` for readability. (Reuses these skills
+     rather than adding a new renderer.)
 5. **QA** — run `artifact-qa` on the rendered files; if it FAILs, loop back to
    the smallest responsible step (usually render or visual-direction) and
    re-run.
