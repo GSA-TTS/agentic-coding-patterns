@@ -59,3 +59,23 @@ kits:
       backends with no manual step. The install+supervise script
       (files/home/openchamber-start.sh) and the wrapper
       (files/home/.local/bin/opencode) are backend-agnostic. No backend shortcut.
+
+  paseo:
+    backends: [sbx, msb]
+    parity: |
+      Opt-in self-hosted browser web UI for coding agents (Paseo). Written
+      entirely in the neutral vocabulary with no backend shortcut or extras: the
+      single published container port (6767, serving the daemon API + WebSocket +
+      bundled web UI) is expressed with the neutral top-level `publishedPorts`
+      list, and the never-exiting startup supervisor is marked with the neutral
+      `background: true` flag. acq's kit translation maps publishedPorts +
+      background to the active backend's native port-publish and detached-hook
+      primitives, so the port is published and the supervisor is detached at
+      create time with no manual step. The install+supervise script
+      (files/home/paseo-start.sh), the worktree-root helper
+      (files/home/paseo-set-worktrees-root.mjs), the generic kit shim
+      (files/home/paseo-agent-shim), and the thin agent-named `opencode` wrapper
+      (files/home/.local/bin/opencode) are backend-agnostic. Unlike openchamber
+      there is NO shared TUI session (Paseo launches its own agent CLIs) and only
+      ONE port. The daemon runs unsecured (no PASEO_PASSWORD); the sandbox is the
+      security boundary and the port is host loopback only.

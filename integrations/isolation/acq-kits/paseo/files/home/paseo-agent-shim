@@ -1,0 +1,255 @@
+#!/bin/sh
+# paseo-agent-shim — the AGENT-NEUTRAL half of this kit's entrypoint behavior.
+#
+# WHY THIS FILE EXISTS: the kit becomes the sandbox entrypoint by dropping a
+# wrapper at ~/.local/bin/<agent> that SHADOWS the real agent binary (the base
+# image runs the bare, unqualified agent command, and ~/.local/bin is first on
+# PATH). That per-agent wrapper is deliberately THIN — it only (a) passes real
+# invocations through to the real agent binary, and (b) on the bare no-arg
+# entrypoint path, hands off to THIS shim. All the Paseo/kit-specific work lives
+# here and knows NOTHING about any particular agent, so a second agent is
+# supported by dropping another thin wrapper that execs this same shim
+# (see docs/decisions/paseo-mixin-generic-wrapper.md).
+#
+# INVOCATION CONTRACT: the thin wrapper must `exec` this shim (not run it as a
+# child) on the no-arg path. That way the shim INHERITS the wrapper's process id —
+# so when the wrapper was the sandbox entrypoint, the shim is PID 1, and the
+# PID-1 hold below actually keeps the sandbox alive. Running it as a child would
+# give the shim a non-1 pid and the hold would never trigger.
+#
+# WHAT THE SHIM DOES on the no-arg entrypoint path:
+#   1. PIN PASEO'S WORKTREE ROOT to the current project. Paseo keeps agent git
+#      worktrees under a SINGLE GLOBAL root; there is no per-project option, and a
+#      relative root resolves against PASEO_HOME. On `acq run <path>` the entrypoint
+#      runs with cwd = the primary (first mounted) workspace, so the shim computes
+#      <PWD>/.paseo-worktrees and writes it to $PASEO_HOME/config.json (via
+#      paseo-set-worktrees-root.mjs). The daemon reads worktrees.root ONLY at boot
+#      (no SIGHUP / no runtime reread), so when the value CHANGES the shim bounces
+#      the daemon — it kills the supervised daemon child (never the supervisor),
+#      and the startup script's supervisor:paseo-daemon loop respawns it, re-reading
+#      the new root.
+#   2. PRINT HOST-CONNECT INSTRUCTIONS and, when it IS PID 1 (the `acq run`
+#      entrypoint), HOLD the foreground so that session's sandbox — and thus the
+#      daemon/UI — stays up.
+#
+# The primary-workspace path comes from the shim's OWN cwd, which equals the
+# primary (first mounted) workspace on every acq backend (the agent entrypoint is
+# launched there). The shim needs no marker file or env var for this. (Note: the
+# guest marker /var/lib/acq/workspace exists on some backends but not all, so it is
+# NOT a portable signal — cwd is.)
+#
+# WHY THE ENTRYPOINT MUST NOT RETURN WHEN IT IS PID 1 (keep the sandbox alive):
+#   A Docker sandbox is "running" only while its entrypoint / PID 1 is alive. On
+#   the `acq run` path the shim (exec'd from the wrapper) IS PID 1; if it returns,
+#   PID 1 exits and the sandbox transitions running -> stopped (taking the Paseo
+#   daemon/UI with it). So when `$$` is 1 the shim ends by BLOCKING FOREVER in
+#   hold_pid1. On a detached `acq create` PID 1 is instead a tini keepalive shim
+#   and this shim is NOT PID 1 (it is reached from a shell / `acq exec`), so it
+#   exits cleanly.
+#
+# The Paseo daemon is UNSECURED (no PASEO_PASSWORD): the sandbox — an ephemeral
+# container with proxied, allow-listed egress and no host FS — is the security
+# boundary, and its published port is host loopback only. See the README
+# "Security" section.
+
+set -eu
+
+# Daemon bind. Keep in sync with the kit spec's PASEO_LISTEN / publishedPorts.
+PASEO_PORT="$(printf '%s' "${PASEO_LISTEN:-127.0.0.1:6767}" | sed -n 's/.*:\([0-9][0-9]*\)$/\1/p')"
+[ -n "$PASEO_PORT" ] || PASEO_PORT=6767
+
+HOME_DIR="${HOME:-/home/agent}"
+PASEO_HOME_DIR="${PASEO_HOME:-$HOME_DIR/.paseo}"
+STATE_DIR="${XDG_STATE_HOME:-$HOME_DIR/.local/state}/paseo"
+DAEMON_LOG="$STATE_DIR/paseo-daemon.log"
+SET_ROOT_SCRIPT="$HOME_DIR/paseo-set-worktrees-root.mjs"
+
+# 1. Pin Paseo's worktree root to <PWD>/.paseo-worktrees. PWD here is the primary
+#    (first mounted) workspace on the `acq run` path. Use an ABSOLUTE path (Paseo
+#    resolves a relative root against PASEO_HOME, not the project).
+WORKTREES_ROOT="$(pwd -P)/.paseo-worktrees"
+worktrees_changed=""
+if [ -f "$SET_ROOT_SCRIPT" ] && command -v node >/dev/null 2>&1; then
+  # The helper prints "changed" / "unchanged" on success, or "error: ..." + rc=1.
+  _set_out="$(PASEO_HOME="$PASEO_HOME_DIR" node "$SET_ROOT_SCRIPT" --root "$WORKTREES_ROOT" 2>&1 || true)"
+  case "$_set_out" in
+    changed)   worktrees_changed=yes ;;
+    unchanged) : ;;
+    *)         echo "paseo: could not pin Paseo worktree root: $_set_out" >&2 ;;
+  esac
+fi
+
+# 2. If the root changed, bounce the daemon so it re-reads config.json. We kill
+#    ONLY the daemon process tree, never the startup script's supervisor loop, so
+#    the supervisor relaunches the daemon with the new worktrees.root. The
+#    supervisor loop's argv carries the marker "supervisor:paseo-daemon"; the
+#    actual daemon is a `paseo daemon start --foreground ...` CHILD of that loop.
+#    We select PIDs whose argv matches the daemon-start pattern but EXCLUDE the
+#    supervisor marker, and kill just those.
+daemon_up() {
+  # /api/health is unauthenticated and returns 200 when the daemon is listening.
+  curl -fsS "http://127.0.0.1:$PASEO_PORT/api/health" >/dev/null 2>&1
+}
+
+# ui_ready: is the BROWSER UI fully serveable, not just the API? This is stronger
+# than daemon_up() on purpose. The web UI ships content-hashed assets served with
+# `Cache-Control: immutable`, so if a browser loads the page during the boot
+# window — after /api/health answers but before the daemon is actually serving the
+# hashed JS bundle intact — Chrome can cache a bad/partial response FOREVER
+# (immutable), and every later reload black-pages with ERR_CONTENT_DECODING_FAILED
+# until the cache is cleared. To avoid steering users to open the browser too
+# early, we confirm the entry bundle referenced by index.html downloads COMPLETE.
+#
+# The bundle is served CHUNKED (no Content-Length), so we can't compare against a
+# response header. Instead we compare the bytes actually received on the wire to
+# the size of the daemon's own on-disk precompressed artifact (the .br file it
+# serves for `Accept-Encoding: br`, what a browser sends). curl codec support is
+# irrelevant — we never decode, only count bytes. Returns 0 only when the full
+# body is delivered.
+ui_ready() {
+  daemon_up || return 1
+  _idx="$(curl -fsS "http://127.0.0.1:$PASEO_PORT/" 2>/dev/null)" || return 1
+  _bundle="$(printf '%s' "$_idx" \
+    | grep -oE '/_expo/static/js/web/index-[0-9a-f]+\.js' | head -1)"
+  # No hashed bundle in index.html => can't assert; treat "root serves HTML" as
+  # the best available readiness signal rather than blocking forever.
+  [ -n "$_bundle" ] || return 0
+  # Locate the on-disk .br the daemon would serve; its size is the expected wire
+  # length for an Accept-Encoding: br fetch.
+  _brfile="$(find / -path "*/web-ui$_bundle.br" 2>/dev/null | head -1)"
+  _got="$(curl -fsS -H 'Accept-Encoding: br' -o /dev/null \
+      -w '%{size_download}' "http://127.0.0.1:$PASEO_PORT$_bundle" 2>/dev/null)" || return 1
+  if [ -n "$_brfile" ] && [ -r "$_brfile" ]; then
+    _expected="$(wc -c < "$_brfile" 2>/dev/null | tr -d ' ')"
+    [ -n "$_expected" ] && [ "$_got" = "$_expected" ]
+  else
+    # Can't find the artifact to size-check against: fall back to "got a
+    # non-trivial body" rather than blocking readiness forever.
+    [ "${_got:-0}" -gt 100000 ] 2>/dev/null
+  fi
+}
+if [ -n "$worktrees_changed" ]; then
+  echo "paseo: pinned Paseo worktree root to $WORKTREES_ROOT; restarting the daemon to apply it ..."
+  for _pid in $(pgrep -u "$(id -u)" -f "paseo daemon start" 2>/dev/null); do
+    # Skip the supervisor loop (its cmdline carries the marker).
+    if tr '\0' ' ' < "/proc/$_pid/cmdline" 2>/dev/null | grep -q "supervisor:paseo-daemon"; then
+      continue
+    fi
+    kill "$_pid" 2>/dev/null || true
+  done
+  # Wait for the supervisor to bring it back on the new root (bounded).
+  _i=0
+  while [ "$_i" -lt 30 ]; do
+    daemon_up && break
+    _i=$((_i + 1))
+    sleep 1
+  done
+fi
+
+# 3. Report status + how to reach it. Give the daemon a brief moment if it is
+#    still coming up (first boot installs the CLI first), and — importantly — wait
+#    until the browser UI is FULLY serveable, not just /api/health, before telling
+#    the user to open it. Opening during the boot window can poison Chrome's
+#    immutable asset cache (see ui_ready() above), which black-pages every later
+#    reload until the cache is cleared.
+ui_is_ready=""
+if ui_ready; then
+  ui_is_ready=yes
+  echo "paseo: Paseo daemon + web UI are up on 127.0.0.1:$PASEO_PORT (started by the kit startup script)"
+else
+  # Wait for full UI readiness (bundle serveable), not just the API. First boot
+  # also installs the CLI, so allow a generous window.
+  _i=0
+  while [ "$_i" -lt 60 ]; do
+    if ui_ready; then ui_is_ready=yes; break; fi
+    _i=$((_i + 1))
+    sleep 1
+  done
+  if [ -n "$ui_is_ready" ]; then
+    echo "paseo: Paseo daemon + web UI are up on 127.0.0.1:$PASEO_PORT"
+  elif daemon_up; then
+    echo "paseo: daemon API is up on :$PASEO_PORT but the web UI bundle isn't fully" >&2
+    echo "       serveable yet — WAIT for it to finish before opening the browser," >&2
+    echo "       or you may cache a broken asset (hard-reload fixes it). See $DAEMON_LOG" >&2
+  else
+    echo "paseo: Paseo daemon not answering yet on :$PASEO_PORT; the startup" >&2
+    echo "       supervisor keeps retrying — see $DAEMON_LOG" >&2
+  fi
+fi
+
+cat <<EOF
+
+────────────────────────────────────────────────────────────────────────────
+Connect from your HOST
+────────────────────────────────────────────────────────────────────────────
+This sandbox publishes container port $PASEO_PORT (the Paseo daemon API,
+WebSocket, and bundled web UI — all on one port) to a host loopback port. Find
+the mapped host port from your host shell:
+
+    acq ports <sandbox>
+
+  • Paseo web UI → container $PASEO_PORT → open http://127.0.0.1:<host-port>
+
+Paseo launches its own agent CLIs; there is no shared live session with a
+terminal TUI, so drive agents from the browser UI.
+EOF
+
+if [ -n "$ui_is_ready" ]; then
+  echo "The web UI is READY now — safe to open."
+else
+  cat <<'EOF'
+The web UI is still coming up. WAIT until it finishes before opening the browser:
+opening during startup can make the browser cache a broken bundle (a black page
+that persists on reload). If that happens, do ONE hard reload with cache
+disabled — DevTools ▸ Network ▸ "Disable cache", then ⌘/Ctrl-Shift-R — or open
+the URL in a private/Incognito window once.
+EOF
+fi
+cat <<'EOF'
+────────────────────────────────────────────────────────────────────────────
+EOF
+
+# Are WE PID 1? This discriminates the two no-arg situations:
+#   - PID 1 (we ARE the sandbox entrypoint, i.e. the `acq run` path): we MUST NOT
+#     return, or PID 1 exits and the sandbox stops. Hold forever (hold_pid1).
+#   - NOT PID 1 (a detached `acq create` is already keeping the sandbox alive via
+#     its tini keepalive shim, and we were reached from a shell / `acq exec`): the
+#     daemon + UI are already supervised by the startup script, so there is
+#     nothing for us to hold — EXIT CLEANLY and give the terminal back.
+is_pid1() { [ "$$" -eq 1 ]; }
+
+if is_pid1; then
+  cat <<EOF
+
+NOTE: you started this with \`acq run\`, so THIS terminal is the sandbox's main
+process. It will stay held open — keep this terminal open while you use Paseo
+from your browser. Closing it stops the sandbox.
+
+If you did NOT want a held terminal: quit this (Ctrl-C), then bring the sandbox
+up detached instead — it keeps running on its own with no terminal attached:
+    acq create --name <sandbox> <agent> <path>
+    acq ports <sandbox>        # find the host port, then open the browser
+
+Daemon log: $DAEMON_LOG
+EOF
+
+  hold_pid1() {
+    # Block forever without spinning. Prefer an inert sleep loop; never return.
+    while :; do
+      sleep 86400
+    done
+  }
+
+  hold_pid1
+else
+  cat <<EOF
+
+The sandbox keeps running on its own; the Paseo daemon and web UI are supervised
+by the kit startup script. This command is exiting and returning your terminal.
+Reach Paseo from the host with:
+    acq ports <sandbox>        # then open http://127.0.0.1:<host-port-for-$PASEO_PORT>
+
+Daemon log: $DAEMON_LOG
+EOF
+  exit 0
+fi
