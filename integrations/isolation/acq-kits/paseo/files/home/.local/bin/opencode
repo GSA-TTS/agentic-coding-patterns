@@ -1,0 +1,70 @@
+#!/bin/sh
+# opencode — thin, agent-named wrapper that SHADOWS the real `opencode` binary.
+#
+# The opencode base image's entrypoint runs the bare, unqualified command
+# `opencode`. This wrapper is dropped at ~/.local/bin/opencode, which is FIRST on
+# the image PATH (ahead of the npm-global bin where the real opencode lives), so
+# the sandbox's interactive `acq run` startup runs THIS instead.
+#
+# This file is intentionally THIN and is the ONLY agent-specific piece of the
+# kit's entrypoint behavior. It does exactly two things:
+#
+#   opencode <args…>  → PASSTHROUGH: exec the REAL opencode with the args
+#                       unchanged (run, auth, etc.). This MUST stay: it is how the
+#                       real opencode remains reachable both for interactive use
+#                       AND for Paseo itself, which launches `opencode` as a child
+#                       process when opencode is the selected provider. Dropping
+#                       passthrough would break Paseo's opencode provider.
+#   opencode          → (no args) exec the generic, agent-neutral shim
+#                       (paseo-agent-shim), which does all the Paseo/kit work
+#                       (pin worktree root, print connect info, hold PID 1 on the
+#                       `acq run` path). We `exec` it — NOT run it as a child — so
+#                       the shim INHERITS this process's id; when this wrapper was
+#                       the sandbox entrypoint (PID 1), the shim becomes PID 1 and
+#                       its hold actually keeps the sandbox alive.
+#
+# REUSE FOR ANOTHER AGENT: copy this file to ~/.local/bin/<other-agent> and change
+# only the agent name in the "resolve the real binary" block below. All shared
+# behavior lives in paseo-agent-shim, which knows nothing about any agent. See
+# docs/decisions/paseo-mixin-generic-wrapper.md.
+
+set -eu
+
+HOME_DIR="${HOME:-/home/agent}"
+SHIM="$HOME_DIR/paseo-agent-shim"
+
+# --- Resolve the REAL opencode (never ourselves). ---------------------------
+# We are ~/.local/bin/opencode and are first on PATH, so `command -v opencode`
+# would find US. Search PATH entries explicitly and skip our own path.
+self_dir="$HOME_DIR/.local/bin"
+canon() { ( cd "$(dirname "$1")" 2>/dev/null && printf '%s/%s\n' "$(pwd -P)" "$(basename "$1")" ); }
+self_canon="$(canon "$self_dir/opencode")"
+real_opencode=""
+_ifs="$IFS"; IFS=:
+for _dir in $PATH; do
+  [ -n "$_dir" ] || continue
+  _cand="$_dir/opencode"
+  { [ -x "$_cand" ] && [ ! -d "$_cand" ]; } || continue
+  [ "$(canon "$_cand")" = "$self_canon" ] && continue
+  real_opencode="$_cand"
+  break
+done
+IFS="$_ifs"
+
+# --- Passthrough: any arguments go straight to the real opencode. ------------
+# (If the real opencode is missing, only fail on the passthrough path — the
+# no-arg shim path below does not need opencode at all.)
+if [ "$#" -gt 0 ]; then
+  if [ -z "$real_opencode" ]; then
+    echo "opencode wrapper: could not locate the real opencode binary on PATH" >&2
+    exit 127
+  fi
+  exec "$real_opencode" "$@"
+fi
+
+# --- No args: hand off to the generic shim (exec, to preserve PID for the hold).
+if [ ! -f "$SHIM" ]; then
+  echo "opencode wrapper: kit shim not found at $SHIM" >&2
+  exit 127
+fi
+exec sh "$SHIM"
