@@ -191,7 +191,7 @@ If you find patterns diverging between repos:
 |------------|------------|------------|-------|
 | Playbook | Moderate | ATO-ready guidance | Full SDLC |
 | Patterns | N/A (public) | Public patterns | Reusable patterns |
-| Quickstart | Low | Pre-ATO (development) | Local dev only |
+| Quickstart | Low/Moderate | Local development only | Local dev only |
 
 **When working across repos:** Default to **FIPS Moderate** constraints unless explicitly scoped to local development.
 
