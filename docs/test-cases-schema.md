@@ -377,22 +377,22 @@ test_cases:
 # Run all test cases
 python scripts/run_test_cases.py
 
-# Run tests for specific pattern
-python scripts/run_test_cases.py skills/your-skill/tests/test-cases.yml
+# Run tests for a specific pattern (by pattern ID, not a path)
+python scripts/run_test_cases.py --pattern your-skill-id
 
 # Verbose output
 python scripts/run_test_cases.py --verbose
 
-# Generate test report
-python scripts/run_test_cases.py --report
+# Run against an explicit repository root
+python scripts/run_test_cases.py --root .
 ```
 
 ## Integration with CI
 
 ```yaml
-# .github/workflows/test.yml
-- name: Run pattern test cases
-  run: python scripts/run_test_cases.py
+# .github/workflows/ci.yml — in the Pattern Validation job
+- name: Run pattern test cases (skill assertions)
+  run: make test-cases
 ```
 
 ## Best Practices
