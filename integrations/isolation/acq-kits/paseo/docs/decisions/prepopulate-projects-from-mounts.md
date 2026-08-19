@@ -111,6 +111,14 @@ means the UI shows fewer projects until the next start.
 - Depends on the CLI internal path `dist/utils/client.js` (`connectToDaemon`);
   the kit pins `@getpaseo/cli` to a specific version, and verify's `node --check`
   plus the live registration assertion catch a break if a future bump moves it.
+- **Footgun:** the dotdir-skip rule (item 5) also excludes any *workspace* whose
+  own directory name begins with `.`. A user who mounts, say, `~/.config/foo` as
+  a project would find it silently un-registered. This is an accepted trade-off
+  to keep backend runtime dirs out without a name allowlist; it surfaced in
+  `scripts/verify`, whose throwaway workspace was originally named
+  `.verify-workspace.*` and was therefore skipped — the fixtures are now named
+  `verify-workspace.*` / `verify-rw-mount.*` / `verify-ro-mount.*` (no leading
+  dot). Documented here so the behavior is not mistaken for a bug.
 
 ## Links
 
