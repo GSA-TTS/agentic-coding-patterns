@@ -368,10 +368,10 @@ A human MUST:
 
 ## References
 
-- [PlainLanguage.gov](https://www.plainlanguage.gov/)
-- [Federal Plain Language Guidelines](https://www.plainlanguage.gov/guidelines/)
+- [Plain Language (digital.gov)](https://digital.gov/topics/plain-language/)
+- [An Introduction to Plain Language (digital.gov)](https://digital.gov/resources/an-introduction-to-plain-language/)
 - [18F Content Guide (GitHub source)](https://github.com/18F/content-guide)
-- [Plain Language Action and Information Network (PLAIN)](https://www.plainlanguage.gov/about/program-history/)
+- [Plain Language Action and Information Network (PLAIN, via digital.gov)](https://digital.gov/topics/plain-language/)
 - [Plain Writing Act of 2010](https://www.gpo.gov/fdsys/pkg/PLAW-111publ274/pdf/PLAW-111publ274.pdf)
 
 ## Deterministic Tools

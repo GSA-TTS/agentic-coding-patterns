@@ -347,7 +347,7 @@ Before publishing:
 
 ## References
 
-- [Plain Language Act](https://www.plainlanguage.gov/)
+- [Plain Writing Act of 2010 (govinfo)](https://www.govinfo.gov/app/details/PLAW-111publ274)
 - [WCAG 2.2 Guidelines](https://www.w3.org/WAI/WCAG22/quickref/)
 - [Diátaxis framework](https://diataxis.fr/)
 - For complete rules, see [main AGENTS.md](../../AGENTS.md)

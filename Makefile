@@ -117,6 +117,9 @@ ci:  ## Full CI check (validate + security + test + pre-commit checks)
 	@echo "==> Running acq-kits node tests..."
 	@$(MAKE) --no-print-directory test-kits
 	@echo ""
+	@echo "==> Running pattern test cases..."
+	@$(MAKE) --no-print-directory test-cases
+	@echo ""
 	@echo "✓ All checks passed"
 
 clean:  ## Remove generated files and caches
