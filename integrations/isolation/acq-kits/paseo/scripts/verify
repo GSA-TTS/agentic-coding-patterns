@@ -307,15 +307,55 @@ fi
 #     br/zstd against a libz-only curl yields CURLE_BAD_CONTENT_ENCODING (rc=61,
 #     size=0) — a CLIENT DECODE failure that must NOT be read as truncation.
 # A genuine truncation shows up as rc=18 (transfer closed) / rc=56 (reset) or a
-# short byte count vs the in-guest identity baseline.
+# short byte count vs the in-guest identity baseline. (See the HOST-PORT COLLISION
+# GUARD below for why a contended host port SKIPs rather than FAILs here.)
 info "5b. Large UI bundle downloads intact over the HOST port (identity + br-decode)"
 HOST_HP="$(sbx_ports_out | grep -Eo '127\.0\.0\.1:[0-9]+' | head -1)"
+# HOST-PORT COLLISION GUARD. This check fetches over the mapped HOST port to prove
+# acq's CREATE-TIME publish reaches the GUEST-IP-bound daemon (the whole point of
+# the 0.0.0.0 bind, see 6b). But if ANOTHER process on this host already owns that
+# host port (e.g. a developer's own Paseo daemon on 6767), acq's create-time -p
+# cannot bind it and the host fetch talks to the OTHER process — a false FAIL that
+# looks like a transport bug. We deliberately do NOT route around this with
+# `acq ports --publish`: that path tunnels via `msb ssh serve` + OpenSSH `-L` from
+# INSIDE the guest to guest loopback, so it would pass even for a loopback-only
+# bind — it cannot exercise the guest-IP transport this test exists to prove.
+# Instead we detect the collision and SKIP (not FAIL) with actionable guidance:
+# the map's own reported host port not matching a fresh mapping, or a pre-existing
+# listener on that host port that this sandbox did not create, means the port is
+# contended — rerun on a free host port (see the note printed below).
+host_port="${HOST_HP##*:}"
+collision=""
+if [ -n "$host_port" ] && command -v lsof >/dev/null 2>&1; then
+  # Discriminate acq's OWN publisher from a foreign listener on the host port. On
+  # msb, create-time -p is served by a msb/microsandbox userland forwarder; on sbx
+  # by the sbx daemon. A developer's own `paseo daemon` (node) on the same port is
+  # the collision we must catch — and it can present two ways:
+  #   (1) acq still bound an ephemeral port but the reported HOST_HP happens to be
+  #       the contended one, so TWO PIDs listen; or
+  #   (2) acq could not bind the contended port at all, so the ONLY listener is the
+  #       foreign process — a single PID, but NOT acq's forwarder.
+  # So: collision if >1 distinct listener PID, OR if the sole listener's command is
+  # a node/paseo process (the foreign daemon) rather than an msb/sbx forwarder.
+  lsof_out="$(lsof -nP -iTCP:"$host_port" -sTCP:LISTEN 2>/dev/null)"
+  listeners="$(printf '%s\n' "$lsof_out" | awk 'NR>1{print $2}' | sort -u | wc -l | tr -d ' ')"
+  cmds="$(printf '%s\n' "$lsof_out" | awk 'NR>1{print tolower($1)}' | sort -u)"
+  if [ "${listeners:-0}" -gt 1 ] 2>/dev/null; then
+    collision=yes
+  elif printf '%s\n' "$cmds" | grep -Eq 'node|paseo'; then
+    # A lone node/paseo listener on this port is a foreign daemon, not acq's
+    # msb/sbx forwarder — the reported host mapping is not this sandbox.
+    collision=yes
+  fi
+fi
 if [ -z "$daemon_up" ]; then
   skip "large-asset guard (daemon not up)"
 elif ! command -v curl >/dev/null 2>&1; then
   skip "large-asset guard (no curl on the HOST to reach the published port)"
 elif [ -z "$HOST_HP" ]; then
   skip "large-asset guard (could not resolve a 127.0.0.1:<port> host mapping)"
+elif [ -n "$collision" ]; then
+  skip "large-asset guard (host port $host_port is already in use by another process — likely your own Paseo daemon on $PASEO_PORT). acq's create-time publish can't own a contended host port, so a HOST fetch would hit the OTHER process, not this sandbox. Stop the other listener (e.g. your local 'paseo daemon') and re-run. NOTE: do not substitute 'acq ports --publish' here — its ssh -L tunnel dials guest loopback and would not exercise the guest-IP transport this step verifies."
 else
   bundle="$(in_sbx "curl -fsS http://127.0.0.1:$PASEO_PORT/ 2>/dev/null" \
             | grep -oE '/_expo/static/js/web/index-[0-9a-f]+\.js' | head -1)"
@@ -425,8 +465,12 @@ else
       warn "unexpected daemon LISTEN address '$bind_addr' (expected 0.0.0.0:$PASEO_PORT)" ;;
   esac
   # Reachability from the host is proven by step 5b (HOST bundle fetch). If that
-  # passed, the create-time publish reaches the guest daemon end-to-end.
-  if [ -n "${HOST_HP:-}" ]; then
+  # ran and passed, the create-time publish reaches the guest daemon end-to-end.
+  # When 5b was SKIPPED for a host-port collision, we can't claim host reachability
+  # here (the fetch never exercised this sandbox), so don't assert it.
+  if [ -n "$collision" ]; then
+    skip "host-port reachability (step 5b skipped: host port in use by another process — bind is confirmed 0.0.0.0 above)"
+  elif [ -n "${HOST_HP:-}" ]; then
     ok "reachable over the published host port (see step 5b)"
   fi
 fi
