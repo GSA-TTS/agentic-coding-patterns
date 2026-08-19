@@ -176,6 +176,40 @@ if ! command -v "$DRIVER" >/dev/null 2>&1; then
 fi
 echo "  driver: $DRIVER"
 
+# --- HOST-PORT CONTENTION PRECHECK (before create). --------------------------
+# On this msb build, create-time publish maps guest 6767 -> host 6767
+# DETERMINISTICALLY (host_port == guest_port, host_bind 127.0.0.1), not to an
+# ephemeral host port. So if ANYTHING already listens on host 6767 — a developer's
+# own `paseo daemon`, OR (more subtly) ANOTHER acq/msb sandbox's own `msb`
+# forwarder that already published 6767 — this verify sandbox's create-time -p
+# cannot own that host port, and step 5b's HOST fetch would hit the OTHER owner:
+# a false FAIL that looks like a transport bug (observed: rc=52 "Empty reply").
+#
+# We detect this by asking the OS who listens on the host port (lsof), NOT by
+# command-name heuristics: the contender can be `msb` (another sandbox's
+# forwarder), `node`/`paseo` (a bare daemon), or anything else. ANY pre-existing
+# listener on the port acq will deterministically claim is a collision. We record
+# it here (pre-create) so 5b/6b can SKIP with accurate guidance rather than FAIL.
+# We deliberately do NOT route around it with `acq ports --publish`: that path
+# tunnels via `msb ssh serve` + OpenSSH `-L` from INSIDE the guest to guest
+# loopback, so it would pass even for a loopback-only bind and would not exercise
+# the guest-IP create-time transport this test exists to prove.
+host_port_collision=""
+if command -v lsof >/dev/null 2>&1; then
+  # The deterministic host port equals the guest port on this backend. Check it
+  # BEFORE create so a pre-existing owner (incl. another sandbox's msb forwarder)
+  # is attributable to something other than the sandbox we are about to create.
+  precheck_owner="$(lsof -nP -iTCP:"$PASEO_PORT" -sTCP:LISTEN 2>/dev/null | awk 'NR>1{print $1" (pid "$2")"}' | sort -u | tr '\n' ',' | sed 's/,$//')"
+  if [ -n "$precheck_owner" ]; then
+    host_port_collision="$precheck_owner"
+    echo "  NOTE: host port $PASEO_PORT is already in use before create by: $precheck_owner" >&2
+    echo "        (commonly another acq/msb sandbox's 'msb' forwarder already publishing $PASEO_PORT," >&2
+    echo "         or a local 'paseo daemon'.) The create-time host mapping will collide; step 5b" >&2
+    echo "         will SKIP its host-reachability fetch. Stop that owner (e.g. 'acq rm <other-sandbox>'" >&2
+    echo "         or kill the local daemon) and re-run to exercise host->guest reachability." >&2
+  fi
+fi
+
 info "2. Create a sandbox with the kit"
 if [ "$DRIVER" = "acq" ]; then
   echo "  creating $SBX_NAME via acq (extra kit: $KIT_DIR)..."
@@ -307,55 +341,25 @@ fi
 #     br/zstd against a libz-only curl yields CURLE_BAD_CONTENT_ENCODING (rc=61,
 #     size=0) — a CLIENT DECODE failure that must NOT be read as truncation.
 # A genuine truncation shows up as rc=18 (transfer closed) / rc=56 (reset) or a
-# short byte count vs the in-guest identity baseline. (See the HOST-PORT COLLISION
-# GUARD below for why a contended host port SKIPs rather than FAILs here.)
+# short byte count vs the in-guest identity baseline. (See the HOST-PORT
+# CONTENTION PRECHECK before step 2 for why a contended host port SKIPs here.)
 info "5b. Large UI bundle downloads intact over the HOST port (identity + br-decode)"
 HOST_HP="$(sbx_ports_out | grep -Eo '127\.0\.0\.1:[0-9]+' | head -1)"
-# HOST-PORT COLLISION GUARD. This check fetches over the mapped HOST port to prove
-# acq's CREATE-TIME publish reaches the GUEST-IP-bound daemon (the whole point of
-# the 0.0.0.0 bind, see 6b). But if ANOTHER process on this host already owns that
-# host port (e.g. a developer's own Paseo daemon on 6767), acq's create-time -p
-# cannot bind it and the host fetch talks to the OTHER process — a false FAIL that
-# looks like a transport bug. We deliberately do NOT route around this with
-# `acq ports --publish`: that path tunnels via `msb ssh serve` + OpenSSH `-L` from
-# INSIDE the guest to guest loopback, so it would pass even for a loopback-only
-# bind — it cannot exercise the guest-IP transport this test exists to prove.
-# Instead we detect the collision and SKIP (not FAIL) with actionable guidance:
-# the map's own reported host port not matching a fresh mapping, or a pre-existing
-# listener on that host port that this sandbox did not create, means the port is
-# contended — rerun on a free host port (see the note printed below).
-host_port="${HOST_HP##*:}"
-collision=""
-if [ -n "$host_port" ] && command -v lsof >/dev/null 2>&1; then
-  # Discriminate acq's OWN publisher from a foreign listener on the host port. On
-  # msb, create-time -p is served by a msb/microsandbox userland forwarder; on sbx
-  # by the sbx daemon. A developer's own `paseo daemon` (node) on the same port is
-  # the collision we must catch — and it can present two ways:
-  #   (1) acq still bound an ephemeral port but the reported HOST_HP happens to be
-  #       the contended one, so TWO PIDs listen; or
-  #   (2) acq could not bind the contended port at all, so the ONLY listener is the
-  #       foreign process — a single PID, but NOT acq's forwarder.
-  # So: collision if >1 distinct listener PID, OR if the sole listener's command is
-  # a node/paseo process (the foreign daemon) rather than an msb/sbx forwarder.
-  lsof_out="$(lsof -nP -iTCP:"$host_port" -sTCP:LISTEN 2>/dev/null)"
-  listeners="$(printf '%s\n' "$lsof_out" | awk 'NR>1{print $2}' | sort -u | wc -l | tr -d ' ')"
-  cmds="$(printf '%s\n' "$lsof_out" | awk 'NR>1{print tolower($1)}' | sort -u)"
-  if [ "${listeners:-0}" -gt 1 ] 2>/dev/null; then
-    collision=yes
-  elif printf '%s\n' "$cmds" | grep -Eq 'node|paseo'; then
-    # A lone node/paseo listener on this port is a foreign daemon, not acq's
-    # msb/sbx forwarder — the reported host mapping is not this sandbox.
-    collision=yes
-  fi
-fi
+# HOST-PORT COLLISION: the pre-create precheck (before step 2) recorded whether
+# something already owned the deterministic host port ($PASEO_PORT) when we
+# started — e.g. another acq/msb sandbox's `msb` forwarder, or a local Paseo
+# daemon. If so, this sandbox's create-time -p mapping collides and a HOST fetch
+# would hit the OTHER owner, not this sandbox. SKIP (don't FAIL) in that case.
+# We track host_fetch_ok so 6b reports host reachability honestly (see below).
+host_fetch_ok=""
 if [ -z "$daemon_up" ]; then
   skip "large-asset guard (daemon not up)"
 elif ! command -v curl >/dev/null 2>&1; then
   skip "large-asset guard (no curl on the HOST to reach the published port)"
 elif [ -z "$HOST_HP" ]; then
   skip "large-asset guard (could not resolve a 127.0.0.1:<port> host mapping)"
-elif [ -n "$collision" ]; then
-  skip "large-asset guard (host port $host_port is already in use by another process — likely your own Paseo daemon on $PASEO_PORT). acq's create-time publish can't own a contended host port, so a HOST fetch would hit the OTHER process, not this sandbox. Stop the other listener (e.g. your local 'paseo daemon') and re-run. NOTE: do not substitute 'acq ports --publish' here — its ssh -L tunnel dials guest loopback and would not exercise the guest-IP transport this step verifies."
+elif [ -n "$host_port_collision" ] && { [ -z "$HOST_HP" ] || [ "${HOST_HP##*:}" = "$PASEO_PORT" ]; }; then
+  skip "large-asset guard (host port $PASEO_PORT was already in use BEFORE create by: $host_port_collision — commonly another acq/msb sandbox's 'msb' forwarder already publishing $PASEO_PORT, or a local 'paseo daemon'). This msb build maps guest $PASEO_PORT -> host $PASEO_PORT deterministically, so this sandbox's create-time -p collides and a HOST fetch would hit the OTHER owner. Stop it (e.g. 'acq rm <other-sandbox>' or kill the local daemon) and re-run. NOTE: do not substitute 'acq ports --publish' here — its ssh -L tunnel dials guest loopback and would not exercise the guest-IP transport this step verifies."
 else
   bundle="$(in_sbx "curl -fsS http://127.0.0.1:$PASEO_PORT/ 2>/dev/null" \
             | grep -oE '/_expo/static/js/web/index-[0-9a-f]+\.js' | head -1)"
@@ -379,6 +383,7 @@ else
        { { [ -n "$g_size" ] && [ "$h_size" = "$g_size" ]; } || \
          { [ -z "$g_size" ] && [ "${h_size:-0}" -gt 1000000 ] 2>/dev/null; }; }; then
       ok "HOST end-to-end: full identity bundle delivered over $HOST_HP (${h_size} bytes)"
+      host_fetch_ok=yes   # 6b gates its host-reachability assert on this
     else
       # rc=18/56 or a short count = real truncation; rc!=0 with size 0 on identity
       # is a transport error (identity needs no decoder), so it IS meaningful here.
@@ -464,14 +469,17 @@ else
     *)
       warn "unexpected daemon LISTEN address '$bind_addr' (expected 0.0.0.0:$PASEO_PORT)" ;;
   esac
-  # Reachability from the host is proven by step 5b (HOST bundle fetch). If that
-  # ran and passed, the create-time publish reaches the guest daemon end-to-end.
-  # When 5b was SKIPPED for a host-port collision, we can't claim host reachability
-  # here (the fetch never exercised this sandbox), so don't assert it.
-  if [ -n "$collision" ]; then
-    skip "host-port reachability (step 5b skipped: host port in use by another process — bind is confirmed 0.0.0.0 above)"
-  elif [ -n "${HOST_HP:-}" ]; then
-    ok "reachable over the published host port (see step 5b)"
+  # Reachability from the host is proven ONLY by step 5b actually FETCHING the
+  # bundle over the host port (host_fetch_ok). Do NOT infer reachability from the
+  # mere existence of a host mapping ($HOST_HP): the create-time -p can be present
+  # yet unreachable (e.g. contended by another sandbox's msb forwarder, the
+  # observed rc=52 case). Report honestly per what 5b actually did.
+  if [ -n "$host_fetch_ok" ]; then
+    ok "reachable over the published host port (proven by step 5b fetch)"
+  elif [ -n "$host_port_collision" ] && { [ -z "$HOST_HP" ] || [ "${HOST_HP##*:}" = "$PASEO_PORT" ]; }; then
+    skip "host-port reachability (step 5b skipped: host port $PASEO_PORT already in use by $host_port_collision — bind is confirmed 0.0.0.0 above; host reachability not exercised)"
+  else
+    skip "host-port reachability (step 5b did not complete a successful host fetch — see 5b above; bind is confirmed 0.0.0.0)"
   fi
 fi
 
