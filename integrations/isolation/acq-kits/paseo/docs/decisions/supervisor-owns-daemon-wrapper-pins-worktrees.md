@@ -28,7 +28,7 @@ entrypoint runs in the primary workspace on `acq run`).
 
 - **The startup script (`paseo-start.sh`) owns the daemon lifecycle.** It installs
   the Paseo CLI on first boot and supervises
-  `paseo daemon start --foreground --listen 127.0.0.1:6767 --web-ui` in a respawn
+  `paseo daemon start --foreground --listen 0.0.0.0:6767 --web-ui` in a respawn
   loop marked `supervisor:paseo-daemon`. The daemon comes up immediately with
   whatever `config.json` currently says (default root on first boot).
 - **The entrypoint pins the worktree root.** On `acq run` the thin wrapper
