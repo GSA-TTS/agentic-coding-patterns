@@ -90,6 +90,29 @@ acq ports <sandbox> --publish 6767:6767          # this sandbox → host 6767
 acq ports <other-sandbox> --publish 6868:6767    # another → host 6868
 ```
 
+## Projects are pre-populated from your mounts
+
+Every **read-write** host directory you mount into the sandbox is registered with
+the Paseo daemon at startup, so the web UI already lists your repos when you
+connect — no manual **Add project** per directory. This runs on every start
+(idempotent) and covers all mounts, not just the primary one the `acq run`
+entrypoint opens.
+
+- **Read-only mounts are skipped.**
+- The backend runtime dir (`/.msb`) and system mounts (`/etc`, `/run`, …) are
+  excluded.
+- Discovery reads `/proc/mounts` and keys only on portable mount properties
+  (fstype `virtiofs`, read-write, a real directory, non-system path, non-dot
+  basename), so it works on both the `sbx` and `msb` isolation backends without
+  relying on backend-specific mount names.
+- It is **fail-open**: if the daemon is briefly unreachable, the sandbox is
+  unaffected and the UI simply shows fewer projects until the next start. See the
+  registrar log at `~/.local/state/paseo/paseo-register.log`.
+
+This is separate from worktree placement below — pre-population only adds
+projects; it never edits `config.json` / `worktrees.root`. See
+`docs/decisions/prepopulate-projects-from-mounts.md`.
+
 ## Worktrees
 
 Paseo keeps agent git worktrees under a **single global root**
@@ -204,8 +227,9 @@ paseo/
 ├── files/home/
 │   ├── .local/bin/opencode         # thin agent-named wrapper: passthrough to real opencode, else exec the shim
 │   ├── paseo-agent-shim            # generic kit logic: pins worktree root, prints connect info, holds PID 1 on acq run
-│   ├── paseo-start.sh              # installs + supervises the Paseo daemon + web UI
-│   └── paseo-set-worktrees-root.mjs # idempotent worktrees.root merge into config.json
+│   ├── paseo-start.sh              # installs + supervises the Paseo daemon + web UI; runs the mount registrar
+│   ├── paseo-set-worktrees-root.mjs # idempotent worktrees.root merge into config.json
+│   └── paseo-register-mounts.mjs   # registers each read-write host mount as a Paseo project (fail-open, idempotent)
 ├── README.md                       # this file
 ├── TROUBLESHOOTING.md              # failure modes and fixes
 ├── scripts/verify                  # host-side live check

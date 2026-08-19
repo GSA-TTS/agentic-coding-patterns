@@ -152,6 +152,19 @@ else
   fi
 fi
 
+# --- Offline check of the mount registrar helper (no sandbox needed). ----------
+info "1c. mount registrar helper parses (offline)"
+REGMOUNTS="$KIT_DIR/files/home/paseo-register-mounts.mjs"
+if ! command -v node >/dev/null 2>&1; then
+  skip "node not on PATH — cannot exercise paseo-register-mounts.mjs"
+elif [ ! -f "$REGMOUNTS" ]; then
+  bad "paseo-register-mounts.mjs missing at $REGMOUNTS"
+elif node --check "$REGMOUNTS" >/dev/null 2>&1; then
+  ok "paseo-register-mounts.mjs parses (node --check)"
+else
+  bad "paseo-register-mounts.mjs failed node --check"
+fi
+
 # --- Select the live driver. -------------------------------------------------
 DRIVER=""
 if [ "$RUN_ACQ" = "1" ]; then
@@ -628,6 +641,58 @@ else
   else
     bad "daemon did NOT come back after being killed — supervisor:paseo-daemon not respawning"
     in_sbx 'tail -n 20 ~/.local/state/paseo/paseo-daemon.log' | sed 's/^/    | /'
+  fi
+fi
+
+info "10. Projects pre-populated from the mounted host directories"
+# The startup registrar (paseo-register-mounts.mjs) registers each read-write
+# host project directory mounted into the sandbox with the daemon. Assert that
+# EVERY such mount shows up as a project in the daemon's registry. We derive the
+# expected set the same backend-agnostic way the helper does — from /proc/mounts
+# inside the guest — so the test does not hard-code msb/sbx mount source names.
+if [ -z "$daemon_up" ]; then
+  skip "project pre-population check (daemon not up)"
+else
+  # Expected set: fstype virtiofs, rw, target is a dir, not under a system prefix,
+  # basename not starting with "." (matches the registrar's rule).
+  expected_mounts="$(in_sbx '
+    awk "\$3==\"virtiofs\" && \$4 ~ /^rw/ {print \$2}" /proc/mounts \
+      | while read -r t; do
+          case "$t" in /etc|/etc/*|/run|/run/*|/proc|/proc/*|/sys|/sys/*|/dev|/dev/*|/) continue ;; esac
+          case "$(basename "$t")" in .*) continue ;; esac
+          [ -d "$t" ] && echo "$t"
+        done | sort -u')"
+  if [ -z "$expected_mounts" ]; then
+    warn "no read-write host project mounts found in the guest; nothing to assert"
+  else
+    # The registrar runs in the background after /api/health; give it a bounded
+    # window to finish before reading the project list.
+    reg_deadline=$(( $(date +%s) + 60 ))
+    projects_json=""
+    missing=""
+    while :; do
+      projects_json="$(in_sbx 'cat "${PASEO_HOME:-$HOME/.paseo}/projects/projects.json" 2>/dev/null')"
+      missing=""
+      for m in $expected_mounts; do
+        printf '%s' "$projects_json" | grep -q "\"rootPath\": \"$m\"" || missing="$missing $m"
+      done
+      [ -z "$missing" ] && break
+      [ "$(date +%s)" -ge "$reg_deadline" ] && break
+      sleep "$POLL_INTERVAL"
+    done
+    if [ -z "$missing" ]; then
+      _n="$(printf '%s\n' "$expected_mounts" | grep -c .)"
+      ok "all $_n read-write host project mount(s) registered as projects"
+    else
+      bad "some host project mounts were not registered:$missing"
+      in_sbx 'tail -n 20 ~/.local/state/paseo/paseo-register.log 2>/dev/null' | sed 's/^/    | /'
+    fi
+    # Negative assertion: the backend runtime dir (/.msb, a dotdir) must NOT be a project.
+    if printf '%s' "$projects_json" | grep -q '"rootPath": "/.msb"'; then
+      bad "backend runtime dir /.msb was wrongly registered as a project"
+    else
+      ok "backend runtime dir (/.msb) correctly excluded"
+    fi
   fi
 fi
 
