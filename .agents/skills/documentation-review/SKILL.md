@@ -304,7 +304,7 @@ This installs packages listed in `package.json`.
 
 ## References
 
-- [Plain Language Act](https://www.plainlanguage.gov/law/)
+- [Plain Writing Act of 2010 (govinfo)](https://www.govinfo.gov/app/details/PLAW-111publ274)
 - [WCAG 2.2 Guidelines](https://www.w3.org/WAI/WCAG22/quickref/)
 - [Diátaxis documentation framework](https://diataxis.fr/)
 - [Write the Docs](https://www.writethedocs.org/)

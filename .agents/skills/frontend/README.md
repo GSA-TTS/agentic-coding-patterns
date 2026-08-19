@@ -68,7 +68,7 @@ To add a new frontend skill:
 
 - [U.S. Web Design System](https://designsystem.digital.gov/)
 - [Section508.gov](https://www.section508.gov/)
-- [PlainLanguage.gov](https://www.plainlanguage.gov/)
+- [Plain Language (digital.gov)](https://digital.gov/topics/plain-language/)
 - [18F Content Guide (GitHub source)](https://github.com/18F/content-guide)
 - [WCAG 2.1 Quick Reference](https://www.w3.org/WAI/WCAG21/quickref/)
 
