@@ -13,7 +13,7 @@
 #      assert the Paseo CLI install, the wrapper, the startup-supervised daemon +
 #      web UI (on one port), the published port, that the LARGE UI bundle arrives
 #      byte-complete over the host port (identity encoding; integrity guard), the
-#      in-guest LOOPBACK bind (hardening #1) reachable over the host port, the
+#      in-guest 0.0.0.0 bind (reachable via create-time publish) over the host port, the
 #      install ran with lifecycle scripts disabled (hardening #2), the respawn
 #      supervisor, the PID-1 hold, daemon self-heal, and the worktree-root pin.
 #
@@ -390,12 +390,15 @@ else
 fi
 printf '%s\n' "$ports_out" | sed 's/^/    | /'
 
-info "6b. Hardening: in-guest daemon bind is LOOPBACK (127.0.0.1), not 0.0.0.0"
-# wz-gsa hardening #1: the daemon should bind 127.0.0.1:6767 in-guest (defense in
-# depth), while still being reachable over the published HOST port. Two asserts:
-#   (a) the LISTEN socket is bound to 127.0.0.1 (not 0.0.0.0) in the guest, and
-#   (b) the earlier HOST-port fetch (step 5b) still delivered the bundle — proving
-#       acq's port-publish reaches a loopback-bound guest daemon.
+info "6b. Guest daemon bind is 0.0.0.0 (reachable via create-time publish), not loopback"
+# The daemon must bind 0.0.0.0:6767 in-guest so acq's CREATE-TIME port publish can
+# reach it. On the msb backend `-p HOST:GUEST` binds a HOST loopback listener but
+# the publisher dials the sandbox's GUEST NETWORK IP (not guest 127.0.0.1), so a
+# loopback-only bind answers inside the guest yet returns "Empty reply from server"
+# on the published host port. See GSA-TTS/agentic-coding-quickstart#333. Two asserts:
+#   (a) the LISTEN socket is bound to 0.0.0.0 (not 127.0.0.1) in the guest, and
+#   (b) the earlier HOST-port fetch (step 5b) delivered the bundle — proving
+#       acq's create-time port-publish reaches the guest daemon end-to-end.
 # We read the listen address from /proc/net/tcp (hex) so we don't depend on ss/
 # netstat being installed. 0100007F = 127.0.0.1; 00000000 = 0.0.0.0.
 if [ -z "$daemon_up" ]; then
@@ -412,19 +415,19 @@ else
       awk -v P="$p" "\$2 ~ (\":\" P \"\$\") && \$4==\"0A\" {print \$2}" /proc/net/tcp 2>/dev/null | head -1
     fi')"
   case "$bind_addr" in
-    127.0.0.1:*|*0100007F:1A6F*)
-      ok "daemon LISTEN socket bound to loopback in-guest ($bind_addr)" ;;
     0.0.0.0:*|*00000000:1A6F*)
-      bad "daemon bound to 0.0.0.0 in-guest ($bind_addr) — hardening #1 not in effect (PASEO_LISTEN?)" ;;
+      ok "daemon LISTEN socket bound to 0.0.0.0 in-guest ($bind_addr) — reachable via create-time publish" ;;
+    127.0.0.1:*|*0100007F:1A6F*)
+      bad "daemon bound to loopback in-guest ($bind_addr) — create-time publish returns 'Empty reply from server' on msb (PASEO_LISTEN?; see quickstart#333)" ;;
     "")
       warn "could not read the daemon's LISTEN address (no ss + unreadable /proc/net/tcp); relying on the host-port fetch as the reachability proof" ;;
     *)
-      warn "unexpected daemon LISTEN address '$bind_addr' (expected 127.0.0.1:$PASEO_PORT)" ;;
+      warn "unexpected daemon LISTEN address '$bind_addr' (expected 0.0.0.0:$PASEO_PORT)" ;;
   esac
-  # Reachability-with-loopback-bind is proven by step 5b (HOST bundle fetch). If
-  # that passed, a loopback in-guest bind is confirmed reachable end-to-end.
+  # Reachability from the host is proven by step 5b (HOST bundle fetch). If that
+  # passed, the create-time publish reaches the guest daemon end-to-end.
   if [ -n "${HOST_HP:-}" ]; then
-    ok "reachable over the published host port with a loopback in-guest bind (see step 5b)"
+    ok "reachable over the published host port (see step 5b)"
   fi
 fi
 

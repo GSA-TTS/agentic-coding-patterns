@@ -143,13 +143,14 @@ no extra kit is needed.
 ## Security
 
 The Paseo daemon runs **unsecured** (no `PASEO_PASSWORD`) and is bound to
-**`127.0.0.1` (loopback)** inside the sandbox. This is safe **only because the
+**`0.0.0.0` (all interfaces)** inside the sandbox. This is safe **only because the
 sandbox is the security boundary** — an ephemeral container with a proxied,
-allow-listed network and no host filesystem access. The in-guest loopback bind is
-a defense-in-depth choice (over binding `0.0.0.0` in-guest): the daemon is
-single-consumer, and the only thing that must reach it — `acq`'s port-publish —
-forwards from the host loopback port to the guest over the guest's loopback
-interface, so the daemon is never exposed on the guest's external interface.
+allow-listed network and no host filesystem access. The in-guest `0.0.0.0` bind is
+required for reachability: `acq`'s create-time port publish (msb `-p HOST:GUEST`)
+binds a **host loopback** listener but dials the sandbox's **guest network IP**,
+not guest `127.0.0.1`, so a loopback-only in-guest bind would answer inside the
+sandbox yet return "Empty reply from server" on the published host port. See
+[GSA-TTS/agentic-coding-quickstart#333](https://github.com/GSA-TTS/agentic-coding-quickstart/pull/333).
 
 **Run this only on a trusted, single-tenant host.** The daemon is published to a
 host **loopback** port and is live for the sandbox's whole lifetime. Loopback
@@ -158,9 +159,11 @@ local user, or anything you forward that port to) can drive Paseo — and the
 agents it launches — without a credential. Don't forward the mapped port to a
 wider interface.
 
-> The loopback-only guarantee depends on `acq` publishing the guest
-> `127.0.0.1:6767` daemon bind to a loopback-scoped host port, which it does at
-> create time from the kit's neutral `publishedPorts`.
+> The host-side loopback guarantee depends on `acq` publishing the guest
+> `6767` daemon port to a loopback-scoped host port, which it does at
+> create time from the kit's neutral `publishedPorts`. (The guest daemon itself
+> binds `0.0.0.0:6767` so the create-time publish can reach it — see the Fig.
+> in quickstart#333 — but the HOST side of the mapping stays loopback-only.)
 >
 > Paseo's bundled web UI static files are public on the daemon origin; the daemon
 > API and WebSocket would be password-protected if `PASEO_PASSWORD` were set. We

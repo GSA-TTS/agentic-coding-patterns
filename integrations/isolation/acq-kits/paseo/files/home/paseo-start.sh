@@ -4,7 +4,7 @@
 # so it auto-restarts if it exits.
 #
 # SCOPE: this startup script manages the Paseo daemon only. It supervises a single
-# `paseo daemon start --foreground --listen 127.0.0.1:6767 --web-ui`. The daemon
+# `paseo daemon start --foreground --listen 0.0.0.0:6767 --web-ui`. The daemon
 # runs under a respawn loop, so a crash, a self-update, or a wrapper-triggered
 # bounce (to apply a new worktrees.root) self-heals. Because this script runs as a
 # `startup` command — which fires on EVERY sandbox start, including a detached
@@ -26,18 +26,20 @@
 # Pins are provided via the environment, with an in-script fallback default kept
 # in sync with the kit spec's documented pin:
 #   PASEO_CLI_VERSION   — @getpaseo/cli version to install (default 0.4.0)
-#   PASEO_LISTEN        — daemon bind address (default 127.0.0.1:6767)
+#   PASEO_LISTEN        — daemon bind address (default 0.0.0.0:6767)
 #   PASEO_RESTART_DELAY — seconds to wait before respawning the daemon (default 5)
 
 set -eu
 
 # Daemon bind. Keep in sync with the kit spec's publishedPorts guest port (6767)
 # and PASEO_LISTEN env. We derive the port from PASEO_LISTEN so a single override
-# moves both the bind and the health probe. The default is LOOPBACK (127.0.0.1) —
-# the daemon is single-consumer and only acq's port-publish must reach it, which
-# it does over the guest loopback interface; binding loopback removes any exposure
-# on the guest's external interface (defense in depth). See spec.yaml environment.
-PASEO_LISTEN="${PASEO_LISTEN:-127.0.0.1:6767}"
+# moves both the bind and the health probe. The default is 0.0.0.0 (all guest
+# interfaces): acq's create-time port publish (msb `-p HOST:GUEST`) binds a host
+# listener but dials the sandbox's GUEST NETWORK IP, not guest loopback, so a
+# 127.0.0.1-only bind is unreachable from the published host port ("Empty reply
+# from server" / ERR_EMPTY_RESPONSE). Binding 0.0.0.0 makes the guest port
+# reachable through create-time publishedPorts. See spec.yaml environment.
+PASEO_LISTEN="${PASEO_LISTEN:-0.0.0.0:6767}"
 PASEO_PORT="$(printf '%s' "$PASEO_LISTEN" | sed -n 's/.*:\([0-9][0-9]*\)$/\1/p')"
 [ -n "$PASEO_PORT" ] || PASEO_PORT=6767
 

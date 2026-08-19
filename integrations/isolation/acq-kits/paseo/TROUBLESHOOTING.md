@@ -30,6 +30,51 @@ acq exec <sandbox> -- sh -c 'curl -fsS http://127.0.0.1:6767/api/health && echo 
   acq exec <sandbox> -- sh -c 'tail -n 40 ~/.local/state/paseo/paseo-install.log'
   ```
 
+## Host curl returns "Empty reply from server" (guest curl works)
+
+**Symptom.** `acq ports <sandbox>` shows container `6767` mapped to a host port,
+and the daemon answers from *inside* the sandbox:
+
+```bash
+acq exec <sandbox> -- sh -c 'curl -fsS http://127.0.0.1:6767/api/health && echo OK'   # -> OK
+```
+
+…but the same request from the **host** fails:
+
+```bash
+curl http://127.0.0.1:<host-port-for-6767>/
+# curl: (52) Empty reply from server
+```
+
+Chrome shows `net::ERR_EMPTY_RESPONSE`. The TCP connect to the host listener
+*succeeds* — this is not a connection reset / ingress-deny.
+
+**Cause — the daemon is bound to guest loopback only.** On the **msb** backend,
+create-time port publish (`-p HOST:GUEST`) binds a host loopback listener but the
+publisher connects to the sandbox's **guest network IP**, not guest `127.0.0.1`.
+A daemon bound only to `127.0.0.1:6767` is therefore healthy from inside the
+sandbox yet unreachable through the create-time published port. Confirm the bind:
+
+```bash
+acq exec <sandbox> -- sh -c 'awk "\$2 ~ /:1A6F\$/ && \$4==\"0A\" {print \$2}" /proc/net/tcp'
+# 00000000:1A6F = 0.0.0.0:6767 (good); 0100007F:1A6F = 127.0.0.1:6767 (the bug)
+```
+
+**Fix.** This kit sets `PASEO_LISTEN=0.0.0.0:6767` in `spec.yaml` so the guest
+daemon binds all interfaces and the create-time publish can reach it. If you are
+running an older sandbox that predates this (or a manual `PASEO_LISTEN` override to
+loopback), either rebuild with the current kit or use acq's post-hoc publish path,
+which tunnels from *inside* the guest and can reach guest loopback:
+
+```bash
+acq --backend msb ports <sandbox> --publish 16767:6767
+curl http://127.0.0.1:16767/
+```
+
+The host side of the mapping stays loopback-only either way, so the `0.0.0.0`
+in-guest bind does not widen host exposure. See
+[GSA-TTS/agentic-coding-quickstart#333](https://github.com/GSA-TTS/agentic-coding-quickstart/pull/333).
+
 ## "No hosts configured" and/or a repeating `ws://…/ws` connect loop
 
 **Symptom.** The UI loads at `http://127.0.0.1:<host-port>`, but shows **no hosts**,
@@ -301,7 +346,7 @@ inbound path; here the host reaches the web UI directly over the loopback-
 published port (see README "Reaching it from the host"), so the relay is pure
 noise.
 
-**This does NOT affect the web UI.** The daemon still binds `127.0.0.1:6767` and
+**This does NOT affect the web UI.** The daemon still binds `0.0.0.0:6767` and
 serves the API + WebSocket + UI locally; `curl http://127.0.0.1:6767/api/health`
 returns 200 throughout. If the **host** browser sees a refused connection, that is
 a port-mapping issue (see "The browser UI never loads" above), not the relay.
