@@ -69,6 +69,24 @@
 # the value actually changes. See docs/decisions/worktrees-root-global-only.md and
 # supervisor-owns-daemon-wrapper-pins-worktrees.md.
 #
+# PROJECT PRE-POPULATION: at startup (after the daemon answers /api/health) the
+# supervisor script runs paseo-register-mounts.mjs, which registers EACH
+# read-write host project directory mounted into the sandbox with the daemon, so
+# the web UI pre-lists every mounted repo — not just the primary one the `acq run`
+# entrypoint opens. It talks to the daemon through the CLI's own client
+# (`client.addProject`, the only side-effect-free registration path — there is no
+# `paseo project add` verb), which is idempotent (dedups by root path). The set of
+# directories is derived from /proc/mounts in a BACKEND-AGNOSTIC way that does NOT
+# rely on the mount SOURCE name (a per-path hash on msb, the literal "host" on sbx
+# — neither is a stable key): a mount qualifies when it is fstype virtiofs, mounted
+# read-write (read-only mounts are SKIPPED), its target is an existing directory
+# (excludes sbx's /etc/{resolv.conf,hosts} bind files), the target is not under a
+# system prefix (/etc /run /proc /sys /dev or "/"), and the target basename does
+# not start with "." (skips the backend runtime dir — /.msb today, any future
+# /.<backend> by convention). The helper is fully fail-open: it never exits
+# non-zero, so a transient daemon/connection error just means fewer projects until
+# the next start. See docs/decisions/prepopulate-projects-from-mounts.md.
+#
 # Why install at STARTUP, not an install phase: the Paseo CLI is a plain npm
 # package (@getpaseo/cli, which pulls @getpaseo/server whose tarball BUNDLES the
 # web UI). Its only native dep (sherpa-onnx-node, for voice) resolves via
@@ -134,6 +152,10 @@ files:
     mode: "0755"
     source: files/home/paseo-set-worktrees-root.mjs
     description: Idempotently merge worktrees.root into $PASEO_HOME/config.json (used by the shim)
+  - path: /home/agent/paseo-register-mounts.mjs
+    mode: "0755"
+    source: files/home/paseo-register-mounts.mjs
+    description: Pre-populate Paseo projects from the read-write host directories mounted into the sandbox (run at startup, fail-open, idempotent)
 
 commands:
   # Run the startup script as the agent user at every start. The never-exiting
@@ -257,6 +279,12 @@ agentContext: |
   mounted project directory) when you run the `opencode` wrapper — it rewrites
   `$PASEO_HOME/config.json` and restarts the daemon so the change takes effect.
   Before you run the wrapper once, worktrees default to `$PASEO_HOME/worktrees`.
+
+  **Projects.** Every read-write host directory mounted into the sandbox is
+  registered as a Paseo project at startup, so the web UI pre-lists your repos
+  with no manual "Add project". Read-only mounts are skipped. This runs on every
+  start (idempotent) and is fail-open. Registrar log:
+  `~/.local/state/paseo/paseo-register.log`.
 
   **Auth.** The daemon runs **unsecured** (no `PASEO_PASSWORD`): the sandbox is
   the security boundary and the published port is host loopback only.
