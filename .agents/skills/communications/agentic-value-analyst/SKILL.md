@@ -184,7 +184,7 @@ modeled levers. (See the measurement guidance §5.)
 
 - [`technical-concept-translator`](../technical-concept-translator/SKILL.md)
 - [`software-delivery-explainer`](../software-delivery-explainer/SKILL.md)
-- [`design-artifact`](../../../workflows/design-artifact/SKILL.md)
+- [`design-artifact`](../../../../workflows/design-artifact/SKILL.md)
 
 ## Human Review Checklist
 

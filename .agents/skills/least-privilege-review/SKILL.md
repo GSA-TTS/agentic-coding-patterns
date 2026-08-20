@@ -313,4 +313,4 @@ comment) and adds nothing extra.
 - Boundary partner (trigger/injection surface):
   `agentic-actions-auditor`
 - Governance model for security skills:
-  [`docs/security-skill-governance.md`](../../docs/security-skill-governance.md)
+  [`docs/security-skill-governance.md`](../../../docs/security-skill-governance.md)

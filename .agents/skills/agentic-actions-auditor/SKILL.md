@@ -331,4 +331,4 @@ and no irreversible write without a gate.
 - GitHub Actions security hardening for untrusted input, `pull_request_target`,
   and `GITHUB_TOKEN` permissions (see GitHub's official docs)
 - Governance model for security skills:
-  [`docs/security-skill-governance.md`](../../docs/security-skill-governance.md)
+  [`docs/security-skill-governance.md`](../../../docs/security-skill-governance.md)

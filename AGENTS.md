@@ -129,7 +129,7 @@ output:
   format: markdown
   contract:
     required_sections: ["Summary"]
-    prohibited_content: ["Secrets", "PII", "CUI"]
+    prohibited_content: ["Secrets", "PII", "CUI", "Internal URLs"]
 quality_gates:
   readability_max_grade: 10
   citations_required: false

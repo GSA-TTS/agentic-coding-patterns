@@ -313,4 +313,4 @@ Finding:
 - NIST SP 800-53 IR-4 (Incident Handling), IR-6 (Incident Reporting), AU-6
   (Audit Record Review) — controls this review supports
 - Governance model for security skills:
-  [`docs/security-skill-governance.md`](../../docs/security-skill-governance.md)
+  [`docs/security-skill-governance.md`](../../../docs/security-skill-governance.md)

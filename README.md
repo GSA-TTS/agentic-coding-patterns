@@ -109,8 +109,11 @@ make coverage
    # Search by tag
    python scripts/search_patterns.py --tag security
 
-   # Filter by status
-   python scripts/search_patterns.py --status recommended
+   # Filter by status (e.g. experimental — the default for new patterns).
+   # Note: `recommended` is populated only via the peer-review promotion gate
+   # (see docs/security-skill-promotion-checklist.md); no patterns are promoted yet,
+   # so `--status recommended` currently returns nothing.
+   python scripts/search_patterns.py --status experimental
 
    # Combined filters
    python scripts/search_patterns.py --tag security --tool opencode
