@@ -169,7 +169,7 @@ specific task.
 
 - [`software-delivery-explainer`](../software-delivery-explainer/SKILL.md) — the whole process.
 - [`agentic-value-analyst`](../agentic-value-analyst/SKILL.md) — value framing.
-- [`design-artifact`](../../../workflows/design-artifact/SKILL.md) — render an artifact (`technical-explainer` profile).
+- [`design-artifact`](../../../../workflows/design-artifact/SKILL.md) — render an artifact (`technical-explainer` profile).
 - [`plain-language-review`](../../frontend/plain-language-review/SKILL.md) — readability check.
 
 **How this differs (not a duplicate):** `plain-language-review` *reviews existing

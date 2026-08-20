@@ -334,4 +334,4 @@ All examples are **synthetic** and **conceptual**. Snippets describe a
   Integrity):
   [`SECURITY-CONTROLS.md`](https://github.com/GSA-TTS/agentic-coding-playbook/blob/main/docs/SECURITY-CONTROLS.md)
 - Governance model for security skills:
-  [`docs/security-skill-governance.md`](../../docs/security-skill-governance.md)
+  [`docs/security-skill-governance.md`](../../../docs/security-skill-governance.md)

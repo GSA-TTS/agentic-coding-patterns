@@ -295,4 +295,4 @@ reach an instruction or privilege-granting position.
 - Sibling skills: `secure-code-review` (app-level SQLi/XSS),
   `agentic-actions-auditor` (CI trigger surface)
 - Governance model for security skills:
-  [`docs/security-skill-governance.md`](../../docs/security-skill-governance.md)
+  [`docs/security-skill-governance.md`](../../../docs/security-skill-governance.md)

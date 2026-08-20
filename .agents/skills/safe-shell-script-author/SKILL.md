@@ -309,7 +309,7 @@ credentials from a secret store at runtime — never echoes them.
 
 ## References
 
-- The [clean-script standard](../../docs/clean-script-standard.md) — the
+- The [clean-script standard](../../../docs/clean-script-standard.md) — the
   authoritative required/prohibited checklist this skill emits to (enforced by
   the unsafe-pattern scanner).
 - Secure code generation (never restated here):
@@ -319,4 +319,4 @@ credentials from a secret store at runtime — never echoes them.
 - ShellCheck (static analysis for shell): <https://www.shellcheck.net/>
 - shfmt (shell formatter): <https://github.com/mvdan/sh>
 - Governance model for security skills:
-  [`docs/security-skill-governance.md`](../../docs/security-skill-governance.md)
+  [`docs/security-skill-governance.md`](../../../docs/security-skill-governance.md)

@@ -68,7 +68,7 @@ search:  ## Search patterns (e.g., make search TAG=security)
 	fi
 
 security:  ## Run security audit (pip-audit for CVEs)
-	pip-audit
+	pip-audit --skip-editable
 
 test:  ## Run pytest test suite
 	@if [ -d "scripts/tests" ] && [ "$$(ls -A scripts/tests/*.py 2>/dev/null)" ]; then \
@@ -105,7 +105,7 @@ ci:  ## Full CI check (validate + security + test + pre-commit checks)
 	python integrations/isolation/acq-kits/validate-kits.py --strict
 	@echo ""
 	@echo "==> Running security audit..."
-	pip-audit
+	pip-audit --skip-editable
 	@echo ""
 	@echo "==> Running tests..."
 	@if [ -d "scripts/tests" ] && [ "$$(ls -A scripts/tests/*.py 2>/dev/null)" ]; then \

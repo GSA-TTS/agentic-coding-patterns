@@ -29,7 +29,7 @@
       "pattern": "<[^>]+>"
     },
     {
-      "_comment": "Relative links that climb out of the current file's directory (../../docs, ../../../agentic-coding-playbook, ../other-pattern) are mis-resolved by the checker to a 400. Cross-file existence is validated by `make validate`; cross-repo targets live in a sibling repo not present in CI checkout.",
+      "_comment": "Relative links that climb out of the current file's directory (../../docs, ../../../agentic-coding-playbook, ../other-pattern) are mis-resolved by the checker to a 400, so they are skipped here. NOTE (#338): no validator currently resolves these on-disk, so a wrong relative depth is NOT caught by CI — author `../` links relative to the PHYSICAL path (files under .agents/skills/<skill>/ reach repo-root docs/ via ../../../docs/, not ../../docs/, because the skills/ path is a symlink). Cross-repo targets live in a sibling repo not present in CI checkout.",
       "pattern": "^\\.\\./"
     },
     {

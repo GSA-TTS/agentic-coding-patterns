@@ -191,7 +191,7 @@ review, merge, and deploy as human-held gates.
 
 - [`technical-concept-translator`](../technical-concept-translator/SKILL.md)
 - [`agentic-value-analyst`](../agentic-value-analyst/SKILL.md)
-- [`design-artifact`](../../../workflows/design-artifact/SKILL.md)
+- [`design-artifact`](../../../../workflows/design-artifact/SKILL.md)
 
 ## Human Review Checklist
 
