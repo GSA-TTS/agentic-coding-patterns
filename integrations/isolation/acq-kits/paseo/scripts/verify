@@ -15,7 +15,9 @@
 #      byte-complete over the host port (identity encoding; integrity guard), the
 #      in-guest 0.0.0.0 bind (reachable via create-time publish) over the host port, the
 #      install ran with lifecycle scripts disabled (hardening #2), the respawn
-#      supervisor, the PID-1 hold, daemon self-heal, and the worktree-root pin.
+#      supervisor, the PID-1 hold, the worktree-root pin, daemon self-heal, and
+#      that projects are pre-populated from the mounted host dirs — including that
+#      a read-write extra workspace IS registered and a ":ro" one is SKIPPED.
 #
 #      Preferred driver — RUN_ACQ=1: drive the `acq` CLI. acq translates the
 #      neutral hybrid/v1 spec to an sbx-v2 kit (kit_translate_to_sbx) and applies
@@ -49,8 +51,18 @@ SBX_NAME="paseo-verify-$$"
 # inspect` and, because the guest mounts it at the SAME host path, doesn't match
 # the fixed guest workspace — obscuring where worktrees actually land. Keeping it
 # under the kit dir avoids both. Cleaned up on exit (unless KEEP=1).
-WORK="$(mktemp -d "$KIT_DIR/.verify-workspace.XXXXXX")"
+# NOTE: the workspace directory name must NOT begin with "." — the project
+# registrar (paseo-register-mounts.mjs) deliberately skips mounts whose target
+# basename starts with "." (to exclude backend runtime dirs like /.msb). A
+# dot-leading workspace name would make the PRIMARY mount ineligible and defeat
+# step 10. Use a plain "verify-workspace." prefix.
+WORK="$(mktemp -d "$KIT_DIR/verify-workspace.XXXXXX")"
 CREATE_LOG="$WORK/create.log"
+# Extra workspaces mounted alongside the primary to exercise the registrar's
+# read-write vs read-only distinction in step 10: RO_FIXTURE is mounted ":ro"
+# (must be SKIPPED), RW_FIXTURE is mounted read-write (must be REGISTERED).
+RW_FIXTURE="$(mktemp -d "$KIT_DIR/verify-rw-mount.XXXXXX")"
+RO_FIXTURE="$(mktemp -d "$KIT_DIR/verify-ro-mount.XXXXXX")"
 KEEP="${KEEP:-0}"
 RUN_ACQ="${RUN_ACQ:-0}"
 RUN_SBX="${RUN_SBX:-0}"
@@ -82,7 +94,7 @@ cleanup() {
     acq) acq rm "$SBX_NAME" >/dev/null 2>&1 || true ;;
     *)   sbx rm -f "$SBX_NAME" >/dev/null 2>&1 || true ;;
   esac
-  rm -rf "$WORK" >/dev/null 2>&1 || true
+  rm -rf "$WORK" "$RW_FIXTURE" "$RO_FIXTURE" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM
 
@@ -152,6 +164,19 @@ else
   fi
 fi
 
+# --- Offline check of the mount registrar helper (no sandbox needed). ----------
+info "1c. mount registrar helper parses (offline)"
+REGMOUNTS="$KIT_DIR/files/home/paseo-register-mounts.mjs"
+if ! command -v node >/dev/null 2>&1; then
+  skip "node not on PATH — cannot exercise paseo-register-mounts.mjs"
+elif [ ! -f "$REGMOUNTS" ]; then
+  bad "paseo-register-mounts.mjs missing at $REGMOUNTS"
+elif node --check "$REGMOUNTS" >/dev/null 2>&1; then
+  ok "paseo-register-mounts.mjs parses (node --check)"
+else
+  bad "paseo-register-mounts.mjs failed node --check"
+fi
+
 # --- Select the live driver. -------------------------------------------------
 DRIVER=""
 if [ "$RUN_ACQ" = "1" ]; then
@@ -213,10 +238,17 @@ fi
 info "2. Create a sandbox with the kit"
 if [ "$DRIVER" = "acq" ]; then
   echo "  creating $SBX_NAME via acq (extra kit: $KIT_DIR)..."
+  echo "  extra workspaces: $RW_FIXTURE (rw), $RO_FIXTURE (ro) — exercises step 10"
   # Redirect stdin from /dev/null: `acq create` reads from the terminal (e.g. a
   # confirmation/consent prompt), which otherwise blocks the run until the user
   # hits ENTER. This script is non-interactive, so feed it EOF.
-  if ACQ_EXTRA_KITS="$KIT_DIR" acq create --name "$SBX_NAME" opencode "$WORK" </dev/null >"$CREATE_LOG" 2>&1; then
+  #
+  # Positional workspaces: <primary> [extra ...], with a trailing ":ro" marking a
+  # read-only extra workspace (sbx/acq multi-workspace semantics; each is mounted
+  # at its own absolute host path in the guest). We add one rw and one ro extra so
+  # step 10 can assert the registrar registers the rw mount and SKIPS the ro one.
+  if ACQ_EXTRA_KITS="$KIT_DIR" acq create --name "$SBX_NAME" opencode \
+       "$WORK" "$RW_FIXTURE" "$RO_FIXTURE:ro" </dev/null >"$CREATE_LOG" 2>&1; then
     ok "sandbox created via acq (kit translated + applied)"
   else
     bad "acq create failed (exit $?)"
@@ -266,8 +298,10 @@ else
     echo "        HTTPS-inspected network the Paseo CLI install may fail TLS." >&2
   fi
   echo "  creating $SBX_NAME (workspace $WORK) from translated kit $SBX_KIT_DIR..."
+  echo "  extra workspaces: $RW_FIXTURE (rw), $RO_FIXTURE (ro) — exercises step 10"
   dbg=(); [ "${DEBUG:-0}" = "1" ] && dbg=(-D)
-  if sbx ${dbg[@]+"${dbg[@]}"} create --name "$SBX_NAME" "${create_kits[@]}" opencode "$WORK" </dev/null >"$CREATE_LOG" 2>&1; then
+  if sbx ${dbg[@]+"${dbg[@]}"} create --name "$SBX_NAME" "${create_kits[@]}" opencode \
+       "$WORK" "$RW_FIXTURE" "$RO_FIXTURE:ro" </dev/null >"$CREATE_LOG" 2>&1; then
     ok "sandbox created with --kit"
   else
     bad "sbx create failed (exit $?)"
@@ -628,6 +662,113 @@ else
   else
     bad "daemon did NOT come back after being killed — supervisor:paseo-daemon not respawning"
     in_sbx 'tail -n 20 ~/.local/state/paseo/paseo-daemon.log' | sed 's/^/    | /'
+  fi
+fi
+
+info "10. Projects pre-populated from the mounted host directories"
+# The startup registrar (paseo-register-mounts.mjs) registers each read-write
+# host project directory mounted into the sandbox with the daemon. Assert that
+# EVERY such mount shows up as a project in the daemon's registry, and — using
+# the rw/ro fixtures we mounted at create (step 2) — that a READ-ONLY mount is
+# SKIPPED and a READ-WRITE one is REGISTERED. We derive the expected set the same
+# backend-agnostic way the helper does — from /proc/mounts inside the guest — so
+# the test does not hard-code msb/sbx mount source names.
+#
+# We read the registered projects from the daemon's own API (the same
+# `client.listProjects()` the registrar's client library speaks), NOT from the
+# on-disk projects.json. Scraping the file would couple this test to Paseo's
+# internal storage layout (path, key name, JSON spacing); querying the API is the
+# supported surface and returns each project's root as `projectRootPath`. See the
+# ADR "Consequences" note on this coupling.
+if [ -z "$daemon_up" ]; then
+  skip "project pre-population check (daemon not up)"
+else
+  # Fetch the set of registered project root paths from the daemon API, one per
+  # line. Runs in-guest via the CLI's bundled client (connectToDaemon), resolved
+  # portably from the `paseo` bin — the same connector the registrar uses.
+  list_project_roots() {
+    in_sbx '
+      CLIENT="$(node -e "process.stdout.write(require(\"path\").dirname(require(\"path\").dirname(require(\"fs\").realpathSync(require(\"child_process\").execFileSync(\"sh\",[\"-c\",\"command -v paseo\"]).toString().trim()))))" 2>/dev/null)/dist/utils/client.js"
+      [ -f "$CLIENT" ] || exit 0
+      CLIENT_URL="file://$CLIENT" node --input-type=module -e "
+        const { connectToDaemon } = await import(process.env.CLIENT_URL);
+        const c = await connectToDaemon({});
+        try {
+          const r = await c.listProjects();
+          for (const p of r.projects ?? []) {
+            const root = p.projectRootPath ?? p.rootPath;
+            if (root) process.stdout.write(root + \"\n\");
+          }
+        } finally { await c.close().catch(() => {}); }
+      " 2>/dev/null'
+  }
+
+  rw_base="$(basename "$RW_FIXTURE")"
+  ro_base="$(basename "$RO_FIXTURE")"
+
+  # Expected set: fstype virtiofs, rw, target is a dir, not under a system prefix,
+  # basename not starting with "." (matches the registrar's rule).
+  expected_mounts="$(in_sbx '
+    awk "\$3==\"virtiofs\" && \$4 ~ /^rw/ {print \$2}" /proc/mounts \
+      | while read -r t; do
+          case "$t" in /etc|/etc/*|/run|/run/*|/proc|/proc/*|/sys|/sys/*|/dev|/dev/*|/) continue ;; esac
+          case "$(basename "$t")" in .*) continue ;; esac
+          [ -d "$t" ] && echo "$t"
+        done | sort -u')"
+  if [ -z "$expected_mounts" ]; then
+    bad "no read-write host project mounts found in the guest — the primary + rw fixture should be present"
+    in_sbx 'grep virtiofs /proc/mounts' | sed 's/^/    | /'
+  else
+    # The registrar runs in the background after /api/health; give it a bounded
+    # window to finish, then read the registered projects from the daemon API.
+    reg_deadline=$(( $(date +%s) + 60 ))
+    project_roots=""
+    missing=""
+    while :; do
+      project_roots="$(list_project_roots)"
+      missing=""
+      for m in $expected_mounts; do
+        printf '%s\n' "$project_roots" | grep -qx "$m" || missing="$missing $m"
+      done
+      [ -z "$missing" ] && break
+      [ "$(date +%s)" -ge "$reg_deadline" ] && break
+      sleep "$POLL_INTERVAL"
+    done
+    if [ -z "$missing" ]; then
+      _n="$(printf '%s\n' "$expected_mounts" | grep -c .)"
+      ok "all $_n read-write host project mount(s) registered as projects (via daemon API)"
+    else
+      bad "some host project mounts were not registered:$missing"
+      in_sbx 'tail -n 20 ~/.local/state/paseo/paseo-register.log 2>/dev/null' | sed 's/^/    | /'
+    fi
+
+    # POSITIVE: the read-write fixture must be registered.
+    if printf '%s\n' "$project_roots" | grep -q "${rw_base}\$"; then
+      ok "read-write fixture ($rw_base) registered as a project"
+    else
+      bad "read-write fixture ($rw_base) was NOT registered"
+    fi
+
+    # NEGATIVE: the read-only fixture must be SKIPPED. Only assert this if the
+    # guest actually mounted it read-only (guard against a backend that ignores
+    # :ro — in which case we skip rather than falsely fail).
+    ro_is_ro="$(in_sbx "awk '\$3==\"virtiofs\" && \$4 ~ /^ro/ && \$2 ~ /${ro_base}\$/ {print \"yes\"}' /proc/mounts | head -1")"
+    if [ "$ro_is_ro" = "yes" ]; then
+      if printf '%s\n' "$project_roots" | grep -q "${ro_base}\$"; then
+        bad "read-only fixture ($ro_base) was wrongly registered (should be skipped)"
+      else
+        ok "read-only fixture ($ro_base) correctly skipped"
+      fi
+    else
+      skip "read-only skip assertion (guest did not mount $ro_base read-only; got: '${ro_is_ro:-not virtiofs}')"
+    fi
+
+    # NEGATIVE: the backend runtime dir (/.msb, a dotdir) must NOT be a project.
+    if printf '%s\n' "$project_roots" | grep -qx "/.msb"; then
+      bad "backend runtime dir /.msb was wrongly registered as a project"
+    else
+      ok "backend runtime dir (/.msb) correctly excluded"
+    fi
   fi
 fi
 

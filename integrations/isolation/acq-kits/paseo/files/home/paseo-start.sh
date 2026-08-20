@@ -12,6 +12,12 @@
 # (PID 1), independent of any interactive session — the daemon + UI come up on
 # their own. No `acq exec` / no `acq run` is needed to bring the daemon up.
 #
+# It ALSO pre-populates Paseo projects from the mounted host directories: after
+# the daemon answers /api/health it runs paseo-register-mounts.mjs in the
+# background (fail-open, idempotent) so every read-write host project mount is
+# registered with the daemon and shows up in the web UI without a manual "Add
+# project". See docs/decisions/prepopulate-projects-from-mounts.md.
+#
 # The kit's `opencode` WRAPPER (files/home/.local/bin/opencode) does NOT own the
 # daemon. It is only the entrypoint on the interactive `acq run` path, where it
 # pins Paseo's worktree root under the current project, prints connect info, and
@@ -42,6 +48,11 @@ set -eu
 PASEO_LISTEN="${PASEO_LISTEN:-0.0.0.0:6767}"
 PASEO_PORT="$(printf '%s' "$PASEO_LISTEN" | sed -n 's/.*:\([0-9][0-9]*\)$/\1/p')"
 [ -n "$PASEO_PORT" ] || PASEO_PORT=6767
+
+# The mount-based project registrar (registers each read-write host project
+# directory with the daemon so the web UI pre-lists them). Backend-agnostic; see
+# the file header and docs/decisions/prepopulate-projects-from-mounts.md.
+REGISTER_MOUNTS_SCRIPT="${HOME}/paseo-register-mounts.mjs"
 
 # npm global installs land in this prefix's bin, which is NOT on the startup
 # shell's PATH by default. Put it on PATH up front so a freshly-installed `paseo`
@@ -173,4 +184,30 @@ if ! supervisor_running paseo-daemon; then
       done
     ' "supervisor:paseo-daemon" "$RESTART_DELAY" "$PASEO_LISTEN" \
     >>"$DAEMON_LOG" 2>&1 ) &
+fi
+
+# --- Pre-populate projects from the mounted host directories (every boot). -----
+# Register each read-write host project directory mounted into this sandbox with
+# the daemon so the web UI pre-lists them (no manual "Add project" per repo).
+# This runs on EVERY start (idempotent — the daemon dedups by root path), so a
+# mount added on a later start is picked up too. It is intentionally NOT gated on
+# a marker file. We run it in the BACKGROUND after waiting (bounded) for the
+# daemon to answer /api/health, so it neither blocks the supervisor loop nor
+# races the daemon's first listen. The helper itself is fully fail-open (it never
+# exits non-zero and never throws out of its loop), so this can never break the
+# sandbox; a transient failure just means the UI shows fewer projects until the
+# next start. Log to its own file for diagnosis.
+REGISTER_LOG="$HOME/.local/state/paseo/paseo-register.log"
+if [ -f "$REGISTER_MOUNTS_SCRIPT" ] && command -v node >/dev/null 2>&1; then
+  (
+    _i=0
+    while [ "$_i" -lt 60 ]; do
+      if curl -fsS "http://127.0.0.1:$PASEO_PORT/api/health" >/dev/null 2>&1; then
+        break
+      fi
+      _i=$((_i + 1))
+      sleep 2
+    done
+    node "$REGISTER_MOUNTS_SCRIPT" >>"$REGISTER_LOG" 2>&1 || true
+  ) &
 fi

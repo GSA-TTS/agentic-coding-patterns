@@ -1,4 +1,10 @@
-# Throwaway sandbox workspaces created by scripts/verify (WORK dir). These are
-# only present transiently (removed on exit unless KEEP=1); ignore them so an
-# interrupted run or a KEEP=1 inspection never gets committed.
+# Throwaway sandbox workspaces + mount fixtures created by scripts/verify. These
+# are only present transiently (removed on exit unless KEEP=1); ignore them so an
+# interrupted run or a KEEP=1 inspection never gets committed. The workspace name
+# must NOT start with "." (the project registrar skips dot-leading mount targets),
+# so these use plain "verify-*" prefixes.
+verify-workspace.*/
+verify-rw-mount.*/
+verify-ro-mount.*/
+# Legacy dot-prefixed name from before the registrar's dotdir-skip rule.
 .verify-workspace.*/
