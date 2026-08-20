@@ -111,6 +111,15 @@ means the UI shows fewer projects until the next start.
 - Depends on the CLI internal path `dist/utils/client.js` (`connectToDaemon`);
   the kit pins `@getpaseo/cli` to a specific version, and verify's `node --check`
   plus the live registration assertion catch a break if a future bump moves it.
+- The live verify (`scripts/verify` step 10) checks registration through the
+  daemon's **API** (`client.listProjects()`, the supported surface — the same
+  connector the registrar uses), not by scraping the daemon's on-disk
+  `projects/projects.json`. Reading the file would couple the test to Paseo's
+  internal storage layout (path, key name, JSON serialization), so that a compact
+  reserialization or a renamed key would flip step 10 to a false FAIL that looks
+  like a real regression. The API query shares the same CLI-internal-path
+  dependency already noted above (nothing new), and reuses the portable
+  `paseo`-bin resolution.
 - **Footgun:** the dotdir-skip rule (item 5) also excludes any *workspace* whose
   own directory name begins with `.`. A user who mounts, say, `~/.config/foo` as
   a project would find it silently un-registered. This is an accepted trade-off

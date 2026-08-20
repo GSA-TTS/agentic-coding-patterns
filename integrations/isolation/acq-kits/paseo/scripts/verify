@@ -673,13 +673,36 @@ info "10. Projects pre-populated from the mounted host directories"
 # SKIPPED and a READ-WRITE one is REGISTERED. We derive the expected set the same
 # backend-agnostic way the helper does — from /proc/mounts inside the guest — so
 # the test does not hard-code msb/sbx mount source names.
+#
+# We read the registered projects from the daemon's own API (the same
+# `client.listProjects()` the registrar's client library speaks), NOT from the
+# on-disk projects.json. Scraping the file would couple this test to Paseo's
+# internal storage layout (path, key name, JSON spacing); querying the API is the
+# supported surface and returns each project's root as `projectRootPath`. See the
+# ADR "Consequences" note on this coupling.
 if [ -z "$daemon_up" ]; then
   skip "project pre-population check (daemon not up)"
 else
-  # Resolve the fixtures to their in-guest paths. acq/msb mount each workspace at
-  # its own absolute host path in the guest, but macOS canonicalizes /var ->
-  # /private/var etc., so ask the guest to canonicalize the paths it actually has.
-  # We match by basename (unique per fixture) against the guest's rw virtiofs set.
+  # Fetch the set of registered project root paths from the daemon API, one per
+  # line. Runs in-guest via the CLI's bundled client (connectToDaemon), resolved
+  # portably from the `paseo` bin — the same connector the registrar uses.
+  list_project_roots() {
+    in_sbx '
+      CLIENT="$(node -e "process.stdout.write(require(\"path\").dirname(require(\"path\").dirname(require(\"fs\").realpathSync(require(\"child_process\").execFileSync(\"sh\",[\"-c\",\"command -v paseo\"]).toString().trim()))))" 2>/dev/null)/dist/utils/client.js"
+      [ -f "$CLIENT" ] || exit 0
+      CLIENT_URL="file://$CLIENT" node --input-type=module -e "
+        const { connectToDaemon } = await import(process.env.CLIENT_URL);
+        const c = await connectToDaemon({});
+        try {
+          const r = await c.listProjects();
+          for (const p of r.projects ?? []) {
+            const root = p.projectRootPath ?? p.rootPath;
+            if (root) process.stdout.write(root + \"\n\");
+          }
+        } finally { await c.close().catch(() => {}); }
+      " 2>/dev/null'
+  }
+
   rw_base="$(basename "$RW_FIXTURE")"
   ro_base="$(basename "$RO_FIXTURE")"
 
@@ -697,15 +720,15 @@ else
     in_sbx 'grep virtiofs /proc/mounts' | sed 's/^/    | /'
   else
     # The registrar runs in the background after /api/health; give it a bounded
-    # window to finish before reading the project list.
+    # window to finish, then read the registered projects from the daemon API.
     reg_deadline=$(( $(date +%s) + 60 ))
-    projects_json=""
+    project_roots=""
     missing=""
     while :; do
-      projects_json="$(in_sbx 'cat "${PASEO_HOME:-$HOME/.paseo}/projects/projects.json" 2>/dev/null')"
+      project_roots="$(list_project_roots)"
       missing=""
       for m in $expected_mounts; do
-        printf '%s' "$projects_json" | grep -q "\"rootPath\": \"$m\"" || missing="$missing $m"
+        printf '%s\n' "$project_roots" | grep -qx "$m" || missing="$missing $m"
       done
       [ -z "$missing" ] && break
       [ "$(date +%s)" -ge "$reg_deadline" ] && break
@@ -713,14 +736,14 @@ else
     done
     if [ -z "$missing" ]; then
       _n="$(printf '%s\n' "$expected_mounts" | grep -c .)"
-      ok "all $_n read-write host project mount(s) registered as projects"
+      ok "all $_n read-write host project mount(s) registered as projects (via daemon API)"
     else
       bad "some host project mounts were not registered:$missing"
       in_sbx 'tail -n 20 ~/.local/state/paseo/paseo-register.log 2>/dev/null' | sed 's/^/    | /'
     fi
 
     # POSITIVE: the read-write fixture must be registered.
-    if printf '%s' "$projects_json" | grep -q "\"rootPath\": \"[^\"]*${rw_base}\""; then
+    if printf '%s\n' "$project_roots" | grep -q "${rw_base}\$"; then
       ok "read-write fixture ($rw_base) registered as a project"
     else
       bad "read-write fixture ($rw_base) was NOT registered"
@@ -731,7 +754,7 @@ else
     # :ro — in which case we skip rather than falsely fail).
     ro_is_ro="$(in_sbx "awk '\$3==\"virtiofs\" && \$4 ~ /^ro/ && \$2 ~ /${ro_base}\$/ {print \"yes\"}' /proc/mounts | head -1")"
     if [ "$ro_is_ro" = "yes" ]; then
-      if printf '%s' "$projects_json" | grep -q "\"rootPath\": \"[^\"]*${ro_base}\""; then
+      if printf '%s\n' "$project_roots" | grep -q "${ro_base}\$"; then
         bad "read-only fixture ($ro_base) was wrongly registered (should be skipped)"
       else
         ok "read-only fixture ($ro_base) correctly skipped"
@@ -741,7 +764,7 @@ else
     fi
 
     # NEGATIVE: the backend runtime dir (/.msb, a dotdir) must NOT be a project.
-    if printf '%s' "$projects_json" | grep -q '"rootPath": "/.msb"'; then
+    if printf '%s\n' "$project_roots" | grep -qx "/.msb"; then
       bad "backend runtime dir /.msb was wrongly registered as a project"
     else
       ok "backend runtime dir (/.msb) correctly excluded"
