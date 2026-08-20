@@ -4,18 +4,22 @@
 # Default owner for everything in the repo
 * @GSA-TTS/agentic-coding-team
 
-# Security-sensitive files require additional review
-/.github/workflows/ @GSA-TTS/agentic-coding-team
-/scripts/ @GSA-TTS/agentic-coding-team
-/AGENTS.md @GSA-TTS/agentic-coding-team
-/schemas/ @GSA-TTS/agentic-coding-team
+# Security-sensitive paths require a review from the admins team. This IS a real
+# additional gate: agentic-coding-admins is a narrow subset of the broad
+# agentic-coding-team default owner above, so a change here needs sign-off from a
+# maintainer/admin, not just any team member. Branch protection must require
+# code-owner review for these lines to be enforced.
+/.github/workflows/ @GSA-TTS/agentic-coding-admins
+/scripts/ @GSA-TTS/agentic-coding-admins
+/AGENTS.md @GSA-TTS/agentic-coding-admins
+/schemas/ @GSA-TTS/agentic-coding-admins
 
 # Security skills (categories: [security]) — human-review gate per
-# docs/security-skill-governance.md. Canonical location is .agents/skills/;
-# skills/ is a backward-compat symlink. Both paths are team-owned so a security
-# skill change always routes to a code-owner regardless of which path is edited.
-/.agents/skills/ @GSA-TTS/agentic-coding-team
-/skills/ @GSA-TTS/agentic-coding-team
-/docs/security-skill-governance.md @GSA-TTS/agentic-coding-team
-/docs/security-skill-promotion-checklist.md @GSA-TTS/agentic-coding-team
-/templates/security-skill-intake.md @GSA-TTS/agentic-coding-team
+# docs/security-skill-governance.md. Canonical location is .agents/skills/.
+# (skills/ is a backward-compat SYMLINK to .agents/skills/; a CODEOWNERS entry
+# for the symlink path does not reliably match, so it is intentionally omitted —
+# the canonical .agents/skills/ rule below is what applies.)
+/.agents/skills/ @GSA-TTS/agentic-coding-admins
+/docs/security-skill-governance.md @GSA-TTS/agentic-coding-admins
+/docs/security-skill-promotion-checklist.md @GSA-TTS/agentic-coding-admins
+/templates/security-skill-intake.md @GSA-TTS/agentic-coding-admins
