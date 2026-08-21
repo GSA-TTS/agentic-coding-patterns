@@ -27,6 +27,7 @@ Exit status is non-zero if any kit has ERRORS. With --strict, WARN advisories
 also fail the run. No network, no sandbox — this is the backend-agnostic gate;
 live per-backend verification is each kit's scripts/verify.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -67,6 +68,22 @@ _PORT_NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
 # Valid transport protocols for a published port (mirrors the schema enum).
 _PORT_PROTOCOLS = {"tcp", "udp"}
+
+# Portable byte-size grammar for a volumes[].size (integer or decimal + optional
+# bare k/m/g/t/p unit: "20G", "512m", "1.5G"). Mirrors the schema's size
+# pattern. Deliberately NO b/ib suffixes ("256MB", "2gib"): sbx's
+# units.RAMInBytes accepts them but msb's size parser rejects them (verified on
+# msb 0.6.12), so the neutral grammar is the INTERSECTION of the two. A
+# volumes[].path reuses _SAFE_PATH_RE above — same charset rule as files[].path
+# (#225).
+_VOL_SIZE_RE = re.compile(r"^[0-9]+(\.[0-9]+)?[kKmMgGtTpP]?$")
+
+# A size that parses but is zero ("0", "0G", "0.0"). The schema pattern alone
+# cannot express non-zero cleanly, so the validator rejects it here.
+_VOL_SIZE_ZERO_RE = re.compile(r"^0+(\.0+)?[kKmMgGtTpP]?$")
+
+# Valid backing-storage types for a volume (mirrors the schema enum).
+_VOL_TYPES = {"", "tmpfs"}
 
 # Extensions that indicate a kit-provided payload/script a command expects to
 # have been dropped by files[] (as opposed to a base-image binary, a runtime-
@@ -143,7 +160,7 @@ def validate_kit(kit_dir: Path, schema: dict) -> tuple[list[str], list[str]]:
             )
 
     for section in ("backend_shortcuts", "backend_extras"):
-        for backend in (spec.get(section) or {}):
+        for backend in spec.get(section) or {}:
             if backend not in KNOWN_BACKENDS:
                 errors.append(f"{kit_dir.name}: {section}: unknown backend '{backend}'")
 
@@ -154,13 +171,11 @@ def validate_kit(kit_dir: Path, schema: dict) -> tuple[list[str], list[str]]:
         for name, value in environment.items():
             if not _ENV_NAME_RE.match(str(name)):
                 errors.append(
-                    f"{kit_dir.name}: environment: invalid env var name '{name}' "
-                    f"(must match [A-Za-z_][A-Za-z0-9_]*)"
+                    f"{kit_dir.name}: environment: invalid env var name '{name}' (must match [A-Za-z_][A-Za-z0-9_]*)"
                 )
             if not isinstance(value, str):
                 errors.append(
-                    f"{kit_dir.name}: environment['{name}']: value must be a string "
-                    f"(got {type(value).__name__})"
+                    f"{kit_dir.name}: environment['{name}']: value must be a string (got {type(value).__name__})"
                 )
 
     if not (kit_dir / "README.md").exists():
@@ -181,10 +196,7 @@ def validate_kit(kit_dir: Path, schema: dict) -> tuple[list[str], list[str]]:
         else:
             for i, entry in enumerate(published_ports):
                 if not isinstance(entry, dict):
-                    errors.append(
-                        f"{kit_dir.name}: publishedPorts[{i}] must be an object "
-                        f"(got {type(entry).__name__})"
-                    )
+                    errors.append(f"{kit_dir.name}: publishedPorts[{i}] must be an object (got {type(entry).__name__})")
                     continue
                 # guest: required int in 1..65535.
                 if "guest" not in entry:
@@ -193,14 +205,12 @@ def validate_kit(kit_dir: Path, schema: dict) -> tuple[list[str], list[str]]:
                     guest = entry["guest"]
                     if not _is_valid_port(guest):
                         errors.append(
-                            f"{kit_dir.name}: publishedPorts[{i}].guest must be an integer 1..65535 "
-                            f"(got {guest!r})"
+                            f"{kit_dir.name}: publishedPorts[{i}].guest must be an integer 1..65535 (got {guest!r})"
                         )
                 # host: optional int in 1..65535 (defaults to guest when omitted).
                 if "host" in entry and not _is_valid_port(entry["host"]):
                     errors.append(
-                        f"{kit_dir.name}: publishedPorts[{i}].host must be an integer 1..65535 "
-                        f"(got {entry['host']!r})"
+                        f"{kit_dir.name}: publishedPorts[{i}].host must be an integer 1..65535 (got {entry['host']!r})"
                     )
                 # protocol: optional, tcp|udp (defaults to tcp when omitted).
                 if "protocol" in entry and entry["protocol"] not in _PORT_PROTOCOLS:
@@ -215,14 +225,54 @@ def validate_kit(kit_dir: Path, schema: dict) -> tuple[list[str], list[str]]:
                         f"(allowed: alphanumerics . _ -, 1-64 chars): {entry['name']!r}"
                     )
 
+    # volumes[] field-level checks (quickstart ADR-0022). The jsonschema pass
+    # above already enforces these; we ALSO check them here so a bad value is
+    # reported with a clear per-entry message at the gate. path/size reach a
+    # generated backend spec and an msb create argv (SI-10), so both are
+    # charset-gated; size is REQUIRED (no unsized default).
+    volumes = spec.get("volumes")
+    if volumes is not None:
+        if not isinstance(volumes, list):
+            errors.append(f"{kit_dir.name}: volumes must be an array of volume objects")
+        else:
+            for i, v in enumerate(volumes):
+                if not isinstance(v, dict):
+                    errors.append(f"{kit_dir.name}: volumes[{i}] must be an object")
+                    continue
+                path = v.get("path")
+                if not isinstance(path, str) or not _SAFE_PATH_RE.match(path):
+                    errors.append(
+                        f"{kit_dir.name}: volumes[{i}].path must be an absolute path "
+                        f"in the safe charset [A-Za-z0-9._/-] (got {path!r})"
+                    )
+                size = v.get("size")
+                if not isinstance(size, str) or not _VOL_SIZE_RE.match(size):
+                    errors.append(
+                        f"{kit_dir.name}: volumes[{i}].size is required and must be a "
+                        f'portable byte-size string like "20G" or "512m" — no b/ib '
+                        f"suffix, msb rejects them (got {size!r})"
+                    )
+                elif _VOL_SIZE_ZERO_RE.match(size):
+                    errors.append(f"{kit_dir.name}: volumes[{i}].size must be non-zero (got {size!r})")
+                vtype = v.get("type", "")
+                if vtype not in _VOL_TYPES:
+                    errors.append(f'{kit_dir.name}: volumes[{i}].type must be "" (block) or "tmpfs" (got {vtype!r})')
+            # Duplicate mount paths within one kit are an authoring error: the
+            # "union by path, last wins" composition rule exists for cross-kit
+            # merging, not for silently resolving a same-kit copy-paste typo.
+            vol_paths = [v.get("path") for v in volumes if isinstance(v, dict) and isinstance(v.get("path"), str)]
+            for dup in sorted({p for p in vol_paths if vol_paths.count(p) > 1}):
+                errors.append(
+                    f"{kit_dir.name}: volumes: duplicate path {dup!r} (declared {vol_paths.count(dup)} times)"
+                )
+
     # commands[].background field-level check (ADR-0014, quickstart repo). Marks
     # a startup command that must be detached rather than awaited. Optional; when
     # present it MUST be a boolean (default false when omitted).
     for i, c in enumerate(spec.get("commands", []) or []):
         if isinstance(c, dict) and "background" in c and not isinstance(c["background"], bool):
             errors.append(
-                f"{kit_dir.name}: commands[{i}].background must be a boolean "
-                f"(got {type(c['background']).__name__})"
+                f"{kit_dir.name}: commands[{i}].background must be a boolean (got {type(c['background']).__name__})"
             )
 
     # caps.network.tier field-level check (#300). Optional; when present it MUST
@@ -231,11 +281,7 @@ def validate_kit(kit_dir: Path, schema: dict) -> tuple[list[str], list[str]]:
     # enum already rejects bad values — this adds a clearer, kit-scoped message.
     _net = (spec.get("caps") or {}).get("network") or {}
     if "tier" in _net and _net["tier"] not in ("strict", "balanced", "open"):
-        errors.append(
-            f"{kit_dir.name}: caps.network.tier must be one of "
-            f"strict|balanced|open (got {_net['tier']!r})"
-        )
-
+        errors.append(f"{kit_dir.name}: caps.network.tier must be one of strict|balanced|open (got {_net['tier']!r})")
 
     # a heuristic (a command could legitimately create a script at runtime), so
     # it flags for human eyes rather than failing the gate outright.
