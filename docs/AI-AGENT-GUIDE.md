@@ -692,7 +692,8 @@ output:
   format: markdown                # Output format
   contract:
     required_sections: []         # Must-have sections
-    prohibited_content: []        # Must-not-have content
+    # MUST list >=4 items covering Secrets, PII, CUI, Internal URLs (#340)
+    prohibited_content: ["Secrets", "PII", "CUI", "Internal URLs"]
 quality_gates:
   readability_max_grade: 10       # Flesch-Kincaid level
   citations_required: false       # Require sources?
