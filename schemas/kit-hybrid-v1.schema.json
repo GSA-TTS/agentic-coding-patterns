@@ -178,6 +178,33 @@
         }
       }
     },
+    "volumes": {
+      "type": "array",
+      "description": "Sized guest storage volumes, mounted at sandbox creation BEFORE any exec is possible (so storage layout never races startup commands or early agent use). Each backend maps these to its native primitive (sbx: kit-spec v2 §5.7 volumes, a dedicated block device; msb: a per-sandbox derived named disk volume via --mount-named, or --tmpfs). Creation-time only — in-place kit add cannot attach volumes. Volumes mount UNSEEDED: an empty filesystem shadows any image content at the path, so a kit needing that content ships its own first-boot copy step. Composition: union by path, last wins. There is deliberately no 'mode' field (no msb equivalent; chmod in a startup step instead) — see quickstart ADR-0022.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "size"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "pattern": "^/[A-Za-z0-9._/-]+$",
+            "description": "Absolute mount path inside the sandbox. Safe charset only (alphanumerics . _ / -): the path reaches a generated backend spec and an msb create argv, so it must not carry shell/YAML metacharacters. Same charset rule as files[].path (see #225)."
+          },
+          "size": {
+            "type": "string",
+            "pattern": "^[0-9]+(\\.[0-9]+)?[kKmMgGtTpP]?$",
+            "description": "Volume size as a non-zero, PORTABLE byte-size string (integer or decimal + optional bare k/m/g/t/p unit, e.g. \"20G\", \"512m\", \"1.5G\"). Deliberately NO b/ib suffixes (\"256MB\", \"2gib\"): sbx's units.RAMInBytes accepts them but msb's size parser rejects them (verified on msb 0.6.12), and a neutral size must work on every backend. REQUIRED: the neutral schema does not inherit sbx's unsized-volume default, which changed between sbx releases. Block volumes should be >= ~256m — msb refuses ext4 disk images below 128M (\"image size is too small for ext4 formatting\", verified on msb 0.6.12)."
+          },
+          "type": {
+            "type": "string",
+            "enum": ["", "tmpfs"],
+            "default": "",
+            "description": "Backing storage. \"\" (default) = block-backed volume (dedicated ext4 device); \"tmpfs\" = RAM-backed. Any other value is rejected."
+          }
+        }
+      }
+    },
     "environment": {
       "type": "object",
       "description": "Non-secret guest environment variables to set for the sandbox. A flat map of NAME -> value (both strings). Each backend maps these onto its native env mechanism (sbx: environment.variables; msb: create/exec --env NAME=value). SECRETS MUST NOT go here — use the backend credential/secret path instead (this block is plain, human-readable config that lands in the guest environment and may reach a shell).",

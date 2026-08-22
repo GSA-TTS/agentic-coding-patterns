@@ -206,6 +206,39 @@ The schema addition is additive and backward-compatible (existing kits without
 `environment` are unaffected). See quickstart#202 for the translate-layer
 implementation and ADR-0011 there.
 
+## Amendment: `volumes` vocabulary (quickstart ADR-0022)
+
+The neutral vocabulary gains a top-level `volumes` list — sized guest storage
+volumes, mounted at sandbox creation before any exec is possible. Each backend
+maps them to its native primitive (sbx: kit-spec v2 §5.7 volumes, a dedicated
+block device; msb: a per-sandbox derived named disk volume via `--mount-named`,
+or `--tmpfs`). The quickstart translate layer already consumes the field
+defensively (absence is a no-op), so this schema addition is additive and
+backward-compatible.
+
+Entry shape: `path` (required, absolute, same safe charset as `files[].path` —
+the path reaches a generated backend spec and an msb create argv; duplicate
+paths within one kit are rejected by the validator), `size` (required non-zero
+**portable** byte-size string — integer or decimal plus an optional bare
+`k`/`m`/`g`/`t`/`p` unit, e.g. `20G`, `512m`, `1.5G`. Deliberately no `b`/`ib`
+suffixes (`256MB`, `2gib`): sbx's units.RAMInBytes accepts them but msb's size
+parser rejects them, so the neutral grammar is the intersection of the two.
+Required because sbx's unsized-volume default changed between releases), `type`
+(optional, `""` = block-backed, the default, or `tmpfs` = RAM-backed). There is
+deliberately **no `mode` field** (msb has no equivalent); a kit that needs
+specific permissions chmods in a `startup` step.
+
+Authoring caveats:
+
+- **Volumes mount UNSEEDED on both backends.** An empty filesystem shadows any
+  image content at the mount path; a kit that needs that content ships its own
+  first-boot copy step.
+- **Block volumes should be >= ~256m.** msb refuses ext4 disk images under
+  128M ("image size is too small for ext4 formatting", verified on msb 0.6.12).
+
+See quickstart ADR-0022 for the translate-layer implementation and the
+per-backend mapping rationale.
+
 ## Follow-ups (tracked, not in this change)
 
 - **Part B (quickstart, blocked on this PR's merge SHA):** `msb.sh`,
