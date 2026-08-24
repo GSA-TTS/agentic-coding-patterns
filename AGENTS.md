@@ -1,6 +1,6 @@
 ---
 id: agentic-patterns-agent-rules
-version: "1.1.0"
+version: "1.2.0"
 title: "Agentic Coding Patterns — Agent Behavior Rules"
 description: "Behavioral contract for AI agents contributing to and using community patterns for agentic coding"
 type: agent
@@ -17,7 +17,7 @@ output:
 quality_gates:
   readability_max_grade: 10
   citations_required: false
-last_updated: "2026-06-24"
+last_updated: "2026-08-24"
 ---
 
 # AGENTS.md — Agentic Coding Patterns Repository
@@ -310,6 +310,74 @@ The agent MUST NOT:
 - Make compliance claims without citing source
 - Duplicate standards that belong in playbook
 
+### 9.3 Durable References: Cross-Link Code, Docs, and ADRs — Not Trackers
+
+This repository must remain **self-contained and outlive the issue tracker.**
+GitHub issue/PR numbers, and internal epic labels ("gap A", "gap K", etc.), are
+ephemeral SaaS-dependent tracking artifacts — useful during development, but an
+obstacle to review and long-term maintenance once merged. The durable homes for
+rationale are **ADRs (`docs/decisions/`, and per-kit `docs/decisions/` under
+`integrations/`) and docs**; the durable homes for behavior are the **content
+and its test-cases**.
+
+The agent MUST:
+
+- Keep **content and comments self-contained.** Explain *why* in prose. A note
+  MAY point to an **ADR** (e.g. "see `docs/decisions/0001-integrations-area.md`")
+  — that is the correct durable anchor for a design decision. A note MUST NOT
+  rely on a bare `#NNN` / `quickstart#NNN` / `patterns#NNN` issue-or-PR
+  reference, or an epic "gap X" label, to carry meaning: rewrite it as prose (and
+  cite an ADR if one applies).
+- Point **docs → content and ADRs** (what/where it is, why it was decided), and
+  point **content → docs and ADRs** (the durable rationale). Prefer docs pointing
+  at content over the reverse, except to cite an ADR.
+- Before opening a PR, **strip ephemeral tracker references from any pattern,
+  comment, or doc it added or touched.** Durable, cross-repo-relevant facts (a
+  pinned release SHA, an upstream bug's observable behavior) belong in prose/ADRs,
+  not as a bare tracker number.
+
+This rule governs **ephemeral tracker references only** (issue/PR numbers, epic
+"gap X" labels). It does **NOT** apply to **NIST SP 800-53 control tags** — a
+`> **Control Mapping:**` footer or `<!-- NIST SP 800-53: ... -->` comment is a
+durable, standards-anchored reference and is fine to keep where a pattern or
+skill maps to a control; never strip one as an "in-code reference."
+
+The agent MAY leave issue/PR references in **ephemeral, non-durable contexts**:
+commit messages, PR descriptions, `CHANGELOG.md` (release automation), and an
+ADR's own *Links / tracking* section (where issue references are acceptable,
+though prose or ADR cross-links are preferred). Test **names** that already encode
+a regression's id MAY keep it as a stable identifier.
+
+### 9.4 Fully Qualify Issue/PR References in Anything Durable
+
+Shorthand like `#233` is **fine when talking to a human in this session** — but
+it MUST NOT land, unqualified, in anything durable or auto-linked (commit
+messages, PR titles/descriptions, review comments, tracking issues, ADRs). Once
+auto-linked, a bare `#233` resolves **relative to whatever repository renders
+it** — so a `#233` written for `GSA-TTS/agentic-coding-patterns` can silently
+point at `GSA-TTS/agentic-coding-quickstart#233` (a different thing) when quoted
+or cross-posted.
+
+Therefore, in any durable or cross-posted artifact, the agent MUST write
+issue/PR references **fully qualified**:
+
+- Cross-repo, always safe: `GSA-TTS/agentic-coding-patterns#NNN` (or a full URL);
+  the same form applies to sibling repos — `GSA-TTS/agentic-coding-quickstart#NNN`,
+  `GSA-TTS/agentic-coding-playbook#NNN`. Use this form in every commit message, PR
+  body, review comment, and tracking issue — including when referring to the
+  current repo — because these are read and auto-linked outside their origin.
+- A bare `#NNN` is acceptable **only** within the same repository's PR/issue body
+  where the target is unambiguous by construction, and even then the qualified
+  form is preferred. When in doubt, fully qualify.
+
+This does not change the durable-reference rule above (content and docs prose
+still avoid tracker numbers entirely, qualified or not); it governs the
+*ephemeral* contexts where a reference is allowed at all.
+
+> Rationale: this is enforcement of the existing "docs-as-code" / self-contained
+> repository discipline. Doing this continuously means no later "de-reference" or
+> "re-qualify" cleanup pass is ever needed.
+
 ---
 
 ## 10. Testing Patterns
@@ -447,6 +515,7 @@ make clean              # Remove generated files
 
 | Date | Version | Change |
 |------|---------|--------|
+| 2026-08-24 | 1.2.0 | Add §9.3 Durable References (cross-link code/docs/ADRs, not trackers) and §9.4 Fully Qualify Issue/PR References; ported from quickstart at maintainer request |
 | 2026-06-24 | 1.1.0 | Add §4.1 categories taxonomy, §4.2 security-governance fields, §4.3 public-source no-copy rule; reference playbook authority |
 | 2026-05-20 | 0.1.0 | Initial release for patterns repository |
 
