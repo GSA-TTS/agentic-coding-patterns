@@ -159,8 +159,8 @@ commands:
       - sh
       - -c
       - |
-        OPENCHAMBER_REF="v1.9.10" \
-        OPENCHAMBER_INSTALL_SHA256="aa268c96ddc6d7d53fc54d2e5c2312e689493ecef6ba4f69730a93d50cf33287" \
+        OPENCHAMBER_REF="v1.20.0" \
+        OPENCHAMBER_INSTALL_SHA256="964df00e6b163fefdc8ae0a10608a764bbb326a3d076d1d2fd9af65dbe4e1b34" \
           sh /home/agent/openchamber-start.sh &
 
 # Neutral published ports (schema hybrid/v1, added in #276). Publish the two

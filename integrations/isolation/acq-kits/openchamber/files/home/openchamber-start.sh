@@ -98,8 +98,8 @@ if ! command -v openchamber >/dev/null 2>&1; then
   # and the fetch path may be MITM-inspected, so a tag alone is not enough. On
   # mismatch, skip install (UI unavailable) rather than pipe unverified bytes to
   # bash.
-  _ref="${OPENCHAMBER_REF:-v1.9.10}"
-  _want_sha="${OPENCHAMBER_INSTALL_SHA256:-aa268c96ddc6d7d53fc54d2e5c2312e689493ecef6ba4f69730a93d50cf33287}"
+  _ref="${OPENCHAMBER_REF:-v1.20.0}"
+  _want_sha="${OPENCHAMBER_INSTALL_SHA256:-964df00e6b163fefdc8ae0a10608a764bbb326a3d076d1d2fd9af65dbe4e1b34}"
   _installer="$HOME/.local/state/openchamber/install.sh"
   if curl -fsSL "https://raw.githubusercontent.com/openchamber/openchamber/$_ref/scripts/install.sh" \
        -o "$_installer" 2>/tmp/openchamber-install.log; then
