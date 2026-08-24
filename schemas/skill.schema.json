@@ -142,7 +142,7 @@
             "prohibited_content": {
               "type": "array",
               "items": {"type": "string"},
-              "minItems": 1
+              "minItems": 4
             },
             "max_length": {
               "type": "integer",

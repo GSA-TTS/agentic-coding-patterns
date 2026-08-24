@@ -182,6 +182,43 @@ def find_pattern_files(root: Path) -> list[Path]:
     return sorted(patterns)
 
 
+# The four mandated prohibited_content categories, each matched by a
+# substring so richer phrasings satisfy it ("Real PII" covers PII, "Internal
+# Hostnames" covers the internal-URL category). The CONTRIBUTING MUST and
+# AGENTS.md §5 name these four as the minimum; the schema enforces the >=4 count,
+# this enforces they are the RIGHT four categories.
+_PROHIBITED_CONTENT_CATEGORIES: dict[str, tuple[str, ...]] = {
+    "secrets": ("secret", "credential", "token", "password", "api key"),
+    "PII": ("pii",),
+    "CUI": ("cui",),
+    "internal URLs": ("internal url", "internal hostname", "internal host"),
+}
+
+
+def check_prohibited_content_coverage(frontmatter: dict[str, Any]) -> list[str]:
+    """Ensure output.contract.prohibited_content covers the four mandated
+    categories. Case-insensitive substring match, so intentional richer
+    phrasings ("Real PII", "Real CUI", "Internal Hostnames") count. No-op if the
+    pattern has no output contract."""
+    output = frontmatter.get("output")
+    contract = output.get("contract") if isinstance(output, dict) else None
+    if not isinstance(contract, dict):
+        return []
+    items = contract.get("prohibited_content")
+    if not isinstance(items, list):
+        return []
+    haystack = " ".join(str(i).lower() for i in items)
+    missing = [
+        label for label, needles in _PROHIBITED_CONTENT_CATEGORIES.items() if not any(n in haystack for n in needles)
+    ]
+    if missing:
+        return [
+            "output.contract.prohibited_content must cover the four mandated categories "
+            f"(secrets, PII, CUI, internal URLs); missing: {', '.join(missing)}"
+        ]
+    return []
+
+
 def validate_file(
     file_path: Path, schema: dict[str, Any], taxonomy: dict[str, set[str]] | None = None
 ) -> tuple[bool, list[str], list[str]]:
@@ -225,6 +262,15 @@ def validate_file(
                 ["output.format is 'multi' but output.artifacts is empty (list at least one produced file)"],
                 gov_warnings,
             )
+
+    # prohibited_content coverage: the schema enforces the COUNT (minItems
+    # 4); this enforces that the four mandated CATEGORIES are actually covered —
+    # secrets, PII, CUI, and internal URLs — so a skill can't satisfy the count
+    # with four unrelated items. Matches the richer phrasings in use ("Real PII",
+    # "Real CUI", "Internal Hostnames") rather than requiring literal bare strings.
+    pc_errors = check_prohibited_content_coverage(frontmatter)
+    if pc_errors:
+        return False, pc_errors, gov_warnings
 
     return True, [], gov_warnings
 
