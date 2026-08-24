@@ -692,7 +692,7 @@ output:
   format: markdown                # Output format
   contract:
     required_sections: []         # Must-have sections
-    # MUST list >=4 items covering Secrets, PII, CUI, Internal URLs (#340)
+    # MUST list >=4 items covering Secrets, PII, CUI, Internal URLs
     prohibited_content: ["Secrets", "PII", "CUI", "Internal URLs"]
 quality_gates:
   readability_max_grade: 10       # Flesch-Kincaid level

@@ -182,7 +182,7 @@ def find_pattern_files(root: Path) -> list[Path]:
     return sorted(patterns)
 
 
-# The four mandated prohibited_content categories (#340), each matched by a
+# The four mandated prohibited_content categories, each matched by a
 # substring so richer phrasings satisfy it ("Real PII" covers PII, "Internal
 # Hostnames" covers the internal-URL category). The CONTRIBUTING MUST and
 # AGENTS.md §5 name these four as the minimum; the schema enforces the >=4 count,
@@ -197,7 +197,7 @@ _PROHIBITED_CONTENT_CATEGORIES: dict[str, tuple[str, ...]] = {
 
 def check_prohibited_content_coverage(frontmatter: dict[str, Any]) -> list[str]:
     """Ensure output.contract.prohibited_content covers the four mandated
-    categories (#340). Case-insensitive substring match, so intentional richer
+    categories. Case-insensitive substring match, so intentional richer
     phrasings ("Real PII", "Real CUI", "Internal Hostnames") count. No-op if the
     pattern has no output contract."""
     output = frontmatter.get("output")
@@ -214,7 +214,7 @@ def check_prohibited_content_coverage(frontmatter: dict[str, Any]) -> list[str]:
     if missing:
         return [
             "output.contract.prohibited_content must cover the four mandated categories "
-            f"(secrets, PII, CUI, internal URLs); missing: {', '.join(missing)} (#340)"
+            f"(secrets, PII, CUI, internal URLs); missing: {', '.join(missing)}"
         ]
     return []
 
@@ -263,7 +263,7 @@ def validate_file(
                 gov_warnings,
             )
 
-    # prohibited_content coverage (#340): the schema enforces the COUNT (minItems
+    # prohibited_content coverage: the schema enforces the COUNT (minItems
     # 4); this enforces that the four mandated CATEGORIES are actually covered —
     # secrets, PII, CUI, and internal URLs — so a skill can't satisfy the count
     # with four unrelated items. Matches the richer phrasings in use ("Real PII",

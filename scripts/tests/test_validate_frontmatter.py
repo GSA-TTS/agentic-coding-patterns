@@ -593,7 +593,7 @@ class TestSecurityGateUnaffectedByRouting:
 
 
 class TestProhibitedContentCoverage:
-    """#340: prohibited_content must cover the 4 mandated categories (schema
+    """prohibited_content must cover the 4 mandated categories (schema
     enforces the >=4 count; this enforces the right categories)."""
 
     def _fm(self, items):
