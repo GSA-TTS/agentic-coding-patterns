@@ -1,0 +1,235 @@
+{
+  "schemaVersion": "usai-model-catalog/v1",
+  "generatedBy": "build-catalog.mjs (generated — do not hand-edit)",
+  "sources": {
+    "bootstrappedFrom": "integrations/isolation/acq-kits/usai-provider/files/home/usai-config/opencode.jsonc"
+  },
+  "gateway": {
+    "host": "api.gsa.usai.gov",
+    "baseUrl": "https://api.gsa.usai.gov/api/v1",
+    "api": "openai-completions",
+    "apiKeyEnv": "USAI_API_KEY"
+  },
+  "vendors": [
+    {
+      "key": "anthropic",
+      "label": "Anthropic",
+      "order": 1,
+      "usaiBackend": "amazon-bedrock"
+    },
+    {
+      "key": "openai",
+      "label": "OpenAI",
+      "order": 2,
+      "usaiBackend": "azure"
+    },
+    {
+      "key": "google",
+      "label": "Google",
+      "order": 3,
+      "usaiBackend": "google-vertex"
+    },
+    {
+      "key": "meta",
+      "label": "Meta",
+      "order": 4,
+      "usaiBackend": "amazon-bedrock"
+    },
+    {
+      "key": "cohere",
+      "label": "Cohere",
+      "order": 5,
+      "usaiBackend": "cohere"
+    }
+  ],
+  "models": [
+    {
+      "id": "claude_4_8_opus",
+      "vendor": "anthropic",
+      "name": "Claude 4.8 Opus",
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
+      "cost": {
+        "input": 5,
+        "output": 25,
+        "cacheRead": 0.5,
+        "cacheWrite": 6.25
+      }
+    },
+    {
+      "id": "claude_4_7_opus",
+      "vendor": "anthropic",
+      "name": "Claude 4.7 Opus",
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
+      "cost": {
+        "input": 5,
+        "output": 25,
+        "cacheRead": 0.5,
+        "cacheWrite": 6.25
+      }
+    },
+    {
+      "id": "claude_4_6_sonnet",
+      "vendor": "anthropic",
+      "name": "Claude 4.6 Sonnet",
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "cost": {
+        "input": 3,
+        "output": 15,
+        "cacheRead": 0.3,
+        "cacheWrite": 3.75
+      }
+    },
+    {
+      "id": "claude_4_5_haiku",
+      "vendor": "anthropic",
+      "name": "Claude 4.5 Haiku",
+      "contextWindow": 200000,
+      "maxOutputTokens": 64000,
+      "cost": {
+        "input": 1,
+        "output": 5,
+        "cacheRead": 0.1,
+        "cacheWrite": 1.25
+      }
+    },
+    {
+      "id": "claude_4_5_opus",
+      "vendor": "anthropic",
+      "name": "Claude 4.5 Opus",
+      "contextWindow": 200000,
+      "maxOutputTokens": 64000,
+      "cost": {
+        "input": 5,
+        "output": 25,
+        "cacheRead": 0.5,
+        "cacheWrite": 6.25
+      }
+    },
+    {
+      "id": "claude_4_5_sonnet",
+      "vendor": "anthropic",
+      "name": "Claude 4.5 Sonnet",
+      "contextWindow": 200000,
+      "maxOutputTokens": 64000,
+      "cost": {
+        "input": 3,
+        "output": 15,
+        "cacheRead": 0.3,
+        "cacheWrite": 3.75
+      }
+    },
+    {
+      "id": "gpt-5.5-latest-guardrails-defaultv2",
+      "vendor": "openai",
+      "name": "GPT 5.5 Latest Guardrails Defaultv2",
+      "contextWindow": 1050000,
+      "maxOutputTokens": 128000,
+      "cost": {
+        "input": 5,
+        "output": 30,
+        "cacheRead": 0.5
+      },
+      "costAbove200kContext": {
+        "input": 10,
+        "output": 45,
+        "cacheRead": 1
+      }
+    },
+    {
+      "id": "gpt-5.4-latest-guardrails-defaultv2",
+      "vendor": "openai",
+      "name": "GPT-5.4 Latest — Guardrails Default v2",
+      "contextWindow": 1050000,
+      "maxOutputTokens": 128000,
+      "cost": {
+        "input": 2.5,
+        "output": 15,
+        "cacheRead": 0.25
+      },
+      "costAbove200kContext": {
+        "input": 5,
+        "output": 22.5,
+        "cacheRead": 0.5
+      }
+    },
+    {
+      "id": "gpt-5.2-latest-guardrails-defaultv2",
+      "vendor": "openai",
+      "name": "GPT-5.2 Latest — Guardrails Default v2",
+      "contextWindow": 400000,
+      "maxOutputTokens": 128000,
+      "cost": {
+        "input": 1.75,
+        "output": 14,
+        "cacheRead": 0.125
+      }
+    },
+    {
+      "id": "gemini-2.5-flash",
+      "vendor": "google",
+      "name": "Gemini 2.5 Flash",
+      "contextWindow": 1048576,
+      "maxOutputTokens": 65536,
+      "cost": {
+        "input": 0.3,
+        "output": 2.5,
+        "cacheRead": 0.075,
+        "cacheWrite": 0.383
+      }
+    },
+    {
+      "id": "gemini-2.5-flash-lite",
+      "vendor": "google",
+      "name": "Gemini 2.5 Flash Lite",
+      "contextWindow": 1048576,
+      "maxOutputTokens": 65536,
+      "cost": {
+        "input": 0.1,
+        "output": 0.4,
+        "cacheRead": 0.01
+      }
+    },
+    {
+      "id": "gemini-2.5-pro",
+      "vendor": "google",
+      "name": "Gemini 2.5 Pro",
+      "contextWindow": 1048576,
+      "maxOutputTokens": 65536,
+      "cost": {
+        "input": 1.25,
+        "output": 10,
+        "cacheRead": 0.125
+      },
+      "costAbove200kContext": {
+        "input": 2.5,
+        "output": 15,
+        "cacheRead": 0.25
+      }
+    },
+    {
+      "id": "llama_4_maverick",
+      "vendor": "meta",
+      "name": "Llama 4 Maverick",
+      "contextWindow": 1000000,
+      "maxOutputTokens": 16384,
+      "cost": {
+        "input": 0.24,
+        "output": 0.97
+      }
+    },
+    {
+      "id": "cohere_english_v3",
+      "vendor": "cohere",
+      "name": "Cohere English v3",
+      "contextWindow": 128000,
+      "maxOutputTokens": 4000,
+      "cost": {
+        "input": 0.0375,
+        "output": 0.15
+      }
+    }
+  ]
+}
