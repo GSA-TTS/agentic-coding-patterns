@@ -337,6 +337,19 @@ done
 
 if [ -n "$installed" ]; then
   ok "OpenChamber CLI installed by the startup step"
+  # Assert the install landed under the AGENT-OWNED per-user prefix
+  # ($HOME/.npm-global), i.e. ran UNPRIVILEGED — not the system/root prefix.
+  # This locks in the drop-sudo hardening: a silent regression back to a
+  # root install (or a system-prefix install) fails here instead of passing.
+  oc_bin="$(in_sbx 'command -v openchamber 2>/dev/null')"
+  case "$oc_bin" in
+    "$HOME/.npm-global/bin/openchamber"|*/.npm-global/bin/openchamber)
+      ok "openchamber installed under the unprivileged per-user prefix ($oc_bin)" ;;
+    "")
+      warn "could not resolve the openchamber path to confirm the unprivileged prefix" ;;
+    *)
+      bad "openchamber resolved to '$oc_bin', not \$HOME/.npm-global/bin — install may have used a root/system prefix (drop-sudo hardening regressed)" ;;
+  esac
 elif [ -n "$installed_off_path" ]; then
   bad "openchamber installed but not on the probe PATH — npm prefix mismatch"
   in_sbx 'echo "npm prefix -g => $(npm prefix -g 2>&1)"; ls -la "$(npm prefix -g 2>/dev/null)/bin" 2>/dev/null | grep -i openchamber' | sed 's/^/    | /'
