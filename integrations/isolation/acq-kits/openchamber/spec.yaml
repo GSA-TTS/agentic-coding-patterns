@@ -223,6 +223,20 @@ agentContext: |
   The shared server is **unsecured** (no password): the sandbox is the security
   boundary and the published ports are host loopback only.
 
+  IN-GUEST BIND IS 0.0.0.0 (both :3000 and :4096), NOT 127.0.0.1 — deliberately,
+  matching the paseo kit. A loopback-only in-guest bind is a defense-in-depth win
+  in the abstract, but it is NOT reachable through acq's create-time port publish
+  on the msb backend: msb's `-p HOST:GUEST` binds a HOST loopback listener while
+  the publisher dials the sandbox's GUEST NETWORK IP, not guest 127.0.0.1. So a
+  127.0.0.1-only service answers `acq exec <sbx> -- curl http://127.0.0.1:<port>`
+  from inside the guest yet the published host port returns "Empty reply from
+  server" (browser ERR_EMPTY_RESPONSE). This was verified empirically (a guest
+  loopback listener is unreachable via the published host port) and is documented
+  for paseo's single daemon and in quickstart's KNOWN_FAILURE_MODES. Binding
+  0.0.0.0 is required for the host-published loopback port to reach the service;
+  the sandbox (ephemeral microVM, deny-default egress, no host FS) remains the
+  security boundary, and the published ports are host-loopback-only.
+
   Logs: `/tmp/openchamber.log` (OpenChamber) and
   `~/.local/state/openchamber/opencode-serve.log` (the shared server). Both run
   under respawn loops (`supervisor:opencode-serve`, `supervisor:openchamber`), so
