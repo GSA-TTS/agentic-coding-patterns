@@ -52,8 +52,8 @@
   "replacementPatterns": [],
   "httpHeaders": [
     {
-      "_comment": "Check github.com links AUTHENTICATED so CI uses the 5000/hr token rate limit instead of the ~60/hr anonymous limit that caused 0/503 throttling false-positives (#316). The CI step substitutes $MLC_GITHUB_TOKEN (the read-only workflow GITHUB_TOKEN) into this file before running; locally, with the env var unset, it becomes an inert 'Bearer ' header (github still answers anonymously).",
-      "urls": ["https://github.com", "https://api.github.com", "https://raw.githubusercontent.com"],
+      "_comment": "Check github.com links AUTHENTICATED so CI uses the 5000/hr token rate limit instead of the ~60/hr anonymous limit that caused 0/503 throttling false-positives (#316). The CI step substitutes $MLC_GITHUB_TOKEN (the read-only workflow GITHUB_TOKEN) into this file before running; locally, with the env var unset, it becomes an inert 'Bearer ' header (github still answers anonymously). SECURITY: the URLs MUST end in '/' — markdown-link-check matches by plain string prefix (link.startsWith(url)), with no host-boundary check, so a bare 'https://github.com' also matches 'https://github.com.evil.example/...' and would send the token to an attacker-controlled host reachable via a PR-added link. The trailing slash confines the match to the real host.",
+      "urls": ["https://github.com/", "https://api.github.com/", "https://raw.githubusercontent.com/"],
       "headers": { "Authorization": "Bearer ${MLC_GITHUB_TOKEN}" }
     }
   ],
