@@ -36,10 +36,12 @@ validate:  ## Run all validators (frontmatter + sensitive terms)
 validate-kits:  ## Validate neutral acq-kits specs against the hybrid/v1 schema (strict: warnings fail)
 	python integrations/isolation/acq-kits/validate-kits.py --strict
 
-test-kits:  ## Run the acq-kits node test suites (usai-provider generator + merge)
+test-kits:  ## Run the acq-kits node test suites (usai-provider generator + merge) + providers/usai emitters
 	@if command -v node >/dev/null 2>&1; then \
 		echo "==> usai-provider kit tests"; \
 		cd integrations/isolation/acq-kits/usai-provider && node --test 'tests/**/*.test.mjs'; \
+		echo "==> providers/usai catalog + emitter tests"; \
+		cd "$(CURDIR)/integrations/providers/usai" && node --test 'tests/**/*.test.mjs'; \
 	else \
 		echo "⚠️  node not installed — skipping acq-kits node tests"; \
 	fi
