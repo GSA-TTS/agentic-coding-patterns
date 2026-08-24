@@ -1,0 +1,11 @@
+{
+  "providers": {
+    "usai": {
+      "baseUrl": "https://api.gsa.usai.gov/api/v1",
+      "api": "openai-completions",
+      "apiKey": "USAI_API_KEY",
+      "authHeader": true,
+      "models": []
+    }
+  }
+}
