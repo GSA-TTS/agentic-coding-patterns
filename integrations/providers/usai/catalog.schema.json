@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "usai-model-catalog/v1",
+  "title": "USAi Model Catalog",
+  "description": "Harness-neutral catalog of USAi gateway models. Generated from live feeds by build-catalog.mjs; consumed by per-harness emitters. Do not hand-edit the generated catalog.json.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "gateway", "vendors", "models"],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "usai-model-catalog/v1",
+      "description": "Schema identifier and version for this catalog document."
+    },
+    "generatedBy": {
+      "type": "string",
+      "description": "Path/marker signaling this document is derived. Do not hand-edit."
+    },
+    "sources": {
+      "type": "object",
+      "description": "Provenance: free-form record of where fields were derived from (e.g. modelsList, enrichment, bootstrappedFrom).",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "gateway": {
+      "type": "object",
+      "description": "USAi gateway connection metadata.",
+      "additionalProperties": false,
+      "required": ["host", "baseUrl", "api", "apiKeyEnv"],
+      "properties": {
+        "host": {
+          "type": "string",
+          "description": "Gateway hostname."
+        },
+        "baseUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "Full base URL for the OpenAI-compatible completions API."
+        },
+        "api": {
+          "type": "string",
+          "const": "openai-completions",
+          "description": "API surface. USAi speaks the OpenAI completions protocol."
+        },
+        "apiKeyEnv": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "description": "NAME of the environment variable holding the API key. Never a secret value."
+        }
+      }
+    },
+    "vendors": {
+      "type": "array",
+      "description": "Model vendors (Anthropic, OpenAI, Google, ...), for grouping and display order.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "label", "order", "usaiBackend"],
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Stable vendor key referenced by models[].vendor."
+          },
+          "label": {
+            "type": "string",
+            "description": "Human-readable vendor label."
+          },
+          "order": {
+            "type": "integer",
+            "description": "Display/sort order for the vendor group."
+          },
+          "usaiBackend": {
+            "type": "string",
+            "description": "USAi backend identifier for this vendor."
+          }
+        }
+      }
+    },
+    "models": {
+      "type": "array",
+      "description": "Model definitions available through the USAi gateway.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "vendor", "name"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Model identifier as used by the gateway (e.g. claude_4_8_opus)."
+          },
+          "vendor": {
+            "type": "string",
+            "description": "Vendor key referencing vendors[].key."
+          },
+          "name": {
+            "type": "string",
+            "description": "Human-readable display name."
+          },
+          "contextWindow": {
+            "type": "integer",
+            "description": "Maximum input context window in tokens (opencode limit.context)."
+          },
+          "maxOutputTokens": {
+            "type": "integer",
+            "description": "Maximum output tokens per response (opencode limit.output)."
+          },
+          "cost": {
+            "$ref": "#/$defs/cost",
+            "description": "Base per-token pricing."
+          },
+          "costAbove200kContext": {
+            "$ref": "#/$defs/cost",
+            "description": "Tiered pricing applied above 200k context (opencode cost.context_over_200k)."
+          },
+          "reasoning": {
+            "type": "boolean",
+            "description": "Whether the model supports reasoning/extended thinking. Not populated yet."
+          },
+          "inputModalities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Supported input modalities (e.g. text, image). Not populated yet."
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "cost": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Per-million-token pricing. All fields optional.",
+      "properties": {
+        "input": {
+          "type": "number",
+          "description": "Cost per input token (opencode cost.input)."
+        },
+        "output": {
+          "type": "number",
+          "description": "Cost per output token (opencode cost.output)."
+        },
+        "cacheRead": {
+          "type": "number",
+          "description": "Cost per cached-read token (opencode cost.cache_read)."
+        },
+        "cacheWrite": {
+          "type": "number",
+          "description": "Cost per cache-write token (opencode cost.cache_write)."
+        }
+      }
+    }
+  }
+}
