@@ -280,7 +280,7 @@ changelog:
 - `requires.anchors`: Dependencies (usually empty)
 - `output.format`: Output format (usually "markdown")
 - `output.contract.required_sections`: Must-have sections
-- `output.contract.prohibited_content`: Must NOT include (min: Secrets, PII, CUI, Internal URLs)
+- `output.contract.prohibited_content`: MUST list at least 4 items covering the four mandated categories — **Secrets, PII, CUI, Internal URLs** (richer phrasings like "Real PII" satisfy a category). Enforced by `schemas/skill.schema.json` (`minItems: 4`) + the validator's category-coverage check.
 - `quality_gates.readability_max_grade`: Max reading level (usually 10)
 - `quality_gates.citations_required`: Require citations? (usually false)
 

@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from scripts.validate_frontmatter import (
+    check_prohibited_content_coverage,
     check_routing_taxonomy,
     check_security_governance,
     extract_frontmatter,
@@ -337,7 +338,7 @@ class TestRealSchemaStrictness:
                 "format": "markdown",
                 "contract": {
                     "required_sections": ["Summary"],
-                    "prohibited_content": ["Secrets"],
+                    "prohibited_content": ["Secrets", "PII", "CUI", "Internal URLs"],
                 },
             },
             "quality_gates": {"readability_max_grade": 10, "citations_required": False},
@@ -459,7 +460,10 @@ class TestRealSchemaStrictness:
                 {"role": "source", "media_type": "text/html", "extension": "html"},
                 {"role": "export", "media_type": "application/pdf", "extension": "pdf"},
             ],
-            "contract": {"required_sections": ["Summary"], "prohibited_content": ["Secrets"]},
+            "contract": {
+                "required_sections": ["Summary"],
+                "prohibited_content": ["Secrets", "PII", "CUI", "Internal URLs"],
+            },
         }
         jsonschema.validate(instance=fm, schema=real_schema)
 
@@ -478,7 +482,10 @@ class TestRealSchemaStrictness:
         fm["output"] = {
             "format": "multi",
             "artifacts": [{"role": "bogus", "media_type": "text/html"}],
-            "contract": {"required_sections": ["Summary"], "prohibited_content": ["Secrets"]},
+            "contract": {
+                "required_sections": ["Summary"],
+                "prohibited_content": ["Secrets", "PII", "CUI", "Internal URLs"],
+            },
         }
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate(instance=fm, schema=real_schema)
@@ -509,7 +516,7 @@ class TestRealSchemaStrictness:
               format: multi
               contract:
                 required_sections: ["Summary"]
-                prohibited_content: ["Secrets"]
+                prohibited_content: ["Secrets", "PII", "CUI", "Internal URLs"]
             quality_gates: {readability_max_grade: 10, citations_required: false}
             ---
             # body
@@ -583,3 +590,35 @@ class TestSecurityGateUnaffectedByRouting:
         }
         errors, _ = check_security_governance(Path("skills/x/SKILL.md"), fm)
         assert errors == []
+
+
+class TestProhibitedContentCoverage:
+    """prohibited_content must cover the 4 mandated categories (schema
+    enforces the >=4 count; this enforces the right categories)."""
+
+    def _fm(self, items):
+        return {"output": {"format": "markdown", "contract": {"prohibited_content": items}}}
+
+    def test_canonical_four_pass(self):
+        errs = check_prohibited_content_coverage(self._fm(["Secrets", "PII", "CUI", "Internal URLs"]))
+        assert errs == []
+
+    def test_richer_phrasings_pass(self):
+        # The real corpus uses "Real PII"/"Real CUI"/"Internal Hostnames".
+        errs = check_prohibited_content_coverage(
+            self._fm(["Real Secrets", "Real PII", "Real CUI", "Internal Hostnames", "Exploit Code"])
+        )
+        assert errs == []
+
+    def test_four_unrelated_items_fail_coverage(self):
+        # SAFETY: four items that DON'T cover the categories must be rejected —
+        # a skill can't satisfy the count with unrelated strings.
+        errs = check_prohibited_content_coverage(self._fm(["A", "B", "C", "D"]))
+        assert errs and "PII" in errs[0] and "CUI" in errs[0]
+
+    def test_missing_one_category_fails(self):
+        errs = check_prohibited_content_coverage(self._fm(["Secrets", "PII", "CUI", "Extra"]))
+        assert errs and "internal URLs" in errs[0]
+
+    def test_no_contract_is_noop(self):
+        assert check_prohibited_content_coverage({"title": "x"}) == []

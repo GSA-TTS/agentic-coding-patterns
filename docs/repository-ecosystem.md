@@ -217,8 +217,8 @@ workflows where an agent can reference one repo while editing another.
 - **Playbook** defines standards that may be referenced from other repos
 
 For command syntax and examples, see the quickstart guide's
-[Quick Start](https://github.com/GSA-TTS/agentic-coding-quickstart/blob/main/docs/QUICKSTART.md)
-and its [Multiple Workspaces](https://github.com/GSA-TTS/agentic-coding-quickstart/blob/main/docs/QUICKSTART_SBX.md#multiple-workspaces)
+[Quick Start](https://github.com/GSA-TTS/agentic-coding-quickstart/blob/main/docs/howto/acq.md#quick-start)
+and its [Multiple Workspaces](https://github.com/GSA-TTS/agentic-coding-quickstart/blob/main/docs/howto/sbx.md#multiple-workspaces)
 section.
 
 ### Security Best Practice
