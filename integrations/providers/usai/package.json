@@ -1,0 +1,7 @@
+{
+  "name": "@gsa-tts/usai-catalog",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Harness-neutral USAi model catalog + emitters"
+}
