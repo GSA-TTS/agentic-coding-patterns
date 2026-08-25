@@ -1,6 +1,6 @@
 {
   "schemaVersion": "usai-model-catalog/v1",
-  "generatedBy": "build-catalog.mjs (generated \u2014 do not hand-edit)",
+  "generatedBy": "build-catalog.mjs (generated - do not hand-edit)",
   "sources": {
     "modelsList": "https://api.gsa.usai.gov/api/v1/models",
     "enrichment": "https://models.dev/api.json"
