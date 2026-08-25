@@ -1,19 +1,95 @@
 {
   "object": "list",
   "data": [
-    { "id": "claude_4_8_opus", "owned_by": "Anthropic" },
-    { "id": "claude_4_7_opus", "owned_by": "Anthropic" },
-    { "id": "claude_4_6_sonnet", "owned_by": "Anthropic" },
-    { "id": "claude_4_5_haiku", "owned_by": "Anthropic" },
-    { "id": "claude_4_5_opus", "owned_by": "Anthropic" },
-    { "id": "claude_4_5_sonnet", "owned_by": "Anthropic" },
-    { "id": "gpt-5.5-latest-guardrails-defaultv2", "owned_by": "OpenAI" },
-    { "id": "gpt-5.4-latest-guardrails-defaultv2", "owned_by": "OpenAI" },
-    { "id": "gpt-5.2-latest-guardrails-defaultv2", "owned_by": "OpenAI" },
-    { "id": "gemini-2.5-flash", "owned_by": "Google" },
-    { "id": "gemini-2.5-flash-lite", "owned_by": "Google" },
-    { "id": "gemini-2.5-pro", "owned_by": "Google" },
-    { "id": "llama_4_maverick", "owned_by": "Meta" },
-    { "id": "cohere_english_v3", "owned_by": "Cohere" }
+    {
+      "id": "claude-opus-5",
+      "created": 1787675321,
+      "object": "model",
+      "owned_by": "Anthropic"
+    },
+    {
+      "id": "claude-sonnet-5",
+      "created": 1787675321,
+      "object": "model",
+      "owned_by": "Anthropic"
+    },
+    {
+      "id": "claude_4_5_haiku",
+      "created": 1787675321,
+      "object": "model",
+      "owned_by": "Anthropic"
+    },
+    {
+      "id": "claude_4_5_sonnet",
+      "created": 1787675321,
+      "object": "model",
+      "owned_by": "Anthropic"
+    },
+    {
+      "id": "claude_4_7_opus",
+      "created": 1787675321,
+      "object": "model",
+      "owned_by": "Anthropic"
+    },
+    {
+      "id": "claude_4_8_opus",
+      "created": 1787675321,
+      "object": "model",
+      "owned_by": "Anthropic"
+    },
+    {
+      "id": "gemini-2.5-flash",
+      "created": 1787675321,
+      "object": "model",
+      "owned_by": "Google"
+    },
+    {
+      "id": "gemini-2.5-flash-lite",
+      "created": 1787675321,
+      "object": "model",
+      "owned_by": "Google"
+    },
+    {
+      "id": "gemini-2.5-pro",
+      "created": 1787675321,
+      "object": "model",
+      "owned_by": "Google"
+    },
+    {
+      "id": "gemini-3-7-flash",
+      "created": 1787675321,
+      "object": "model",
+      "owned_by": "Google"
+    },
+    {
+      "id": "gemini-3.5-flash",
+      "created": 1787675321,
+      "object": "model",
+      "owned_by": "Google"
+    },
+    {
+      "id": "gpt_5_2_default_v2",
+      "created": 1787675321,
+      "object": "model",
+      "owned_by": "Openai"
+    },
+    {
+      "id": "gpt_5_4_default_v2",
+      "created": 1787675321,
+      "object": "model",
+      "owned_by": "Openai"
+    },
+    {
+      "id": "gpt_5_5_default_v2",
+      "created": 1787675321,
+      "object": "model",
+      "owned_by": "Openai"
+    },
+    {
+      "id": "llama_4_maverick",
+      "created": 1787675321,
+      "object": "model",
+      "owned_by": "Meta"
+    }
   ]
 }

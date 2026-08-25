@@ -60,9 +60,12 @@ test("provider-level fields map from catalog.gateway + authHeader constant", () 
   assert.equal(provider.authHeader, true)
 })
 
-test("model count matches the catalog (14)", () => {
-  assert.equal(provider.models.length, 14)
+// The count is DERIVED from the catalog on purpose: the emitter's contract is
+// "emit every catalog model, drop none", not "emit some fixed number". A literal
+// here would go stale every time USAi adds or renames a model.
+test("model count matches the catalog", () => {
   assert.equal(provider.models.length, catalog.models.length)
+  assert.ok(provider.models.length > 0, "catalog must not be empty")
 })
 
 test("preserves catalog (vendor-grouped) model order", () => {
@@ -94,18 +97,18 @@ test("NO OpenCode-shaped leakage (no limit object, no snake_case cost, no contex
 })
 
 test("costAbove200kContext is dropped (tiered models carry no such field)", () => {
-  // Sanity: these three DO carry the tiered field in the source catalog.
-  const tieredIds = [
-    "gpt-5.5-latest-guardrails-defaultv2",
-    "gpt-5.4-latest-guardrails-defaultv2",
-    "gemini-2.5-pro",
-  ]
-  for (const id of tieredIds) {
-    const src = catalog.models.find((m) => m.id === id)
-    assert.ok(src && src.costAbove200kContext, `catalog fixture must have tiered pricing for ${id}`)
-    const out = provider.models.find((m) => m.id === id)
-    assert.ok(out, `emitted output must still contain ${id}`)
-    assert.equal(out.costAbove200kContext, undefined, `costAbove200kContext must be dropped for ${id}`)
+  // Derive the tiered set from the catalog rather than naming ids: USAi renames
+  // model ids, so a hardcoded id list only proves the list is out of date.
+  const tiered = catalog.models.filter((m) => m.costAbove200kContext)
+  assert.ok(tiered.length > 0, "catalog must carry at least one tiered-pricing model")
+  for (const src of tiered) {
+    const out = provider.models.find((m) => m.id === src.id)
+    assert.ok(out, `emitted output must still contain ${src.id}`)
+    assert.equal(
+      out.costAbove200kContext,
+      undefined,
+      `costAbove200kContext must be dropped for ${src.id}`,
+    )
   }
   // And no model anywhere retains the field.
   for (const m of provider.models) {
@@ -114,17 +117,19 @@ test("costAbove200kContext is dropped (tiered models carry no such field)", () =
   assert.doesNotMatch(serialized, /costAbove200kContext/)
 })
 
-test("cacheWrite preserved where the catalog has it (claude models + gemini-flash)", () => {
-  const withCacheWrite = catalog.models.filter((m) => m.cost && "cacheWrite" in m.cost)
-  // Guard the fixture assumption: claude models + gemini-2.5-flash carry it.
-  assert.ok(withCacheWrite.length >= 7, "fixture should have cacheWrite on 6 claude + gemini-flash")
+test("cacheWrite preserved wherever the catalog declares it", () => {
+  const withCacheWrite = catalog.models.filter((m) => m.cost && m.cost.cacheWrite !== undefined)
+  // Sanity floor only — which models carry cacheWrite comes from upstream
+  // models.dev data and changes over time, so assert a count floor, not ids.
+  assert.ok(
+    withCacheWrite.length >= 5,
+    `catalog should declare cacheWrite on several models (found ${withCacheWrite.length})`,
+  )
   for (const src of withCacheWrite) {
     const out = provider.models.find((m) => m.id === src.id)
+    assert.ok(out, `emitted output must still contain ${src.id}`)
     assert.equal(out.cost.cacheWrite, src.cost.cacheWrite, `cacheWrite preserved for ${src.id}`)
   }
-  // Spot-check gemini-2.5-flash specifically (the non-claude cacheWrite carrier).
-  const flash = provider.models.find((m) => m.id === "gemini-2.5-flash")
-  assert.equal(flash.cost.cacheWrite, 0.383)
 })
 
 test("apiKey is the env-var NAME, and NO real key material appears anywhere", () => {
