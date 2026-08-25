@@ -30,6 +30,19 @@
 //
 // CI / round-trip callers use the offline paths (--bootstrap, or --models-url
 // against committed fixtures with --no-enrichment) so no network is required.
+//
+// Live invocation (regenerating from the real USAi gateway) requires a USAi API
+// key, because the gateway rejects unauthenticated /models requests:
+//
+//   USAI_API_KEY=… node scripts/build-catalog.mjs \
+//     --models-url https://api.gsa.usai.gov/api/v1/models
+//
+// The key is read from the ENVIRONMENT ONLY. There is deliberately NO CLI flag
+// for it (flags land in shell history and process listings), it is never logged,
+// and it is never written into catalog.json — `sources.modelsList` records the
+// URL, not the credential. If the key is missing, or the gateway answers 401/403,
+// the build FAILS LOUDLY rather than falling back to bootstrap or emitting a
+// partial catalog: a silently-degraded catalog is worse than no catalog.
 // =============================================================================
 
 import { readFile, writeFile } from "node:fs/promises"
@@ -129,15 +142,30 @@ function generateDisplayName(id) {
 // -----------------------------------------------------------------------------
 // Fuzzy models.dev matching (structural re-implementation of the monolith).
 // -----------------------------------------------------------------------------
+
+// Gateway deployment suffixes that carry no model identity. USAi appends these
+// to distinguish a deployment (guardrail profile, "latest" alias, default
+// deployment revision) of the SAME underlying model, so they must be stripped
+// before comparing against models.dev, which names only the model. `default_v2`
+// / `default-v2` is the same class of noise as `guardrails` and `latest`.
+const GATEWAY_SUFFIXES = [/guardrails.*$/i, /latest.*$/i, /-default-?v\d+$/i]
+
+// Some upstream catalogs glue a family's major version onto the family name
+// ("meta.llama4-maverick-…" on Bedrock) while the gateway separates it
+// ("llama_4_maverick"). Splitting the glued digit lets the shared family/version
+// scorer align the two forms instead of settling for a variant-only near-miss.
+// Keyed by family so unrelated ids that merely end in a digit are untouched.
+const GLUED_FAMILY_VERSION = /\b(llama)(\d)/g
+
 function normalizeModelId(id) {
   const withoutProvider = id.includes("/") ? id.split("/").pop() : id
-  return withoutProvider
+  let out = withoutProvider
     .toLowerCase()
+    .replace(GLUED_FAMILY_VERSION, "$1-$2")
     .replace(/[_-]+/g, "-")
     .replace(/(\d)\.(\d)/g, "$1-$2")
-    .replace(/guardrails.*$/i, "")
-    .replace(/latest.*$/i, "")
-    .replace(/-+$/, "")
+  for (const suffix of GATEWAY_SUFFIXES) out = out.replace(suffix, "")
+  return out.replace(/-+$/, "")
 }
 
 function extractModelTokens(id) {
@@ -282,16 +310,29 @@ async function readBodyCapped(response, ref) {
 }
 
 async function fetchJsonBounded(url, options = {}) {
+  // `requiresAuth` is our own marker for error reporting, not a fetch option.
+  const { requiresAuth = false, timeoutMs, ...fetchOptions } = options
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? FETCH_TIMEOUT_MS)
+  const timer = setTimeout(() => controller.abort(), timeoutMs ?? FETCH_TIMEOUT_MS)
   let response
   try {
-    response = await fetch(url, { ...options, signal: controller.signal })
+    response = await fetch(url, { ...fetchOptions, signal: controller.signal })
   } catch (err) {
     if (err.name === "AbortError") throw new Error(`request to ${url} timed out after ${FETCH_TIMEOUT_MS}ms`)
     throw err
   } finally {
     clearTimeout(timer)
+  }
+  // Authentication failures are called out explicitly and always throw: never
+  // degrade to bootstrap or to a partial catalog on a rejected credential.
+  if (response.status === 401 || response.status === 403) {
+    const detail = requiresAuth
+      ? `the ${USAI_API_KEY_ENV} value was rejected (expired, revoked, or wrong environment)`
+      : `the endpoint requires credentials this build did not send`
+    throw new Error(
+      `authentication to ${url} failed: ${response.status} ${response.statusText} — ${detail}.\n` +
+        `  Verify ${USAI_API_KEY_ENV} in the environment and re-run. The catalog was NOT written.`,
+    )
   }
   if (!response.ok) {
     const body = await response.text().catch(() => "(no body)")
@@ -314,8 +355,57 @@ function isUrl(ref) {
   return /^https?:\/\//i.test(ref)
 }
 
+// -----------------------------------------------------------------------------
+// USAi gateway authentication.
+//
+// The USAi models endpoint requires `Authorization: Bearer <key>`; an
+// unauthenticated request is rejected. The key comes from the environment only
+// (see the header comment for why there is no CLI flag), and the helpers below
+// keep it out of every error message and out of the emitted catalog.
+// -----------------------------------------------------------------------------
+const USAI_API_KEY_ENV = "USAI_API_KEY"
+
+// True only for https URLs served by the USAi gateway host, so a key is never
+// attached to models.dev or to any other third-party host. Host is compared
+// exactly (or as a subdomain) to defeat lookalikes such as
+// "api.gsa.usai.gov.evil.example".
+function needsUsaiAuth(ref) {
+  if (!isUrl(ref)) return false
+  let parsed
+  try {
+    parsed = new URL(ref)
+  } catch {
+    return false
+  }
+  if (parsed.protocol !== "https:") return false
+  const host = parsed.hostname.toLowerCase()
+  const gatewayHost = buildGateway().host
+  return host === gatewayHost || host.endsWith(`.${gatewayHost}`)
+}
+
+// Read the key, failing loudly when it is absent. The message names the env var
+// and the fix; it never echoes any value.
+function requireUsaiApiKey(ref) {
+  const key = process.env[USAI_API_KEY_ENV]
+  if (typeof key === "string" && key.trim().length > 0) return key.trim()
+  throw new Error(
+    `${ref} is a USAi gateway URL and requires authentication, but ${USAI_API_KEY_ENV} is unset or empty.\n` +
+      `  Set it in the environment and re-run, for example:\n` +
+      `    ${USAI_API_KEY_ENV}=<your-usai-key> node scripts/build-catalog.mjs --models-url ${ref}\n` +
+      `  The key is read from the environment only — do not pass it as a command-line flag.`,
+  )
+}
+
+// Build request options for a source ref: an Authorization header for the USAi
+// gateway, nothing extra for anything else.
+function requestOptionsFor(ref) {
+  if (!needsUsaiAuth(ref)) return {}
+  const key = requireUsaiApiKey(ref)
+  return { headers: { Authorization: `Bearer ${key}` }, requiresAuth: true }
+}
+
 async function loadJsonSource(ref, options = {}) {
-  if (isUrl(ref)) return fetchJsonBounded(ref, options)
+  if (isUrl(ref)) return fetchJsonBounded(ref, { ...requestOptionsFor(ref), ...options })
   const abs = path.isAbsolute(ref) ? ref : path.resolve(process.cwd(), ref)
   const text = await readFile(abs, "utf8")
   if (Buffer.byteLength(text, "utf8") > MAX_RESPONSE_BYTES) {

@@ -1,8 +1,9 @@
 {
   "schemaVersion": "usai-model-catalog/v1",
-  "generatedBy": "build-catalog.mjs (generated — do not hand-edit)",
+  "generatedBy": "build-catalog.mjs (generated \u2014 do not hand-edit)",
   "sources": {
-    "bootstrappedFrom": "integrations/isolation/acq-kits/usai-provider/files/home/usai-config/opencode.jsonc"
+    "modelsList": "https://api.gsa.usai.gov/api/v1/models",
+    "enrichment": "https://models.dev/api.json"
   },
   "gateway": {
     "host": "api.gsa.usai.gov",
@@ -34,15 +35,35 @@
       "label": "Meta",
       "order": 4,
       "usaiBackend": "amazon-bedrock"
-    },
-    {
-      "key": "cohere",
-      "label": "Cohere",
-      "order": 5,
-      "usaiBackend": "cohere"
     }
   ],
   "models": [
+    {
+      "id": "claude-opus-5",
+      "vendor": "anthropic",
+      "name": "Claude Opus 5",
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
+      "cost": {
+        "input": 5,
+        "output": 25,
+        "cacheRead": 0.5,
+        "cacheWrite": 6.25
+      }
+    },
+    {
+      "id": "claude-sonnet-5",
+      "vendor": "anthropic",
+      "name": "Claude Sonnet 5",
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
+      "cost": {
+        "input": 2,
+        "output": 10,
+        "cacheRead": 0.2,
+        "cacheWrite": 2.5
+      }
+    },
     {
       "id": "claude_4_8_opus",
       "vendor": "anthropic",
@@ -70,10 +91,10 @@
       }
     },
     {
-      "id": "claude_4_6_sonnet",
+      "id": "claude_4_5_sonnet",
       "vendor": "anthropic",
-      "name": "Claude 4.6 Sonnet",
-      "contextWindow": 1000000,
+      "name": "Claude 4.5 Sonnet",
+      "contextWindow": 200000,
       "maxOutputTokens": 64000,
       "cost": {
         "input": 3,
@@ -96,35 +117,9 @@
       }
     },
     {
-      "id": "claude_4_5_opus",
-      "vendor": "anthropic",
-      "name": "Claude 4.5 Opus",
-      "contextWindow": 200000,
-      "maxOutputTokens": 64000,
-      "cost": {
-        "input": 5,
-        "output": 25,
-        "cacheRead": 0.5,
-        "cacheWrite": 6.25
-      }
-    },
-    {
-      "id": "claude_4_5_sonnet",
-      "vendor": "anthropic",
-      "name": "Claude 4.5 Sonnet",
-      "contextWindow": 200000,
-      "maxOutputTokens": 64000,
-      "cost": {
-        "input": 3,
-        "output": 15,
-        "cacheRead": 0.3,
-        "cacheWrite": 3.75
-      }
-    },
-    {
-      "id": "gpt-5.5-latest-guardrails-defaultv2",
+      "id": "gpt_5_5_default_v2",
       "vendor": "openai",
-      "name": "GPT 5.5 Latest Guardrails Defaultv2",
+      "name": "GPT 5.5",
       "contextWindow": 1050000,
       "maxOutputTokens": 128000,
       "cost": {
@@ -139,9 +134,9 @@
       }
     },
     {
-      "id": "gpt-5.4-latest-guardrails-defaultv2",
+      "id": "gpt_5_4_default_v2",
       "vendor": "openai",
-      "name": "GPT-5.4 Latest — Guardrails Default v2",
+      "name": "GPT 5.4",
       "contextWindow": 1050000,
       "maxOutputTokens": 128000,
       "cost": {
@@ -156,15 +151,32 @@
       }
     },
     {
-      "id": "gpt-5.2-latest-guardrails-defaultv2",
+      "id": "gpt_5_2_default_v2",
       "vendor": "openai",
-      "name": "GPT-5.2 Latest — Guardrails Default v2",
+      "name": "GPT 5.2",
       "contextWindow": 400000,
       "maxOutputTokens": 128000,
       "cost": {
         "input": 1.75,
         "output": 14,
         "cacheRead": 0.125
+      }
+    },
+    {
+      "id": "gemini-2.5-pro",
+      "vendor": "google",
+      "name": "Gemini 2.5 Pro",
+      "contextWindow": 1048576,
+      "maxOutputTokens": 65536,
+      "cost": {
+        "input": 1.25,
+        "output": 10,
+        "cacheRead": 0.125
+      },
+      "costAbove200kContext": {
+        "input": 2.5,
+        "output": 15,
+        "cacheRead": 0.25
       }
     },
     {
@@ -193,20 +205,27 @@
       }
     },
     {
-      "id": "gemini-2.5-pro",
+      "id": "gemini-3.5-flash",
       "vendor": "google",
-      "name": "Gemini 2.5 Pro",
+      "name": "Gemini 3.5 Flash",
       "contextWindow": 1048576,
       "maxOutputTokens": 65536,
       "cost": {
-        "input": 1.25,
-        "output": 10,
-        "cacheRead": 0.125
-      },
-      "costAbove200kContext": {
-        "input": 2.5,
-        "output": 15,
-        "cacheRead": 0.25
+        "input": 1.5,
+        "output": 9,
+        "cacheRead": 0.15
+      }
+    },
+    {
+      "id": "gemini-3-7-flash",
+      "vendor": "google",
+      "name": "Gemini 3.7 Flash",
+      "contextWindow": 1000000,
+      "maxOutputTokens": 65536,
+      "cost": {
+        "input": 1.875,
+        "output": 9.375,
+        "cacheRead": 0.1875
       }
     },
     {
@@ -218,17 +237,6 @@
       "cost": {
         "input": 0.24,
         "output": 0.97
-      }
-    },
-    {
-      "id": "cohere_english_v3",
-      "vendor": "cohere",
-      "name": "Cohere English v3",
-      "contextWindow": 128000,
-      "maxOutputTokens": 4000,
-      "cost": {
-        "input": 0.0375,
-        "output": 0.15
       }
     }
   ]
