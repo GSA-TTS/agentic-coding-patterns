@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.9.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.8.0...v1.9.0) (2026-08-25)
+
+
+### Features
+
+* **kits:** add neutral network.tier vocab (strict/balanced/open) to hybrid/v1 ([#300](https://github.com/GSA-TTS/agentic-coding-patterns/issues/300)) ([#313](https://github.com/GSA-TTS/agentic-coding-patterns/issues/313)) ([3f51984](https://github.com/GSA-TTS/agentic-coding-patterns/commit/3f519840aabdf106693862f8218102c0128a687b))
+* **kits:** add neutral volumes to hybrid/v1 schema ([#353](https://github.com/GSA-TTS/agentic-coding-patterns/issues/353)) ([7d742fb](https://github.com/GSA-TTS/agentic-coding-patterns/commit/7d742fbbeb0d98e8109fedb5d724e50172bf7e4a))
+* **kits:** add paseo self-hosted web UI acq mixin kit ([#312](https://github.com/GSA-TTS/agentic-coding-patterns/issues/312)) ([de22b4e](https://github.com/GSA-TTS/agentic-coding-patterns/commit/de22b4e5d9692ce5c02c97c98e14c1a9b593d8e3))
+* **kits:** pre-populate Paseo projects from mounted host directories ([#349](https://github.com/GSA-TTS/agentic-coding-patterns/issues/349)) ([4dc2a52](https://github.com/GSA-TTS/agentic-coding-patterns/commit/4dc2a527ffba48fd4c64162bb3cad0ba9b440111))
+* **network-tiers:** balanced baseline allowlist + deterministic additions guard ([#301](https://github.com/GSA-TTS/agentic-coding-patterns/issues/301), [#302](https://github.com/GSA-TTS/agentic-coding-patterns/issues/302)) ([#315](https://github.com/GSA-TTS/agentic-coding-patterns/issues/315)) ([aff5d63](https://github.com/GSA-TTS/agentic-coding-patterns/commit/aff5d631672a10748598f02380fb3670c0d1afee))
+* **prime-agent:** add kit skeleton + spec.yaml (hybrid/v1) ([#378](https://github.com/GSA-TTS/agentic-coding-patterns/issues/378)) ([dd80e38](https://github.com/GSA-TTS/agentic-coding-patterns/commit/dd80e384663ef31b162c9d0bb0f0b1fb87c03210))
+* **skills:** executive technical explainer capability (3 skills + technical-explainer profile) ([#329](https://github.com/GSA-TTS/agentic-coding-patterns/issues/329)) ([2a82c1b](https://github.com/GSA-TTS/agentic-coding-patterns/commit/2a82c1b23dedbed8c9601cc64fdfec73f14400cc))
+* **usai-catalog:** harness-neutral USAi model catalog — schema, build, emitters + byte-exact guarantee ([#358](https://github.com/GSA-TTS/agentic-coding-patterns/issues/358)/[#359](https://github.com/GSA-TTS/agentic-coding-patterns/issues/359)/[#360](https://github.com/GSA-TTS/agentic-coding-patterns/issues/360)/[#361](https://github.com/GSA-TTS/agentic-coding-patterns/issues/361)) ([#379](https://github.com/GSA-TTS/agentic-coding-patterns/issues/379)) ([305dfa8](https://github.com/GSA-TTS/agentic-coding-patterns/commit/305dfa80e661d3ca0308dbbf1dd8a4627a215b7c))
+
+
+### Bug Fixes
+
+* **ci:** authenticate Link Check to github.com to stop rate-limit false-positives ([#316](https://github.com/GSA-TTS/agentic-coding-patterns/issues/316)) ([#317](https://github.com/GSA-TTS/agentic-coding-patterns/issues/317)) ([e71209f](https://github.com/GSA-TTS/agentic-coding-patterns/commit/e71209f11aa0fa7f96a0a6aa33d823ba6ac47b03))
+* **ci:** enforce pattern test-cases in CI + keep ruff pins in lockstep ([#345](https://github.com/GSA-TTS/agentic-coding-patterns/issues/345)) ([0ea5bac](https://github.com/GSA-TTS/agentic-coding-patterns/commit/0ea5bac71382ce2635352178d512184636cb1dbc))
+* **ci:** ignore climbing relative links in Link Check (400 false positives) ([#309](https://github.com/GSA-TTS/agentic-coding-patterns/issues/309)) ([118825c](https://github.com/GSA-TTS/agentic-coding-patterns/commit/118825c06cf64de0a2cea2e4d97b027ccb535905))
+* **ci:** scope link-check GITHUB_TOKEN to the real github hosts (trailing slash) ([#354](https://github.com/GSA-TTS/agentic-coding-patterns/issues/354)) ([ac9b794](https://github.com/GSA-TTS/agentic-coding-patterns/commit/ac9b794aeec36ec9206f4488369dc7c111b6f149))
+* **kits:** bind Paseo daemon to 0.0.0.0 so create-time publish reaches it ([#335](https://github.com/GSA-TTS/agentic-coding-patterns/issues/335)) ([61c8a5a](https://github.com/GSA-TTS/agentic-coding-patterns/commit/61c8a5ad8b4ae98cb5b19e8c1ab73ed5765b70d2))
+* **links:** repoint dead federal links to live official/GitHub sources ([#311](https://github.com/GSA-TTS/agentic-coding-patterns/issues/311)) ([a73f9c1](https://github.com/GSA-TTS/agentic-coding-patterns/commit/a73f9c1f882965b7f078351048fbb76df547be6a))
+* **openchamber:** install @openchamber/web unprivileged (drop sudo/root) ([#355](https://github.com/GSA-TTS/agentic-coding-patterns/issues/355)) ([2c27856](https://github.com/GSA-TTS/agentic-coding-patterns/commit/2c27856895081b89f289a3a7f88c1590418a455e))
+* repair 11 dead skill links, align local audit to CI, doc-honesty fixes ([#350](https://github.com/GSA-TTS/agentic-coding-patterns/issues/350)) ([ae5b0dd](https://github.com/GSA-TTS/agentic-coding-patterns/commit/ae5b0dd95c78aa3ef6d61ee52ce8549ef5582049))
+* **schema:** enforce prohibited_content minimum + category coverage ([#340](https://github.com/GSA-TTS/agentic-coding-patterns/issues/340)) ([#352](https://github.com/GSA-TTS/agentic-coding-patterns/issues/352)) ([0d3266c](https://github.com/GSA-TTS/agentic-coding-patterns/commit/0d3266c10ca3a46475b031db9cd2ab96aed17d24))
+* **usai:** add Claude 5 + Gemini 3.x, repoint the dead GPT ids ([#386](https://github.com/GSA-TTS/agentic-coding-patterns/issues/386)) ([f60a805](https://github.com/GSA-TTS/agentic-coding-patterns/commit/f60a805f9a3efb8596043d11d8d508859d80d9b4))
+
 ## [1.8.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.7.0...v1.8.0) (2026-08-04)
 
 
