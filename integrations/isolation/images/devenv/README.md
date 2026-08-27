@@ -8,8 +8,8 @@ block package mirrors — so the toolchain ships as a published image instead.
 
 Built and pushed to GHCR by
 [`devenv-image.yml`](../../../../.github/workflows/devenv-image.yml) on
-changes to this directory (plus manual dispatch), as a multi-arch
-(amd64 + arm64) public package.
+changes to the `Dockerfile` or [`VERSION`](VERSION) (plus manual dispatch), as
+a multi-arch (amd64 + arm64) public package.
 
 ## Variants
 
@@ -53,5 +53,6 @@ docker build --build-arg EXTRA_CA_CERT="$(cat proxy-root-ca.crt)" .
 ## Versioning
 
 [`VERSION`](VERSION) is the published tag, bumped together with any toolchain
-change (`NIXPKGS_REV`, installer version, base image); tags are never reused.
-A moving `latest` also exists — pin the version tag in anything durable.
+change (`NIXPKGS_REV`, installer version, base image); tags are never reused —
+the workflow refuses to republish an existing version tag. A moving `latest`
+also exists — pin the version tag in anything durable.

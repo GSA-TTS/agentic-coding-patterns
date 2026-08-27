@@ -9,6 +9,10 @@ FROM ${BASE_IMAGE}
 # unpinned `nixpkgs#…` tracks unstable HEAD and drifts per build.
 ARG NIXPKGS_REV=ac62194c3917d5f474c1a844b6fd6da2db95077d
 
+# Checksum pin for the installer script below (release assets are mutable);
+# bump together with the installer version.
+ARG NIX_INSTALLER_SHA256=6298ff0bd25729adba5cd9a75a4b708118e4bb643797301d03ca0ceb210a4748
+
 # Optional PEM content of an extra root CA, for local rebuilds behind a
 # TLS-inspecting proxy. CI builds leave it empty: runtime trust inside
 # sandboxes is a kit's job (e.g. zscaler-ca-certificate), never baked into a
@@ -43,6 +47,7 @@ ENV NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 RUN curl -L --cacert /etc/ssl/certs/ca-certificates.crt \
       https://github.com/NixOS/experimental-nix-installer/releases/download/0.27.0/nix-installer.sh \
       -o /tmp/nix-installer.sh \
+ && echo "${NIX_INSTALLER_SHA256}  /tmp/nix-installer.sh" | sha256sum -c \
  && sh /tmp/nix-installer.sh install linux \
       --ssl-cert-file /etc/ssl/certs/ca-certificates.crt \
       --no-add-channel \
@@ -52,6 +57,11 @@ RUN curl -L --cacert /etc/ssl/certs/ca-certificates.crt \
  && chown -R agent:agent /nix
 
 USER agent
+
+# The Nix profile on PATH image-wide, so the toolchain is visible to
+# NON-INTERACTIVE execs too (`bash -c`, plain OCI command exec) — those never
+# read .bashrc, which only covers interactive/login shells.
+ENV PATH=/home/agent/.nix-profile/bin:/nix/var/nix/profiles/default/bin:$PATH
 
 # Enable flakes (devenv needs them) and pin the CA for all nix invocations —
 # user-scoped, so no root/daemon config is required.
@@ -66,8 +76,8 @@ RUN . /etc/profile.d/nix.sh \
       "github:NixOS/nixpkgs/${NIXPKGS_REV}#devenv" \
       "github:NixOS/nixpkgs/${NIXPKGS_REV}#direnv"
 
-# Nix profile + direnv hook in every shell (`.bashrc` is sourced by sandbox
-# bash sessions and non-interactive `run` shells).
+# Nix profile + direnv hook for interactive/login bash sessions (the ENV PATH
+# above already covers non-interactive execs; direnv only matters in shells).
 RUN printf '%s\n' \
       '# devenv image: Nix single-user profile + direnv' \
       '. /etc/profile.d/nix.sh 2>/dev/null || true' \
