@@ -60,9 +60,12 @@ WORK="$(mktemp -d "$KIT_DIR/verify-workspace.XXXXXX")"
 CREATE_LOG="$WORK/create.log"
 # Extra workspaces mounted alongside the primary to exercise the registrar's
 # read-write vs read-only distinction in step 10: RO_FIXTURE is mounted ":ro"
-# (must be SKIPPED), RW_FIXTURE is mounted read-write (must be REGISTERED).
+# (must be SKIPPED), RW_FIXTURE is mounted read-write and shaped like a parent
+# directory containing repos (its child repos must be REGISTERED).
 RW_FIXTURE="$(mktemp -d "$KIT_DIR/verify-rw-mount.XXXXXX")"
 RO_FIXTURE="$(mktemp -d "$KIT_DIR/verify-ro-mount.XXXXXX")"
+RW_CHILD_REPO_A="$RW_FIXTURE/repo-a"
+RW_CHILD_REPO_B="$RW_FIXTURE/repo-b"
 KEEP="${KEEP:-0}"
 RUN_ACQ="${RUN_ACQ:-0}"
 RUN_SBX="${RUN_SBX:-0}"
@@ -76,6 +79,9 @@ POLL_INTERVAL="${POLL_INTERVAL:-2}"
 # Once install is done the daemon should answer fast; stop waiting this many
 # seconds after install completes so a broken daemon fails quickly.
 POST_INSTALL_GRACE="${POST_INSTALL_GRACE:-25}"
+
+mkdir -p "$RW_CHILD_REPO_A/.git" "$RW_CHILD_REPO_B" "$RW_FIXTURE/scratch-not-a-repo"
+printf 'gitdir: /tmp/paseo-verify-repo-b.git\n' > "$RW_CHILD_REPO_B/.git"
 
 pass=0
 fail=0
@@ -667,12 +673,15 @@ fi
 
 info "10. Projects pre-populated from the mounted host directories"
 # The startup registrar (paseo-register-mounts.mjs) registers each read-write
-# host project directory mounted into the sandbox with the daemon. Assert that
-# EVERY such mount shows up as a project in the daemon's registry, and — using
-# the rw/ro fixtures we mounted at create (step 2) — that a READ-ONLY mount is
-# SKIPPED and a READ-WRITE one is REGISTERED. We derive the expected set the same
-# backend-agnostic way the helper does — from /proc/mounts inside the guest — so
-# the test does not hard-code msb/sbx mount source names.
+# host project directory mounted into the sandbox with the daemon. If a mount is
+# a plain parent directory containing direct child Git repos, those child repos
+# are registered instead of the parent; mounts without child repos still fall
+# back to the mount itself. Assert that EVERY expected project shows up in the
+# daemon's registry, and — using the rw/ro fixtures we mounted at create (step 2)
+# — that a READ-ONLY mount is SKIPPED while child repos under a READ-WRITE parent
+# are REGISTERED. We derive the expected set the same backend-agnostic way the
+# helper does — from /proc/mounts inside the guest — so the test does not
+# hard-code msb/sbx mount source names.
 #
 # We read the registered projects from the daemon's own API (the same
 # `client.listProjects()` the registrar's client library speaks), NOT from the
@@ -704,18 +713,33 @@ else
   }
 
   rw_base="$(basename "$RW_FIXTURE")"
+  rw_child_a_base="$(basename "$RW_CHILD_REPO_A")"
+  rw_child_b_base="$(basename "$RW_CHILD_REPO_B")"
   ro_base="$(basename "$RO_FIXTURE")"
 
-  # Expected set: fstype virtiofs, rw, target is a dir, not under a system prefix,
-  # basename not starting with "." (matches the registrar's rule).
-  expected_mounts="$(in_sbx '
-    awk "\$3==\"virtiofs\" && \$4 ~ /^rw/ {print \$2}" /proc/mounts \
-      | while read -r t; do
-          case "$t" in /etc|/etc/*|/run|/run/*|/proc|/proc/*|/sys|/sys/*|/dev|/dev/*|/) continue ;; esac
-          case "$(basename "$t")" in .*) continue ;; esac
-          [ -d "$t" ] && echo "$t"
-        done | sort -u')"
-  if [ -z "$expected_mounts" ]; then
+  # Expected set: qualifying rw virtiofs mounts, expanded by the actual registrar
+  # helper so this live check cannot drift from paseo-register-mounts.mjs.
+  expected_projects="$(in_sbx '
+    node --input-type=module -e "
+      import { readFileSync, statSync } from \"node:fs\";
+      import { basename } from \"node:path\";
+      import { projectDirsFromMounts } from \"file://$HOME/paseo-register-mounts.mjs\";
+      const systemPrefixes = [\"/etc\", \"/run\", \"/proc\", \"/sys\", \"/dev\"];
+      const unescapeMountField = (field) => field.replace(/\\\\(\\d{3})/g, (_, oct) => String.fromCharCode(parseInt(oct, 8)));
+      const underSystemPrefix = (target) => target === \"/\" || systemPrefixes.some((prefix) => target === prefix || target.startsWith(prefix + \"/\"));
+      const mounts = [];
+      for (const line of readFileSync(\"/proc/mounts\", \"utf8\").split(\"\\n\")) {
+        if (!line) continue;
+        const parts = line.split(/\\s+/);
+        if (parts.length < 4 || parts[2] !== \"virtiofs\" || !parts[3].startsWith(\"rw\")) continue;
+        const target = unescapeMountField(parts[1]);
+        if (underSystemPrefix(target) || basename(target).startsWith(\".\")) continue;
+        try { if (!statSync(target).isDirectory()) continue; } catch { continue; }
+        mounts.push(target);
+      }
+      for (const project of projectDirsFromMounts(mounts).sort()) process.stdout.write(project + \"\\n\");
+    "')"
+  if [ -z "$expected_projects" ]; then
     bad "no read-write host project mounts found in the guest — the primary + rw fixture should be present"
     in_sbx 'grep virtiofs /proc/mounts' | sed 's/^/    | /'
   else
@@ -727,7 +751,7 @@ else
     while :; do
       project_roots="$(list_project_roots)"
       missing=""
-      for m in $expected_mounts; do
+      for m in $expected_projects; do
         printf '%s\n' "$project_roots" | grep -qx "$m" || missing="$missing $m"
       done
       [ -z "$missing" ] && break
@@ -735,18 +759,27 @@ else
       sleep "$POLL_INTERVAL"
     done
     if [ -z "$missing" ]; then
-      _n="$(printf '%s\n' "$expected_mounts" | grep -c .)"
-      ok "all $_n read-write host project mount(s) registered as projects (via daemon API)"
+      _n="$(printf '%s\n' "$expected_projects" | grep -c .)"
+      ok "all $_n expected project path(s) registered as projects (via daemon API)"
     else
       bad "some host project mounts were not registered:$missing"
       in_sbx 'tail -n 20 ~/.local/state/paseo/paseo-register.log 2>/dev/null' | sed 's/^/    | /'
     fi
 
-    # POSITIVE: the read-write fixture must be registered.
-    if printf '%s\n' "$project_roots" | grep -q "${rw_base}\$"; then
-      ok "read-write fixture ($rw_base) registered as a project"
+    # POSITIVE: child repos under the read-write parent fixture must be registered.
+    if printf '%s\n' "$project_roots" | grep -q "${rw_base}/${rw_child_a_base}\$" && \
+       printf '%s\n' "$project_roots" | grep -q "${rw_base}/${rw_child_b_base}\$"; then
+      ok "child repos under read-write parent fixture ($rw_base) registered as projects"
     else
-      bad "read-write fixture ($rw_base) was NOT registered"
+      bad "child repos under read-write parent fixture ($rw_base) were NOT registered"
+    fi
+
+    # NEGATIVE: the parent fixture should not be registered when direct child repos
+    # were found and registered instead.
+    if printf '%s\n' "$project_roots" | grep -q "${rw_base}\$"; then
+      bad "read-write parent fixture ($rw_base) was registered instead of only its child repos"
+    else
+      ok "read-write parent fixture ($rw_base) correctly expanded to child repos"
     fi
 
     # NEGATIVE: the read-only fixture must be SKIPPED. Only assert this if the
