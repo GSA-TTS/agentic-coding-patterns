@@ -101,7 +101,8 @@ all mounts, not just the primary one the `acq run` entrypoint opens.
 - A mount that is itself a Git repo is registered as that project.
 - A plain parent-directory mount with direct child Git repos registers those
   child repos instead of the parent. This scan is intentionally shallow (direct
-  children only), and `.git` may be either a directory or a file.
+  children only), follows direct-child symlinks that resolve to directories, and
+  `.git` may be either a directory or a file.
 - A mount with no direct child Git repos falls back to registering the mount
   itself, preserving support for non-git working directories.
 - The backend runtime dir (`/.msb`) and system mounts (`/etc`, `/run`, …) are

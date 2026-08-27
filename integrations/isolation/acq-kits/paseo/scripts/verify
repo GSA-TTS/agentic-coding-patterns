@@ -717,34 +717,17 @@ else
   rw_child_b_base="$(basename "$RW_CHILD_REPO_B")"
   ro_base="$(basename "$RO_FIXTURE")"
 
-  # Expected set: qualifying rw virtiofs mounts, expanded the same shallow way as
-  # the registrar: if direct child repos exist, expect those repos; otherwise
-  # expect the mount itself.
+  # Expected set: qualifying rw virtiofs mounts, expanded by the actual registrar
+  # helper so this live check cannot drift from paseo-register-mounts.mjs.
   expected_projects="$(in_sbx '
     node --input-type=module -e "
-      import { existsSync, readFileSync, readdirSync, statSync } from \"node:fs\";
-      import { basename, join } from \"node:path\";
+      import { readFileSync, statSync } from \"node:fs\";
+      import { basename } from \"node:path\";
+      import { projectDirsFromMounts } from \"file://$HOME/paseo-register-mounts.mjs\";
       const systemPrefixes = [\"/etc\", \"/run\", \"/proc\", \"/sys\", \"/dev\"];
       const unescapeMountField = (field) => field.replace(/\\\\(\\d{3})/g, (_, oct) => String.fromCharCode(parseInt(oct, 8)));
       const underSystemPrefix = (target) => target === \"/\" || systemPrefixes.some((prefix) => target === prefix || target.startsWith(prefix + \"/\"));
-      const hasGitEntry = (dir) => existsSync(join(dir, \".git\"));
-      const expand = (mount) => {
-        if (hasGitEntry(mount)) return [mount];
-        let entries;
-        try { entries = readdirSync(mount, { withFileTypes: true }); } catch { return [mount]; }
-        const repos = [];
-        for (const entry of entries) {
-          const child = join(mount, entry.name);
-          let isDir = entry.isDirectory();
-          if (!isDir && entry.isSymbolicLink()) {
-            try { isDir = statSync(child).isDirectory(); } catch { isDir = false; }
-          }
-          if (isDir && hasGitEntry(child)) repos.push(child);
-        }
-        return repos.length > 0 ? repos : [mount];
-      };
-      const seen = new Set();
-      const projects = [];
+      const mounts = [];
       for (const line of readFileSync(\"/proc/mounts\", \"utf8\").split(\"\\n\")) {
         if (!line) continue;
         const parts = line.split(/\\s+/);
@@ -752,14 +735,9 @@ else
         const target = unescapeMountField(parts[1]);
         if (underSystemPrefix(target) || basename(target).startsWith(\".\")) continue;
         try { if (!statSync(target).isDirectory()) continue; } catch { continue; }
-        for (const project of expand(target)) {
-          if (seen.has(project)) continue;
-          seen.add(project);
-          projects.push(project);
-        }
+        mounts.push(target);
       }
-      projects.sort();
-      for (const project of projects) process.stdout.write(project + \"\\n\");
+      for (const project of projectDirsFromMounts(mounts).sort()) process.stdout.write(project + \"\\n\");
     "')"
   if [ -z "$expected_projects" ]; then
     bad "no read-write host project mounts found in the guest — the primary + rw fixture should be present"

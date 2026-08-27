@@ -83,7 +83,9 @@ directories to register:
 
 The `.git` entry may be either a directory or a file, covering normal clones,
 worktrees, and submodules. The child scan is intentionally shallow, not
-recursive.
+recursive. It follows direct-child symlinks that resolve to directories, which
+keeps symlinked worktrees/submodules usable under an operator-selected mount
+without traversing deeper than one child level.
 
 ### Timing and cadence
 
