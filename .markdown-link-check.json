@@ -47,6 +47,10 @@
     {
       "_comment": "nvd.nist.gov (NIST National Vulnerability Database) is bot-hostile to the checker's unauthenticated HEAD probe (returns 0) but is a stable live gov site — referenced from the dependency-analysis skill.",
       "pattern": "^https://nvd\\.nist\\.gov"
+    },
+    {
+      "_comment": "playbook.cio.gov is a stable federal reference, but CI runners cannot reliably connect to it (status 0 from markdown-link-check).",
+      "pattern": "^https://playbook\\.cio\\.gov"
     }
   ],
   "replacementPatterns": [],
