@@ -29,8 +29,8 @@ Two facts shape the solution:
 ## Decision
 
 Ship `paseo-register-mounts.mjs`, run from the startup supervisor after the
-daemon answers `/api/health`, which registers each qualifying host directory with
-the daemon.
+daemon answers `/api/health`, which inspects each qualifying host directory and
+registers the resulting project directories with the daemon.
 
 ### How it registers a project
 
@@ -67,6 +67,24 @@ This keys entirely on portable mount properties, so it captures the three repos
 on both sbx and msb and needs no per-backend tokens. A future backend that
 bind-mounts host dirs as read-write `virtiofs` is covered automatically.
 
+### How qualifying mounts become projects
+
+After mount discovery, each qualifying mount is expanded to the project
+directories to register:
+
+1. If the mount itself has a `.git` entry, register the mount itself. This
+   preserves the existing behavior for the normal case where the mount is one
+   repository, and avoids unexpectedly registering submodules or nested repos.
+2. Otherwise, inspect only the mount's direct child directories. If any child has
+   a `.git` entry, register each such child as its own project and do not register
+   the parent directory.
+3. If no direct child Git repositories are found, register the mount itself. This
+   preserves support for intentionally-mounted non-git working directories.
+
+The `.git` entry may be either a directory or a file, covering normal clones,
+worktrees, and submodules. The child scan is intentionally shallow, not
+recursive.
+
 ### Timing and cadence
 
 Runs on **every** sandbox start, in the background, after a bounded wait for
@@ -99,11 +117,18 @@ means the UI shows fewer projects until the next start.
 - **Requiring a project marker (`.git`, `package.json`, …) in the dir.** Rejected
   as unnecessary: it would skip intentionally-mounted non-standard working dirs,
   and Paseo already records non-git dirs cleanly as `kind: "non_git"`.
+- **Recursive scanning under parent mounts.** Rejected as surprising and
+  potentially expensive: it could register vendored repos, caches, test fixtures,
+  or deeply nested submodules the user did not intend to expose as top-level
+  Paseo projects. Direct children cover the common "one parent directory with
+  many sibling repos" workflow.
 
 ## Consequences
 
 - Every read-write host project mount is listed in the Paseo UI after any start
-  (detached `acq create` or interactive `acq run`), with no manual "Add project".
+  (detached `acq create` or interactive `acq run`), unless it is a plain parent
+  directory containing direct child Git repos. In that case, each direct child
+  repo is listed instead, with no manual "Add project".
 - Read-only mounts and the backend runtime dir are excluded.
 - The behavior is orthogonal to the worktrees-root pin (which still targets only
   the primary/first mount via the shim); this helper touches projects only, never
