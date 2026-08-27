@@ -92,13 +92,19 @@ acq ports <other-sandbox> --publish 6868:6767    # another → host 6868
 
 ## Projects are pre-populated from your mounts
 
-Every **read-write** host directory you mount into the sandbox is registered with
-the Paseo daemon at startup, so the web UI already lists your repos when you
-connect — no manual **Add project** per directory. This runs on every start
-(idempotent) and covers all mounts, not just the primary one the `acq run`
-entrypoint opens.
+Every **read-write** host directory you mount into the sandbox is inspected at
+startup, so the web UI already lists your repos when you connect — no manual
+**Add project** per directory. This runs on every start (idempotent) and covers
+all mounts, not just the primary one the `acq run` entrypoint opens.
 
 - **Read-only mounts are skipped.**
+- A mount that is itself a Git repo is registered as that project.
+- A plain parent-directory mount with direct child Git repos registers those
+  child repos instead of the parent. This scan is intentionally shallow (direct
+  children only), follows direct-child symlinks that resolve to directories, and
+  `.git` may be either a directory or a file.
+- A mount with no direct child Git repos falls back to registering the mount
+  itself, preserving support for non-git working directories.
 - The backend runtime dir (`/.msb`) and system mounts (`/etc`, `/run`, …) are
   excluded.
 - Discovery reads `/proc/mounts` and keys only on portable mount properties

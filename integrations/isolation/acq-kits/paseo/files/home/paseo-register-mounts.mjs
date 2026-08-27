@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // paseo-register-mounts.mjs — pre-populate Paseo PROJECTS from the host
-// directories mounted into this sandbox, so the web UI already lists them the
-// moment you connect (no manual "Add project" per repo).
+// directories mounted into this sandbox, so the web UI already lists mounted
+// repos the moment you connect (no manual "Add project" per repo).
 //
 // WHY THIS EXISTS: acq bind-mounts one or more host project directories into the
 // guest. Paseo, however, only learns about a project when something opens it
@@ -16,9 +16,13 @@
 //   * works for non-git dirs (registered as kind "non_git"),
 //   * returns { project: null, errorCode: "directory_not_found" } for a bad path
 //     instead of throwing.
-// (Alternatives were rejected: `workspace create` mints a NEW workspace record
-// every call — workspace spam across restarts — and `terminal create` leaves a
-// stray terminal behind. See docs/decisions/prepopulate-projects-from-mounts.md.)
+// Before registering, a qualifying mount is expanded: if the mount is itself a
+// Git repo, register it; otherwise register direct child dirs that have a `.git`
+// entry; if none exist, fall back to the mount itself. The child scan is shallow
+// by design. (Alternatives were rejected: `workspace create` mints a NEW
+// workspace record every call — workspace spam across restarts — and `terminal
+// create` leaves a stray terminal behind. See
+// docs/decisions/prepopulate-projects-from-mounts.md.)
 //
 // We import the CLI's OWN connector (dist/utils/client.js -> connectToDaemon) so
 // we reuse its socket/localhost resolution and need no host/port here. The CLI
@@ -49,9 +53,15 @@
 // connection is always closed, and the process ALWAYS exits 0 — even if the
 // daemon is unreachable or some adds fail. Errors are logged for diagnosis.
 
-import { readFileSync, realpathSync, statSync } from "node:fs";
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
 import { execFileSync } from "node:child_process";
-import { dirname, basename, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 // Target-path prefixes we never treat as a host project (system / pseudo mounts).
@@ -100,9 +110,55 @@ function unescapeMountField(field) {
   );
 }
 
+export function hasGitEntry(dir) {
+  return existsSync(join(dir, ".git"));
+}
+
+export function expandMountToProjectDirs(mount) {
+  // If the mount itself is a repo, preserve the existing one-mount-one-project
+  // behavior rather than expanding nested repos or submodules beneath it.
+  if (hasGitEntry(mount)) return [mount];
+
+  let entries;
+  try {
+    entries = readdirSync(mount, { withFileTypes: true });
+  } catch {
+    return [mount];
+  }
+
+  const childRepos = [];
+  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    const child = join(mount, entry.name);
+    let isDir = entry.isDirectory();
+    if (!isDir && entry.isSymbolicLink()) {
+      try {
+        isDir = statSync(child).isDirectory();
+      } catch {
+        isDir = false;
+      }
+    }
+    if (isDir && hasGitEntry(child)) childRepos.push(child);
+  }
+
+  return childRepos.length > 0 ? childRepos : [mount];
+}
+
+export function projectDirsFromMounts(mounts) {
+  const seen = new Set();
+  const projects = [];
+  for (const mount of mounts) {
+    for (const project of expandMountToProjectDirs(mount)) {
+      if (seen.has(project)) continue;
+      seen.add(project);
+      projects.push(project);
+    }
+  }
+  return projects;
+}
+
 // Parse /proc/mounts and return the set of host-project target directories,
 // applying the backend-agnostic rule documented in the header.
-function discoverProjectMounts() {
+export function discoverProjectMounts() {
   let raw;
   try {
     raw = readFileSync("/proc/mounts", "utf8");
@@ -153,7 +209,11 @@ async function main() {
     log("no read-write host project mounts found; nothing to register");
     return;
   }
-  log(`found ${mounts.length} host project mount(s): ${mounts.join(", ")}`);
+  log(`found ${mounts.length} qualifying host mount(s): ${mounts.join(", ")}`);
+  const projects = projectDirsFromMounts(mounts);
+  log(
+    `registering ${projects.length} project director${projects.length === 1 ? "y" : "ies"}: ${projects.join(", ")}`,
+  );
 
   let connectToDaemon;
   try {
@@ -172,7 +232,7 @@ async function main() {
   }
 
   try {
-    for (const dir of mounts) {
+    for (const dir of projects) {
       try {
         const res = await client.addProject(dir);
         if (res && res.project && res.project.projectId) {
@@ -192,10 +252,15 @@ async function main() {
 }
 
 // Always exit 0 — never let project pre-population fail the sandbox.
-main()
-  .catch((err) => {
-    log(`unexpected error: ${err && err.message ? err.message : String(err)}`);
-  })
-  .finally(() => {
-    process.exit(0);
-  });
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(resolve(process.argv[1])).href
+) {
+  main()
+    .catch((err) => {
+      log(`unexpected error: ${err && err.message ? err.message : String(err)}`);
+    })
+    .finally(() => {
+      process.exit(0);
+    });
+}
