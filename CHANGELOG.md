@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.10.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.9.0...v1.10.0) (2026-08-28)
+
+
+### Features
+
+* **isolation:** add generic devenv sandbox image built and published to GHCR ([#395](https://github.com/GSA-TTS/agentic-coding-patterns/issues/395)) ([8c7e9ca](https://github.com/GSA-TTS/agentic-coding-patterns/commit/8c7e9ca50cda3409234b8f38e6a5e89f20a87598))
+* **paseo:** register child repos in parent mounts ([#391](https://github.com/GSA-TTS/agentic-coding-patterns/issues/391)) ([eded00c](https://github.com/GSA-TTS/agentic-coding-patterns/commit/eded00cecaea06e34a732eb28468efa0808f4b28))
+
 ## [1.9.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.8.0...v1.9.0) (2026-08-25)
 
 
