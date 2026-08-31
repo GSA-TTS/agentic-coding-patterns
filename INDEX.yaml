@@ -334,6 +334,14 @@ patterns:
       - outline the argument
       - story structure
       priority: 55
+  - path: skills/frontend/nielsen-norman-heuristic-review/SKILL.md
+    id: nielsen-norman-heuristic-review
+    title: Nielsen Norman Heuristic Review
+    type: skill
+    status: experimental
+    categories: []
+    collection: null
+    routing: {}
   - path: skills/communications/one-pager/SKILL.md
     id: one-pager
     title: One-Pager
@@ -1168,8 +1176,8 @@ output_artifacts:
   web-prototype:
   - uswds-prototype
 stats:
-  total_patterns: 41
-  skills: 30
+  total_patterns: 42
+  skills: 31
   prompts: 3
   agents: 3
   workflows: 4
