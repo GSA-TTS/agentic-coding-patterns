@@ -72,8 +72,10 @@ curl http://127.0.0.1:16767/
 ```
 
 The host side of the mapping stays loopback-only either way, so the `0.0.0.0`
-in-guest bind does not widen host exposure. See
-[GSA-TTS/agentic-coding-quickstart#333](https://github.com/GSA-TTS/agentic-coding-quickstart/pull/333).
+in-guest bind does not widen host exposure. The important distinction is which
+side of the boundary dials the guest port: create-time publishing dials the guest
+network IP, while post-hoc publishing tunnels from inside the guest and can reach
+guest loopback.
 
 ## "No hosts configured" and/or a repeating `ws://…/ws` connect loop
 

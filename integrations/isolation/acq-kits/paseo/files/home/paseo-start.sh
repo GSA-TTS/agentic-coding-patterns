@@ -1,5 +1,5 @@
 #!/bin/sh
-# paseo-start.sh — install the Paseo CLI on first boot, then supervise the Paseo
+# paseo-start.sh — install/update the pinned Paseo CLI, then supervise the Paseo
 # daemon (which serves the API, the WebSocket, AND the bundled web UI on one port)
 # so it auto-restarts if it exits.
 #
@@ -26,8 +26,8 @@
 #
 # Runs as the agent user (whose uid is assigned at provision and is not
 # necessarily 1000) in the background on every sandbox start and is fully
-# idempotent: it installs the Paseo CLI only if missing, then starts a supervisor
-# for the daemon only if one isn't already running.
+# idempotent: it installs the pinned Paseo CLI only if missing or out of date,
+# then starts a supervisor for the daemon only if one isn't already running.
 #
 # Pins are provided via the environment, with an in-script fallback default kept
 # in sync with the kit spec's documented pin:
@@ -74,9 +74,13 @@ case ":$PATH:" in *":$NPM_BIN:"*) : ;; *) PATH="$NPM_BIN:$PATH" ;; esac
 case ":$PATH:" in *":$HOME/.npm-global/bin:"*) : ;; *) PATH="$HOME/.npm-global/bin:$PATH" ;; esac
 export PATH
 
-# --- Install the Paseo CLI if it isn't present yet (first boot). -------------
-if ! command -v paseo >/dev/null 2>&1; then
-  _ver="${PASEO_CLI_VERSION:-0.6.1}"
+# --- Install the pinned Paseo CLI if it is missing or out of date. -----------
+_ver="${PASEO_CLI_VERSION:-0.6.1}"
+_installed_ver=""
+if command -v paseo >/dev/null 2>&1; then
+  _installed_ver="$(paseo --version 2>/dev/null | sed -n 's/^v//; s/.*\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p; q')"
+fi
+if [ "$_installed_ver" != "$_ver" ]; then
   # Route npm through the sandbox proxy. npm honors HTTP(S)_PROXY automatically,
   # but be explicit so any Node-side downloads (none expected for the sherpa
   # prebuilt, which is a plain npm tarball) also proxy.

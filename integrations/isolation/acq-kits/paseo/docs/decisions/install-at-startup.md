@@ -30,9 +30,9 @@ in a create-time hook would risk crashing sandbox create over an optional UI.
 ## Decision
 
 **Do the install in the `startup` phase (backgrounded), never a create-time
-hook.** `paseo-start.sh` installs the CLI on first boot only (guarded by
-`command -v paseo`), then supervises the daemon. There is deliberately no
-`install` phase.
+hook.** `paseo-start.sh` installs the pinned CLI when it is missing or when the
+installed `paseo --version` differs from `PASEO_CLI_VERSION`, then supervises the
+daemon. There is deliberately no `install` phase.
 
 - The startup script routes npm through the sandbox proxy
   (`HTTP(S)_PROXY`/`npm_config_*`) and builds a `NODE_EXTRA_CA_CERTS` bundle from
@@ -43,7 +43,7 @@ hook.** `paseo-start.sh` installs the CLI on first boot only (guarded by
   (`$HOME/.npm`) instead of `sudo npm`. That keeps all npm-written files owned by
   the agent user and avoids privileged package installation.
 - A failed install degrades to "UI unavailable" (`|| true` + an early `exit 0`
-  after the `command -v paseo` guard); it never fails the sandbox.
+  after the final `command -v paseo` guard); it never fails the sandbox.
 
 ## Why no SHA-pinned installer (unlike openchamber)
 
@@ -58,7 +58,8 @@ from the trusted npm registry over the proxied, allow-listed egress).
 
 - `acq create` can never be taken down by a Paseo install failure.
 - First boot pays a one-time npm install cost (a few seconds) before the UI is
-  reachable; later starts skip it (guarded by `command -v paseo`).
+  reachable; later starts skip it unless the installed CLI version differs from
+  `PASEO_CLI_VERSION`.
 - Adopting a newer Paseo release is a two-value edit (`PASEO_CLI_VERSION` in
   `spec.yaml` + the fallback default in `paseo-start.sh`).
 - The kit's only egress is `registry.npmjs.org`.

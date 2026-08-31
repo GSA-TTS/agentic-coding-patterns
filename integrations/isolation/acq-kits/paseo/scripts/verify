@@ -481,7 +481,7 @@ info "6b. Guest daemon bind is 0.0.0.0 (reachable via create-time publish), not 
 # reach it. On the msb backend `-p HOST:GUEST` binds a HOST loopback listener but
 # the publisher dials the sandbox's GUEST NETWORK IP (not guest 127.0.0.1), so a
 # loopback-only bind answers inside the guest yet returns "Empty reply from server"
-# on the published host port. See GSA-TTS/agentic-coding-quickstart#333. Two asserts:
+# on the published host port. Two asserts:
 #   (a) the LISTEN socket is bound to 0.0.0.0 (not 127.0.0.1) in the guest, and
 #   (b) the earlier HOST-port fetch (step 5b) delivered the bundle — proving
 #       acq's create-time port-publish reaches the guest daemon end-to-end.
@@ -504,7 +504,7 @@ else
     0.0.0.0:*|*00000000:1A6F*)
       ok "daemon LISTEN socket bound to 0.0.0.0 in-guest ($bind_addr) — reachable via create-time publish" ;;
     127.0.0.1:*|*0100007F:1A6F*)
-      bad "daemon bound to loopback in-guest ($bind_addr) — create-time publish returns 'Empty reply from server' on msb (PASEO_LISTEN?; see quickstart#333)" ;;
+      bad "daemon bound to loopback in-guest ($bind_addr) — create-time publish returns 'Empty reply from server' on msb; check PASEO_LISTEN" ;;
     "")
       warn "could not read the daemon's LISTEN address (no ss + unreadable /proc/net/tcp); relying on the host-port fetch as the reachability proof" ;;
     *)
@@ -547,16 +547,14 @@ fi
 
 info "6d. Hardening: npm cache remains agent-owned"
 # Regression guard for running npm as root while HOME=/home/agent: that creates
-# root-owned files under ~/.npm and later blocks ordinary agent npm commands.
-if [ -z "$installed" ]; then
-  skip "npm cache ownership check (Paseo CLI did not install)"
+# root-owned files under ~/.npm and later blocks ordinary agent npm commands. Run
+# this even when install fails, because stale root-owned cache files may be the
+# reason install failed.
+bad_cache_owner="$(in_sbx 'if [ -d "$HOME/.npm" ]; then find "$HOME/.npm" -not -user "$(id -u)" -print -quit 2>/dev/null; fi')"
+if [ -n "$bad_cache_owner" ]; then
+  bad "npm cache contains files not owned by the agent user: $bad_cache_owner"
 else
-  bad_cache_owner="$(in_sbx 'if [ -d "$HOME/.npm" ]; then find "$HOME/.npm" -not -user "$(id -u)" -print -quit 2>/dev/null; fi')"
-  if [ -n "$bad_cache_owner" ]; then
-    bad "npm cache contains files not owned by the agent user: $bad_cache_owner"
-  else
-    ok "npm cache has no non-agent-owned files under ~/.npm"
-  fi
+  ok "npm cache has no non-agent-owned files under ~/.npm"
 fi
 
 info "7. Respawn supervisor running (auto-restart) — the daemon"
