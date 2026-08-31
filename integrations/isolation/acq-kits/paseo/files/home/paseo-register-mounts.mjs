@@ -27,8 +27,8 @@
 // We import the CLI's OWN connector (dist/utils/client.js -> connectToDaemon) so
 // we reuse its socket/localhost resolution and need no host/port here. The CLI
 // package dir is resolved portably from the `paseo` bin symlink, so this works
-// whether the CLI was installed into the sudo-global npm prefix OR the no-sudo
-// per-user ~/.npm-global fallback (see paseo-start.sh).
+// whether the CLI was already present in the default global npm prefix or was
+// installed into the kit's per-user ~/.npm-global prefix (see paseo-start.sh).
 //
 // WHICH MOUNTS COUNT (backend-agnostic — no reliance on the source-name token,
 // which is a per-path hash on msb and the literal "host" on sbx, i.e. NOT a

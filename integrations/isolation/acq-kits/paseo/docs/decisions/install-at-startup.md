@@ -39,9 +39,9 @@ hook.** `paseo-start.sh` installs the CLI on first boot only (guarded by
   the sandbox proxy CA (`PROXY_CA_CERT_B64`) + the system trust store, so the
   install works behind an inspecting proxy (e.g. Zscaler).
 - On the default sandbox-template base the npm global prefix is root-owned, so
-  the install runs via `sudo -n env …` (forwarding proxy + CA + HOME), with a
-  per-user `npm_config_prefix` fallback when sudo is unavailable (plain-OCI
-  override).
+  the install uses an agent-owned npm prefix (`$HOME/.npm-global`) and cache
+  (`$HOME/.npm`) instead of `sudo npm`. That keeps all npm-written files owned by
+  the agent user and avoids privileged package installation.
 - A failed install degrades to "UI unavailable" (`|| true` + an early `exit 0`
   after the `command -v paseo` guard); it never fails the sandbox.
 

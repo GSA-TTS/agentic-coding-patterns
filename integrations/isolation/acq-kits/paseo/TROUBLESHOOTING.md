@@ -276,13 +276,13 @@ Common causes:
   inspection CA. Pair with the `zscaler-ca-certificate` kit; the startup script
   folds `PROXY_CA_CERT_B64` + the system trust store into `NODE_EXTRA_CA_CERTS`.
 
-- **npm global prefix permissions.** On the default sandbox template the global
-  prefix is root-owned, so the script installs via `sudo -n`. If sudo is
-  unavailable (a plain-OCI base), it falls back to a per-user prefix at
-  `~/.npm-global`. Verify which took effect:
+- **npm global prefix permissions.** On the default sandbox template the system
+  global prefix is root-owned, so the script installs Paseo into the agent-owned
+  per-user prefix at `~/.npm-global` and uses the agent-owned cache at `~/.npm`.
+  Verify the per-user install path:
 
   ```bash
-  acq exec <sandbox> -- sh -c 'ls -la ~/.npm-global/bin 2>/dev/null; ls -la "$(npm prefix -g 2>/dev/null)/bin" 2>/dev/null | grep -i paseo'
+  acq exec <sandbox> -- sh -c 'ls -la ~/.npm-global/bin 2>/dev/null; command -v paseo'
   ```
 
 ## Worktrees aren't landing under my project

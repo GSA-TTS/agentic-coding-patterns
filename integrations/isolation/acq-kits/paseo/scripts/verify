@@ -14,10 +14,11 @@
 #      web UI (on one port), the published port, that the LARGE UI bundle arrives
 #      byte-complete over the host port (identity encoding; integrity guard), the
 #      in-guest 0.0.0.0 bind (reachable via create-time publish) over the host port, the
-#      install ran with lifecycle scripts disabled (hardening #2), the respawn
-#      supervisor, the PID-1 hold, the worktree-root pin, daemon self-heal, and
-#      that projects are pre-populated from the mounted host dirs — including that
-#      a read-write extra workspace IS registered and a ":ro" one is SKIPPED.
+#      install ran with lifecycle scripts disabled (hardening #2), the npm cache
+#      remains agent-owned, the respawn supervisor, the PID-1 hold, the
+#      worktree-root pin, daemon self-heal, and that projects are pre-populated
+#      from the mounted host dirs — including that a read-write extra workspace IS
+#      registered and a ":ro" one is SKIPPED.
 #
 #      Preferred driver — RUN_ACQ=1: drive the `acq` CLI. acq translates the
 #      neutral hybrid/v1 spec to an sbx-v2 kit (kit_translate_to_sbx) and applies
@@ -108,7 +109,7 @@ trap cleanup EXIT INT TERM
 # PATH SCOPING: a bare `sh -c` sources nothing, so its PATH lacks the npm-global
 # bin (where `paseo` and the real `opencode` install) and ~/.local/bin (the
 # wrapper). Prepend them for every probe so PRESENT binaries resolve. Also
-# include $HOME/.npm-global/bin for the no-sudo install fallback.
+# include $HOME/.npm-global/bin for the per-user Paseo install path.
 in_sbx() {
   _wrapped='export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:$(npm prefix -g 2>/dev/null)/bin:$PATH"; '"$1"
   case "${DRIVER:-}" in
@@ -541,6 +542,20 @@ else
     ok "paseo binary runs (\`paseo --version\`) — no required postinstall was skipped"
   else
     warn "\`paseo --version\` did not run cleanly; if the daemon is also down, a required lifecycle script may have been skipped — drop --ignore-scripts in paseo-start.sh"
+  fi
+fi
+
+info "6d. Hardening: npm cache remains agent-owned"
+# Regression guard for running npm as root while HOME=/home/agent: that creates
+# root-owned files under ~/.npm and later blocks ordinary agent npm commands.
+if [ -z "$installed" ]; then
+  skip "npm cache ownership check (Paseo CLI did not install)"
+else
+  bad_cache_owner="$(in_sbx 'if [ -d "$HOME/.npm" ]; then find "$HOME/.npm" -not -user "$(id -u)" -print -quit 2>/dev/null; fi')"
+  if [ -n "$bad_cache_owner" ]; then
+    bad "npm cache contains files not owned by the agent user: $bad_cache_owner"
+  else
+    ok "npm cache has no non-agent-owned files under ~/.npm"
   fi
 fi
 
