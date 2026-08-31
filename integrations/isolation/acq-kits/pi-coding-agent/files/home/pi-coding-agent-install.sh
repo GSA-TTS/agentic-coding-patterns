@@ -116,12 +116,17 @@ if ! command -v pi >/dev/null 2>&1; then
   mkdir -p "$(dirname "$_ca")"
   : > "$_ca"
   if [ -n "${PROXY_CA_CERT_B64:-}" ]; then
-    if ! printf %s "$PROXY_CA_CERT_B64" | base64 -d >> "$_ca" 2>/tmp/pi-coding-agent-ca-decode.err; then
+    # Same predictable-/tmp-path avoidance as the install log below (mktemp,
+    # not a hardcoded name) — this script creates two files under /tmp in a
+    # single run and both should meet the same standard, not just one.
+    _ca_err="$(mktemp "${TMPDIR:-/tmp}/pi-coding-agent-ca-decode.XXXXXX.err" 2>/dev/null || true)"
+    [ -n "$_ca_err" ] || _ca_err="/tmp/pi-coding-agent-ca-decode.$$.err"
+    if ! printf %s "$PROXY_CA_CERT_B64" | base64 -d >> "$_ca" 2>"$_ca_err"; then
       # Surface a decode failure instead of silently shipping a bundle
       # missing the proxy CA — an incomplete bundle behind an inspecting
       # proxy fails TLS with a confusing "unable to verify" error rather
       # than a clear signal that PROXY_CA_CERT_B64 itself is malformed.
-      echo "pi-coding-agent: PROXY_CA_CERT_B64 failed to base64-decode; proxy CA NOT added to the bundle (see /tmp/pi-coding-agent-ca-decode.err)" >&2
+      echo "pi-coding-agent: PROXY_CA_CERT_B64 failed to base64-decode; proxy CA NOT added to the bundle (see $_ca_err)" >&2
     fi
   fi
   [ -f /etc/ssl/certs/ca-certificates.crt ] && cat /etc/ssl/certs/ca-certificates.crt >> "$_ca"
@@ -141,14 +146,17 @@ if ! command -v pi >/dev/null 2>&1; then
   # experimental PI_EXPERIMENTAL=1 managed-install mode (unstable upstream,
   # could change or break without notice). --ignore-scripts: verified
   # against the published npm registry metadata that
-  # @earendil-works/pi-coding-agent declares NO preinstall/postinstall
-  # lifecycle script, so this flag has nothing to skip for the top-level
-  # package — it still blocks any transitive dependency's install-time
-  # hooks. NOTE (residual risk, see spec.yaml header): --ignore-scripts does
-  # NOT vet or sandbox code that runs when `pi` is later INVOKED; a
-  # compromised package can still run arbitrary code on first `pi` execution
-  # with full agent-user privilege. The sandbox itself remains the real
-  # containment boundary.
+  # @earendil-works/pi-coding-agent AND every one of its transitive
+  # dependencies (checked individually, not assumed) declare NO
+  # preinstall/postinstall lifecycle script, so this flag has nothing to
+  # skip anywhere in the dependency tree for this exact pinned version.
+  # NOTE (residual risk, see spec.yaml header): --ignore-scripts blocks
+  # lifecycle HOOKS only — npm still performs ordinary package-manager
+  # bookkeeping regardless (e.g. linking the package's declared `bin` entry
+  # onto PATH), and none of that vets the code that runs when `pi` is later
+  # INVOKED. A compromised package can still run arbitrary code on first
+  # `pi` execution with full agent-user privilege. The sandbox itself
+  # remains the real containment boundary.
   _pkg="@earendil-works/pi-coding-agent"
   [ "$_pi_version" != "latest" ] && _pkg="${_pkg}@${_pi_version}"
 

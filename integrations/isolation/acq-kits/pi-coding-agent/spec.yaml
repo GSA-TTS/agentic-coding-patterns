@@ -53,16 +53,19 @@
 #   with a live-tested justification — do not allow-list it speculatively now.
 #
 # WHY NOT `--ignore-scripts` LEAVES ANY RESIDUAL RISK: verified against the
-# published npm registry metadata for @earendil-works/pi-coding-agent — its
-# package.json declares NO preinstall/postinstall lifecycle script, so
-# --ignore-scripts (which this kit's install script also passes, matching
-# pi's own installer) has nothing to skip; there is no native-module
-# postinstall step here the way openchamber's better-sqlite3 dependency has,
-# so this kit needs none of openchamber's github.com/*.githubusercontent.com
-# release-asset allow-list entries. IMPORTANT residual-risk note:
-# --ignore-scripts blocks npm LIFECYCLE hooks (preinstall/postinstall) for
-# this package and its transitive deps — it does NOT vet or sandbox the code
-# that runs when the installed `pi` binary is later INVOKED. A compromised
+# published npm registry metadata for @earendil-works/pi-coding-agent AND
+# every one of its transitive dependencies (checked individually, not
+# assumed) — none declares a preinstall/postinstall lifecycle script for this
+# exact pinned version, so --ignore-scripts (which this kit's install script
+# also passes, matching pi's own installer) has nothing to skip anywhere in
+# the dependency tree; there is no native-module postinstall step here the
+# way openchamber's better-sqlite3 dependency has, so this kit needs none of
+# openchamber's github.com/*.githubusercontent.com release-asset allow-list
+# entries. IMPORTANT residual-risk note: --ignore-scripts blocks npm
+# LIFECYCLE HOOKS only — npm still performs ordinary package-manager
+# bookkeeping regardless of this flag (e.g. linking the package's declared
+# `bin` entry onto PATH), and none of that vets the code that runs when the
+# installed `pi` binary is later INVOKED. A compromised
 # @earendil-works/pi-coding-agent package does not need a postinstall hook at
 # all; it can put a payload directly in the code path that runs on `pi`'s
 # first invocation, with full agent-user privilege. --ignore-scripts removes
