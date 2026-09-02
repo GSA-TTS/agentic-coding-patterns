@@ -184,6 +184,32 @@ class TestFindPatternFiles:
         files = find_pattern_files(tmp_path)
         assert files == []
 
+    def test_excludes_fixtures_and_kit_files_trees(self, tmp_path):
+        """SKILL.md under fixtures/ or an acq-kit files/ tree is excluded.
+
+        A kit may VENDOR a foreign-schema SKILL.md as a guest payload under
+        `.../files/...`; those are not repo pattern skills and must not be
+        validated against skill.schema.json."""
+        # A real repo skill (validated).
+        (tmp_path / "skills" / "real").mkdir(parents=True)
+        (tmp_path / "skills" / "real" / "SKILL.md").write_text("content")
+        # A vendored guest payload under a kit files/ tree (excluded).
+        vendored = tmp_path / "integrations" / "isolation" / "acq-kits" / "k" / "files" / "home" / "s"
+        vendored.mkdir(parents=True)
+        (vendored / "SKILL.md").write_text("content")
+        # A fixture (excluded).
+        (tmp_path / "skills" / "fixtures").mkdir(parents=True)
+        (tmp_path / "skills" / "fixtures" / "SKILL.md").write_text("content")
+
+        files = find_pattern_files(tmp_path)
+
+        rels = [f.relative_to(tmp_path) for f in files]
+        assert len(files) == 1, rels
+        assert files[0].parts[-2] == "real"
+        assert not any("files" in r.parts for r in rels)
+        assert not any("fixtures" in r.parts for r in rels)
+
+
 
 class TestValidateFile:
     """Tests for validate_file function."""

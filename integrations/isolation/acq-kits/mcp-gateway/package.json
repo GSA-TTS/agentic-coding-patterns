@@ -1,0 +1,9 @@
+{
+  "name": "mcp-gateway",
+  "private": true,
+  "type": "module",
+  "description": "acq mixin kit (hybrid/v1): reach MCP servers behind the GSA-TTS obot MCP gateway via the obot CLI",
+  "scripts": {
+    "test": "node --test 'tests/**/*.test.mjs'"
+  }
+}

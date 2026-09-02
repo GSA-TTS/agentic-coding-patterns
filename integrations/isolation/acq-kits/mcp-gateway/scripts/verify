@@ -1,0 +1,188 @@
+#!/usr/bin/env bash
+#
+# verify — host-side validation for the mcp-gateway acq mixin kit.
+#
+# NOTE (hybrid/v1): this kit's spec.yaml is the NEUTRAL schemaVersion "hybrid/v1"
+# form. The backend-agnostic gate is the repo's schema validator
+# (integrations/isolation/acq-kits/validate-kits.py) plus the merge-helper unit
+# tests (npm test). THIS script is the live, per-backend end-to-end check for the
+# sbx-translation path — it drives the sbx CLI directly. Live sandbox verification
+# is otherwise deferred (this repo's CI cannot create nested sandboxes).
+#
+# Run on a host where a backend CLI (`sbx` >= 0.34.0) is installed and logged in.
+# It validates the kit spec, creates a sandbox with the kit applied, and confirms:
+#   1. obot CLI installed at the pinned version.
+#   2. obot defaultURL primed (config.json present with the gateway URL).
+#   3. Gateway REACHABLE on :80 (unauthenticated MCP probe returns HTTP 401 rather
+#      than a connection failure/000 — needs NO key; the load-bearing check).
+#   4. If OBOT_TOKEN is injected: `obot mcp search --non-interactive --json`
+#      returns CDC PLACES, and `obot-add-server.sh "CDC PLACES"` writes a valid
+#      OpenCode mcp.cdc-places entry (url ends in /mcp, Bearer {env:OBOT_TOKEN}).
+#
+# It creates a temporary sandbox named "mcp-gateway-verify-*" and removes it at
+# the end (and on interrupt). It does not touch your other sandboxes. Nothing here
+# prints secret values.
+#
+# Usage (from anywhere):
+#   path/to/mcp-gateway/scripts/verify
+#   KEEP=1 path/to/.../scripts/verify        # keep the sandbox for inspection
+#
+# Prerequisite (for the auth checks): store the obot API key once, bound to the
+# gateway host, so acq injects it:
+#   acq secret set-custom -g \
+#     --host obot-alb-469455713.us-east-1.elb.amazonaws.com \
+#     --env OBOT_TOKEN
+# The key must carry MCP scope (all-mcp or per-server), NOT llm.
+#
+# CAVEAT: whether set-custom injects for a plaintext :80 host is UNVERIFIED — see
+# docs/decisions/0002-allowlist-http-port-80.md.
+
+set -uo pipefail
+
+KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+SBX_NAME="mcp-gateway-verify-$$"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/mcp-gateway-verify.XXXXXX")"
+CREATE_LOG="$WORK/sbx-create.log"
+KEEP="${KEEP:-0}"
+
+# Gateway + worked-example server (CDC PLACES). Keep in sync with spec.yaml,
+# files/home/obot-config/config.json, and README on any gateway URL change.
+GATEWAY_HOST="obot-alb-469455713.us-east-1.elb.amazonaws.com"
+PROBE_URL="http://${GATEWAY_HOST}/mcp-connect/ms1frnfd/mcp"   # CDC PLACES + /mcp
+OBOT_VERSION="v0.25.4"
+
+pass=0
+fail=0
+ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass+1)); }
+bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail+1)); }
+info() { printf '\n\033[1m%s\033[0m\n' "$1"; }
+
+cleanup() {
+  if [ "$KEEP" = "1" ]; then
+    printf '\nKEEP=1 set; leaving sandbox %s and %s in place.\n' "$SBX_NAME" "$WORK" >&2
+    return
+  fi
+  sbx rm -f "$SBX_NAME" >/dev/null 2>&1 || true
+  rm -rf "$WORK" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT INT TERM
+
+in_sbx() { sbx exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true; }
+
+# Unauthenticated MCP `initialize` POST; prints the HTTP status (000 on failure).
+probe_status() {
+  in_sbx "curl -sS -o /dev/null -w '%{http_code}' --max-time 20 \
+    -X POST \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json, text/event-stream' \
+    -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}' \
+    '$PROBE_URL'"
+}
+
+info "0. Preconditions"
+if ! command -v sbx >/dev/null 2>&1; then
+  echo "  sbx not on PATH. Install sbx >= 0.34.0 and retry." >&2
+  exit 1
+fi
+echo "  sbx version: $(sbx version 2>/dev/null | grep -oE 'v?[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1)"
+[ -f "$KIT_DIR/spec.yaml" ] && ok "kit spec.yaml present" || { bad "spec.yaml missing"; exit 1; }
+if sbx secret ls 2>/dev/null | grep -q "$GATEWAY_HOST"; then
+  ok "obot gateway custom secret is set (auth checks will run)"
+else
+  echo "  NOTE: no gateway custom secret found. Reachability check still runs;" >&2
+  echo "        obot search + add-server checks are skipped. Set it with:" >&2
+  echo "        sbx secret set-custom -g --host $GATEWAY_HOST --env OBOT_TOKEN" >&2
+fi
+
+info "1. Offline gates (schema + merge-helper unit tests)"
+if sbx kit validate "$KIT_DIR" >/dev/null 2>&1; then ok "sbx kit validate"; else bad "sbx kit validate failed"; fi
+if command -v node >/dev/null 2>&1; then
+  if ( cd "$KIT_DIR" && node --test 'tests/**/*.test.mjs' >/dev/null 2>&1 ); then
+    ok "merge-helper unit tests pass"
+  else
+    bad "merge-helper unit tests failed (cd $KIT_DIR && npm test)"
+  fi
+else
+  echo "  NOTE: node not on PATH; skipping merge-helper unit tests." >&2
+fi
+
+info "2. Create a sandbox with the kit"
+echo "  creating $SBX_NAME (workspace $WORK)..."
+if sbx create --name "$SBX_NAME" --kit "$KIT_DIR" opencode "$WORK" >"$CREATE_LOG" 2>&1; then
+  ok "sandbox created with --kit"
+else
+  bad "sbx create failed (exit $?)"
+  sed 's/^/  | /' "$CREATE_LOG" >&2
+  exit 1
+fi
+sleep 2
+
+info "3. obot CLI installed at the pinned version"
+if [ "$(in_sbx 'command -v obot >/dev/null 2>&1 && echo yes')" = "yes" ]; then
+  ok "obot on PATH"
+  ver="$(in_sbx 'obot version 2>/dev/null | head -n1')"
+  echo "  obot version: ${ver:-<unknown>}"
+  case "$ver" in
+    *"$OBOT_VERSION"*) ok "obot is the pinned version ($OBOT_VERSION)" ;;
+    *) bad "obot version does not match pinned $OBOT_VERSION" ;;
+  esac
+else
+  bad "obot not installed (install step failed — see create log)"
+fi
+
+info "4. obot defaultURL primed + non-secret gateway URL set"
+cfg="$(in_sbx 'cat "${XDG_CONFIG_HOME:-$HOME/.config}/obot/config.json" 2>/dev/null')"
+case "$cfg" in
+  *"$GATEWAY_HOST"*) ok "obot config.json primed with the gateway defaultURL" ;;
+  *) bad "obot config.json missing/incorrect (got: ${cfg:-<none>})" ;;
+esac
+[ "$(in_sbx 'test -n "$OBOT_GATEWAY_URL" && echo yes')" = "yes" ] \
+  && ok "OBOT_GATEWAY_URL is set" || bad "OBOT_GATEWAY_URL missing from the guest env"
+
+info "5. Vendored search skill linked"
+[ "$(in_sbx 'test -e "$HOME/.agents/skills/obot-search-mcp-servers/SKILL.md" && echo yes')" = "yes" ] \
+  && ok "obot-search-mcp-servers skill linked into ~/.agents/skills" \
+  || bad "search skill not linked (startup step issue)"
+
+info "6. Gateway REACHABLE on :80 (unauthenticated — no key needed)"
+status="$(probe_status)"
+echo "  unauthenticated HTTP status: ${status:-<none>}"
+if [ "$status" = "401" ]; then
+  ok "gateway reached (401 as expected without a key)"
+elif [ -z "$status" ] || [ "$status" = "000" ]; then
+  bad "gateway unreachable (no HTTP status) — check :80 egress allow-list"
+  echo "  Check: sbx policy log $SBX_NAME ($GATEWAY_HOST:80)." >&2
+else
+  ok "gateway reached (HTTP $status — a served status, not a connection failure)"
+fi
+
+info "7. obot search + turnkey wiring (only if OBOT_TOKEN is injected)"
+if [ "$(in_sbx 'test -n "$OBOT_TOKEN" && echo yes')" = "yes" ]; then
+  rows="$(in_sbx 'obot mcp search --non-interactive "CDC PLACES" 2>/dev/null')"
+  case "$rows" in
+    *"CDC PLACES"*) ok "obot mcp search returned CDC PLACES" ;;
+    *) bad "obot mcp search did not return CDC PLACES (token scope / URL prime?)" ;;
+  esac
+
+  wire="$(in_sbx 'sh "$HOME/obot-add-server.sh" "CDC PLACES" 2>&1')"
+  entry="$(in_sbx 'cat "$HOME/.config/opencode/opencode.jsonc" 2>/dev/null')"
+  case "$entry" in
+    *'"cdc-places"'*'/mcp-connect/'*'/mcp"'*)
+      ok "obot-add-server wrote mcp.cdc-places with a /mcp URL" ;;
+    *) bad "obot-add-server did not write a valid mcp.cdc-places entry (got: $(printf '%s' "$wire" | tr '\n' ' '))" ;;
+  esac
+  case "$entry" in
+    *'Bearer {env:OBOT_TOKEN}'*) ok "mcp entry uses Bearer {env:OBOT_TOKEN}" ;;
+    *) bad "mcp entry missing the Bearer {env:OBOT_TOKEN} header" ;;
+  esac
+else
+  echo "  SKIP: OBOT_TOKEN not present in the guest." >&2
+  echo "        Either no secret is stored, or set-custom did not inject for the" >&2
+  echo "        :80 host (see docs/decisions/0002-allowlist-http-port-80.md)." >&2
+fi
+
+info "Summary"
+printf '  %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ] && printf '  \033[32mAll checks passed.\033[0m\n' || printf '  \033[31mSome checks failed — see notes above.\033[0m\n'
+
+[ "$fail" -eq 0 ]

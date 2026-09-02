@@ -36,12 +36,14 @@ validate:  ## Run all validators (frontmatter + sensitive terms)
 validate-kits:  ## Validate neutral acq-kits specs against the hybrid/v1 schema (strict: warnings fail)
 	python integrations/isolation/acq-kits/validate-kits.py --strict
 
-test-kits:  ## Run the acq-kits node test suites (usai-provider + paseo) + providers/usai emitters
+test-kits:  ## Run the acq-kits node test suites (usai-provider + paseo + mcp-gateway) + providers/usai emitters
 	@if command -v node >/dev/null 2>&1; then \
 		echo "==> usai-provider kit tests" && \
 		(cd integrations/isolation/acq-kits/usai-provider && node --test 'tests/**/*.test.mjs') && \
 		echo "==> paseo kit tests" && \
 		(cd "$(CURDIR)/integrations/isolation/acq-kits/paseo" && node --test 'tests/**/*.test.mjs') && \
+		echo "==> mcp-gateway kit tests" && \
+		(cd "$(CURDIR)/integrations/isolation/acq-kits/mcp-gateway" && node --test 'tests/**/*.test.mjs') && \
 		echo "==> providers/usai catalog + emitter tests" && \
 		(cd "$(CURDIR)/integrations/providers/usai" && node --test 'tests/**/*.test.mjs'); \
 	else \

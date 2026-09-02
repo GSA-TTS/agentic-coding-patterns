@@ -80,6 +80,22 @@ kits:
       ONE port. The daemon runs unsecured (no PASEO_PASSWORD); the sandbox is the
       security boundary and the port is host loopback only.
 
+  mcp-gateway:
+    backends: [sbx, msb]
+    parity: |
+      Both backends install the same pinned obot CLI binary (from GitHub
+      Releases, sha256-verified), allow-list the obot MCP gateway host on plaintext
+      :80 (HTTP-only today) plus the obot-download hosts, drop the same obot
+      config.json (defaultURL primer), and read the injected OBOT_TOKEN. No backend
+      shortcut. The obot API key is injected at runtime by acq as OBOT_TOKEN via the
+      active backend's credential path (never stored in the kit); the CLI reads it
+      from the env — no keyring, no `obot login`. Discovery + wiring are CLI-driven:
+      a vendored search skill + `obot-add-server.sh` use `obot mcp search` to find a
+      server's current mcp-connect URL and merge an OpenCode remote MCP entry. The
+      user's key needs MCP scope (all-mcp or per-server), NOT llm. OPEN: whether
+      set-custom injects a secret for a plaintext :80 host is unverified — flagged
+      for the acq maintainers in the kit's docs/decisions/0002.
+
   prime-agent:
     backends: [sbx, msb]
     parity: |

@@ -24,6 +24,7 @@ not agent behavior. (Behavioral patterns live in `skills/`, `prompts/`, etc.)
 | [`git-ssh-sign/`](git-ssh-sign/) | Sign git commits and tags with the SSH key forwarded from the host agent (vendored from sbx-kits-contrib). |
 | [`openchamber/`](openchamber/) | Run OpenChamber, a browser UI for OpenCode, inside the sandbox alongside the terminal TUI. Opt-in (see its parity note). |
 | [`paseo/`](paseo/) | Self-host the [Paseo](https://github.com/getpaseo/paseo) daemon + browser web UI (for coding agents) inside the sandbox on one port. Opt-in; agent-generic wrapper, no shared TUI session. |
+| [`mcp-gateway/`](mcp-gateway/) | Give the agent reach to MCP servers behind the GSA-TTS obot MCP gateway: installs the obot CLI, primes the gateway URL, injects the obot API key (OBOT_TOKEN), and ships a search skill + helper to discover servers (`obot mcp search`) and wire one into the agent config. |
 
 Each kit is self-contained: a `spec.yaml` (`hybrid/v1`), any `files/` payload, a
 `scripts/verify` host-side check, a `README.md` (with a **backend parity** note),

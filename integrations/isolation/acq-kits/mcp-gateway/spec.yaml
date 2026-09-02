@@ -1,0 +1,189 @@
+# spec.yaml — mcp-gateway (a neutral acq mixin kit, hybrid/v1)
+#
+# Gives a coding agent in the sandbox reach to MCP servers hosted behind the
+# GSA-TTS obot MCP gateway (the "MCP Server Hub"), DRIVEN BY THE obot CLI.
+#
+# WHY THE CLI (not static URLs): the gateway fronts many MCP servers, each at a
+# distinct proxy URL of the form <gateway>/mcp-connect/<server-id>/mcp, where
+# <server-id> is assigned at registration and CHANGES on re-register. Rather than
+# ship a stale hardcoded list, this kit installs the obot CLI and uses
+# `obot mcp search` to DISCOVER servers + their current URLs at use-time. A
+# vendored skill teaches the agent to search, and a helper wires a chosen server
+# into the agent's config. See docs/decisions/0001-obot-cli-discovery-and-wiring.md.
+#
+# HOW obot IS PRIMED (empirically verified against obot v0.25.4):
+#   - `obot mcp search` needs TWO things and nothing else:
+#       1. a stored default URL — a trivial config file:
+#            ~/.config/obot/config.json  ->  { "defaultURL": "<gateway>" }
+#          The kit DROPS this file (files[] + a startup copy). `obot setup` is NOT
+#          used: it demands scopes (llm) our MCP token does not carry and errors
+#          `token does not have scope: llm` / `token is not allowed`.
+#       2. an API key in the OBOT_TOKEN env var. With OBOT_TOKEN set, the CLI
+#          authenticates per-invocation with NO keyring and NO `obot login`
+#          (verified: after `obot logout`, exporting OBOT_TOKEN alone makes
+#          `obot mcp search` work). So the sandbox just injects OBOT_TOKEN.
+#   `obot login`/`obot setup` are therefore NOT part of the happy path.
+#
+# SECRET: the obot API key is NOT in this kit. acq injects it as OBOT_TOKEN via
+# the active backend's credential path; the CLI reads it from the env. The user's
+# key must carry MCP scope (`all-mcp` or per-server) — NOT `llm`. Store it once:
+#   acq secret set-custom -g \
+#     --host obot-alb-469455713.us-east-1.elb.amazonaws.com \
+#     --env OBOT_TOKEN
+#
+# CAVEAT (OPEN — pending acq maintainers): the gateway is plain HTTP on :80.
+# Whether `acq/sbx secret set-custom` binds/injects an env secret for a plaintext
+# :80 host (vs assuming HTTPS/443) is UNVERIFIED. See
+# docs/decisions/0002-allowlist-http-port-80.md and TROUBLESHOOTING.md.
+#
+# YAML ALIAS TRAP (documented by the paseo kit): acq's kit translation emits
+# network allow entries UNQUOTED, and a bare leading-`*` host is parsed by YAML as
+# an alias, breaking the translated spec. NO entry below begins with a leading `*`.
+schemaVersion: "hybrid/v1"
+kind: mixin
+name: mcp-gateway
+displayName: MCP Gateway (GSA-TTS obot MCP Server Hub)
+description: >
+  Gives a coding agent reach to MCP servers hosted behind the GSA-TTS obot MCP
+  gateway, driven by the obot CLI. Installs a pinned obot binary, primes the
+  gateway URL (a small config.json) and injects the obot API key (OBOT_TOKEN), and
+  ships a skill + helper to discover servers with `obot mcp search` and wire a
+  chosen one into the agent's config. Agent-agnostic at the network/token layer;
+  turnkey OpenCode wiring via the bundled helper.
+
+caps:
+  network:
+    allow:
+      # The obot MCP gateway ALB. HTTP-ONLY today (HTTPS/custom-domain deferred),
+      # so the plaintext :80 port is allow-listed explicitly — mirrors
+      # network-tiers/balanced.yaml's convention for hosts that require plaintext.
+      # Used by BOTH the obot CLI (`obot mcp search`) and the agent's MCP client.
+      #
+      # MOVABLE HOST — SINGLE POINT TO UPDATE. Raw AWS ALB DNS name; it changes on
+      # ALB replacement/redeploy, and the HTTPS cutover will change BOTH the host
+      # (to a custom domain) AND the port (drop :80 for :443). On any change,
+      # update this line, OBOT_GATEWAY_URL below, files/home/obot-config/config.json,
+      # the README worked example, and scripts/verify.
+      - obot-alb-469455713.us-east-1.elb.amazonaws.com:80
+      # obot CLI release-asset download (install step). The Homebrew formula is a
+      # GoReleaser wrapper around a static binary tarball on GitHub Releases:
+      #   github.com/obot-platform/obot/releases/download/vX/obot_vX_linux_amd64.tar.gz
+      # api.github.com is retained for release metadata; objects.githubusercontent.com
+      # and github.com serve the redirected asset bytes.
+      - api.github.com:443
+      - github.com:443
+      - objects.githubusercontent.com:443
+
+files:
+  # obot install script (create-time, root). Fetches + verifies + installs the
+  # pinned obot binary. Mode 0755.
+  - path: /home/agent/obot-install.sh
+    mode: "0755"
+    source: files/home/obot-install.sh
+    description: Install the pinned obot CLI binary from GitHub Releases (create-time, root).
+  # Startup script (every start, agent uid). Drops config.json into obot's config
+  # dir and links the vendored skill into the agent skill paths. Idempotent,
+  # non-fatal. Mode 0755.
+  - path: /home/agent/obot-startup.sh
+    mode: "0755"
+    source: files/home/obot-startup.sh
+    description: Prime obot defaultURL + link the search skill at startup (agent uid).
+  # Turnkey helper — `obot-add-server <query>` searches the gateway and wires the
+  # matched server into OpenCode's config. Mode 0755.
+  - path: /home/agent/obot-add-server.sh
+    mode: "0755"
+    source: files/home/obot-add-server.sh
+    description: Search the gateway and wire a chosen MCP server into OpenCode config.
+  # JSONC-safe merge helper used by obot-add-server.sh to write the OpenCode mcp
+  # entry without clobbering existing config. Node (base image ships node v22).
+  - path: /home/agent/obot-merge-mcp.mjs
+    mode: "0644"
+    source: files/home/obot-merge-mcp.mjs
+    description: Deep-merge an OpenCode mcp.<name> remote entry into the global config (JSONC-safe).
+  # The obot defaultURL primer. `obot mcp search` reads this to resolve the
+  # gateway (no `obot setup`, no llm scope). Kept in sync with OBOT_GATEWAY_URL +
+  # the allow-list. Mode 0644 (read-only data).
+  - path: /home/agent/obot-config/config.json
+    mode: "0644"
+    source: files/home/obot-config/config.json
+    description: obot CLI defaultURL primer (points `obot mcp search` at the gateway).
+  # Vendored, pinned search skill. Mode 0644. Linked into the agent skill paths by
+  # obot-startup.sh (we do NOT use `obot setup --clients` to install obot's own
+  # bootstrap skills — we vendor a pinned copy for provenance).
+  - path: /home/agent/obot-skills/obot-search-mcp-servers/SKILL.md
+    mode: "0644"
+    source: files/home/obot-skills/obot-search-mcp-servers/SKILL.md
+    description: Vendored "search Obot MCP servers" skill (pinned copy).
+
+commands:
+  # INSTALL phase — create-time, once, as root (uid "0"). Installs the obot CLI.
+  - phase: install
+    user: "0"
+    description: Install the pinned obot CLI binary.
+    command:
+      - sh
+      - -c
+      - |
+        OBOT_VERSION="v0.25.4" \
+        OBOT_SHA256_LINUX_AMD64="6553abb14df6cea031a994724e597d878ad6cd9a228ee761424c96243c608f74" \
+          sh /home/agent/obot-install.sh
+  # STARTUP phase — every start, as the agent user (uid "1000"). Drops config.json
+  # and links the skill. Idempotent + non-fatal (warns + exits 0). Not background:
+  # it runs to completion and exits (no supervisor loop).
+  - phase: startup
+    user: "1000"
+    description: Prime obot defaultURL + link the search skill.
+    command:
+      - sh
+      - /home/agent/obot-startup.sh
+
+# Non-secret gateway base URL. The startup script uses it to write config.json
+# (defaultURL) and the helper uses it as the search context. Keep in sync with
+# caps.network.allow and files/home/obot-config/config.json on any URL change.
+# NOT a secret — the obot API key is injected separately as OBOT_TOKEN.
+environment:
+  OBOT_GATEWAY_URL: "http://obot-alb-469455713.us-east-1.elb.amazonaws.com"
+
+agentContext: |
+  ## MCP Gateway (GSA-TTS obot MCP Server Hub)
+
+  This sandbox has the **obot CLI** installed and pointed at the GSA-TTS MCP
+  gateway, which fronts a catalog of hosted MCP servers (federal open-data tools —
+  CDC PLACES, NIH RePORTER, Grants.gov, the NEPA suite, and more). Your obot API
+  key is injected as `OBOT_TOKEN`; the gateway URL is in `OBOT_GATEWAY_URL`.
+
+  **Discover servers** with the obot CLI (see the `obot-search-mcp-servers` skill):
+
+      obot mcp search --non-interactive "<query>"     # or no query to list all
+
+  Each result shows a connection URL of the form
+  `<gateway>/mcp-connect/<server-id>/mcp` (the `<server-id>` is assigned by the
+  gateway and can change on re-register — always use the CURRENT URL from search).
+
+  **Wire a server into OpenCode** with the bundled helper (it searches, then adds
+  a remote MCP entry to `~/.config/opencode/opencode.jsonc` using
+  `Authorization: Bearer {env:OBOT_TOKEN}`):
+
+      ~/obot-add-server.sh "CDC PLACES"
+
+  You can also add the entry by hand — note the search URL omits the trailing
+  `/mcp`, so append it:
+
+      "mcp": {
+        "cdc-places": {
+          "type": "remote",
+          "url": "http://obot-alb-469455713.us-east-1.elb.amazonaws.com/mcp-connect/ms1frnfd/mcp",
+          "enabled": true,
+          "headers": { "Authorization": "Bearer {env:OBOT_TOKEN}" }
+        }
+      }
+
+  Your obot API key must carry MCP scope (`all-mcp` or per-server) — NOT `llm`.
+
+# No backend shortcuts: both backends install the same pinned binary, allow-list
+# the same hosts, drop the same config.json, and read the injected OBOT_TOKEN. The
+# only per-backend concern is HOW acq injects OBOT_TOKEN (its credential path),
+# which acq owns — not a spec shortcut.
+backend_shortcuts:
+  sbx: {}
+  msb: {}

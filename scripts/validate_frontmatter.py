@@ -175,11 +175,23 @@ def extract_frontmatter(content: str) -> dict[str, Any] | None:
 
 
 def find_pattern_files(root: Path) -> list[Path]:
-    """Find all SKILL.md and AGENTS.md files."""
+    """Find all SKILL.md and AGENTS.md files.
+
+    Excludes non-pattern payloads: `fixtures/` (test data) and acq-kit
+    `files/` trees. A kit may VENDOR a third-party skill (e.g. an obot-format
+    SKILL.md the kit drops into a sandbox) under `.../files/...`; those are guest
+    payloads in a foreign schema, not repo pattern skills, so they are not
+    validated against this repo's skill.schema.json. This mirrors the scoping in
+    validate_references.py (skills/prompts/workflows/agents/lessons-learned +
+    fixtures skip)."""
     patterns = []
     for pattern in ["**/SKILL.md", "**/AGENTS.md"]:
         patterns.extend(root.glob(pattern))
-    return sorted(patterns)
+    return sorted(
+        p
+        for p in patterns
+        if "fixtures" not in p.parts and "files" not in p.parts
+    )
 
 
 # The four mandated prohibited_content categories, each matched by a
