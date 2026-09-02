@@ -118,10 +118,18 @@ if [ "$_installed_ver" != "$_ver" ]; then
   # ~/.npm cache. Install into an agent-owned per-user prefix/cache instead. The
   # package is still invoked as a global install, but all files it writes are owned
   # by the agent user and lifecycle scripts remain disabled above.
-  export npm_config_prefix="$HOME/.npm-global"
-  export npm_config_cache="$HOME/.npm"
+  #
+  # `--prefix`/`--cache` on the COMMAND LINE, not just npm_config_prefix/
+  # npm_config_cache env exports: verified live that this kit's own base image
+  # persistently exports an uppercase NPM_CONFIG_PREFIX, which npm's config
+  # precedence reads over a lowercase npm_config_prefix export — an env-only
+  # override would silently install back into the root-owned system prefix and
+  # fail EACCES, defeating this entire fix. A CLI flag always outranks any env
+  # var regardless of case, so it can't be silently shadowed the same way. Same
+  # pattern the sibling pi-coding-agent kit uses for the identical reason.
   mkdir -p "$HOME/.npm-global" "$HOME/.npm"
-  npm install -g "@getpaseo/cli@${_ver}" >>"$HOME/.local/state/paseo/paseo-install.log" 2>&1 || true
+  npm install -g --prefix "$HOME/.npm-global" --cache "$HOME/.npm" \
+    "@getpaseo/cli@${_ver}" >>"$HOME/.local/state/paseo/paseo-install.log" 2>&1 || true
 fi
 command -v paseo >/dev/null 2>&1 || {
   # Route the marker to BOTH the log and stderr. This is written for ANY
