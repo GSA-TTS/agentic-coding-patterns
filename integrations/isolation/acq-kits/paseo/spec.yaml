@@ -15,7 +15,7 @@
 #
 # DESIGN (see docs/decisions/):
 #   - The STARTUP script (paseo-start.sh) owns the daemon: on every sandbox start
-#     it installs the Paseo CLI (first boot only) and supervises the daemon with
+#     it installs/updates the pinned Paseo CLI and supervises the daemon with
 #     `paseo daemon start --foreground --listen 0.0.0.0:6767 --web-ui`. A single
 #     Paseo process serves the daemon API, the WebSocket, AND the bundled web UI,
 #     all on ONE container port (6767). Because a `startup` command fires on EVERY
@@ -111,7 +111,7 @@ name: paseo
 displayName: Paseo (self-hosted web UI for coding agents)
 description: >
   Runs the Paseo daemon and its bundled browser web UI inside the sandbox and
-  publishes it to the host. Installs the Paseo CLI on first boot and supervises
+  publishes it to the host. Installs or updates the pinned Paseo CLI and supervises
   the daemon on 0.0.0.0:6767 (API + WebSocket + web UI on one port). Ships a thin
   `opencode` wrapper over a generic kit shim that pins Paseo's worktree root under
   the current project and holds PID 1 on `acq run` so the sandbox (and UI) stay up.
@@ -147,7 +147,7 @@ files:
   - path: /home/agent/paseo-start.sh
     mode: "0755"
     source: files/home/paseo-start.sh
-    description: Install (first boot) and supervise the Paseo daemon + web UI
+    description: Install/update the pinned Paseo CLI and supervise the Paseo daemon + web UI
   - path: /home/agent/paseo-set-worktrees-root.mjs
     mode: "0755"
     source: files/home/paseo-set-worktrees-root.mjs
@@ -177,12 +177,12 @@ commands:
     # `agent`; acq/the backend runs the startup phase as the agent user.
     user: "1000"
     background: true
-    description: Install (first boot) and supervise the Paseo daemon + web UI (background)
+    description: Install/update the pinned Paseo CLI and supervise the Paseo daemon + web UI (background)
     command:
       - sh
       - -c
       - |
-        PASEO_CLI_VERSION="0.5.2" \
+        PASEO_CLI_VERSION="0.7.0" \
           sh /home/agent/paseo-start.sh &
 
 # Neutral published port (schema hybrid/v1). Publish the single container/guest
@@ -215,8 +215,8 @@ publishedPorts:
 # host-published loopback port. The sandbox remains the security boundary
 # (ephemeral container, proxied allow-listed egress, no host FS) and the HOST
 # side of the publish is still loopback-only, so 0.0.0.0 in-guest does not widen
-# host exposure. See GSA-TTS/agentic-coding-quickstart#333 and the msb port
-# limitations in that repo's BACKEND_GUIDE.md / KNOWN_FAILURE_MODES.md §36.
+# host exposure. This is the same msb create-time port-publish limitation covered
+# by quickstart's BACKEND_GUIDE.md / KNOWN_FAILURE_MODES.md guidance.
 # Verified live: see scripts/verify "in-guest bind" assertion.
 #
 # PASEO_RELAY_ENABLED=false disables Paseo's cloud relay (wss://relay.paseo.sh).

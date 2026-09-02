@@ -1,5 +1,5 @@
 #!/bin/sh
-# paseo-start.sh — install the Paseo CLI on first boot, then supervise the Paseo
+# paseo-start.sh — install/update the pinned Paseo CLI, then supervise the Paseo
 # daemon (which serves the API, the WebSocket, AND the bundled web UI on one port)
 # so it auto-restarts if it exits.
 #
@@ -26,12 +26,12 @@
 #
 # Runs as the agent user (whose uid is assigned at provision and is not
 # necessarily 1000) in the background on every sandbox start and is fully
-# idempotent: it installs the Paseo CLI only if missing, then starts a supervisor
-# for the daemon only if one isn't already running.
+# idempotent: it installs the pinned Paseo CLI only if missing or out of date,
+# then starts a supervisor for the daemon only if one isn't already running.
 #
 # Pins are provided via the environment, with an in-script fallback default kept
 # in sync with the kit spec's documented pin:
-#   PASEO_CLI_VERSION   — @getpaseo/cli version to install (default 0.5.2)
+#   PASEO_CLI_VERSION   — @getpaseo/cli version to install (default 0.7.0)
 #   PASEO_LISTEN        — daemon bind address (default 0.0.0.0:6767)
 #   PASEO_RESTART_DELAY — seconds to wait before respawning the daemon (default 5)
 
@@ -55,9 +55,12 @@ PASEO_PORT="$(printf '%s' "$PASEO_LISTEN" | sed -n 's/.*:\([0-9][0-9]*\)$/\1/p')
 REGISTER_MOUNTS_SCRIPT="${HOME}/paseo-register-mounts.mjs"
 
 # npm global installs land in this prefix's bin, which is NOT on the startup
-# shell's PATH by default. Put it on PATH up front so a freshly-installed `paseo`
-# resolves in THIS shell (otherwise the post-install `command -v paseo` guard
-# trips and the supervisor section never runs on first boot).
+# shell's PATH by default. Put both possible bins on PATH up front so a
+# freshly-installed `paseo` resolves in THIS shell (otherwise the post-install
+# `command -v paseo` guard trips and the supervisor section never runs on first
+# boot). `$HOME/.npm-global/bin` is the intended Paseo install location; the
+# default global prefix remains present so an existing globally-installed Paseo in
+# an older sandbox still resolves.
 #
 # SCOPE LIMIT — this PATH addition is PROCESS-LOCAL. It cannot be persisted for
 # other, later `acq exec … sh -c '…'` invocations from here: this script runs as
@@ -68,11 +71,16 @@ REGISTER_MOUNTS_SCRIPT="${HOME}/paseo-register-mounts.mjs"
 # PATH themselves; the verify script's in_sbx() does exactly that.
 NPM_BIN="$(npm prefix -g 2>/dev/null)/bin"
 case ":$PATH:" in *":$NPM_BIN:"*) : ;; *) PATH="$NPM_BIN:$PATH" ;; esac
+case ":$PATH:" in *":$HOME/.npm-global/bin:"*) : ;; *) PATH="$HOME/.npm-global/bin:$PATH" ;; esac
 export PATH
 
-# --- Install the Paseo CLI if it isn't present yet (first boot). -------------
-if ! command -v paseo >/dev/null 2>&1; then
-  _ver="${PASEO_CLI_VERSION:-0.5.2}"
+# --- Install the pinned Paseo CLI if it is missing or out of date. -----------
+_ver="${PASEO_CLI_VERSION:-0.7.0}"
+_installed_ver=""
+if command -v paseo >/dev/null 2>&1; then
+  _installed_ver="$(paseo --version 2>/dev/null | sed -n 's/^v//; s/.*\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p; q')"
+fi
+if [ "$_installed_ver" != "$_ver" ]; then
   # Route npm through the sandbox proxy. npm honors HTTP(S)_PROXY automatically,
   # but be explicit so any Node-side downloads (none expected for the sherpa
   # prebuilt, which is a plain npm tarball) also proxy.
@@ -103,36 +111,25 @@ if ! command -v paseo >/dev/null 2>&1; then
   [ -n "${PROXY_CA_CERT_B64:-}" ] && printf %s "$PROXY_CA_CERT_B64" | base64 -d >> "$_ca" 2>/dev/null
   [ -f /etc/ssl/certs/ca-certificates.crt ] && cat /etc/ssl/certs/ca-certificates.crt >> "$_ca"
   [ -s "$_ca" ] && export NODE_EXTRA_CA_CERTS="$_ca"
-  # On the sbx-template base the npm global prefix's lib/ dir is ROOT-owned (the
-  # template provisions global tooling as root), so the agent's `npm install -g`
-  # fails EACCES. Run the install via `sudo -n` (the agent has passwordless sudo
-  # on the template). The sudoers env_keep covers HTTP(S)_PROXY/NO_PROXY but NOT
-  # NODE_EXTRA_CA_CERTS (bare sudo resets it), so forward proxy + CA + HOME
-  # explicitly via `sudo env`. HOME keeps npm cache/config in the agent home
-  # rather than /root. The `${VAR:+NAME=...}` idiom omits an arg entirely when the
-  # var is empty/unset (safe under set -u). When sudo is unavailable (a plain-OCI
-  # override without the template's sudo), fall back to an agent-owned per-user
-  # npm prefix so the global install needs no root.
-  if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
-    sudo -n env \
-      npm_config_user_agent="${npm_config_user_agent:-npm}" \
-      npm_config_ignore_scripts="${npm_config_ignore_scripts:-true}" \
-      ${npm_config_https_proxy:+npm_config_https_proxy="$npm_config_https_proxy"} \
-      ${npm_config_proxy:+npm_config_proxy="$npm_config_proxy"} \
-      ${NODE_EXTRA_CA_CERTS:+NODE_EXTRA_CA_CERTS="$NODE_EXTRA_CA_CERTS"} \
-      ONNXRUNTIME_NODE_INSTALL="${ONNXRUNTIME_NODE_INSTALL:-skip}" \
-      HOME="$HOME" \
-      npm install -g "@getpaseo/cli@${_ver}" >>"$HOME/.local/state/paseo/paseo-install.log" 2>&1 || true
-  else
-    export npm_config_prefix="$HOME/.npm-global"
-    mkdir -p "$HOME/.npm-global"
-    # NPM_BIN (above) was computed from the DEFAULT global prefix, so the
-    # `command -v paseo` guard below and the supervisor probe would otherwise
-    # never see a package installed under this per-user prefix. Prepend it.
-    case ":$PATH:" in *":$HOME/.npm-global/bin:"*) : ;; *) PATH="$HOME/.npm-global/bin:$PATH" ;; esac
-    export PATH
-    npm install -g "@getpaseo/cli@${_ver}" >>"$HOME/.local/state/paseo/paseo-install.log" 2>&1 || true
-  fi
+  # On the sbx-template base the default npm global prefix's lib/ dir is
+  # root-owned (the template provisions global tooling as root), so installing
+  # there as the agent fails EACCES. Do NOT use `sudo npm`: npm resolves its cache
+  # from HOME, and root + HOME=/home/agent creates root-owned files in the agent's
+  # ~/.npm cache. Install into an agent-owned per-user prefix/cache instead. The
+  # package is still invoked as a global install, but all files it writes are owned
+  # by the agent user and lifecycle scripts remain disabled above.
+  #
+  # `--prefix`/`--cache` on the COMMAND LINE, not just npm_config_prefix/
+  # npm_config_cache env exports: verified live that this kit's own base image
+  # persistently exports an uppercase NPM_CONFIG_PREFIX, which npm's config
+  # precedence reads over a lowercase npm_config_prefix export — an env-only
+  # override would silently install back into the root-owned system prefix and
+  # fail EACCES, defeating this entire fix. A CLI flag always outranks any env
+  # var regardless of case, so it can't be silently shadowed the same way. Same
+  # pattern the sibling pi-coding-agent kit uses for the identical reason.
+  mkdir -p "$HOME/.npm-global" "$HOME/.npm"
+  npm install -g --prefix "$HOME/.npm-global" --cache "$HOME/.npm" \
+    "@getpaseo/cli@${_ver}" >>"$HOME/.local/state/paseo/paseo-install.log" 2>&1 || true
 fi
 command -v paseo >/dev/null 2>&1 || {
   # Route the marker to BOTH the log and stderr. This is written for ANY
