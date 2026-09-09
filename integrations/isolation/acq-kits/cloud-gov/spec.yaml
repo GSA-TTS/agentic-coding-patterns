@@ -82,7 +82,3 @@ agentContext: |
   Do not ask the user to paste the token into chat or write it to the workspace.
   Use normal `cf` commands; real token material remains outside agent-readable
   files.
-
-# No backend shortcuts: sbx consumes the neutral files, create-time install, and
-# allow-list. msb support is not declared until acq translates per-kit `**.`
-# wildcard entries to msb suffix rules.

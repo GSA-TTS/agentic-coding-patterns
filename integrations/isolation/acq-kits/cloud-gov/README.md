@@ -26,9 +26,9 @@ sandbox.
 
 ## Backend Parity
 
-The kit currently declares `sbx` support. sbx consumes the neutral kit fields:
-`caps.network.allow`, file drops, and create-time/startup commands. There is no
-backend shortcut.
+The kit declares `sbx` and `msb` support. Both backends consume the neutral kit
+fields: `caps.network.allow`, file drops, and create-time/startup commands. There
+is no backend shortcut.
 
 The Cloud Foundry token is not a kit field. The user stores it in the acq secret
 store and binds it to `api.fr.cloud.gov`; the active backend maps that to its
@@ -36,9 +36,9 @@ own proxy or secret-substitution mechanism. The kit writes only the injected
 placeholder into CF CLI config so `cf` can send an auth header for the proxy to
 rewrite.
 
-msb support is intentionally not declared yet: this kit relies on
-`**.cloud.gov`, and acq must translate per-kit `**.` wildcard entries to msb
-suffix rules before the same spec can honestly claim msb parity.
+The only backend-specific network nuance is the cloud.gov wildcard. sbx consumes
+`**.cloud.gov` directly. msb support requires acq to translate that per-kit
+wildcard to msb's suffix rule form (`*.cloud.gov`).
 
 ## Usage
 
