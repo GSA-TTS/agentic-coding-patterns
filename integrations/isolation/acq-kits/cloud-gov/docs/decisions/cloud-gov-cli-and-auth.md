@@ -16,7 +16,7 @@ an authenticated request.
 
 ## Decision
 
-Create a neutral `cloud-gov` acq mixin kit, initially registered for sbx, that:
+Create a neutral `cloud-gov` acq mixin kit for sbx and msb that:
 
 1. Installs `cf` at create time from pinned Cloud Foundry CLI release tarballs
    with committed SHA-256 values.
@@ -51,6 +51,9 @@ active backend's secret/proxy mechanism.
   should treat that as an accepted blast-radius tradeoff for this shared kit, not
   as a generic default for other kits. Custom domains and internal routes outside
   `cloud.gov` should be added per project rather than broadening this shared kit.
+- msb support depends on acq translating the neutral per-kit `**.cloud.gov` entry
+  into msb's suffix rule form (`*.cloud.gov`). Without that adapter behavior,
+  exact cloud.gov hosts may work but the all-subdomains contract is not met.
 - Live verification with `RUN_ACQ=1` requires a configured `cloud-gov` secret and
   must exercise both raw authenticated CF API access and an authenticated `cf`
   command. Offline verification remains useful for schema/shell checks, but it is
