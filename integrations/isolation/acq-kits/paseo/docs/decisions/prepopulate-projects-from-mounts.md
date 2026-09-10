@@ -44,8 +44,8 @@ for a bad path instead of throwing.
 The helper imports the CLI's **own** connector
 (`<cli-pkg>/dist/utils/client.js` → `connectToDaemon`), resolving the CLI package
 dir portably from the `paseo` bin symlink (`readlink`/`realpath` of
-`command -v paseo`, then two levels up). This works under both the sudo-global
-npm prefix and the no-sudo `~/.npm-global` fallback the install path uses, and
+`command -v paseo`, then two levels up). This works under both an existing global
+npm install and the agent-owned `~/.npm-global` install path the kit uses, and
 reuses the same socket/localhost daemon resolution the CLI itself uses (no
 host/port needed here).
 

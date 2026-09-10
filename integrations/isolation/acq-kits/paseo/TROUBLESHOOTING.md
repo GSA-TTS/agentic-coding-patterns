@@ -72,8 +72,10 @@ curl http://127.0.0.1:16767/
 ```
 
 The host side of the mapping stays loopback-only either way, so the `0.0.0.0`
-in-guest bind does not widen host exposure. See
-[GSA-TTS/agentic-coding-quickstart#333](https://github.com/GSA-TTS/agentic-coding-quickstart/pull/333).
+in-guest bind does not widen host exposure. The important distinction is which
+side of the boundary dials the guest port: create-time publishing dials the guest
+network IP, while post-hoc publishing tunnels from inside the guest and can reach
+guest loopback.
 
 ## "No hosts configured" and/or a repeating `ws://…/ws` connect loop
 
@@ -276,13 +278,13 @@ Common causes:
   inspection CA. Pair with the `zscaler-ca-certificate` kit; the startup script
   folds `PROXY_CA_CERT_B64` + the system trust store into `NODE_EXTRA_CA_CERTS`.
 
-- **npm global prefix permissions.** On the default sandbox template the global
-  prefix is root-owned, so the script installs via `sudo -n`. If sudo is
-  unavailable (a plain-OCI base), it falls back to a per-user prefix at
-  `~/.npm-global`. Verify which took effect:
+- **npm global prefix permissions.** On the default sandbox template the system
+  global prefix is root-owned, so the script installs Paseo into the agent-owned
+  per-user prefix at `~/.npm-global` and uses the agent-owned cache at `~/.npm`.
+  Verify the per-user install path:
 
   ```bash
-  acq exec <sandbox> -- sh -c 'ls -la ~/.npm-global/bin 2>/dev/null; ls -la "$(npm prefix -g 2>/dev/null)/bin" 2>/dev/null | grep -i paseo'
+  acq exec <sandbox> -- sh -c 'ls -la ~/.npm-global/bin 2>/dev/null; command -v paseo'
   ```
 
 ## Worktrees aren't landing under my project
