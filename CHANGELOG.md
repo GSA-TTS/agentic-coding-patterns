@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.10.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.9.0...v1.10.0) (2026-09-10)
+
+
+### Features
+
+* **isolation:** add generic devenv sandbox image built and published to GHCR ([#395](https://github.com/GSA-TTS/agentic-coding-patterns/issues/395)) ([8c7e9ca](https://github.com/GSA-TTS/agentic-coding-patterns/commit/8c7e9ca50cda3409234b8f38e6a5e89f20a87598))
+* **paseo:** register child repos in parent mounts ([#391](https://github.com/GSA-TTS/agentic-coding-patterns/issues/391)) ([eded00c](https://github.com/GSA-TTS/agentic-coding-patterns/commit/eded00cecaea06e34a732eb28468efa0808f4b28))
+
+
+### Bug Fixes
+
+* **ci:** bump js-yaml to 4.3.2 to clear a high-severity CPU-DoS advisory ([#409](https://github.com/GSA-TTS/agentic-coding-patterns/issues/409)) ([086f9f6](https://github.com/GSA-TTS/agentic-coding-patterns/commit/086f9f6c99908b76d7b66b9b4877debe33aa8cf9))
+* **ci:** bump smol-toml to 1.7.1 to clear an infinite-loop DoS advisory ([#411](https://github.com/GSA-TTS/agentic-coding-patterns/issues/411)) ([acc0346](https://github.com/GSA-TTS/agentic-coding-patterns/commit/acc03460565b842876eba63ac43c955140f0b792))
+* **paseo:** keep npm cache agent-owned ([#402](https://github.com/GSA-TTS/agentic-coding-patterns/issues/402)) ([c0ad118](https://github.com/GSA-TTS/agentic-coding-patterns/commit/c0ad1186fad7ce54eaed9102010e74526bb3d445))
+
 ## [1.9.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.8.0...v1.9.0) (2026-08-25)
 
 
