@@ -20,6 +20,7 @@ not agent behavior. (Behavioral patterns live in `skills/`, `prompts/`, etc.)
 |-----|---------|
 | [`usai-provider/`](usai-provider/) | Configure the agent to use the GSA USAi model provider (OpenCode today), with egress allow-listed. |
 | [`agentic-coding-playbook/`](agentic-coding-playbook/) | Clone the GSA agentic-coding-playbook at startup and link its `AGENTS.md` + skills into each agent's search paths. |
+| [`cloud-gov/`](cloud-gov/) | Install the Cloud Foundry CLI and allow-list cloud.gov platform, app-route, dashboard, and docs domains, with auth supplied through acq secrets. |
 | [`zscaler-ca-certificate/`](zscaler-ca-certificate/) | Trust the public Zscaler Root CA in the sandbox (msb: native `--trust-host-cas`; sbx: file-drop + `update-ca-certificates`). |
 | [`git-ssh-sign/`](git-ssh-sign/) | Sign git commits and tags with the SSH key forwarded from the host agent (vendored from sbx-kits-contrib). |
 | [`openchamber/`](openchamber/) | Run OpenChamber, a browser UI for OpenCode, inside the sandbox alongside the terminal TUI. Opt-in (see its parity note). |
