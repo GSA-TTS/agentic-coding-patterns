@@ -42,8 +42,13 @@ environment variable, or `~/.pi/agent/auth.json` per
 - **Startup phase only** (every start, agent user, uid `1000`) — no install
   phase. `pi-coding-agent-install.sh` installs the `pi` CLI via
   `npm install -g --ignore-scripts`, pinned to a specific reviewed version,
-  into an unprivileged per-user npm prefix (`$HOME/.npm-global`). Idempotent:
-  a no-op if `pi` is already on `PATH`.
+  into an unprivileged per-user npm prefix (`$HOME/.local` — see
+  [`docs/decisions/local-prefix-not-npm-global.md`](docs/decisions/local-prefix-not-npm-global.md)
+  for why not the `$HOME/.npm-global` convention the sibling kits use).
+  Idempotent: a no-op if `pi` is already on `PATH`. Rebuilds the CA trust
+  bundle and the `pi` wrapper (see
+  [`docs/decisions/ca-bundle-wrapper-not-env-var.md`](docs/decisions/ca-bundle-wrapper-not-env-var.md))
+  on **every** boot, not just a fresh install.
 
 There is no supervisor loop and nothing running in the background — `pi` is a
 TUI the agent runs directly; this kit does not manage a shared session the
@@ -52,19 +57,11 @@ way the `openchamber`/`paseo` web-UI kits do.
 ## Install method: npm registry, not `pi.dev/install.sh`
 
 pi.dev publishes a curl-pipe-to-shell installer, but this kit does **not**
-fetch it. Two reasons, both verified live:
-
-1. That script is a **mutable, live** script whose logic can change without
-   notice, and it runs an **interactive** Node/npm-install preflight path
-   that is meaningless in a non-interactive sandbox startup script.
-2. `npm install -g @earendil-works/pi-coding-agent` needs **only**
-   `registry.npmjs.org` — no `pi.dev` egress at all, a strictly smaller and
-   more auditable allow-list. A live msb network probe found
-   `registry.npmjs.org` reachable while `pi.dev` was blocked by this
-   deployment's egress policy / TLS-inspecting proxy in every sandbox tested
-   — this kit's design avoids depending on a host that isn't already
-   provisioned for, mirroring the same reasoning that keeps the sibling
-   `prime-agent` kit off `app.primeintellect.ai`'s live install.sh.
+fetch it — see [`docs/decisions/`](docs/decisions/) for the full rationale
+(a mutable live script with an interactive Node/npm preflight path, and
+`pi.dev` egress this kit's allow-list deliberately omits). The short version:
+`npm install -g @earendil-works/pi-coding-agent` needs only
+`registry.npmjs.org`.
 
 **Open question, not yet verified:** does the installed `pi` binary itself
 phone home to `pi.dev` at runtime (update checks, telemetry)? If a future
@@ -78,14 +75,8 @@ Deny-by-default. The allow-list in `spec.yaml` is pi's own install host only:
 - `registry.npmjs.org` — npm package metadata and tarballs (no wildcard
   subdomain needed)
 
-Deliberately **absent**:
-
-- `pi.dev` — see "Install method" above
-- `github.com` / `*.githubusercontent.com` — no native-module postinstall
-  step exists for this package (verified: its published npm registry
-  metadata declares no preinstall/postinstall lifecycle script), so unlike
-  `openchamber`'s `better-sqlite3` dependency, this kit needs no
-  release-asset hosts
+Deliberately **absent** (see `docs/decisions/` for why): `pi.dev`,
+`github.com` / `*.githubusercontent.com`.
 
 Model-provider egress (`api.gsa.usai.gov`) is **not** here — that is the
 `usai-provider` kit's job.
@@ -109,25 +100,16 @@ Model-provider egress (`api.gsa.usai.gov`) is **not** here — that is the
   well past a minute, which would delay sandbox startup. Retries are set to 0
   deliberately: this is a startup-phase script that runs on every boot, not a
   one-shot manual install, so the *next* boot already retries naturally.
-- **`--ignore-scripts` is not a complete mitigation.** It blocks npm lifecycle
-  hooks (`preinstall`/`postinstall`) for this package and its transitive
-  dependencies at install time — it does **not** vet or sandbox the code that
-  runs when the installed `pi` binary is later **invoked**. A compromised
-  package does not need a postinstall hook; it can run arbitrary code with
-  full agent-user privilege on `pi`'s first invocation. The ephemeral,
-  single-tenant sandbox (no host filesystem, proxied/allow-listed egress)
-  remains the real containment boundary — the same threat model every
-  sibling kit in this family documents.
-- **CA-bundle handling is load-bearing, not defensive**: pi is a plain
-  npm-installed Node CLI making HTTPS requests, and `NODE_EXTRA_CA_CERTS`
-  only *appends* to Node's built-in trust roots — it needs the sandbox's
-  proxy CA explicitly, or an inspecting-proxy environment fails closed with
-  `SELF_SIGNED_CERT_IN_CHAIN`. The block is adapted from `openchamber`'s own
-  script (same structure and trust rationale, plus decode-failure surfacing
-  for a malformed `PROXY_CA_CERT_B64`). The proxy CA is read from the
-  `PROXY_CA_CERT_B64` environment variable (base64-encoded PEM) — the same
-  variable name `openchamber`/`paseo` already read; this kit only reads it,
-  never sets or requires it.
+- **`--ignore-scripts` is not a complete mitigation.** See
+  [`docs/decisions/`](docs/decisions/) for the full residual-risk analysis;
+  in short, it blocks npm lifecycle hooks at install time, not code that runs
+  when `pi` is later **invoked** — the ephemeral, single-tenant sandbox
+  remains the real containment boundary.
+- **CA-bundle handling is load-bearing, not defensive** — see
+  [`docs/decisions/ca-bundle-wrapper-not-env-var.md`](docs/decisions/ca-bundle-wrapper-not-env-var.md)
+  for the full design and why a runtime wrapper, not an install-time
+  `export`, is required for the bundle to actually reach `pi`'s own later
+  invocations.
 
 ## Naming
 

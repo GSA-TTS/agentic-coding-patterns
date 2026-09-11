@@ -8,7 +8,9 @@
 # toolchain, unlike openchamber's better-sqlite3 dependency, so there is no
 # create-vs-startup safety tension to resolve here). Runs as the agent user
 # (whose uid is assigned at provision and is not necessarily 1000) and is
-# fully idempotent: installs `pi` only if it isn't already present.
+# fully idempotent: installs `pi` only if it isn't already present. The
+# CA-bundle and the `pi` wrapper (both below) are rebuilt EVERY boot,
+# regardless of whether a fresh install happened — see the comments at each.
 #
 # DELIBERATELY NOT the pi.dev curl-pipe-to-shell installer: that script is
 # mutable, runs an interactive Node/npm preflight path meaningless in a
@@ -81,57 +83,79 @@ case "$_pi_version" in
     ;;
 esac
 
-# Explicit, unprivileged per-user npm prefix — deliberately NOT pi's own
-# installer's prefix-detection-with-$HOME/.local-fallback logic (pi's own
-# installer tries the system global prefix first and only falls back to
-# $HOME/.local if that isn't writable). An explicit, unconditional prefix is
-# more auditable and idempotent in a sandbox startup script: it does not
-# depend on probing whether the default global prefix happens to be writable
-# this boot (which can vary by base image / prior kit ordering), and it
-# lands packages in the same destination directory openchamber's own
-# convention uses ($HOME/.npm-global) — though not via the same MECHANISM:
-# openchamber sets the prefix with an `npm_config_prefix` env-var export,
-# while this script passes `--prefix` on the npm command line instead (see
-# the comment at the npm install call below for why the CLI flag, not the
-# env var, is the correct choice here). This is an intentional divergence
-# from pi's own installer, not an oversight.
-NPM_PREFIX="$HOME/.npm-global"
-case ":$PATH:" in *":$NPM_PREFIX/bin:"*) : ;; *) PATH="$NPM_PREFIX/bin:$PATH" ;; esac
-export PATH
+# Single shared log for this boot's run — the CA-decode-failure path and the
+# npm-install-failure path both append to it, rather than each creating its
+# own separate mktemp file (an earlier version of this script did that; the
+# second file was created even on a fully successful boot, as an empty,
+# never-read leftover under /tmp — mktemp creates the file immediately on
+# call, not lazily on first write).
+_log="$(mktemp "${TMPDIR:-/tmp}/pi-coding-agent-install.XXXXXX.log" 2>/dev/null || true)"
+[ -n "$_log" ] || _log="/tmp/pi-coding-agent-install.$$.log"
+
+# Explicit, unprivileged per-user npm prefix. $HOME/.local, specifically —
+# NOT $HOME/.npm-global (the convention openchamber/paseo use), and NOT pi's
+# own installer's prefix-detection-with-$HOME/.local-fallback logic either
+# (pi's own installer tries the system global prefix first and only falls
+# back to $HOME/.local if that isn't writable).
+#
+# WHY $HOME/.local, specifically: it is on this kit's target base images'
+# DEFAULT guest PATH already (confirmed live). $HOME/.npm-global/bin is NOT
+# — which is exactly why openchamber's and paseo's own startup scripts each
+# have to prepend it to PATH themselves, and why their `scripts/verify`
+# probes have to inject the same prepend into every `sh -c` they run inside
+# the sandbox (see either sibling's `in_sbx()` helper and its own comment on
+# why: a bare, later `sh -c` — e.g. the one a real user's interactive shell
+# runs, or `acq exec … -- pi` — gets NEITHER kit's PATH prepend, since that
+# prepend is this PROCESS-local, not persisted anywhere a root-owned
+# /etc/profile.d or similar could pick up as the non-root agent user; see
+# openchamber-start.sh's own "SCOPE LIMIT" comment for the full explanation
+# of why there is no agent-user-safe way to persist it). By choosing a
+# prefix whose bin/ directory the base image ALREADY has on PATH, this kit
+# sidesteps that whole class of problem instead of working around it: no
+# process-local PATH prepend is needed here, in `scripts/verify`, or for a
+# user's own later shell — `pi` is reachable the same way regardless of who
+# invokes it or when. See docs/decisions/local-prefix-not-npm-global.md.
+#
+# An explicit, unconditional prefix (rather than probing at runtime whether
+# some OTHER prefix happens to be writable) is also more auditable and
+# idempotent in a sandbox startup script — this remains true independent of
+# the .local-vs-.npm-global choice above, and is why this script still does
+# not use pi's own installer's runtime-detection logic.
+NPM_PREFIX="$HOME/.local"
+
+# Build a CA bundle for Node's HTTPS requests — UNCONDITIONALLY, on every
+# boot, not only when pi is freshly installed: (1) npm's own tarball download
+# below needs it during an install, and (2) the exported wrapper this script
+# writes near the end needs an ALWAYS-CURRENT bundle path for pi's own later
+# LLM-provider calls, since a proxy CA could change between boots and a stale
+# bundle would fail closed with a confusing TLS error rather than a clear one.
+# NODE_EXTRA_CA_CERTS *appends* to Node's built-in roots, which lack both the
+# sandbox proxy CA and any HTTPS-inspection CA (e.g. Zscaler). This block is
+# ADAPTED from openchamber's own script (same PROXY_CA_CERT_B64 decode +
+# system-bundle-append + NODE_EXTRA_CA_CERTS-export structure and trust
+# rationale), with one deliberate improvement: a failed base64 decode is
+# surfaced with a clear error (into the shared $_log above, not a second,
+# separate temp file) instead of silently producing an incomplete bundle
+# (openchamber's own block swallows that same decode failure via
+# `2>/dev/null` — not fixed here, since that's a pre-existing, separately-
+# tracked concern in a different kit).
+_ca="$HOME/.local/state/pi-coding-agent/ca-bundle.pem"
+mkdir -p "$(dirname "$_ca")"
+: > "$_ca"
+if [ -n "${PROXY_CA_CERT_B64:-}" ]; then
+  if ! printf %s "$PROXY_CA_CERT_B64" | base64 -d >> "$_ca" 2>>"$_log"; then
+    # Surface a decode failure instead of silently shipping a bundle missing
+    # the proxy CA — an incomplete bundle behind an inspecting proxy fails
+    # TLS with a confusing "unable to verify" error rather than a clear
+    # signal that PROXY_CA_CERT_B64 itself is malformed.
+    echo "pi-coding-agent: PROXY_CA_CERT_B64 failed to base64-decode; proxy CA NOT added to the bundle (see $_log)" >&2
+  fi
+fi
+[ -f /etc/ssl/certs/ca-certificates.crt ] && cat /etc/ssl/certs/ca-certificates.crt >> "$_ca"
+[ -s "$_ca" ] && export NODE_EXTRA_CA_CERTS="$_ca"
 
 # --- Install pi if it isn't present yet (idempotent). -----------------------
 if ! command -v pi >/dev/null 2>&1; then
-  # Build a CA bundle for Node's HTTPS requests (both npm's own tarball
-  # download here, and later pi's own LLM-provider calls at runtime).
-  # NODE_EXTRA_CA_CERTS *appends* to Node's built-in roots, which lack both
-  # the sandbox proxy CA and any HTTPS-inspection CA (e.g. Zscaler). This
-  # block is ADAPTED from openchamber's own script (same PROXY_CA_CERT_B64
-  # decode + system-bundle-append + NODE_EXTRA_CA_CERTS-export structure and
-  # trust rationale), with one deliberate improvement: a failed base64 decode
-  # is surfaced with a clear error instead of silently producing an
-  # incomplete bundle (openchamber's own block swallows that same decode
-  # failure via `2>/dev/null` — not fixed here, since that's a pre-existing,
-  # separately-tracked concern in a different kit).
-  _ca="$HOME/.local/state/pi-coding-agent/ca-bundle.pem"
-  mkdir -p "$(dirname "$_ca")"
-  : > "$_ca"
-  if [ -n "${PROXY_CA_CERT_B64:-}" ]; then
-    # Same predictable-/tmp-path avoidance as the install log below (mktemp,
-    # not a hardcoded name) — this script creates two files under /tmp in a
-    # single run and both should meet the same standard, not just one.
-    _ca_err="$(mktemp "${TMPDIR:-/tmp}/pi-coding-agent-ca-decode.XXXXXX.err" 2>/dev/null || true)"
-    [ -n "$_ca_err" ] || _ca_err="/tmp/pi-coding-agent-ca-decode.$$.err"
-    if ! printf %s "$PROXY_CA_CERT_B64" | base64 -d >> "$_ca" 2>"$_ca_err"; then
-      # Surface a decode failure instead of silently shipping a bundle
-      # missing the proxy CA — an incomplete bundle behind an inspecting
-      # proxy fails TLS with a confusing "unable to verify" error rather
-      # than a clear signal that PROXY_CA_CERT_B64 itself is malformed.
-      echo "pi-coding-agent: PROXY_CA_CERT_B64 failed to base64-decode; proxy CA NOT added to the bundle (see $_ca_err)" >&2
-    fi
-  fi
-  [ -f /etc/ssl/certs/ca-certificates.crt ] && cat /etc/ssl/certs/ca-certificates.crt >> "$_ca"
-  [ -s "$_ca" ] && export NODE_EXTRA_CA_CERTS="$_ca"
-
   mkdir -p "$NPM_PREFIX"
   # `--prefix` on the command line (below), not just an npm_config_prefix
   # env-var export: verified live that some base images persistently export
@@ -160,9 +184,6 @@ if ! command -v pi >/dev/null 2>&1; then
   _pkg="@earendil-works/pi-coding-agent"
   [ "$_pi_version" != "latest" ] && _pkg="${_pkg}@${_pi_version}"
 
-  _log="$(mktemp "${TMPDIR:-/tmp}/pi-coding-agent-install.XXXXXX.log" 2>/dev/null || true)"
-  [ -n "$_log" ] || _log="/tmp/pi-coding-agent-install.$$.log"
-
   # --fetch-timeout bounds how long a hanging (not merely erroring)
   # connection to the registry can block sandbox startup — verified live,
   # e.g. a firewall that silently drops packets rather than refusing the
@@ -182,6 +203,85 @@ if ! command -v pi >/dev/null 2>&1; then
     echo "pi-coding-agent: npm install exited $_rc (prefix=$NPM_PREFIX); pi unavailable this boot. See $_log" \
       | tee -a "$_log" >&2
   fi
+fi
+
+# --- Wrapper: make the CA bundle actually apply to a USER's later `pi`. -----
+# Rebuilt UNCONDITIONALLY (regardless of whether a fresh install happened
+# above), for two reasons: (1) it must self-heal a sandbox that already had
+# `pi` installed from a boot BEFORE this wrapper existed, and (2) the CA
+# bundle it points at is rebuilt every boot (see above), so the wrapper must
+# be too, or it would keep exporting a stale bundle path forever after the
+# first boot that created it.
+#
+# WHY A WRAPPER, NOT JUST THE NODE_EXTRA_CA_CERTS EXPORT ABOVE: that export
+# is scoped to THIS SCRIPT's own process. It does nothing for the `pi`
+# process a user launches later, in a completely separate shell — an
+# install-time env-var export cannot reach a process that starts after this
+# script has already exited. Concretely, without this wrapper, behind the
+# Zscaler-inspecting proxy this kit is designed for: first boot installs
+# `pi` successfully (the CA bundle IS exported for that process, so npm's own
+# HTTPS calls work), then the user runs `pi` themselves and its first HTTPS
+# call to the LLM provider fails with SELF_SIGNED_CERT_IN_CHAIN /
+# UNABLE_TO_GET_ISSUER_CERT_LOCALLY — the exact failure this kit's CA-bundle
+# logic exists to prevent, just not actually prevented for the process that
+# matters. See docs/decisions/ca-bundle-wrapper-not-env-var.md.
+#
+# _pi_real is whatever npm's own global-install bin symlink actually points
+# at — resolved via readlink rather than hardcoding pi's internal package
+# layout, so this does not silently break if a future pi release restructures
+# its own dist/ tree. That symlink only EXISTS right after npm creates it,
+# though: once this script has replaced it with the wrapper below (a plain
+# file, not a symlink), a LATER boot has nothing left to readlink from — so
+# the resolved path is cached in a sidecar file the first time it's found,
+# and read back from there on every subsequent boot where $_pi_bin is
+# already our own wrapper rather than npm's symlink.
+_pi_real_cache="$HOME/.local/state/pi-coding-agent/real-bin-path"
+_pi_bin="$NPM_PREFIX/bin/pi"
+_pi_real=""
+if [ -L "$_pi_bin" ]; then
+  _pi_real="$(readlink "$_pi_bin" 2>/dev/null || true)"
+  case "$_pi_real" in
+    /*) : ;;                                   # already absolute
+    "") : ;;                                   # readlink failed; handled below
+    *) _pi_real="$NPM_PREFIX/bin/$_pi_real" ;;  # resolve relative to bin/
+  esac
+  if [ -n "$_pi_real" ]; then
+    mkdir -p "$(dirname "$_pi_real_cache")"
+    printf '%s\n' "$_pi_real" > "$_pi_real_cache"
+  fi
+elif [ -e "$_pi_bin" ] && [ -f "$_pi_real_cache" ]; then
+  # $_pi_bin already our wrapper from an earlier boot (a plain file, not
+  # npm's symlink) — recover the real path from the cache written above the
+  # first time this ever ran.
+  _pi_real="$(cat "$_pi_real_cache" 2>/dev/null || true)"
+fi
+
+if [ -n "$_pi_real" ] && [ -e "$_pi_real" ]; then
+  # `> "$_pi_bin"` alone would be WRONG here on the very first rewrite: at
+  # that point $_pi_bin is still npm's own symlink (from the readlink call
+  # just above), and a shell redirection into a symlink follows it and
+  # truncates the REAL target file underneath — which is $_pi_real itself,
+  # i.e. this would silently clobber the actual `pi` binary with the
+  # wrapper's own shell-script text (reproduced live: Node then fails to
+  # parse the clobbered file as JS). Remove the symlink first so the
+  # redirection creates a fresh regular file at $_pi_bin instead.
+  rm -f "$_pi_bin"
+  cat > "$_pi_bin" <<WRAPPER
+#!/bin/sh
+# Auto-generated by pi-coding-agent-install.sh — do not edit by hand; this
+# file is overwritten on every sandbox boot. Exports the CA bundle this kit
+# rebuilds every boot, then execs the real npm-installed entrypoint, so a
+# user's own \`pi\` invocation gets the same TLS trust the installer itself
+# used. See docs/decisions/ca-bundle-wrapper-not-env-var.md.
+NODE_EXTRA_CA_CERTS="$_ca"
+export NODE_EXTRA_CA_CERTS
+exec node "$_pi_real" "\$@"
+WRAPPER
+  chmod 0755 "$_pi_bin"
+elif [ ! -e "$_pi_bin" ]; then
+  : # No install this boot and none from a prior boot either; nothing to wrap.
+else
+  echo "pi-coding-agent: could not resolve $_pi_bin's real target; leaving it unwrapped (pi will run without the managed CA bundle) — see $_log" >&2
 fi
 
 command -v pi >/dev/null 2>&1 || {

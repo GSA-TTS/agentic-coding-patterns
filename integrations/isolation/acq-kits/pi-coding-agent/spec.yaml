@@ -25,80 +25,18 @@
 # openchamber / paseo, which each publish a browser-UI port). Publishes NO
 # ports.
 #
-# INSTALL METHOD — npm registry, NOT pi.dev/install.sh: pi.dev publishes a
-# curl-pipe-to-shell installer, but this kit deliberately does NOT fetch it.
-# Two independent reasons, both verified live this session:
-#   1. pi.dev's installer is a MUTABLE live script whose logic can change
-#      without notice, and it runs an INTERACTIVE Homebrew/apt/apk/standalone-
-#      Node preflight path when Node/npm are missing — meaningless in a
-#      non-interactive startup script. Installing Node itself is out of scope
-#      for this kit (the base image is expected to already carry Node, the
-#      same assumption openchamber makes for its own base image).
-#   2. `npm install -g @earendil-works/pi-coding-agent` needs ONLY
-#      registry.npmjs.org — no pi.dev egress at all. A live msb network probe
-#      (both a bare demo sandbox and an acq-provisioned one) found
-#      registry.npmjs.org reachable in both cases, while pi.dev was refused in
-#      the bare sandbox and blocked by this deployment's Zscaler TLS-inspecting
-#      proxy in the other (neither result implicates this kit's own design —
-#      both are the deny-by-default egress model and the host's own CA-trust
-#      chain working as intended on hosts that have not been given a route to
-#      pi.dev) — a real signal that depending on pi.dev directly adds egress
-#      risk this kit does not need to take on. This mirrors the exact
-#      reasoning that made the sibling prime-agent kit avoid depending on
-#      app.primeintellect.ai's live install.sh for its own bundle-fetch step.
-#   pi.dev is therefore DELIBERATELY ABSENT from caps.network.allow below.
-#   Open question, not yet verified: does the installed `pi` binary itself
-#   phone home to pi.dev at runtime (update checks, telemetry)? If a future
-#   live trace of a running `pi` session finds that it does, add the host then
-#   with a live-tested justification — do not allow-list it speculatively now.
-#
-# WHY NOT `--ignore-scripts` LEAVES ANY RESIDUAL RISK: verified against the
-# published npm registry metadata for @earendil-works/pi-coding-agent AND
-# every one of its transitive dependencies (checked individually, not
-# assumed) — none declares a preinstall/postinstall lifecycle script for this
-# exact pinned version, so --ignore-scripts (which this kit's install script
-# also passes, matching pi's own installer) has nothing to skip anywhere in
-# the dependency tree; there is no native-module postinstall step here the
-# way openchamber's better-sqlite3 dependency has, so this kit needs none of
-# openchamber's github.com/*.githubusercontent.com release-asset allow-list
-# entries. IMPORTANT residual-risk note: --ignore-scripts blocks npm
-# LIFECYCLE HOOKS only — npm still performs ordinary package-manager
-# bookkeeping regardless of this flag (e.g. linking the package's declared
-# `bin` entry onto PATH), and none of that vets the code that runs when the
-# installed `pi` binary is later INVOKED. A compromised
-# @earendil-works/pi-coding-agent package does not need a postinstall hook at
-# all; it can put a payload directly in the code path that runs on `pi`'s
-# first invocation, with full agent-user privilege. --ignore-scripts removes
-# the install-time hook vector only, not the runtime one — the ephemeral,
-# single-tenant sandbox (no host FS, proxied/allow-listed egress) remains the
-# real containment boundary, exactly as documented for every sibling kit's
-# threat model.
-#
-# VERSION PIN: PI_CODING_AGENT_VERSION defaults to a specific, reviewed
-# release (see pi-coding-agent-install.sh) rather than "latest" — this kit's
-# behavior must not silently drift to whatever npm resolves as newest on every
-# sandbox boot. Bump the pin deliberately, as its own reviewed change.
-#
-# CA-bundle: pi is a plain npm-installed Node CLI that will make HTTPS
-# requests (both during its own npm install, and later to whichever LLM
-# provider API it's configured against). It needs the EXACT SAME
-# NODE_EXTRA_CA_CERTS bundle pattern as openchamber/paseo/prime-agent — proxy
-# CA + system trust store concatenated, because NODE_EXTRA_CA_CERTS only
-# APPENDS to Node's built-in roots and an inspecting proxy's CA is not in
-# either set on its own. This is load-bearing, not defensive: the
-# SELF_SIGNED_CERT_IN_CHAIN failure mode this guards against has already been
-# verified live for prime-agent's own npm install path, and this session's own
-# live probe against a Zscaler-inspected host reproduced the analogous
-# "unable to get local issuer certificate" failure directly. See
-# pi-coding-agent-install.sh, which ADAPTS the block from openchamber's own
-# script (same structure and trust rationale, with decode-failure surfacing
-# added — see that script's comment for the full diff). The proxy CA itself
-# is read from the PROXY_CA_CERT_B64 environment variable (base64-encoded
-# PEM) — the same variable name openchamber/paseo already read; not declared
-# under this kit's own `environment:` block below because it is supplied by
-# whatever injects a proxy CA into the sandbox (e.g. the zscaler-ca-certificate
-# kit's own mechanism, or the operator's environment), not by this kit
-# itself — this kit only ever reads it, never sets or requires it.
+# The install-method choice (npm registry, not pi.dev/install.sh), the
+# --ignore-scripts residual-risk analysis, the npm-install prefix choice
+# ($HOME/.local, not $HOME/.npm-global) and the CA-bundle wrapper design are
+# each documented ONCE, in docs/decisions/ (a lighter-weight per-decision ADR
+# format, matching openchamber's/paseo's own convention), not restated here
+# — an earlier revision of this kit wrote the same rationale out three times
+# (this header, README.md, and the install script's own comments), and a
+# review flagged that a future change (bumping the pin, adding pi.dev,
+# wiring models.json) would have to be edited consistently in all three
+# places to stay accurate. See docs/decisions/ for the full "why"; this
+# header and the install script's comments now cite it rather than
+# duplicating it.
 #
 # MODEL PROVIDER CONFIG IS DELIBERATELY DEFERRED, not merely out of scope: an
 # earlier draft of this kit also shipped a models.json install step and a
@@ -148,15 +86,17 @@ caps:
       # The ONLY host this kit's install path needs: npm metadata AND
       # tarballs both resolve from registry.npmjs.org (no wildcard subdomain
       # needed — see openchamber's own note on why one host, unsuffixed, is
-      # sufficient). Deliberately NOT pi.dev (see the header's "INSTALL
-      # METHOD" note) and NOT any github.com/*.githubusercontent.com
-      # release-asset host (no native module, no postinstall script — see
-      # the header's "WHY NOT --ignore-scripts" note): this kit's egress
-      # surface is intentionally the smallest in the family.
+      # sufficient). Deliberately NOT pi.dev and NOT any
+      # github.com/*.githubusercontent.com release-asset host — see
+      # docs/decisions/ for why. This kit's egress surface is intentionally
+      # the smallest in the family.
       - registry.npmjs.org
 
 files:
-  # Lifecycle script. Mode 0755 (executable).
+  # Lifecycle script. Mode 0755 (executable). Builds a per-user npm prefix,
+  # a per-boot CA trust bundle, and the runtime wrapper that carries that
+  # bundle into `pi`'s own invocations — see docs/decisions/ for why each of
+  # these exists.
   - path: /home/agent/pi-coding-agent-install.sh
     mode: "0755"
     source: files/home/pi-coding-agent-install.sh

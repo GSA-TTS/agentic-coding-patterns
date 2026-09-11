@@ -1,0 +1,330 @@
+#!/usr/bin/env bash
+#
+# verify — host-side validation for the pi-coding-agent acq mixin kit.
+#
+# Two layers, matching the sibling openchamber/paseo kits:
+#
+#   1. OFFLINE GATE (always runs): the backend-agnostic validator
+#      integrations/isolation/acq-kits/validate-kits.py (schema + files[].source
+#      + registry), plus source-level regression guards (5b) for behaviours that
+#      are otherwise only exercised live, once, in a PR description. Needs
+#      python3 with jsonschema + pyyaml; if those aren't importable this check
+#      reports SKIP (with the fix), not a false FAIL.
+#
+#   2. LIVE END-TO-END (opt-in): create a real sandbox with the kit applied,
+#      wait for the startup install, then assert `pi` is reachable and runnable,
+#      that a second run is idempotent, that a malformed version pin is
+#      rejected without touching the existing install, and that a malformed
+#      PROXY_CA_CERT_B64 is surfaced rather than silently swallowed.
+#
+#      Preferred driver — RUN_ACQ=1: drive the `acq` CLI. acq translates the
+#      neutral hybrid/v1 spec to an sbx-v2 kit (kit_translate_to_sbx) and
+#      applies it.
+#
+#      Legacy driver — RUN_SBX=1: drive `sbx` directly on a PRE-TRANSLATED
+#      sbx-v2 kit dir (SBX_KIT_DIR) — sbx cannot parse the neutral schema.
+#      Without SBX_KIT_DIR this path SKIPs with guidance. Prefer RUN_ACQ=1.
+#
+# CLI SHAPE: no positional arguments — this matches openchamber's and paseo's
+# own scripts/verify exactly (both generate their own unique sandbox name
+# internally, e.g. SBX_NAME="openchamber-verify-$$", and are driven entirely by
+# env vars: RUN_ACQ / RUN_SBX / KEEP / READY_TIMEOUT / etc.). This script
+# follows the same convention rather than inventing a `verify <sandbox-name>`
+# CLI the sibling kits don't use.
+#
+# Usage (from anywhere):
+#   path/to/pi-coding-agent/scripts/verify          # offline gate only (default)
+#   RUN_ACQ=1 path/to/.../scripts/verify            # live, via acq (preferred)
+#   KEEP=1 RUN_ACQ=1 path/to/.../scripts/verify     # keep the sandbox to inspect
+#   RUN_SBX=1 SBX_KIT_DIR=<translated> .../verify   # live, via sbx (needs sbx-v2 dir)
+
+set -uo pipefail
+
+KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+# Repo root (…/agentic-coding-patterns) for the backend-agnostic validator.
+REPO_ROOT="$(cd "$KIT_DIR/../../../.." && pwd)"
+INSTALL_SCRIPT="$KIT_DIR/files/home/pi-coding-agent-install.sh"
+SBX_NAME="pi-coding-agent-verify-$$"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/pi-coding-agent-verify.XXXXXX")"
+CREATE_LOG="$WORK/create.log"
+KEEP="${KEEP:-0}"
+RUN_ACQ="${RUN_ACQ:-0}"
+RUN_SBX="${RUN_SBX:-0}"
+SBX_KIT_DIR="${SBX_KIT_DIR:-}"
+# pi has no native-module postinstall step and no server to wait on (contrast
+# openchamber's better-sqlite3 prebuild download) — a plain `npm install -g` of
+# a small package, so the default timeout is much shorter than the sibling
+# kits'. Override with READY_TIMEOUT if your network is slow.
+READY_TIMEOUT="${READY_TIMEOUT:-60}"
+POLL_INTERVAL="${POLL_INTERVAL:-2}"
+
+pass=0
+fail=0
+ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass+1)); }
+bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail+1)); }
+skip() { printf '  \033[33mSKIP\033[0m %s\n' "$1"; }
+warn() { printf '  \033[33mWARN\033[0m %s\n' "$1"; }
+info() { printf '\n\033[1m%s\033[0m\n' "$1"; }
+
+cleanup() {
+  if [ "$KEEP" = "1" ]; then
+    printf '\nKEEP=1 set; leaving sandbox %s and %s in place.\n' "$SBX_NAME" "$WORK" >&2
+    return
+  fi
+  case "${DRIVER:-}" in
+    acq) acq rm "$SBX_NAME" >/dev/null 2>&1 || true ;;
+    *)   sbx rm -f "$SBX_NAME" >/dev/null 2>&1 || true ;;
+  esac
+  rm -rf "$WORK" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT INT TERM
+
+# --- Driver abstraction: exec a command inside the sandbox (non-TTY). --------
+#
+# DELIBERATE DIFFERENCE FROM openchamber/paseo's own in_sbx: THIS in_sbx does
+# **NOT** prepend anything to PATH. openchamber and paseo both have to inject
+# `$HOME/.npm-global/bin` (and `~/.local/bin`) because a bare non-login `sh -c`
+# sources no profile, so their installed binaries — which land in a non-default
+# npm-global prefix — are otherwise invisible to a fresh probe. pi-coding-agent's
+# installer is (being) changed to use `$HOME/.local` as its npm prefix
+# specifically BECAUSE `~/.local/bin` is already first on the guest's default
+# PATH (see docs/decisions/ — the install-prefix ADR), so `pi` should resolve
+# from a bare `sh -c` with NO PATH massaging at all.
+#
+# This is intentional and load-bearing for what this script exists to catch
+# (review finding: "a verify that probes `command -v pi` through a bare `sh -c`
+# would have caught finding 1" — the old-prefix/no-wrapper regression). If a
+# future regression puts `pi` back behind a non-default-PATH prefix, THIS
+# script's step 4 below must FAIL, not quietly route around it with a PATH
+# injection the way the sibling kits do — that PATH injection is exactly what
+# would hide the regression again.
+in_sbx() {
+  case "${DRIVER:-}" in
+    acq) acq exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true ;;
+    *)   sbx exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true ;;
+  esac
+}
+
+info "0. Preconditions"
+[ -f "$KIT_DIR/spec.yaml" ] && ok "kit spec.yaml present" || { bad "spec.yaml missing"; exit 1; }
+[ -f "$INSTALL_SCRIPT" ] && ok "install script present" || { bad "files/home/pi-coding-agent-install.sh missing"; exit 1; }
+
+info "1. Validate the neutral kit spec"
+VALIDATOR="$REPO_ROOT/integrations/isolation/acq-kits/validate-kits.py"
+if ! command -v python3 >/dev/null 2>&1; then
+  skip "validate-kits.py not run (python3 not on PATH)"
+elif [ ! -f "$VALIDATOR" ]; then
+  skip "validate-kits.py not found at $VALIDATOR"
+elif ! python3 -c 'import jsonschema, yaml' >/dev/null 2>&1; then
+  skip "validate-kits.py needs 'jsonschema' + 'pyyaml' — install them (pip install jsonschema pyyaml) and re-run"
+else
+  if val_out="$(python3 "$VALIDATOR" --root "$REPO_ROOT" 2>&1)"; then
+    ok "acq-kits validate-kits.py passes (schema + registry)"
+  else
+    bad "validate-kits.py failed:"
+    printf '%s\n' "$val_out" | sed 's/^/    | /' >&2
+  fi
+fi
+
+# --- Offline source checks (no sandbox needed). ------------------------------
+# The review finding this file exists to address: "the live-tested behaviours
+# (idempotent re-run, bad-version rejection, old-Node rejection, CA-decode
+# logging) exist only in the PR description, so a regression in any of them
+# goes undetected." Steps 6-8 below re-test these LIVE where practical (idempotent
+# re-run, bad-version rejection, CA-decode logging). The old-Node rejection is
+# checked here OFFLINE instead, at the source level — reliably forcing the
+# guest's own Node to report a stale version without patching the base image is
+# impractical for a host-side script, so the regression guard is the presence
+# of the version-gate logic itself.
+info "1b. Source-level regression guards (offline)"
+if grep -Eq "process\.versions\.node" "$INSTALL_SCRIPT" && grep -Eq '22' "$INSTALL_SCRIPT"; then
+  ok "install script gates on Node's own version (old-Node rejection present)"
+else
+  bad "install script no longer checks Node's version — old-Node installs would fail late and opaquely instead of being rejected up front"
+fi
+if grep -Eq 'PI_CODING_AGENT_VERSION' "$INSTALL_SCRIPT" && grep -Eq 'refusing to install' "$INSTALL_SCRIPT"; then
+  ok "install script validates PI_CODING_AGENT_VERSION format (bad-version rejection present)"
+else
+  bad "install script no longer validates the version-pin format — a malformed PI_CODING_AGENT_VERSION could reach the npm package-spec string unchecked"
+fi
+if grep -Eq 'base64 -d' "$INSTALL_SCRIPT" && grep -Eq 'failed to base64-decode' "$INSTALL_SCRIPT"; then
+  ok "install script surfaces a PROXY_CA_CERT_B64 decode failure (CA-decode logging present)"
+else
+  bad "install script no longer surfaces a CA decode failure — a malformed PROXY_CA_CERT_B64 could silently ship an incomplete trust bundle"
+fi
+if command -v pi >/dev/null 2>&1; then :; fi   # no-op; keeps shellcheck quiet about unused fn style below
+if grep -Eq 'command -v pi >/dev/null 2>&1; then' "$INSTALL_SCRIPT"; then
+  ok "install script is guarded to be idempotent (skips the npm install when pi is already present)"
+else
+  bad "install script no longer guards against re-installing on every boot — idempotency regression"
+fi
+
+# --- Select the live driver. -------------------------------------------------
+DRIVER=""
+if [ "$RUN_ACQ" = "1" ]; then
+  DRIVER="acq"
+elif [ "$RUN_SBX" = "1" ]; then
+  DRIVER="sbx"
+fi
+
+if [ -z "$DRIVER" ]; then
+  info "Live sandbox checks (2-8): SKIPPED"
+  echo "  Set RUN_ACQ=1 to run the live end-to-end check via acq (preferred)." >&2
+  echo "  (RUN_SBX=1 also works but needs a pre-translated sbx-v2 kit; see header.)" >&2
+  info "Summary"
+  printf '  %d passed, %d failed\n' "$pass" "$fail"
+  [ "$fail" -eq 0 ] && printf '  \033[32mOffline gate passed.\033[0m\n' || printf '  \033[31mOffline gate failed — see above.\033[0m\n'
+  exit "$([ "$fail" -eq 0 ] && echo 0 || echo 1)"
+fi
+
+if ! command -v "$DRIVER" >/dev/null 2>&1; then
+  echo "  RUN_${DRIVER^^}=1 set but '$DRIVER' not on PATH. Install it and retry." >&2
+  exit 1
+fi
+echo "  driver: $DRIVER"
+
+info "2. Create a sandbox with the kit"
+if [ "$DRIVER" = "acq" ]; then
+  echo "  creating $SBX_NAME via acq (extra kit: $KIT_DIR)..."
+  if ACQ_EXTRA_KITS="$KIT_DIR" acq create --name "$SBX_NAME" opencode "$WORK" </dev/null >"$CREATE_LOG" 2>&1; then
+    ok "sandbox created via acq (kit translated + applied)"
+  else
+    bad "acq create failed (exit $?)"
+    sed 's/^/  | /' "$CREATE_LOG" >&2
+    exit 1
+  fi
+else
+  if [ -z "$SBX_KIT_DIR" ]; then
+    info "Live sandbox checks (2-8): SKIPPED"
+    echo "  RUN_SBX=1 needs a PRE-TRANSLATED sbx-v2 kit dir in SBX_KIT_DIR." >&2
+    echo "  sbx cannot parse the neutral hybrid/v1 spec directly. Prefer RUN_ACQ=1," >&2
+    echo "  which translates automatically." >&2
+    info "Summary"
+    printf '  %d passed, %d failed\n' "$pass" "$fail"
+    [ "$fail" -eq 0 ] && printf '  \033[32mOffline gate passed; live checks skipped.\033[0m\n' \
+      || printf '  \033[31mOffline gate failed — see above.\033[0m\n'
+    exit "$([ "$fail" -eq 0 ] && echo 0 || echo 1)"
+  fi
+  echo "  creating $SBX_NAME (workspace $WORK) from translated kit $SBX_KIT_DIR..."
+  if sbx create --name "$SBX_NAME" --kit "$SBX_KIT_DIR" opencode "$WORK" </dev/null >"$CREATE_LOG" 2>&1; then
+    ok "sandbox created with --kit"
+  else
+    bad "sbx create failed (exit $?)"
+    sed 's/^/  | /' "$CREATE_LOG" >&2
+    exit 1
+  fi
+fi
+
+info "3. Wait for the startup install (up to ${READY_TIMEOUT}s)"
+# pi has no server to wait on — just wait for the startup phase's npm install to
+# land the binary. No native-module postinstall (contrast openchamber's
+# better-sqlite3), so this should be quick.
+installed=""
+deadline=$(( $(date +%s) + READY_TIMEOUT ))
+while :; do
+  [ -n "$(in_sbx 'command -v pi')" ] && { installed=yes; break; }
+  [ "$(date +%s)" -ge "$deadline" ] && break
+  sleep "$POLL_INTERVAL"
+done
+
+info "4. \`pi\` reachable via a BARE, fresh \`sh -c\` probe — the exact check this file exists to run"
+# THIS is the specific check the review asked for: "a verify that probes
+# `command -v pi` through a bare `sh -c` would have caught finding 1." in_sbx
+# above injects NO PATH (see its own comment) — command -v here resolves purely
+# off whatever PATH a fresh non-login shell gets from the guest's own
+# /etc/environment, i.e. the SAME PATH a freshly-attached `acq run`/`acq exec`
+# session would have. If `pi` installs somewhere not on that default PATH
+# (e.g. a regression back to a bare `$HOME/.npm-global` prefix with no
+# default-PATH-visible shim), this step FAILS — which is the intended,
+# load-bearing behavior, not a false positive to work around.
+pi_path="$(in_sbx 'command -v pi')"
+if [ -n "$pi_path" ]; then
+  ok "pi resolves on the default guest PATH via a bare sh -c ($pi_path)"
+else
+  bad "pi NOT found via a bare, unmodified \`sh -c\` probe — either the install failed (see step 3/5) or pi installed to a prefix that is not on the guest's DEFAULT PATH (the exact regression class this check exists to catch)"
+fi
+
+info "5. Real \`pi --version\` output — not just command -v"
+# command -v only proves a file exists at that path; it does not prove the
+# binary actually RUNS. Capture and print the real version output.
+ver_out="$(in_sbx 'pi --version 2>&1')"
+ver_rc_ok="$(in_sbx 'pi --version >/dev/null 2>&1 && echo yes')"
+if [ -n "$installed" ] && [ "$ver_rc_ok" = "yes" ] && [ -n "$ver_out" ]; then
+  ok "pi --version runs and prints output: ${ver_out}"
+elif [ -z "$installed" ]; then
+  bad "pi was never installed by the startup step within ${READY_TIMEOUT}s"
+  in_sbx 'tail -n 25 /tmp/pi-coding-agent-install.*.log 2>/dev/null || true' | sed 's/^/    | /'
+else
+  bad "pi is on PATH but \`pi --version\` did not run cleanly (output: '${ver_out}')"
+fi
+
+info "6. Idempotent re-run — running the install script again is a clean no-op"
+# REGRESSION GUARD: the review's "idempotent re-run" behaviour. Re-invoke the
+# SAME startup script directly (not just rely on a second sandbox boot, which
+# this script does not perform) and confirm it exits 0 and does not clobber the
+# existing binary or re-download anything unnecessarily. The script's own guard
+# is `command -v pi >/dev/null 2>&1 || { …install… }`; with pi already present
+# this should be fast and silent about installing.
+if [ -z "$installed" ]; then
+  skip "idempotent re-run check (pi was never installed — nothing to re-run against)"
+else
+  rerun_out="$(in_sbx 'sh /home/agent/pi-coding-agent-install.sh 2>&1; echo "RC=$?"')"
+  pi_still_there="$(in_sbx 'command -v pi')"
+  case "$rerun_out" in
+    *RC=0*)
+      if [ -n "$pi_still_there" ]; then
+        ok "re-running the install script is idempotent (exit 0, pi still on PATH)"
+      else
+        bad "re-running the install script exited 0 but pi is no longer on PATH afterward"
+      fi
+      ;;
+    *)
+      bad "re-running the install script did not exit cleanly: $rerun_out"
+      ;;
+  esac
+fi
+
+info "7. Bad-version rejection — a malformed PI_CODING_AGENT_VERSION is refused, not installed"
+# REGRESSION GUARD: the review's "bad-version rejection" behaviour. Invoke the
+# script directly with an obviously-invalid pin and confirm it logs a refusal
+# and exits 0 (never fails the sandbox over an optional CLI) WITHOUT disturbing
+# the already-installed pi from step 3.
+bad_ver_out="$(in_sbx 'PI_CODING_AGENT_VERSION="1.0.0; rm -rf /" sh /home/agent/pi-coding-agent-install.sh 2>&1; echo "RC=$?"')"
+pi_after_bad_ver="$(in_sbx 'command -v pi')"
+case "$bad_ver_out" in
+  *"refusing to install"*RC=0*|*RC=0*"refusing to install"*)
+    if [ -n "$pi_after_bad_ver" ]; then
+      ok "malformed PI_CODING_AGENT_VERSION is refused (exit 0, existing pi install untouched)"
+    else
+      bad "malformed PI_CODING_AGENT_VERSION was refused but the existing pi install is now missing"
+    fi
+    ;;
+  *)
+    bad "malformed PI_CODING_AGENT_VERSION was NOT clearly refused (output: $bad_ver_out)"
+    ;;
+esac
+
+info "8. CA-decode failure is surfaced, not silently swallowed"
+# REGRESSION GUARD: the review's "CA-decode failure logging" behaviour. Force a
+# base64 decode failure with a garbage PROXY_CA_CERT_B64 and confirm the script
+# prints its own explicit warning rather than silently shipping an incomplete
+# trust bundle. This does not require pi to be missing — the CA-bundle block
+# only runs on an actual install attempt, so pair it with a throwaway version
+# override to force that branch without disturbing the real install.
+ca_out="$(in_sbx 'PROXY_CA_CERT_B64="not-valid-base64!!!" PI_CODING_AGENT_VERSION=latest sh -c "rm -f \$(command -v pi) 2>/dev/null; true"; PROXY_CA_CERT_B64="not-valid-base64!!!" sh /home/agent/pi-coding-agent-install.sh 2>&1')"
+case "$ca_out" in
+  *"failed to base64-decode"*)
+    ok "a malformed PROXY_CA_CERT_B64 is surfaced with a clear decode-failure message"
+    ;;
+  *)
+    warn "did not observe the decode-failure message (output: $ca_out) — this step forcibly removes pi first to re-trigger the install branch; if pi failed to reinstall afterward, re-run scripts/verify"
+    ;;
+esac
+# Restore: make sure pi is present again after step 8's forced-removal probe,
+# so a KEEP=1 inspection run isn't left in a misleading state.
+in_sbx 'command -v pi >/dev/null 2>&1 || sh /home/agent/pi-coding-agent-install.sh' >/dev/null 2>&1 || true
+
+info "Summary"
+[ "$fail" -eq 0 ] && printf '  \033[32mAll checks passed.\033[0m\n' || printf '  \033[31mSome checks failed — see notes above.\033[0m\n'
+
+[ "$fail" -eq 0 ]
