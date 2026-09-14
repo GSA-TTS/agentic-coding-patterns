@@ -1,6 +1,7 @@
 # Agor + `acq` — run the executor inside a sandbox
 
-> **Status: DRAFT (v1, sbx backend).** Authored via the wayfinder map
+> **Status: DRAFT (v1, msb default backend; sbx supported).** Authored via the
+> wayfinder map
 > ([#247](https://github.com/GSA-TTS/agentic-coding-patterns/issues/247)); the
 > wrapper has **not** yet been live-validated end to end (map
 > [#257](https://github.com/GSA-TTS/agentic-coding-patterns/issues/257)). Read
@@ -26,8 +27,9 @@ with the [isolation kits](../../isolation/acq-kits/), which are things `acq`
    **piping a JSON payload to the process's stdin**.
 2. This integration's wrapper (`sandbox-wrapper-acq.sh`) is that template target.
    It reads the payload, works out what to mount from the branch's own `.git`,
-   creates an `acq` sandbox, and pipes the payload into
-   `agor-executor --stdin` **inside** the sandbox.
+   rewrites a loopback `daemonUrl` to the sandbox-reachable host alias, creates an
+   `acq` sandbox (which installs `agor-executor` via the egress kit), and pipes
+   the payload into `agor-executor --stdin` **inside** the sandbox.
 3. The executor connects back to the daemon over WebSocket using the payload's
    scoped JWT — so the sandbox network policy must allow the daemon URL.
 
@@ -36,20 +38,21 @@ Agor daemon ──(executor_command_template: sandbox-wrapper-acq.sh {session_id
    │  writes JSON payload to stdin
    ▼
 sandbox-wrapper-acq.sh
-   │  parse params.cwd, derive mounts from .git, acq create (+ egress kit + usai secret)
+   │  parse params.cwd, rewrite daemonUrl, derive mounts from .git,
+   │  acq create (+ egress/executor kit + usai secret)
    ▼
-acq sandbox (sbx) ── acq exec -- agor-executor --stdin ──▶ agent SDK
+acq sandbox (msb) ── acq exec -- agor-executor --stdin ──▶ agent SDK
    │                                                          │
    └────────────────── WebSocket back to daemon ◀────────────┘  (allow-listed egress)
 ```
 
 ## Prerequisites
 
-- **`acq`** installed and configured with a backend (**sbx** for v1; see
+- **`acq`** installed and configured with a backend (**msb** is the default; see
   [Backend support](#backend-support)).
-- **`agor-executor`** available on `PATH` **inside the sandbox image**. (Agor's
-  daemon owns installing/bundling the executor; the sandbox image must be able to
-  run `agor-executor --stdin`.)
+- A **base sandbox image with `node`/`npm`** — the egress kit installs
+  `agor-executor` at create time (`npm install -g agor-live`), so the image must
+  be able to run `npm`/`node`. (The default `shell-docker` image does.)
 - **`jq`** on the host (the wrapper parses the payload with it).
 - A **daemon-egress kit** ref (see [Daemon reachability](#daemon-reachability)).
 - A **USAi API key** available to the operator (see [Credentials](#credentials-usai)).
@@ -98,7 +101,8 @@ All are optional and **none are secrets**:
 | `AGOR_SANDBOX_DRY_RUN` | `0` | `1` = print the planned acq commands and exit. |
 | `AGOR_DATA_HOME` | (Agor default) | Agor's git-data root (`repos/` + `worktrees/`); used to tell an Agor-managed repo from a user's local repo. Falls back to `AGOR_HOME`, then `~/.agor`. **Export it if your deploy sets `paths.data_home` only in `config.yaml`** (this wrapper can't read the config file). |
 | `AGOR_MANAGED_ROOTS` | (unset) | Extra colon-separated managed roots to allow (e.g. an EFS/NFS mount), in addition to `AGOR_DATA_HOME`. |
-| `AGOR_EGRESS_KIT` | (unset) | acq kit ref that allow-lists the daemon (local dir or `git+https…#ref=&dir=`). |
+| `AGOR_EGRESS_KIT` | (unset) | acq kit ref that allow-lists the daemon and installs the executor (local dir or `git+https…#ref=&dir=`). |
+| `AGOR_DAEMON_HOST` | `host.microsandbox.internal` | Host alias the executor uses to reach the daemon (msb default); set `host.docker.internal` for sbx. |
 | `AGOR_USAI_SECRET` | `1` | `1` = set the per-sandbox `usai` acq secret. |
 | `AGOR_USAI_KEY_FILE` | (unset) | File holding the USAi key; piped to `acq secret set` (never argv). |
 
@@ -156,16 +160,20 @@ refuses this** (exit 5). v1 supports:
 
 The executor inside the sandbox must reach the daemon over WebSocket. `acq` has
 **no per-invocation network flag** — outbound egress can only be allow-listed by
-an **acq kit's `caps.network.allow`**, and sbx is default-deny for arbitrary
-hosts. So this integration ships/uses a small egress kit whose allow-list
-includes the daemon host alias (`host.docker.internal:3030` on sbx):
+an **acq kit's `caps.network.allow`**, and backends are default-deny for
+arbitrary hosts. The egress kit also **installs the executor** (its `install`
+phase runs `npm install -g agor-live` and shims `agor-executor`), since
+`agor-live` ships no `agor-executor` bin. Its allow-list carries **both** backend
+host aliases on the Agor default port:
 
 ```yaml
 # integrations/isolation/acq-kits/agor-daemon-egress/spec.yaml (see map #259)
 caps:
   network:
     allow:
-      - host.docker.internal:3030
+      - host.docker.internal:3030          # sbx
+      - host.microsandbox.internal:3030    # msb (default backend)
+      - registry.npmjs.org:443             # install-time executor fetch
 ```
 
 Point `AGOR_EGRESS_KIT` at it — a **local dir** (bypasses the source allowlist)
@@ -173,9 +181,12 @@ or the **git form**
 `git+https://github.com/GSA-TTS/agentic-coding-patterns.git#ref=<40-char-sha>&dir=integrations/isolation/acq-kits/agor-daemon-egress`
 (`GSA-TTS/` is on acq's default kit-source allowlist).
 
-> The daemon port defaults to `3030`; the wrapper can read the actual
-> `daemonUrl` from the payload. If your daemon uses a non-default port, the
-> egress kit's allow entry must match.
+> The daemon advertises `http://localhost:3030` by default, but inside the sandbox
+> `localhost` is the **guest's** loopback, not the host. The wrapper rewrites a
+> loopback `daemonUrl` in the payload to `AGOR_DAEMON_HOST`
+> (`host.microsandbox.internal` on msb, `host.docker.internal` on sbx), preserving
+> the port. If your daemon uses a non-default port, the egress kit's allow entry
+> must match.
 
 ## Credentials (USAi)
 
@@ -199,8 +210,9 @@ agent never sees it):
 |---|---|---|---|
 | Agent model selection | ✅ `model_config` | | |
 | Agent credentials (OpenCode) | ❌ not handled | | ✅ MITM (key set out-of-band) |
-| Worktree + `.git` mount | | ✅ derive from `.git`, pass to acq | ✅ performs the mount (sbx: host path) |
-| Daemon egress | | ✅ apply egress kit via `--kit` | ✅ `caps.network.allow` |
+| Worktree + `.git` mount | | ✅ derive from `.git`, pass to acq | ✅ performs the mount (host path, both backends) |
+| Daemon egress | | ✅ apply egress kit via `--kit`; rewrite loopback `daemonUrl` → host alias | ✅ `caps.network.allow` |
+| Executor install | | (references the kit) | ✅ install-phase `npm install -g agor-live` + shim |
 | USAi key storage/rotation | (not for OpenCode today) | ✅ read operator key → `acq secret set` | ✅ injection mechanism |
 | USAi endpoint config | | | ✅ `usai-provider` kit |
 | Zscaler CA / playbook / git-sign | | | ✅ the respective kits |
@@ -211,8 +223,8 @@ agent never sees it):
 
 | Backend | v1 | Notes |
 |---|---|---|
-| **sbx** | ✅ validated | Positional workspaces mount at their absolute host path — required for `gitdir:` resolution and Agor's same-path assumption. The live end-to-end run is tracked at map [#257](https://github.com/GSA-TTS/agentic-coding-patterns/issues/257). |
-| **msb** | ✅ code-ready, live-pending | `acq`'s msb adapter now mounts each workspace at its **host path** (sbx-parity) and supports multiple positional mounts ([quickstart#230](https://github.com/GSA-TTS/agentic-coding-quickstart/pull/230), #233), so the `.git` pointer resolves the same way as on sbx. A live msb run still needs a KVM host (msb is not live-verified upstream); that residual is folded into [#257](https://github.com/GSA-TTS/agentic-coding-patterns/issues/257). |
+| **msb** (default) | ✅ code-ready, live-pending | `acq`'s msb adapter mounts each workspace at its **host path** (sbx-parity) and supports multiple positional mounts ([quickstart#230](https://github.com/GSA-TTS/agentic-coding-quickstart/pull/230), #233), so the `.git` pointer resolves the same way as on sbx. Daemon egress uses the `host.microsandbox.internal` alias; the live end-to-end run is tracked at [#257](https://github.com/GSA-TTS/agentic-coding-patterns/issues/257). |
+| **sbx** | ✅ code-ready | Positional workspaces mount at their absolute host path — required for `gitdir:` resolution and Agor's same-path assumption. Daemon egress uses the `host.docker.internal` alias. The live end-to-end run is tracked at map [#257](https://github.com/GSA-TTS/agentic-coding-patterns/issues/257). |
 | **ppp** | ❌ | Future, with msb. |
 
 ## Scope and authority

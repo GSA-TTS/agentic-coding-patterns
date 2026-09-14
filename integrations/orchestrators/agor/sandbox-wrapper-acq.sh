@@ -29,12 +29,11 @@
 #   before wiring it live. See docs/clean-script-standard.md.
 #
 # SCOPE (v1)
-#   - Backend: sbx is the validated target. `acq`'s msb adapter now mounts each
-#     workspace at its host path (sbx-parity) and supports multiple positional
-#     mounts (quickstart#230, #233), so the worktree `.git` pointer resolves the
-#     same on msb — the wrapper is backend-agnostic here. A live msb run still
-#     needs a KVM host (msb is not live-verified upstream); that live-validation
-#     residual is tracked at map #257.
+#   - Backend: msb (microsandbox) is now acq's DEFAULT backend; sbx (Docker
+#     Sandboxes) is still supported. `acq`'s msb adapter mounts each workspace at
+#     its host path and supports multiple positional mounts (quickstart#230,
+#     #233), so the worktree `.git` pointer resolves the same on both backends —
+#     the wrapper is backend-agnostic here. A live msb run is tracked at map #257.
 #   - Daemon egress is allow-listed via a small acq kit, NOT a flag (acq has no
 #     --net-rule); see AGOR_EGRESS_KIT below and map #259.
 #   - USAi key: provisioned to acq out-of-band by the operator (map #252). Agor
@@ -53,6 +52,10 @@ IFS=$'\n\t'
 : "${AGOR_EGRESS_KIT:=}"                 # acq kit ref that allow-lists the daemon
                                          #   (local dir or git+https #ref=&dir=);
                                          #   see integrations/isolation/acq-kits/agor-daemon-egress
+: "${AGOR_DAEMON_HOST:=host.microsandbox.internal}"  # host alias the sandboxed
+                                         #   executor uses to reach the daemon
+                                         #   (msb, the default backend); sbx uses
+                                         #   host.docker.internal instead
 : "${AGOR_USAI_SECRET:=1}"               # 1 = set the per-sandbox `usai` acq secret
 : "${AGOR_USAI_KEY_FILE:=}"              # optional file the operator populates with
                                          #   the USAi key; piped to `acq secret set`
@@ -81,6 +84,7 @@ Env (all optional; none are secrets):
   AGOR_MANAGED_ROOTS   extra colon-separated managed roots to allow (e.g. an EFS
                        mount), in addition to AGOR_DATA_HOME
   AGOR_EGRESS_KIT      acq kit ref allow-listing the daemon (local dir or git+https)
+  AGOR_DAEMON_HOST     host alias the executor uses to reach the daemon (default: host.microsandbox.internal)
   AGOR_USAI_SECRET     1 = provision the per-sandbox `usai` acq secret (default: 1)
   AGOR_USAI_KEY_FILE   file holding the USAi key to pipe to `acq secret set`
 EOF
@@ -298,6 +302,34 @@ if [[ "${AGOR_USAI_SECRET}" -eq 1 ]]; then
   else
     echo "NOTE: AGOR_USAI_KEY_FILE unset/unreadable; skipping per-sandbox USAi secret." >&2
     echo "      Provide it, or set a global secret once: acq secret set -g usai" >&2
+  fi
+fi
+
+# --------------------------------------------------------------------------
+# Rewrite a loopback daemonUrl in the payload to the sandbox-reachable host
+# alias before handing it to agor-executor. Agor advertises
+# http://localhost:3030 by default, but inside the sandbox localhost/127.0.0.1
+# is the GUEST's own loopback — it never reaches the host daemon. The executor
+# connects to payload.daemonUrl, so we point a loopback host at AGOR_DAEMON_HOST
+# (host.docker.internal for sbx, host.microsandbox.internal for msb), preserving
+# scheme and :port. A non-loopback URL (remote daemon) is left untouched.
+# --------------------------------------------------------------------------
+_durl="$(jq -r '.daemonUrl // empty' <"${PAYLOAD_FILE}")"
+if [[ -n "${_durl}" ]]; then
+  _d_scheme="${_durl%%://*}"
+  _d_rest="${_durl#*://}"
+  if [[ "${_d_rest}" != "${_durl}" ]]; then
+    _d_authority="${_d_rest%%/*}"
+    _d_host="${_d_authority%%:*}"
+    case "${_d_host}" in
+      localhost|127.0.0.1)
+        _d_path="${_d_rest#"${_d_authority}"}"
+        _d_suffix="${_d_authority#"${_d_host}"}"
+        jq --arg u "${_d_scheme}://${AGOR_DAEMON_HOST}${_d_suffix}${_d_path}" \
+          '.daemonUrl = $u' <"${PAYLOAD_FILE}" >"${PAYLOAD_FILE}.rewrite"
+        mv "${PAYLOAD_FILE}.rewrite" "${PAYLOAD_FILE}"
+        ;;
+    esac
   fi
 fi
 
