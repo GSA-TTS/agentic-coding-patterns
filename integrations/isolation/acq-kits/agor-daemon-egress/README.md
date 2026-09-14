@@ -101,14 +101,17 @@ port** `3030`. If your daemon uses a different port or alias, edit
 `caps.network.allow` in [`spec.yaml`](spec.yaml). (On msb the port is dropped
 either way.)
 
-The executor version defaults to **`latest`**; to lock the executor to the daemon,
-set `AGOR_EXECUTOR_VERSION` (in the kit's `environment` or the install script).
+The executor version defaults to **`latest`** (the `AGOR_EXECUTOR_VERSION` entry
+in the spec's `environment`). To lock the executor to the daemon, set that value
+to a specific `agor-live` version — it is a kit-authoring pin, not a runtime
+operator env var.
 
 ## Verifying
 
 ```bash
-# Offline, backend-agnostic gate (schema + registry + README):
-python ../validate-kits.py
+# Offline, backend-agnostic gate (schema + registry + README); run from the
+# repo root so `--root` (default: cwd) finds schemas/:
+python integrations/isolation/acq-kits/validate-kits.py
 
 # Live sbx check (needs sbx installed + logged in): creates a throwaway sandbox
 # with this kit and confirms the daemon host:port is in the sandbox egress

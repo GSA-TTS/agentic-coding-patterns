@@ -4,12 +4,14 @@
 #
 # Backend-agnostic gate is integrations/isolation/acq-kits/validate-kits.py
 # (schema + files + commands + registry). This script does the sbx-path live
-# check: it creates a throwaway sandbox with the kit applied and confirms BOTH
-# daemon host aliases are present in the sandbox's egress allow-list (sbx
+# check: it greps the kit spec for both daemon host aliases (sbx
 # host.docker.internal and msb host.microsandbox.internal — msb is acq's default
-# backend). It does NOT prove routing to the host alias (a runtime property) nor
-# a real daemon connection — that live end-to-end path is validated by the
-# orchestrators/agor integration (GSA-TTS/agentic-coding-patterns#257).
+# backend), validates + applies the kit to a throwaway sbx sandbox, and probes
+# only host.docker.internal resolution. It does NOT inspect the sandbox's
+# effective egress allow-list, prove routing to the host alias (a runtime
+# property), or prove a real daemon connection — the live end-to-end path is
+# validated by the orchestrators/agor integration
+# (GSA-TTS/agentic-coding-patterns#257).
 #
 # Run on a host where `sbx` is installed and logged in. Creates a temporary
 # sandbox "agor-egress-verify-*" and removes it at the end (and on interrupt).

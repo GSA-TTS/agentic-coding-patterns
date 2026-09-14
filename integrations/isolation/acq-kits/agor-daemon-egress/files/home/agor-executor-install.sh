@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env sh
 #
 # agor-executor-install.sh — install the Agor executor into the sandbox (create-time).
 #
@@ -12,14 +12,15 @@
 # starts (the executor can be re-installed on a later start) — matching the
 # agentic-coding-playbook kit's degrade-gracefully contract.
 #
-# Runs as root (uid 0) at create time (phase: install). The executor is
-# BUSL-licensed third-party code, so it is fetched from npm at runtime rather than
-# committed to this CC0 kit.
+# POSIX sh (the kit spec invokes this via `sh`, which is dash on Debian/Ubuntu —
+# no bashisms, no `pipefail`). Runs as root (uid 0) at create time (phase:
+# install). The executor is BUSL-licensed third-party code, so it is fetched from
+# npm at runtime rather than committed to this CC0 kit.
 #
 # AGOR_EXECUTOR_VERSION: pin to a specific agor-live version to lock the executor
 # to the daemon (default: latest).
 
-set -uo pipefail
+set -u
 
 AGOR_EXECUTOR_VERSION="${AGOR_EXECUTOR_VERSION:-latest}"
 EXECUTOR_BIN="/usr/local/bin/agor-executor"
@@ -33,12 +34,12 @@ fi
 
 if ! command -v npm >/dev/null 2>&1; then
   echo "WARNING: npm not found in the sandbox; cannot install agor-executor." >&2
-  echo "         The wrapper's \`acq exec … -- agor-executor --stdin\` will fail until" >&2
-  echo "         the base image ships node/npm." >&2
+  echo "         The wrapper's 'acq exec ... -- agor-executor --stdin' will fail" >&2
+  echo "         until the base image ships node/npm." >&2
   exit 0
 fi
 
-echo "Installing agor-live@${AGOR_EXECUTOR_VERSION} (executor runtime)…" >&2
+echo "Installing agor-live@${AGOR_EXECUTOR_VERSION} (executor runtime)..." >&2
 if ! npm install -g --no-fund --no-audit "agor-live@${AGOR_EXECUTOR_VERSION}"; then
   echo "WARNING: npm install agor-live failed; agor-executor will not be available." >&2
   exit 0
@@ -54,7 +55,7 @@ fi
 
 # Write the shim. agor-live's bin does not include agor-executor.
 cat > "${EXECUTOR_BIN}" <<EOF
-#!/usr/bin/env bash
+#!/bin/sh
 exec node "${CLI_PATH}" "\$@"
 EOF
 chmod 0755 "${EXECUTOR_BIN}"

@@ -92,6 +92,12 @@ commands:
       - sh
       - /home/agent/agor-executor-install.sh
 
+# Non-secret guest env. AGOR_EXECUTOR_VERSION is the single pin point for the
+# executor runtime (the install script reads it); set it to a specific agor-live
+# version to lock the executor to the daemon rather than tracking `latest`.
+environment:
+  AGOR_EXECUTOR_VERSION: "latest"
+
 # Bundle provenance (quickstart#235). Declares the source repo so a consumer
 # (acq) can attribute this kit. Unlike the acq-builtin bundle kits, this kit is a
 # standalone integration kit (consumed only by orchestrators/agor), so it declares
