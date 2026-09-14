@@ -33,17 +33,23 @@ test("updateTemplate filters embeddings and keeps strongest defaults", async () 
   const { updatedTemplate, models } = updateTemplate(templateText, JSON.parse(fixtureText))
 
   assert.equal(models.some((model) => model.id === "text-embedding-005"), false)
-  assert.match(updatedTemplate, /"model": "usai\/claude_4_5_opus"/)
+  // The fixture carries claude_4_5_sonnet, which outranks claude_4_5_opus in
+  // ROLE_PRIORITY.model (see the priority-list rationale above updateTemplate's
+  // ROLE_PRIORITY constant in the implementation).
+  assert.match(updatedTemplate, /"model": "usai\/claude_4_5_sonnet"/)
   assert.match(updatedTemplate, /"small_model": "usai\/claude_4_5_haiku"/)
   assert.match(updatedTemplate, /"model": "usai\/gpt-5.4-latest-guardrails-defaultv2"/)
 })
 
-test("updateTemplate prefers newer opus and gpt generations when available", async () => {
+test("updateTemplate selects the highest-priority listed candidate present, regardless of numeric recency", async () => {
   const templateText = await readFile(templatePath, "utf8")
   const payload = {
     data: [
+      // claude-opus-4-7/4-8 are NOT in ROLE_PRIORITY.model, so numeric
+      // "newness" must NOT win over an explicitly listed candidate.
       { id: "claude-opus-4-7", name: "Claude Opus 4.7" },
       { id: "claude-opus-4-8", name: "Claude Opus 4.8" },
+      { id: "claude-opus-5", name: "Claude Opus 5" },
       { id: "gpt-5.4", name: "GPT-5.4" },
       { id: "gpt-5.5", name: "GPT-5.5" },
       { id: "gpt-5.5-mini", name: "GPT-5.5 mini" },
@@ -53,15 +59,20 @@ test("updateTemplate prefers newer opus and gpt generations when available", asy
 
   const { updatedTemplate } = updateTemplate(templateText, payload)
 
-  assert.match(updatedTemplate, /"model": "usai\/claude-opus-4-8"/)
+  // claude-opus-5 is listed in ROLE_PRIORITY.model; the unlisted opus-4-7/4-8
+  // generations must NOT be selected even though they parse as "newer".
+  assert.match(updatedTemplate, /"model": "usai\/claude-opus-5"/)
   assert.match(updatedTemplate, /"small_model": "usai\/claude-3-5-haiku"/)
-  assert.match(updatedTemplate, /"model": "usai\/gpt-5.5"/)
+  // None of gpt-5.4/5.5/5.5-mini are in ROLE_PRIORITY.compaction, so the
+  // compaction role keeps the template's existing value unchanged.
+  assert.match(updatedTemplate, /"compaction":\s*\{\s*"model": "usai\/gpt_5_5_default_v2"/)
 })
 
-test("updateTemplate falls back to defaults when no opus or gpt available", async () => {
+test("updateTemplate preserves the template's existing value when no priority candidate is present (stability over reactivity)", async () => {
   const templateText = await readFile(templatePath, "utf8")
   const payload = {
     data: [
+      // None of these ids appear in ROLE_PRIORITY for any role.
       { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro" },
       { id: "gemini-2.5-flash-lite", name: "Gemini 2.5 Flash Lite" },
     ],
@@ -70,15 +81,18 @@ test("updateTemplate falls back to defaults when no opus or gpt available", asyn
   const { updatedTemplate, models } = updateTemplate(templateText, payload)
 
   assert.equal(models.length, 2)
-  // No opus available, so main model falls back to hardcoded default
-  assert.match(updatedTemplate, /"model": "usai\/claude_4_5_opus"/)
-  // Flash-lite has familyScore 650 for small role, gemini-2.5-pro has 0
-  // selectDefault finds flash-lite as first with score > 0
-  // But current selectDefault uses highest ranked after sort, which may pick pro via localeCompare tiebreaker
-  // Accept either since this is an edge case fallback scenario
-  assert.match(updatedTemplate, /"small_model": "usai\/gemini-2.5/)
-  // No GPT available, so compaction falls back to hardcoded default
-  assert.match(updatedTemplate, /"model": "usai\/gpt-5.4-latest-guardrails-defaultv2"/)
+  // No ROLE_PRIORITY.model candidate present -> template's existing "model"
+  // value (usai/claude-opus-5) is left completely unchanged, not replaced
+  // by any fallback literal or fuzzy guess.
+  assert.match(updatedTemplate, /"model": "usai\/claude-opus-5"/)
+  // No ROLE_PRIORITY.small_model candidate present -> existing small_model
+  // value is preserved unchanged, NOT overwritten with a gemini id (the old
+  // fuzzy scorer would have picked a gemini flash/pro variant here).
+  assert.match(updatedTemplate, /"small_model": "usai\/claude_4_5_haiku"/)
+  assert.doesNotMatch(updatedTemplate, /"small_model": "usai\/gemini/, "gemini id must not leak into the small_model role")
+  // No ROLE_PRIORITY.compaction candidate present -> existing compaction
+  // model value is preserved unchanged.
+  assert.match(updatedTemplate, /"compaction":\s*\{\s*"model": "usai\/gpt_5_5_default_v2"/)
 })
 
 test("updateTemplate handles empty model list gracefully", async () => {
@@ -88,7 +102,8 @@ test("updateTemplate handles empty model list gracefully", async () => {
   const { updatedTemplate, models } = updateTemplate(templateText, payload)
 
   assert.equal(models.length, 0)
-  assert.match(updatedTemplate, /"model": "usai\/claude_4_5_opus"/)
+  // No candidates at all -> every role keeps its existing template value.
+  assert.match(updatedTemplate, /"model": "usai\/claude-opus-5"/)
   assert.match(updatedTemplate, /"small_model": "usai\/claude_4_5_haiku"/)
 })
 
