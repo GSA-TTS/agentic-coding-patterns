@@ -1,0 +1,310 @@
+# spec.yaml — goose-server (a neutral acq mixin kit, hybrid/v1)
+#
+# Runs `goose serve` (the "goosed" ACP server — Block/AAIF goose's backend) INSIDE
+# the sandbox and publishes its port to the host, so a goose DESKTOP app running
+# NATIVELY on the host can drive it as an EXTERNAL server. All the agent work — the
+# interactive loop, tool execution, MCP extensions, file operations — happens in
+# the sandbox, where acq's controls apply (ephemeral container/microVM, deny-default
+# allow-listed egress, no host FS, injected credentials). The desktop app is a thin
+# UI; the agent's blast radius stays inside the sandbox. This is goose's own
+# documented "remote goose server" pattern (goose Desktop → Settings → goose Server
+# → external server), NOT a workaround. It is the FIRST acq "chat harness" kit —
+# structurally like the openchamber/paseo kits (supervise a long-lived server in the
+# guest, publish one host-loopback port), except the client is a native desktop app
+# rather than a browser served from the guest. See
+# docs/decisions/0001-goosed-in-sandbox-desktop-on-host.md.
+#
+# OPT-IN: not a default GSA kit. Apply it with an extra kit ref (see README.md
+# "Quick start").
+#
+# NEUTRAL (backend-agnostic) hybrid/v1 form, structured like the sibling openchamber
+# and paseo kits. acq's kit-translate layer maps the declarative
+# caps/files/commands/publishedPorts/environment below onto whichever isolation
+# backend acq has active (sbx or msb); this kit carries no backend-specific config.
+#
+# DESIGN (see docs/decisions/):
+#   - The goose CLI is installed at CREATE time (install phase, root) by
+#     goose-install.sh — a SINGLE pinned, sha256-verified static binary from GitHub
+#     Releases (no npm, no native build, no toolchain). Unlike openchamber/paseo
+#     (which install npm packages at startup to keep a flaky native build off the
+#     create path), goose's single-binary install is deterministic, so create-time
+#     is appropriate — and it is still fully NON-FATAL (a transient download failure
+#     degrades to "server absent", never a dead sandbox).
+#   - The STARTUP script (goose-start.sh, agent uid, background) owns the server: on
+#     every sandbox start it (1) merges the USAi config primer into goose's global
+#     config (idempotent, converges), then (2) supervises a single
+#     `goose serve --host 0.0.0.0 --port 3284 --platform desktop` (with
+#     GOOSE_SERVER__SECRET_KEY from the env) under a respawn loop. Because a
+#     `startup` command fires on EVERY start — including a detached `acq create`
+#     with nobody attached, held open by the sandbox's tini keepalive (PID 1) — the
+#     server comes up on its own. A single `acq create` is enough; no `acq exec`/
+#     `acq run` needed.
+#
+# PROVIDER (USAi): the kit ships a goose CUSTOM provider named `custom_usai` (an
+# OpenAI-compatible custom provider — files/home/goose-config/custom_providers/
+# custom_usai.json), pointed at the GSA USAi gateway
+# (base_url https://api.gsa.usai.gov/api/v1/chat/completions). We use a NAMED custom
+# provider — NOT the built-in `openai` provider — because goose Desktop drives the
+# external server by named provider + model, and a real GSA Desktop is configured
+# with `custom_usai`. If the server defined a different provider, Desktop's session
+# would fail agent init and could not connect (learned from a live Desktop test).
+# The API KEY is the only secret; goose reads it from the env var named in the
+# provider's api_key_env: CUSTOM_USAI_API_KEY. acq injects it via a CUSTOM secret
+# service bound to api.gsa.usai.gov — NEVER stored in this kit. Register it once
+# (verified against the acq secret store: a custom service's --env name is honored
+# end-to-end and the value is swapped only on the wire to its host):
+#   acq secret set -g goose-usai --host api.gsa.usai.gov --env CUSTOM_USAI_API_KEY
+# See docs/decisions/0003-usai-openai-compatible-provider.md.
+#
+# AUTH: goose Desktop 1.50.0's ACP client ALWAYS performs a secret-key handshake
+# (it sends `X-Secret-Key` to /status and `/acp?token=<secret>`), so a server run
+# `--dangerously-unauthenticated` is rejected by Desktop with "server cannot
+# connect" even though /status is reachable (confirmed on a live 1.50.0 Desktop).
+# The kit therefore runs WITH a shared secret from GOOSE_SERVER__SECRET_KEY (set in
+# the non-secret `environment:` block below; the operator pastes the SAME value
+# into Desktop's Secret Key field). This is a cleartext HANDSHAKE TOKEN, not a
+# protected credential: it guards only a host-loopback port, and it must also live
+# in Desktop's settings, so it is not something acq's secret path could meaningfully
+# protect (and acq cannot inject a host-less secret anyway). The sandbox remains the
+# real security boundary. TLS + cert-fingerprint pinning is a tracked follow-up.
+# See docs/decisions/0002-plaintext-http-loopback.md.
+#
+# PORT FORWARDING: `goose serve` binds container port 3284 (goosed's ACP default —
+# API over HTTP + WebSocket). It is published to the host via the NEUTRAL top-level
+# `publishedPorts:` list; acq's translator/adapter maps it to the active backend's
+# native port-publish primitive, so the kit needs no per-backend extras.
+#
+# YAML ALIAS TRAP (documented by the paseo/openchamber kits): acq's kit translation
+# emits network allow entries UNQUOTED, and a bare leading-`*` host is parsed by YAML
+# as an alias, breaking the translated spec. NO entry below begins with a `*`.
+schemaVersion: "hybrid/v1"
+kind: mixin
+name: goose-server
+displayName: goose Server (goosed for goose Desktop)
+description: >
+  Runs the goose ACP server (`goose serve`, "goosed") inside the sandbox and
+  publishes its port to the host so a natively-installed goose Desktop app can drive
+  it as an external server. Installs a pinned, sha256-verified goose CLI at create
+  time and supervises the server on 0.0.0.0:3284 on every start. Ships a goose
+  custom provider (custom_usai) pointed at the GSA USAi gateway so a goose Desktop
+  configured with that provider can drive the server (key injected by acq as
+  CUSTOM_USAI_API_KEY, never stored in the kit). Uses a shared secret-key
+  handshake (GOOSE_SERVER__SECRET_KEY) that goose Desktop 1.50.0 requires, over a
+  host-loopback port; the sandbox is the security boundary. Opt-in chat-harness
+  mixin; composes with the other GSA kits.
+
+caps:
+  network:
+    allow:
+      # 1. The goose CLI is fetched from GitHub Releases at create time. The tarball
+      #    is served from github.com and redirects to the release-asset object host.
+      - github.com
+      - objects.githubusercontent.com
+      - release-assets.githubusercontent.com
+      # 2. api.github.com is used only as a fallback for release metadata if the
+      #    pinned direct-asset download needs the latest-tag lookup (goose's own
+      #    download flow does this; our installer pins a version, so this is a
+      #    belt-and-suspenders allowance).
+      - api.github.com
+      # 3. The LLM provider endpoint: the GSA USAi OpenAI-compatible gateway. goosed
+      #    calls this for every model turn. The USAi API key is injected on the wire
+      #    to THIS host as CUSTOM_USAI_API_KEY (see the provider note in the header).
+      - api.gsa.usai.gov
+
+files:
+  # Install script (create-time, root). Fetches + verifies + installs the pinned
+  # goose CLI binary. Mode 0755.
+  - path: /home/agent/goose-install.sh
+    mode: "0755"
+    source: files/home/goose-install.sh
+    description: Install the pinned, sha256-verified goose CLI from GitHub Releases (create-time, root).
+  # Startup script (every start, agent uid, background). Merges the USAi config
+  # primer, then supervises `goose serve`. Mode 0755.
+  - path: /home/agent/goose-start.sh
+    mode: "0755"
+    source: files/home/goose-start.sh
+    description: Merge the USAi config primer, then install/supervise the goosed server (agent uid, background).
+  # The goose config primer (USAi provider defaults). Staged; merged into goose's
+  # global config by merge-config.mjs at startup. Mode 0644 (read-only data).
+  - path: /home/agent/goose-config/config.yaml
+    mode: "0644"
+    source: files/home/goose-config/config.yaml
+    description: goose USAi config primer (staged; merged into ~/.config/goose/config.yaml at startup).
+  # JSON/YAML-safe merge helper: lands the primer into goose's global config without
+  # clobbering an existing config. Node (base image ships node). Mode 0755.
+  - path: /home/agent/goose-config/merge-config.mjs
+    mode: "0755"
+    source: files/home/goose-config/merge-config.mjs
+    description: Merge the goose USAi primer into ~/.config/goose/config.yaml (fail-safe, idempotent).
+  # The custom_usai provider definition (base_url + models, NO secret). Staged;
+  # copied into ~/.config/goose/custom_providers/ at startup so the server defines
+  # the SAME named provider goose Desktop uses. Mode 0644 (read-only data).
+  - path: /home/agent/goose-config/custom_providers/custom_usai.json
+    mode: "0644"
+    source: files/home/goose-config/custom_providers/custom_usai.json
+    description: goose custom_usai provider definition (staged; copied into ~/.config/goose/custom_providers/ at startup).
+
+commands:
+  # INSTALL phase — create-time, once, as root (uid "0"). Installs the goose CLI.
+  # The version pin + BOTH arch sha256 hashes are exported here (the script also
+  # carries matching fallback defaults); bump the version and BOTH hashes together
+  # to adopt a newer release, re-verifying against the GitHub release-asset digests
+  # (the release API exposes each asset's `digest: sha256:...`). Pinned to goose
+  # v1.50.0; hashes are the release-asset digests for the -gnu (glibc) Linux GZIP
+  # builds (`.tar.gz`). We use GZIP, not bzip2: the minimal shell-docker
+  # sandbox-template has no `bzip2` binary, so `tar xjf` on a `.tar.bz2` fails there
+  # (download + sha verify succeed, extraction fails, goose ends up uninstalled) —
+  # gzip needs only zlib, which is always present. The `.tar.gz` sha256 differs from
+  # the `.tar.bz2` sha256; these are the GZIP digests.
+  - phase: install
+    user: "0"
+    description: Install the pinned goose CLI binary.
+    command:
+      - sh
+      - -c
+      - |
+        GOOSE_VERSION="v1.50.0" \
+        GOOSE_LINUX_VARIANT="gnu" \
+        GOOSE_SHA256_LINUX_X86_64="6389eea4440178de006fa148d466ac411021315ff7f72b1014beae2d445851e2" \
+        GOOSE_SHA256_LINUX_AARCH64="febd71a6a25c3aff7dbcf566f78d2864e87d886c33c4ef1fee2f67fedd334063" \
+          sh /home/agent/goose-install.sh
+  # STARTUP phase — every start, as the agent user (uid "1000"), BACKGROUND. Merges
+  # the config primer, then supervises `goose serve`. The never-exiting supervisor
+  # loop must not block sandbox start, so this is marked neutral `background: true`
+  # — acq's translator/adapter maps it to each backend's native detached hook. The
+  # `sh -c` body ALSO ends the launch with a trailing `&` as belt-and-suspenders,
+  # matching the openchamber/paseo shape (the two mechanisms compose safely: the
+  # backend runs the whole command detached, and the inner `&` returns the short
+  # `sh -c` immediately after spawning the script). See docs/decisions/.
+  - phase: startup
+    # Schema-required: the hybrid/v1 `user` field pattern is ^[0-9]+$ (a numeric
+    # uid, NOT a name), so this MUST stay "1000" even though the agent uid is
+    # assigned at provision and is not necessarily 1000. Do not "fix" this to
+    # `agent`; acq/the backend runs the startup phase as the agent user.
+    user: "1000"
+    background: true
+    description: Merge the USAi config primer, then supervise the goosed server (background).
+    command:
+      - sh
+      - -c
+      - |
+        GOOSE_SERVE_HOST="0.0.0.0" \
+        GOOSE_SERVE_PORT="3284" \
+          sh /home/agent/goose-start.sh &
+
+# Neutral published port (schema hybrid/v1). Publish the single container/guest port
+# goosed binds: 3284 (ACP API + WebSocket). Uses the NEUTRAL shape — `guest:`,
+# `protocol:`, `name:`. Host is omitted, so acq defaults the host port to the guest
+# value (or an ephemeral host loopback port, backend's choice). acq's translator
+# maps this to the active backend's native port-publish primitive, so the port is
+# published at create time on both backends with no manual step.
+publishedPorts:
+  - guest: 3284
+    protocol: tcp
+    name: goosed
+
+# Non-secret guest env. NONE of these are secrets — the API KEY is injected
+# separately by acq as CUSTOM_USAI_API_KEY (custom secret service bound to
+# api.gsa.usai.gov; see the header), which is the env var the shipped custom_usai
+# provider's `api_key_env` names. The provider CONNECTION (base_url + models) lives
+# in the staged custom_usai.json, and the active provider + default model live in
+# the config primer, so the guest env only needs the model default + server bind.
+#
+#   GOOSE_MODEL                default model id (keep in sync with the config primer
+#                              and with a model id present in custom_usai.json)
+#   GOOSE_SERVE_HOST/PORT      the goosed bind (0.0.0.0:3284), read by goose-start.sh
+#                              and kept in sync with publishedPorts above
+#   GOOSE_DISABLE_SESSION_NAMING=1  avoid a background model call just to name
+#                              sessions (tidy for a server-backed Desktop)
+#
+# NOTE: no OPENAI_* / GOOSE_PROVIDER env — those select goose's BUILT-IN openai
+# provider, which is a different provider identity than the `custom_usai` Desktop
+# uses. The custom provider is defined by the shipped custom_usai.json instead.
+#
+# IN-GUEST BIND IS 0.0.0.0:3284 (all guest interfaces), NOT 127.0.0.1 — the
+# openchamber/paseo lesson: acq's create-time port publish (msb `-p HOST:GUEST`)
+# binds a HOST loopback listener but dials the sandbox's GUEST NETWORK IP for GUEST,
+# not guest 127.0.0.1. So a 127.0.0.1-only bind answers an in-guest curl yet the
+# published host port returns "Empty reply from server". Binding 0.0.0.0 makes the
+# guest port reachable from the host-published loopback port; the HOST side of the
+# publish stays loopback-only, so 0.0.0.0 in-guest does not widen host exposure.
+environment:
+  GOOSE_MODEL: "claude-sonnet-5"
+  GOOSE_SERVE_HOST: "0.0.0.0"
+  GOOSE_SERVE_PORT: "3284"
+  GOOSE_DISABLE_SESSION_NAMING: "1"
+  # ACP shared secret. goose Desktop 1.50.0's ACP client ALWAYS sends a secret
+  # (X-Secret-Key on /status, ?token= on /acp), so an unauthenticated server is
+  # rejected with "server cannot connect" even though /status is reachable
+  # (confirmed on a live Desktop). goose reads this from the env. It is NOT a real
+  # credential — it guards only a host-loopback port, and the operator must paste
+  # the SAME value into goose Desktop → Settings → goose Server → Secret Key. So it
+  # is a cleartext handshake token by design, not a protected secret (which is why
+  # it lives in this non-secret env block rather than acq's secret path — and why
+  # acq's inability to inject a host-less secret is moot). Operators MAY override
+  # it per sandbox with `ACQ ... -e GOOSE_SERVER__SECRET_KEY=...` if they prefer a
+  # unique value. See docs/decisions/0002-plaintext-http-loopback.md.
+  GOOSE_SERVER__SECRET_KEY: "goose-server-kit-local-loopback"
+
+agentContext: |
+  ## goose Server (goosed for goose Desktop)
+
+  This sandbox runs the **goose ACP server** (`goose serve`, "goosed") in the
+  background on container port **3284** (ACP API + WebSocket). **It is installed at
+  create time and supervised by the kit's startup script on every sandbox start** —
+  including a detached `acq create` with nobody attached — so it comes up on its own.
+
+  **The client is a NATIVE goose Desktop app on your host machine**, not a browser
+  UI served from the sandbox. All agent work (the interactive loop, tool execution,
+  MCP extensions, file operations) runs HERE in the sandbox; the desktop app is a
+  thin UI pointed at this server.
+
+  **No terminal needed to bring it up.** A single
+  `acq create --name <sandbox> shell <path>` (with this kit applied) starts the
+  server; then find the host port with `acq ports <sandbox>` and point goose Desktop
+  at it.
+
+  **Reaching it from the host.** The kit publishes container port 3284; acq's active
+  backend maps it to an ephemeral host loopback port, per sandbox. Find it, then in
+  goose Desktop go to **Settings → goose Server**, enable **Use external server**,
+  set the **URL** to `http://127.0.0.1:<host-port-for-3284>`, and set the **Secret
+  Key** to the kit's `GOOSE_SERVER__SECRET_KEY` value (default
+  `goose-server-kit-local-loopback`). goose Desktop 1.50.0 requires the secret-key
+  handshake, so an empty Secret Key will fail to connect. Leave Certificate
+  Fingerprint empty (HTTP, no TLS in v1). A full Quit + reopen of Desktop is needed
+  after changing these settings.
+
+  ```
+  acq ports <sandbox>        # host port for 3284
+  # goose Desktop → Settings → goose Server → Use external server
+  #   URL: http://127.0.0.1:<host-port-for-3284>
+  #   Secret Key: goose-server-kit-local-loopback
+  ```
+
+  **Provider.** The kit ships a goose **custom provider** named `custom_usai`
+  (OpenAI-compatible) pointed at the GSA **USAi** gateway (`api.gsa.usai.gov`), so a
+  goose Desktop configured with that same `custom_usai` provider can drive this
+  server directly. The API key is injected at runtime by `acq` as
+  `CUSTOM_USAI_API_KEY` (the provider's `api_key_env`) and is not stored in this
+  sandbox. In goose Desktop, pick the **USAi** provider and a model like
+  `claude-sonnet-5`.
+
+  **Auth.** The server runs with a shared secret-key handshake
+  (`GOOSE_SERVER__SECRET_KEY`) that goose Desktop 1.50.0 requires. This is a
+  cleartext loopback handshake token (you paste the same value into Desktop), not a
+  protected credential; the sandbox is the security boundary and the published port
+  is host loopback only.
+
+  Logs: `~/.local/state/goose/goose-serve.log` (the server) and
+  `~/.local/state/goose/goose-config-merge.log` (the config merge). The server runs
+  under a respawn loop (`supervisor:goose-serve`), so if it exits — for example after
+  a self-update — it comes back a few seconds later on its own; the log shows
+  `[supervisor] ... restarting` lines when it happens.
+
+# No backend_extras / backend_shortcuts: the port and background flag are declared
+# with the NEUTRAL publishedPorts + background vocabulary above, which acq's kit
+# translation feeds to whatever backend it has active. The install script, the
+# supervise/merge startup script, and the config helpers are all backend-agnostic.
+backend_shortcuts:
+  sbx: {}
+  msb: {}

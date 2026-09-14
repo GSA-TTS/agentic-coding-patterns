@@ -24,6 +24,7 @@ not agent behavior. (Behavioral patterns live in `skills/`, `prompts/`, etc.)
 | [`git-ssh-sign/`](git-ssh-sign/) | Sign git commits and tags with the SSH key forwarded from the host agent (vendored from sbx-kits-contrib). |
 | [`openchamber/`](openchamber/) | Run OpenChamber, a browser UI for OpenCode, inside the sandbox alongside the terminal TUI. Opt-in (see its parity note). |
 | [`paseo/`](paseo/) | Self-host the [Paseo](https://github.com/getpaseo/paseo) daemon + browser web UI (for coding agents) inside the sandbox on one port. Opt-in; agent-generic wrapper, no shared TUI session. |
+| [`goose-server/`](goose-server/) | Run the goose ACP server (`goose serve`, "goosed") inside the sandbox and publish its port so a NATIVE goose Desktop app on the host drives it as an external server. Installs a pinned goose CLI, ships the USAi custom provider, uses a secret-key handshake over a host-loopback port. Opt-in chat-harness mixin. |
 
 Each kit is self-contained: a `spec.yaml` (`hybrid/v1`), any `files/` payload, a
 `scripts/verify` host-side check, a `README.md` (with a **backend parity** note),

@@ -1,0 +1,56 @@
+# config.yaml — goose primer for the GSA USAi provider (staged, not the live path).
+#
+# This file is DROPPED into the sandbox at /home/agent/goose-config/config.yaml
+# (a staging area) and MERGED into goose's real global config
+# (~/.config/goose/config.yaml) at startup by merge-config.mjs, WITHOUT clobbering
+# any global config the base image or another kit may already have written. See
+# the goose-server kit README "Design: merge, don't clobber" and
+# docs/decisions/0003-usai-openai-compatible-provider.md.
+#
+# WHY A CUSTOM PROVIDER (custom_usai), NOT the built-in `openai` provider (learned
+# from a live Desktop test): goose Desktop drives the server by NAMED provider +
+# model. A real GSA goose Desktop is configured with a CUSTOM provider named
+# `custom_usai` (an OpenAI-compatible custom provider defined in
+# ~/.config/goose/custom_providers/custom_usai.json), selecting models like
+# `claude_4_5_sonnet` / `claude-sonnet-5`. When Desktop connects to THIS external
+# server and asks for provider `custom_usai`, the server must ALSO define
+# `custom_usai` or agent init fails and Desktop cannot connect. So the kit ships
+# the matching custom_usai.json (see files/home/goose-config/custom_providers/) and
+# this primer marks custom_usai active — the two now agree. The built-in `openai`
+# provider is deliberately NOT used, because it is a DIFFERENT provider identity
+# than the one Desktop names.
+#
+# THE ONLY SECRET is the API key, read by goose from the env var named in the
+# custom provider's api_key_env: CUSTOM_USAI_API_KEY. acq injects it at runtime
+# bound to api.gsa.usai.gov (never stored in this kit). Register it once:
+#   acq secret set -g goose-usai --host api.gsa.usai.gov --env CUSTOM_USAI_API_KEY
+#
+# So the live config is: this primer selects the provider/model, the shipped
+# custom_usai.json defines the provider connection (base_url + models), and acq
+# injects CUSTOM_USAI_API_KEY. No OPENAI_* env is needed or set.
+#
+# goose-server:owns-goose-config
+# ^ Ownership marker COMMENT (mirrors the usai-provider kit's marker). Tags this
+# file as the one this kit ships so the startup merge + scripts/verify can
+# recognize it after a verbatim copy into the global path. YAML comments survive a
+# verbatim copy but are dropped on a merge (the merge emits normalized YAML), same
+# convergence behavior as the usai-provider kit. Do not remove this comment.
+
+# Active provider selection. `custom_usai` matches the custom provider Desktop
+# uses AND the shipped custom_providers/custom_usai.json (which carries the
+# base_url + model list). We keep this primer FLAT (top-level scalar keys only) —
+# no nested `providers:` map — so the kit's fail-safe flat-YAML merger
+# (merge-config.mjs) can merge it into a pre-existing config without touching an
+# unmodeled nested shape. The provider CONNECTION details live in custom_usai.json,
+# not here; this primer only needs to name the active provider + default model.
+active_provider: custom_usai
+
+# Default model (goose reads GOOSE_MODEL from env too; kept here as belt-and-
+# suspenders). Must be a model id present in custom_usai.json.
+GOOSE_MODEL: claude-sonnet-5
+
+# Tool execution mode. "smart_approve" asks before higher-risk tool calls; the
+# sandbox is the containment boundary, but goose Desktop is a human-in-the-loop UI,
+# so a smart-approve default gives the operator visibility without a prompt on
+# every benign call. Operators can change this in Desktop or via GOOSE_MODE.
+GOOSE_MODE: smart_approve
