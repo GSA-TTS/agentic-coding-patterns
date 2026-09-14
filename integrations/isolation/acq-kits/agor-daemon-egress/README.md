@@ -1,9 +1,10 @@
 # agor-daemon-egress (acq mixin kit, `hybrid/v1`)
 
 A neutral [`acq`](https://github.com/GSA-TTS/agentic-coding-quickstart) **mixin
-kit** that allow-lists outbound egress to the **Agor daemon** control-plane from
-inside the sandbox, so an Agor executor running in the sandbox can connect back
-to the daemon over WebSocket/Feathers using its scoped JWT.
+kit** that, applied inside an `acq` sandbox, (1) allow-lists outbound egress to
+the **Agor daemon** control-plane and (2) installs the **Agor executor**
+(`agor-executor`) into the guest — so an Agor executor running in the sandbox can
+connect back to the daemon over WebSocket/Feathers using its scoped JWT.
 
 > **Consumed by the [`orchestrators/agor`](../../../orchestrators/agor/)
 > integration.** That wrapper *drives* `acq`; this kit is *applied inside* the
@@ -18,33 +19,45 @@ to the daemon over WebSocket/Feathers using its scoped JWT.
 
 ## Why this kit exists
 
-`acq` has **no per-invocation network flag** — `--net-rule`, `--allow`, and
-`acq policy` do not exist at the acq level. The **only** acq-native way to open
-outbound egress is a kit's `caps.network.allow`. sbx is **default-deny** for
-arbitrary hosts, so without an allow entry the in-sandbox `agor-executor` cannot
-reach the daemon and the session never streams results. This kit is that entry,
-scoped to exactly one host:port — the Agor daemon.
+Two things the `orchestrators/agor` wrapper needs from the sandbox, neither of
+which `acq` provides natively:
+
+1. **Daemon egress.** `acq` has **no per-invocation network flag** (`--net-rule`,
+   `--allow`, `acq policy` do not exist at the acq level). The only acq-native way
+   to open outbound egress is a kit's `caps.network.allow`, and backends are
+   deny-by-default for arbitrary hosts. Without an allow entry the executor cannot
+   reach the daemon and the session never streams results.
+2. **The executor itself.** The wrapper runs `agor-executor --stdin` inside the
+   sandbox, but `agor-live`'s npm `bin` exposes only `agor`/`agor-daemon` — not
+   `agor-executor` (which is `dist/executor/cli.js`). The kit's install phase
+   installs `agor-live` from npm and shims `agor-executor` onto PATH.
 
 See [`GSA-TTS/agentic-coding-patterns#259`](https://github.com/GSA-TTS/agentic-coding-patterns/issues/259)
 (the decision) and the map [#247](https://github.com/GSA-TTS/agentic-coding-patterns/issues/247).
 
 ## What it does
 
-- **Network egress** — allow-lists a single host:port,
-  `host.docker.internal:3030` by default (the sbx host alias + the Agor default
-  daemon port). Nothing else: no files, no commands, no secret.
+- **Network egress** — allow-lists the daemon control-plane on **both** backend
+  host aliases (`host.docker.internal:3030` for sbx, `host.microsandbox.internal:3030`
+  for msb, the default backend), plus `registry.npmjs.org` for the install-time
+  fetch.
+- **Executor install** — a create-time (`install`) command runs
+  [`files/home/agor-executor-install.sh`](files/home/agor-executor-install.sh),
+  which `npm install -g agor-live` (BUSL; fetched at runtime, never committed) and
+  writes an `agor-executor` shim.
+- No secret.
 
 ## Security posture
 
-This kit **widens network egress**, so it is reviewed as a **security-relevant**
-kit (`categories: [security]` in intent; `human_review_required`; PR labelled
+This kit **widens network egress** and **runs a create-time install command**, so
+it is reviewed as a **security-relevant** kit (`human_review_required`; PR labelled
 `needs-human-review`). Its capability is deliberately minimal:
 
 | Field | Value | Why |
 |---|---|---|
-| Egress | one host:port (the daemon) | least-privilege: only the control-plane the executor must reach |
-| Filesystem | none | it drops no files |
-| Commands | none | it runs nothing in the guest |
+| Egress | daemon control-plane (one alias/backend) + npm registry | least-privilege: the control-plane the executor must reach + its install source |
+| Filesystem | one committed installer script | the executor runtime is fetched at runtime, not committed |
+| Commands | one create-time `install` (root) | `npm install -g agor-live` + shim |
 | Secrets | none | the daemon URL is not sensitive |
 
 The `hybrid/v1` kit schema is `additionalProperties: false` and models **no**
@@ -57,11 +70,12 @@ and enforced by **human review**, not by schema fields — consistent with
 
 | Backend | Support | Notes |
 |---|---|---|
-| **sbx** | Supported (validated) | `caps.network.allow` is synthesized into the sbx-v2 kit; the full `host.docker.internal:3030` is preserved (quoted). |
-| **msb** | Works, port-stripped | acq emits `--net-rule allow@host.docker.internal` and **drops the `:port`** (msb keys on domain only). Egress is host-wide for that host on msb — acceptable. A live msb run is tracked at [#257](https://github.com/GSA-TTS/agentic-coding-patterns/issues/257). |
+| **msb** (default) | Works, port-stripped | acq emits `--net-rule allow@host.microsandbox.internal` and **drops the `:port`** (msb keys on domain only), so egress is host-wide for that host — acceptable. A live msb run is tracked at [#257](https://github.com/GSA-TTS/agentic-coding-patterns/issues/257). |
+| **sbx** | Supported | `caps.network.allow` is synthesized into the sbx-v2 kit; the full `host.docker.internal:3030` is preserved (quoted). |
 | **ppp** (later) | Deferred | Same `caps.network.allow` path as sbx. |
 
-No backend shortcut — every backend uses `caps.network.allow`.
+The executor install is backend-agnostic (one `install`-phase command). No backend
+shortcut.
 
 ## Usage
 
@@ -77,17 +91,18 @@ AGOR_EGRESS_KIT=integrations/isolation/acq-kits/agor-daemon-egress
 AGOR_EGRESS_KIT="git+https://github.com/GSA-TTS/agentic-coding-patterns.git#ref=<sha>&dir=integrations/isolation/acq-kits/agor-daemon-egress"
 ```
 
-The wrapper passes it to `acq create … --kit "$AGOR_EGRESS_KIT"`.
+The wrapper passes it to `acq create … --kit "$AGOR_EGRESS_KIT"`, and the
+install-phase command installs the executor at create time.
 
-## Adjusting the allow entry
+## Adjusting the allow entry / executor version
 
-The default assumes the **sbx host alias** `host.docker.internal` and the **Agor
-default daemon port** `3030`. If your daemon uses a different port, or your
-deploy exposes it under a different host alias, **edit the single
-`caps.network.allow` entry** in [`spec.yaml`](spec.yaml). A `hybrid/v1` kit
-cannot template a dynamic value; the wrapper can read the real `daemonUrl` from
-the executor payload, but the allow-list itself is static. (On msb the port is
-dropped either way.)
+The allow-list carries **both** backend aliases on the **Agor default daemon
+port** `3030`. If your daemon uses a different port or alias, edit
+`caps.network.allow` in [`spec.yaml`](spec.yaml). (On msb the port is dropped
+either way.)
+
+The executor version defaults to **`latest`**; to lock the executor to the daemon,
+set `AGOR_EXECUTOR_VERSION` (in the kit's `environment` or the install script).
 
 ## Verifying
 
@@ -97,9 +112,9 @@ python ../validate-kits.py
 
 # Live sbx check (needs sbx installed + logged in): creates a throwaway sandbox
 # with this kit and confirms the daemon host:port is in the sandbox egress
-# allow-list. Whether the sandbox can actually ROUTE to host.docker.internal is
-# a Docker-Sandboxes runtime property; the live end-to-end connection is
-# validated by the orchestrators/agor integration (#257).
+# allow-list. Whether the sandbox can actually ROUTE to the host alias is a
+# runtime property; the live end-to-end connection is validated by the
+# orchestrators/agor integration (#257).
 ./scripts/verify
 ```
 
@@ -107,8 +122,9 @@ python ../validate-kits.py
 
 ```
 agor-daemon-egress/
-├── spec.yaml               # the kit (hybrid/v1: caps.network.allow only)
-├── README.md               # this file (with the backend-parity + security note)
-├── scripts/verify          # host-side check
-└── docs/decisions/         # design records
+├── spec.yaml                           # the kit (hybrid/v1: egress + install)
+├── files/home/agor-executor-install.sh # installs agor-live + shims agor-executor
+├── README.md                           # this file
+├── scripts/verify                      # host-side check
+└── docs/decisions/                     # design records
 ```

@@ -1,82 +1,117 @@
 # spec.yaml — agor-daemon-egress (a neutral acq mixin kit, hybrid/v1)
 #
-# Allow-lists outbound egress to the Agor DAEMON from inside the sandbox, so an
-# Agor executor running in the sandbox (via the orchestrators/agor wrapper) can
-# connect back to the daemon over WebSocket/Feathers using its scoped JWT.
+# Allow-lists outbound egress to the Agor DAEMON from inside the sandbox AND
+# installs the Agor executor (`agor-executor`) into the guest, so an Agor executor
+# running in the sandbox (via the orchestrators/agor wrapper) can connect back to
+# the daemon over WebSocket/Feathers using its scoped JWT.
 #
 # WHY A KIT (not a flag): acq has NO per-invocation network flag (`--net-rule`,
 # `--allow`, `acq policy` do not exist at the acq level). The ONLY acq-native
-# egress mechanism is a kit's caps.network.allow. sbx is default-deny for
-# arbitrary hosts, so without this the executor cannot reach the daemon and the
-# session never streams results. See:
-#   integrations/orchestrators/agor/  (the consumer)
-#   integrations/orchestrators/docs/decisions/0001-orchestrators-area-and-agor-acq.md
-#   GSA-TTS/agentic-coding-patterns#259  (the decision), #247 (the map)
+# egress mechanism is a kit's caps.network.allow. Without this the executor cannot
+# reach the daemon and the session never streams results.
+#
+# WHY THE EXECUTOR IS INSTALLED HERE TOO: the wrapper runs the bare command
+# `agor-executor --stdin` inside the sandbox, but agor-live's npm `bin` exposes
+# only `agor`/`agor-daemon` — NOT `agor-executor` (which is `dist/executor/cli.js`).
+# The kit's install phase installs agor-live from npm and shims `agor-executor`
+# onto PATH (see files/home/agor-executor-install.sh) — the same
+# install-at-create-time pattern as the prime-agent kit. The executor is
+# BUSL-licensed third-party code, so it is FETCHED FROM NPM AT RUNTIME, not
+# committed to this CC0 repo.
 #
 # COMPOSITION (per the #250 drives-vs-applied boundary): this is an ISOLATION kit
 # (acq applies it INSIDE the sandbox), so it lives here under acq-kits/ even
 # though its sole consumer is the orchestrators/agor integration, which merely
 # REFERENCES it (e.g. AGOR_EGRESS_KIT=<this dir> or a git+https ref).
 #
-# SECURITY NOTE (this kit widens network egress — reviewed as a security kit):
-#   - It allow-lists exactly ONE host:port — the Agor daemon control-plane on the
-#     backend's host alias. It grants no filesystem access, drops no files, runs
-#     no commands, and carries no secret. The daemon URL is NOT sensitive.
+# SECURITY NOTE (this kit widens network egress AND runs a create-time install —
+# reviewed as a security kit):
+#   - Egress: the daemon control-plane (one host alias per backend) + the npm
+#     registry (install-time only). It drops one committed installer script, runs
+#     one create-time command, and carries no secret.
 #   - The `hybrid/v1` kit schema is additionalProperties:false and models no
 #     security-governance frontmatter (those fields live on skill patterns, not
-#     kit specs). The governance posture is therefore documented in README.md +
-#     the kit's ADR and enforced by human review (needs-human-review on the PR),
-#     not by schema fields. See docs/security-skill-governance.md for the model.
+#     kit specs). The governance posture is documented in README.md + the kit's
+#     ADR and enforced by human review (needs-human-review on the PR).
 #
 # BACKEND PARITY:
+#   - msb (acq's DEFAULT backend): caps.network.allow -> `--net-rule allow@<host>`
+#     with the port STRIPPED (msb keys on domain only), so egress is host-wide for
+#     that host. The host alias is host.microsandbox.internal.
 #   - sbx: caps.network.allow is synthesized into the sbx-v2 kit; the full
-#     host:port is preserved (quoted). This is the v1 target backend.
-#   - msb: acq emits `--net-rule allow@<host>` and STRIPS the port (msb keys on
-#     domain only) — so egress is host-wide for that host on msb. Acceptable;
-#     sbx is the validated backend, and a live msb run is tracked at #257.
+#     host:port is preserved (quoted). The host alias is host.docker.internal.
+#   - Both aliases are allow-listed (a static kit cannot template them; the
+#     wrapper rewrites the executor payload's daemonUrl to the active backend's
+#     alias via AGOR_DAEMON_HOST).
 #
-# DAEMON HOST ALIAS + PORT: defaults below assume the sbx host alias
-# `host.docker.internal` and the Agor default daemon port 3030. If your daemon
-# uses a different port or the deploy exposes it under a different alias, EDIT the
-# allow entry to match (the wrapper can read the real daemonUrl from the payload;
-# a static kit cannot template it). See README "Adjusting the allow entry".
+# DAEMON HOST ALIAS + PORT: allow-lists the sbx alias host.docker.internal and the
+# msb alias host.microsandbox.internal, both on the Agor default daemon port 3030.
+# If your daemon uses a different port or alias, EDIT the allow entries to match.
 schemaVersion: "hybrid/v1"
 kind: mixin
 name: agor-daemon-egress
-displayName: Agor Daemon Egress
+displayName: Agor Daemon Egress + Executor
 description: >
   Allow-list outbound egress to the Agor daemon control-plane from inside the
-  sandbox, so an Agor executor running in the sandbox can connect back to the
-  daemon over WebSocket. acq has no per-invocation egress flag, so daemon
-  reachability must be expressed as a kit caps.network.allow entry. Defaults to
-  the sbx host alias host.docker.internal:3030 (the Agor default port); edit the
-  allow entry for a non-default port or alias.
+  sandbox and install the Agor executor (agor-executor) into the guest, so an
+  Agor executor running in the sandbox can connect back to the daemon over
+  WebSocket. acq has no per-invocation egress flag, so daemon reachability must
+  be expressed as a kit caps.network.allow entry; and the executor is installed
+  from npm at create time (agor-live does not ship an `agor-executor` bin).
+  Allow-lists both the sbx (host.docker.internal) and msb
+  (host.microsandbox.internal) host aliases on the Agor default port 3030.
 
 caps:
   network:
     allow:
-      # The Agor daemon control-plane. sbx keeps the :port; msb strips it.
-      # EDIT this if your daemon port/alias differs (see README).
+      # The Agor daemon control-plane, one alias per backend. msb (the default
+      # backend) strips the :port; sbx preserves it.
       - host.docker.internal:3030
+      - host.microsandbox.internal:3030
+      # npm registry — install-time only (the install phase runs
+      # `npm install -g agor-live`). Metadata + tarballs both come from
+      # registry.npmjs.org.
+      - registry.npmjs.org:443
+
+files:
+  # The executor installer. Committed as a small CC0 shell script; the actual
+  # agor-live runtime is fetched from npm at create time (not committed).
+  - path: /home/agent/agor-executor-install.sh
+    mode: "0755"
+    source: files/home/agor-executor-install.sh
+    description: Install agor-live from npm and shim `agor-executor` onto PATH (create-time, root)
+
+commands:
+  # INSTALL phase — create-time, once, as root (uid "0"). Installs agor-live from
+  # npm and writes the `agor-executor` shim (agor-live's bin does not include
+  # agor-executor). Same install-at-create-time pattern as the prime-agent kit.
+  - phase: install
+    user: "0"
+    description: Install agor-live (npm) + shim `agor-executor` (create-time)
+    command:
+      - sh
+      - /home/agent/agor-executor-install.sh
 
 # Bundle provenance (quickstart#235). Declares the source repo so a consumer
-# (acq) can attribute this kit. Unlike the acq-builtin bundle kits, this egress
-# kit is a standalone integration kit (consumed only by orchestrators/agor), so
-# it declares `repo` but no bundle/kit_names. The applied commit SHA, timestamp,
-# and backend are recorded by the consumer inside the sandbox at apply time.
+# (acq) can attribute this kit. Unlike the acq-builtin bundle kits, this kit is a
+# standalone integration kit (consumed only by orchestrators/agor), so it declares
+# `repo` but no bundle/kit_names. The applied commit SHA, timestamp, and backend
+# are recorded by the consumer inside the sandbox at apply time.
 provenance:
   repo: GSA-TTS/agentic-coding-patterns
 
 agentContext: |
-  ## Agor daemon egress
+  ## Agor daemon egress + executor
 
-  This sandbox is allowed to reach the Agor daemon control-plane
-  (`host.docker.internal:3030` by default). That is how the in-sandbox
-  `agor-executor` streams task results back to the daemon. No action is needed
-  from you; this kit only opens that one egress path.
+  This sandbox is allowed to reach the Agor daemon control-plane and has the Agor
+  executor (`agor-executor`) installed on PATH. The executor streams task results
+  back to the daemon over WebSocket. The daemon host alias depends on the backend
+  (host.docker.internal on sbx, host.microsandbox.internal on msb). No action is
+  needed from you; this kit opens that egress path and installs the executor.
 
-# No backend shortcut: every backend uses caps.network.allow. sbx preserves the
-# host:port; msb strips the port (domain-only) — documented in README parity.
+# No backend shortcut: every backend uses caps.network.allow for egress and the
+# install-phase command for the executor. sbx preserves the host:port; msb strips
+# the port (domain-only) — documented in README parity.
 backend_shortcuts:
   sbx: {}
   msb: {}

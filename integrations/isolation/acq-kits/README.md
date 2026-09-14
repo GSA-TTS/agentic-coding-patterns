@@ -24,7 +24,7 @@ not agent behavior. (Behavioral patterns live in `skills/`, `prompts/`, etc.)
 | [`git-ssh-sign/`](git-ssh-sign/) | Sign git commits and tags with the SSH key forwarded from the host agent (vendored from sbx-kits-contrib). |
 | [`openchamber/`](openchamber/) | Run OpenChamber, a browser UI for OpenCode, inside the sandbox alongside the terminal TUI. Opt-in (see its parity note). |
 | [`paseo/`](paseo/) | Self-host the [Paseo](https://github.com/getpaseo/paseo) daemon + browser web UI (for coding agents) inside the sandbox on one port. Opt-in; agent-generic wrapper, no shared TUI session. |
-| [`agor-daemon-egress/`](agor-daemon-egress/) | Allow-list egress to the Agor daemon control-plane so an Agor executor running in the sandbox (via [`orchestrators/agor`](../../orchestrators/agor/)) can connect back. Security-relevant (widens egress). |
+| [`agor-daemon-egress/`](agor-daemon-egress/) | Allow-list egress to the Agor daemon control-plane and install the Agor executor (`agor-executor`), so an Agor executor running in the sandbox (via [`orchestrators/agor`](../../orchestrators/agor/)) can connect back. Security-relevant (widens egress + create-time install). |
 
 Each kit is self-contained: a `spec.yaml` (`hybrid/v1`), any `files/` payload, a
 `scripts/verify` host-side check, a `README.md` (with a **backend parity** note),

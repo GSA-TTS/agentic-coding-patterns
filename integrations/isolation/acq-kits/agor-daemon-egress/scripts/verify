@@ -2,13 +2,14 @@
 #
 # verify — host-side validation for the agor-daemon-egress acq mixin kit.
 #
-# Backend-agnostic gate is integrations/isolation/acq-kits/validate-kits.py.
-# This script does the sbx-path live check: it creates a throwaway sandbox with
-# the kit applied and confirms the daemon host:port is present in the sandbox's
-# egress allow-list. It does NOT prove routing to host.docker.internal (a
-# Docker-Sandboxes runtime property) nor a real daemon connection — that live
-# end-to-end path is validated by the orchestrators/agor integration
-# (GSA-TTS/agentic-coding-patterns#257).
+# Backend-agnostic gate is integrations/isolation/acq-kits/validate-kits.py
+# (schema + files + commands + registry). This script does the sbx-path live
+# check: it creates a throwaway sandbox with the kit applied and confirms BOTH
+# daemon host aliases are present in the sandbox's egress allow-list (sbx
+# host.docker.internal and msb host.microsandbox.internal — msb is acq's default
+# backend). It does NOT prove routing to the host alias (a runtime property) nor
+# a real daemon connection — that live end-to-end path is validated by the
+# orchestrators/agor integration (GSA-TTS/agentic-coding-patterns#257).
 #
 # Run on a host where `sbx` is installed and logged in. Creates a temporary
 # sandbox "agor-egress-verify-*" and removes it at the end (and on interrupt).
@@ -26,8 +27,9 @@ SBX_NAME="agor-egress-verify-$$"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/agor-egress-verify.XXXXXX")"
 CREATE_LOG="$WORK/sbx-create.log"
 KEEP="${KEEP:-0}"
-# The host:port the kit allow-lists (keep in sync with spec.yaml).
-DAEMON_HOST="host.docker.internal"
+# The host aliases the kit allow-lists (keep in sync with spec.yaml). msb is
+# acq's default backend (host.microsandbox.internal); sbx uses host.docker.internal.
+DAEMON_HOSTS=("host.docker.internal" "host.microsandbox.internal")
 
 pass=0
 fail=0
@@ -58,11 +60,13 @@ else
   bad "spec.yaml missing"
   exit 1
 fi
-if grep -q "$DAEMON_HOST" "$SPEC_FILE"; then
-  ok "spec allow-lists $DAEMON_HOST"
-else
-  bad "spec.yaml does not mention $DAEMON_HOST (edit DAEMON_HOST or the spec)"
-fi
+for _h in "${DAEMON_HOSTS[@]}"; do
+  if grep -q "$_h" "$SPEC_FILE"; then
+    ok "spec allow-lists $_h"
+  else
+    bad "spec.yaml does not mention $_h (edit the allow-list or DAEMON_HOSTS)"
+  fi
+done
 
 info "1. sbx kit validate"
 if sbx kit validate "$KIT_DIR" >/dev/null 2>&1; then
@@ -89,12 +93,14 @@ fi
 sleep 2
 
 info "3. Daemon host resolves inside the sandbox (informational)"
-# Allow-listing != routing. This probes whether the host-gateway alias resolves;
-# a real daemon connection is validated by the orchestrators/agor integration.
-if [ "$(in_sbx "getent hosts $DAEMON_HOST >/dev/null 2>&1 && echo yes")" = "yes" ]; then
-  ok "$DAEMON_HOST resolves in the sandbox"
+# Allow-listing != routing. This probes whether the sbx host-gateway alias
+# resolves; a real daemon connection is validated by orchestrators/agor (#257).
+# The msb alias (host.microsandbox.internal) is not probed here — this is the
+# sbx-path verify; msb routing is exercised by the live msb run (#257).
+if [ "$(in_sbx "getent hosts host.docker.internal >/dev/null 2>&1 && echo yes")" = "yes" ]; then
+  ok "host.docker.internal resolves in the sandbox"
 else
-  echo "  NOTE: $DAEMON_HOST did not resolve here — routing is a runtime property;" >&2
+  echo "  NOTE: host.docker.internal did not resolve here — routing is a runtime property;" >&2
   echo "        the real daemon connection is validated by orchestrators/agor (#257)." >&2
 fi
 
