@@ -183,24 +183,56 @@ if [[ -f "${WORKTREE_PATH}/.git" ]]; then
   # NOTE: this wrapper cannot read config.yaml's paths.data_home; if a deploy
   # sets data_home ONLY in config (not via env), export AGOR_DATA_HOME (or
   # AGOR_MANAGED_ROOTS) for this wrapper too. See the README.
+  # Normalize a host path so the gitdir-derived repo path and the managed-root
+  # allowlist compare in the same form. Under MSYS/Git Bash, Agor writes the
+  # worktree gitdir in native Windows form (C:/...) while $HOME is MSYS form
+  # (/c/...); cygpath folds both to mixed Windows form. On POSIX hosts cygpath
+  # is absent and this is a no-op (mirrors acq's canonicalize_path convention,
+  # quickstart#463).
+  _canon_path() {
+    local _p="${1:-}"
+    [[ -n "${_p}" ]] || { printf '\n'; return 0; }
+    if command -v cygpath >/dev/null 2>&1; then
+      local _m
+      _m="$(cygpath -m "${_p}" 2>/dev/null)" && [[ -n "${_m}" ]] && _p="${_m}"
+    fi
+    printf '%s\n' "${_p}"
+  }
+
   agor_data_home="${AGOR_DATA_HOME:-${AGOR_HOME:-${HOME}/.agor}}"
   # Allow operators to extend the managed-root allowlist (colon-separated),
-  # e.g. AGOR_MANAGED_ROOTS="/mnt/efs/agor:/srv/agor-data".
+  # e.g. AGOR_MANAGED_ROOTS="/mnt/efs/agor:/srv/agor-data". A Windows drive
+  # letter ("C:/...") also contains a colon, so the list is split with a drive-
+  # prefix guard below rather than a bare IFS=':' word-split.
   managed_roots="${agor_data_home}${AGOR_MANAGED_ROOTS:+:${AGOR_MANAGED_ROOTS}}"
+  main_repo_dir="$(_canon_path "${main_repo_dir}")"
 
   managed=0
-  _IFS_SAVE="${IFS}"
-  IFS=':'
-  for root in ${managed_roots}; do
-    [[ -z "${root}" ]] && continue
+  _roots=()
+  _cur=""
+  IFS=':' read -r -a _raw <<< "${managed_roots}" || true
+  for _tok in "${_raw[@]}"; do
+    if [[ -z "${_cur}" ]]; then
+      _cur="${_tok}"
+    elif [[ "${_cur}" =~ ^[A-Za-z]$ ]]; then
+      _cur="${_cur}:${_tok}"       # re-join a Windows drive letter with its path
+    else
+      _roots+=("${_cur}")
+      _cur="${_tok}"
+    fi
+  done
+  [[ -n "${_cur}" ]] && _roots+=("${_cur}")
+
+  for _root in "${_roots[@]}"; do
+    [[ -z "${_root}" ]] && continue
+    _root="$(_canon_path "${_root}")"
     case "${main_repo_dir}/" in
-    "${root%/}"/*)
+    "${_root%/}"/*)
       managed=1
       break
       ;;
     esac
   done
-  IFS="${_IFS_SAVE}"
 
   if [[ "${managed}" -eq 1 ]]; then
     # Agor-managed clean clone under AGOR_DATA_HOME: safe to mount the main .git.
