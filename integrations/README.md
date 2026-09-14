@@ -70,4 +70,4 @@ integrations/
 | [isolation/sbx-kits/playbook-kit](isolation/sbx-kits/playbook-kit/) | sbx | Mixin kit: clone the GSA playbook at sandbox startup and link its AGENTS.md + skills into each agent. |
 | [isolation/sbx-kits/zscaler-ca-certificate](isolation/sbx-kits/zscaler-ca-certificate/) | sbx | Mixin kit: install the public Zscaler Root CA into the sandbox trust store for HTTPS-inspecting proxies. |
 | [isolation/sbx-kits/git-ssh-sign](isolation/sbx-kits/git-ssh-sign/) | sbx | Mixin kit: sign git commits/tags with the host-forwarded SSH key (vendored from sbx-kits-contrib). |
-| [orchestrators/agor](orchestrators/agor/) | Agor → `acq` | Run Agor's executor inside an `acq` sandbox via `executor_command_template`; portable wrapper + setup guide. **v1: sbx backend.** |
+| [orchestrators/agor](orchestrators/agor/) | Agor → `acq` | Run Agor's executor inside an `acq` sandbox via `executor_command_template`; portable wrapper + setup guide. **v1: msb (default) + sbx backends.** |

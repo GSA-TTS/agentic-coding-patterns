@@ -48,7 +48,7 @@ not restated.
 
 | Orchestrator | Drives | Description |
 |--------------|--------|-------------|
-| [agor](agor/) | `acq` | Run [Agor](https://github.com/preset-io/agor)'s executor inside an `acq` sandbox via `executor_command_template` — a portable wrapper that mounts the branch worktree, allow-lists the daemon, and pipes `agor-executor --stdin` into the sandbox. **v1: sbx backend.** |
+| [agor](agor/) | `acq` | Run [Agor](https://github.com/preset-io/agor)'s executor inside an `acq` sandbox via `executor_command_template` — a portable wrapper that mounts the branch worktree, allow-lists the daemon, and pipes `agor-executor --stdin` into the sandbox. **v1: msb (default) + sbx backends.** |
 
 ## Rules
 

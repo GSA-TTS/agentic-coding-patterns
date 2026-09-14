@@ -129,10 +129,11 @@ Adopt **Option 1**.
 - The Agor+acq integration itself carries **no compliance authority** and is not
   federal policy; behavioral/policy authority stays in the playbook and is
   referenced, not restated (consistent with `docs/contribution-scope.md`).
-- v1 of the Agor+acq integration is scoped to the **sbx** backend (see the
+- v1 of the Agor+acq integration targets **both** the **msb** (microsandbox,
+  `acq`'s default backend) and **sbx** (Docker Sandboxes) backends (see the
   wrapper's own notes / map ticket
-  [#251](https://github.com/GSA-TTS/agentic-coding-patterns/issues/251)); msb
-  support and Agor-core changes are tracked separately and are out of scope here.
+  [#251](https://github.com/GSA-TTS/agentic-coding-patterns/issues/251));
+  Agor-core changes remain tracked separately and are out of scope here.
 
 ## Links
 

@@ -103,8 +103,8 @@ All are optional and **none are secrets**:
 | `AGOR_MANAGED_ROOTS` | (unset) | Extra colon-separated managed roots to allow (e.g. an EFS/NFS mount), in addition to `AGOR_DATA_HOME`. |
 | `AGOR_EGRESS_KIT` | (unset) | acq kit ref that allow-lists the daemon and installs the executor (local dir or `git+https…#ref=&dir=`). |
 | `AGOR_DAEMON_HOST` | `host.microsandbox.internal` | Host alias the executor uses to reach the daemon (msb default); set `host.docker.internal` for sbx. |
-| `AGOR_USAI_SECRET` | `1` | `1` = set the per-sandbox `usai` acq secret. |
-| `AGOR_USAI_KEY_FILE` | (unset) | File holding the USAi key; piped to `acq secret set` (never argv). |
+| `AGOR_USAI_SECRET` | `0` | `0` = assume a global `usai` secret is set (default); `1` = set a per-sandbox secret from `AGOR_USAI_KEY_FILE`. |
+| `AGOR_USAI_KEY_FILE` | (unset) | File holding the USAi key (used only when `AGOR_USAI_SECRET` is `1`); piped to `acq secret set` (never argv). |
 
 ## Mount strategy
 
@@ -118,14 +118,14 @@ daemon calls**:
 - **Clone branches** — `.git` is a *directory* (self-contained). The wrapper
   mounts **only the clone dir**.
 
-On sbx, positional workspaces are mounted at their **absolute host path**, so the
+Both backends mount positional workspaces at their **absolute host path**, so the
 worktree appears at the same path inside the sandbox (preserving `gitdir:`
 resolution and error messages).
 
 ### v1 safety gate — local repos are refused
 
-sbx mounts **whole directories** at their host path; it cannot bind *only*
-`<repo>/.git` without its parent. So for a **worktree off a local repo**
+Both backends mount **whole directories** at their host path; neither can bind
+*only* `<repo>/.git` without its parent. So for a **worktree off a local repo**
 (`agor repo add-local`), mounting the main repo dir would drag the user's working
 tree — including a `.env` with real secrets — into the sandbox. **The wrapper
 refuses this** (exit 5). v1 supports:
@@ -196,9 +196,11 @@ credential endpoint has no OpenCode entry. So v1 provisions the USAi key **to
 `acq` out-of-band**, and `acq`'s MITM proxy injects it on outbound requests (the
 agent never sees it):
 
-- Per-sandbox: put the key in a file and set `AGOR_USAI_KEY_FILE`; the wrapper
-  runs `acq secret set <sandbox> usai` with the key on **stdin**.
-- Or once, globally: `acq secret set -g usai` (then set `AGOR_USAI_SECRET=0`).
+- Global (default): set it once with `acq secret set -g usai`; the wrapper assumes
+  it is present (`AGOR_USAI_SECRET` defaults to `0`).
+- Per-sandbox: set `AGOR_USAI_SECRET` to `1` and put the key in a file at
+  `AGOR_USAI_KEY_FILE`; the wrapper runs `acq secret set <sandbox> usai` with the
+  key on **stdin**.
 
 > Agor-vended **per-user / per-project** USAi keys (the original design) require
 > an upstream Agor change and are **out of scope** for this worked example —
@@ -225,7 +227,7 @@ agent never sees it):
 |---|---|---|
 | **msb** (default) | ✅ code-ready, live-pending | `acq`'s msb adapter mounts each workspace at its **host path** (sbx-parity) and supports multiple positional mounts ([quickstart#230](https://github.com/GSA-TTS/agentic-coding-quickstart/pull/230), #233), so the `.git` pointer resolves the same way as on sbx. Daemon egress uses the `host.microsandbox.internal` alias; the live end-to-end run is tracked at [#257](https://github.com/GSA-TTS/agentic-coding-patterns/issues/257). |
 | **sbx** | ✅ code-ready | Positional workspaces mount at their absolute host path — required for `gitdir:` resolution and Agor's same-path assumption. Daemon egress uses the `host.docker.internal` alias. The live end-to-end run is tracked at map [#257](https://github.com/GSA-TTS/agentic-coding-patterns/issues/257). |
-| **ppp** | ❌ | Future, with msb. |
+| **ppp** | ❌ | Future. |
 
 ## Scope and authority
 
