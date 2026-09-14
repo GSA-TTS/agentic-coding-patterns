@@ -2,7 +2,7 @@
 #
 # sandbox-wrapper-acq.sh — run an Agor executor task inside an `acq` sandbox.
 #
-# STATUS: DRAFT (v1, sbx backend). Authored AFK via the wayfinder map
+# STATUS: DRAFT (v1, msb + sbx backends). Authored AFK via the wayfinder map
 #   (GSA-TTS/agentic-coding-patterns#247, prototype ticket #253). Not yet
 #   live-validated end to end — see the map's #257. Read before adopting.
 #
@@ -56,9 +56,12 @@ IFS=$'\n\t'
                                          #   executor uses to reach the daemon
                                          #   (msb, the default backend); sbx uses
                                          #   host.docker.internal instead
-: "${AGOR_USAI_SECRET:=1}"               # 1 = set the per-sandbox `usai` acq secret
+: "${AGOR_USAI_SECRET:=0}"               # 0 = assume a global `usai` acq secret
+                                         #   is set (default); 1 = set a per-sandbox
+                                         #   secret from AGOR_USAI_KEY_FILE
 : "${AGOR_USAI_KEY_FILE:=}"              # optional file the operator populates with
-                                         #   the USAi key; piped to `acq secret set`
+                                         #   the USAi key (used when AGOR_USAI_SECRET=1);
+                                         #   piped to `acq secret set`
 
 usage() {
   cat >&2 <<'EOF'
@@ -85,8 +88,9 @@ Env (all optional; none are secrets):
                        mount), in addition to AGOR_DATA_HOME
   AGOR_EGRESS_KIT      acq kit ref allow-listing the daemon (local dir or git+https)
   AGOR_DAEMON_HOST     host alias the executor uses to reach the daemon (default: host.microsandbox.internal)
-  AGOR_USAI_SECRET     1 = provision the per-sandbox `usai` acq secret (default: 1)
-  AGOR_USAI_KEY_FILE   file holding the USAi key to pipe to `acq secret set`
+  AGOR_USAI_SECRET     0 = assume a global `usai` secret is set (default);
+                       1 = set a per-sandbox secret from AGOR_USAI_KEY_FILE
+  AGOR_USAI_KEY_FILE   file holding the USAi key (used when AGOR_USAI_SECRET=1)
 EOF
 }
 
@@ -122,8 +126,10 @@ SANDBOX_NAME="${AGOR_SANDBOX_PREFIX}${SESSION_ID:0:8}"
 PAYLOAD_FILE="$(mktemp)"
 SANDBOX_CREATED=0
 cleanup() {
-  # Remove the payload temp file (may contain a session JWT — never leave it).
+  # Remove the payload temp file (may contain a session JWT — never leave it),
+  # plus any rewrite temp file from the daemonUrl step below.
   [[ -n "${PAYLOAD_FILE}" && -f "${PAYLOAD_FILE}" ]] && rm -f "${PAYLOAD_FILE}"
+  [[ -n "${PAYLOAD_FILE}" && -f "${PAYLOAD_FILE}.rewrite" ]] && rm -f "${PAYLOAD_FILE}.rewrite"
   # Tear the sandbox down if we created one (best effort). acq rm is already
   # force; do NOT pass --force (acq would misparse it as the sandbox name).
   if [[ "${SANDBOX_CREATED}" -eq 1 ]]; then
@@ -190,20 +196,25 @@ if [[ -f "${WORKTREE_PATH}/.git" ]]; then
   # Normalize a host path so the gitdir-derived repo path and the managed-root
   # allowlist compare in the same form. Under MSYS/Git Bash, Agor writes the
   # worktree gitdir in native Windows form (C:/...) while $HOME is MSYS form
-  # (/c/...); cygpath folds both to mixed Windows form. On POSIX hosts cygpath
-  # is absent and this is a no-op (mirrors acq's canonicalize_path convention,
-  # quickstart#463).
+  # (/c/...); cygpath folds both to mixed Windows form (mirrors acq's
+  # canonicalize_path convention, quickstart#463). Elsewhere, resolve symlinks
+  # and `..` so the prefix check cannot be fooled by a symlink or a traversing
+  # gitdir. Best-effort: if no normalizer is available the path is used as-is.
   _canon_path() {
     local _p="${1:-}"
     [[ -n "${_p}" ]] || { printf '\n'; return 0; }
     if command -v cygpath >/dev/null 2>&1; then
       local _m
       _m="$(cygpath -m "${_p}" 2>/dev/null)" && [[ -n "${_m}" ]] && _p="${_m}"
+    else
+      local _r
+      _r="$(realpath -m "${_p}" 2>/dev/null || realpath "${_p}" 2>/dev/null || true)"
+      [[ -n "${_r}" ]] && _p="${_r}"
     fi
     printf '%s\n' "${_p}"
   }
 
-  agor_data_home="${AGOR_DATA_HOME:-${AGOR_HOME:-${HOME}/.agor}}"
+  agor_data_home="${AGOR_DATA_HOME:-${AGOR_HOME:-${HOME:-}/.agor}}"
   # Allow operators to extend the managed-root allowlist (colon-separated),
   # e.g. AGOR_MANAGED_ROOTS="/mnt/efs/agor:/srv/agor-data". A Windows drive
   # letter ("C:/...") also contains a colon, so the list is split with a drive-
@@ -293,15 +304,18 @@ SANDBOX_CREATED=1
 
 # --------------------------------------------------------------------------
 # Provision the per-sandbox USAi secret (out-of-band; not fetched from Agor —
-# map #252). The key is piped on stdin so it never appears in argv/process list.
+# map #252). By default (AGOR_USAI_SECRET=0) a GLOBAL `usai` secret is assumed to
+# have been set once via `acq secret set -g usai`, so nothing happens here. When
+# AGOR_USAI_SECRET=1, set a per-sandbox secret from AGOR_USAI_KEY_FILE, piped on
+# stdin so it never appears in argv/process list.
 # --------------------------------------------------------------------------
 if [[ "${AGOR_USAI_SECRET}" -eq 1 ]]; then
   if [[ -n "${AGOR_USAI_KEY_FILE}" && -r "${AGOR_USAI_KEY_FILE}" ]]; then
     "${AGOR_ACQ_BIN}" secret set "${SANDBOX_NAME}" usai <"${AGOR_USAI_KEY_FILE}" ||
       echo "WARNING: 'acq secret set ${SANDBOX_NAME} usai' failed; USAi calls may fail." >&2
   else
-    echo "NOTE: AGOR_USAI_KEY_FILE unset/unreadable; skipping per-sandbox USAi secret." >&2
-    echo "      Provide it, or set a global secret once: acq secret set -g usai" >&2
+    echo "NOTE: AGOR_USAI_SECRET=1 but AGOR_USAI_KEY_FILE is unset/unreadable; no per-sandbox secret." >&2
+    echo "      Provide AGOR_USAI_KEY_FILE, or set AGOR_USAI_SECRET=0 to use the global secret." >&2
   fi
 fi
 
@@ -321,13 +335,20 @@ if [[ -n "${_durl}" ]]; then
   if [[ "${_d_rest}" != "${_durl}" ]]; then
     _d_authority="${_d_rest%%/*}"
     _d_host="${_d_authority%%:*}"
-    case "${_d_host}" in
+    # Case-insensitive host match (URL hosts are case-insensitive); keep the
+    # original for the suffix slice. IPv6 loopback ([::1]) is not handled — it is
+    # left untouched rather than corrupted.
+    _d_host_lc="$(printf '%s' "${_d_host}" | tr '[:upper:]' '[:lower:]')"
+    case "${_d_host_lc}" in
       localhost|127.0.0.1)
         _d_path="${_d_rest#"${_d_authority}"}"
         _d_suffix="${_d_authority#"${_d_host}"}"
-        jq --arg u "${_d_scheme}://${AGOR_DAEMON_HOST}${_d_suffix}${_d_path}" \
-          '.daemonUrl = $u' <"${PAYLOAD_FILE}" >"${PAYLOAD_FILE}.rewrite"
+        # umask 077 keeps the rewrite file private (it holds the session JWT);
+        # mktemp's 0600 on the original is otherwise lost to the redirect.
+        (umask 077; jq --arg u "${_d_scheme}://${AGOR_DAEMON_HOST}${_d_suffix}${_d_path}" \
+          '.daemonUrl = $u' <"${PAYLOAD_FILE}" >"${PAYLOAD_FILE}.rewrite")
         mv "${PAYLOAD_FILE}.rewrite" "${PAYLOAD_FILE}"
+        chmod 600 "${PAYLOAD_FILE}" 2>/dev/null || true
         ;;
     esac
   fi
