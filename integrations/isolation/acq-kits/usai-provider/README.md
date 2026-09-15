@@ -61,8 +61,33 @@ The policy gates (`ask`):
   proxy allow-list is the real network control, so `aws s3 cp`/`gcloud`/`az`/
   `docker push`/`dig` are intentionally left ungated (same proxy boundary; see
   the decision record).
+- **`gh pr merge`** (and the equivalent `gh api .../pulls/*/merge` REST form) —
+  gated separately from PR creation. Merging alters the authoritative state of
+  a shared, version-controlled system outside the sandbox; this maps to NIST SP
+  800-53 **CM-3** (Configuration Change Control), not AC-6, since it's a
+  change-control concern, not a filesystem/privilege-scope one. See the
+  decision record for why AC-6 is the wrong citation here, and for the gate's
+  disclosed gap (it doesn't cover `git push` to an auto-merge-enabled branch).
+- **`rm` outside the workspace** — an absolute path, a `~`/`$HOME`-relative
+  path, or a path that climbs out via `..` (e.g. `rm -rf /`, `rm -rf ~/other`,
+  `rm -rf ../sibling`). In-workspace `rm` (`rm -rf build`, `rm -rf ./dist`)
+  stays fully allowed, matching the rest of this policy. **This is
+  defense-in-depth, not enforcement** — it's a glob match on a command
+  string, not a filesystem boundary, and it has real, disclosed bypasses
+  (`cd .. && rm -rf x`, `sh -c 'rm -rf ~/x'`, `find .. -delete`, and similar —
+  see the decision record's full list). The sandbox's mount scope remains the
+  actual, structural implementation of AC-6's "restricted to the project
+  directory" language; this gate only covers the residual writable paths the
+  mount scope doesn't reach.
 - **Data-bearing `curl`/`wget`** (`-d`/`--data`/`-F`/`-T`/`-X POST`, wget
   `--post-*`/`--body-*`) — as **defense-in-depth**, not a completeness claim.
+
+**Neither the `gh pr merge` gate nor the `rm` gate protects anything under
+`opencode --auto`/`opencode run --auto`**, which auto-approves any request
+that isn't an explicit `deny` (OpenCode's own documented behavior). Both are
+interactive-session safeguards by construction — see the decision record for
+what the actual controls are for an automated pipeline (credential scoping
+for `rm`; branch protection for merges).
 
 It also keeps one hard **`deny`**: the `read` tool's **credential-file
 deny-list** (`.env`, `*.pem`, `*.key`, `*.tfvars`, `~/.aws/*`, kubeconfig, …).
