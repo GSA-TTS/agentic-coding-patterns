@@ -80,6 +80,42 @@ kits:
       ONE port. The daemon runs unsecured (no PASEO_PASSWORD); the sandbox is the
       security boundary and the port is host loopback only.
 
+  goose-server:
+    backends: [sbx, msb]
+    parity: |
+      Opt-in CHAT-HARNESS mixin: runs the goose ACP server (`goose serve`,
+      "goosed") inside the sandbox and publishes its port so a NATIVE goose Desktop
+      app on the host drives it as an external server (goose's documented
+      remote-server pattern). Written entirely in the neutral vocabulary with no
+      backend shortcut or extras. The goose CLI is installed by an INSTALL-phase
+      command (create-time, root): a single pinned, sha256-verified static binary
+      from GitHub Releases, arch-selected for x86_64/aarch64 guests (msb microVMs
+      are aarch64 on Apple Silicon), so both backends install the same verified
+      artifact. The single published container port (3284, goosed's ACP API +
+      WebSocket) is declared with the neutral top-level `publishedPorts` list and
+      the never-exiting startup supervisor with the neutral `background: true`
+      flag; acq's kit translation maps both to each backend's native port-publish
+      and detached-hook primitives, so the port is published and the server
+      supervised at create time on both backends with no manual step. In-guest bind
+      is 0.0.0.0:3284 (not loopback) so acq's create-time publish reaches the guest
+      on msb; the host side stays loopback-only. The server runs with a SHARED
+      SECRET-KEY handshake (GOOSE_SERVER__SECRET_KEY) over plaintext HTTP on the
+      host-loopback port — goose Desktop 1.50.0's ACP client always sends a secret,
+      so an unauthenticated server is rejected with "server cannot connect". The
+      secret is a cleartext loopback handshake token in the kit env (also pasted
+      into Desktop), not a protected credential; the sandbox is the security
+      boundary. The LLM provider is a goose CUSTOM provider named
+      `custom_usai` (OpenAI-compatible) that the kit ships as
+      custom_providers/custom_usai.json (base_url https://api.gsa.usai.gov/api/v1/
+      chat/completions) and stages into ~/.config/goose/custom_providers/ at
+      startup — matching the provider a GSA goose Desktop uses, so Desktop can drive
+      the external server (a named-provider mismatch would fail agent init). The API
+      key is injected at runtime by acq as CUSTOM_USAI_API_KEY (the provider's
+      api_key_env) via a CUSTOM secret service bound to api.gsa.usai.gov (`acq
+      secret set -g goose-usai --host api.gsa.usai.gov --env CUSTOM_USAI_API_KEY`),
+      never stored in the kit. No backend shortcut. The install/supervise/merge/
+      provider-stage scripts and the config helper are backend-agnostic.
+
   prime-agent:
     backends: [sbx, msb]
     parity: |

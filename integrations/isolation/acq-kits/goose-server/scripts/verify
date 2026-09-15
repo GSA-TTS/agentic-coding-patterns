@@ -1,0 +1,481 @@
+#!/usr/bin/env bash
+#
+# verify — host-side validation for the goose-server acq mixin kit.
+#
+# Two layers:
+#
+#   1. OFFLINE GATE (always runs): the backend-agnostic validator
+#      integrations/isolation/acq-kits/validate-kits.py (schema + files[].source +
+#      registry) plus node --check of the merge helper. Needs python3 with
+#      jsonschema + pyyaml; if those aren't importable this reports SKIP (with the
+#      fix), not a false FAIL.
+#
+#   2. LIVE END-TO-END (opt-in): create a real sandbox with the kit applied, then
+#      assert the goose CLI install, the startup-supervised goosed server, the
+#      published port, the in-guest 0.0.0.0 bind (reachable via create-time
+#      publish) over the host port, the secret-key ACP handshake, the config
+#      merge (USAi provider), and the respawn supervisor self-heal.
+#
+#      Preferred driver — RUN_ACQ=1: drive the `acq` CLI. acq translates the
+#      neutral hybrid/v1 spec and applies it, so the kit's files/commands land and
+#      acq publishes port 3284 at CREATE time from the neutral publishedPorts.
+#
+#      Legacy driver — RUN_SBX=1: drive `sbx` on a PRE-TRANSLATED sbx-v2 kit dir
+#      (SBX_KIT_DIR). sbx cannot parse the neutral schema; without SBX_KIT_DIR this
+#      path SKIPs with guidance. Prefer RUN_ACQ=1.
+#
+# NOTE: this kit rides on the `shell` agent (Increment A). We create the sandbox
+# with the `shell` agent token so there is no coding-agent TUI entrypoint — the
+# goosed server is brought up entirely by the kit's startup command, held open by
+# the sandbox's tini keepalive. (`acq create` is detached, so nothing needs to
+# hold PID 1 here — unlike the paseo/openchamber wrappers.)
+#
+# Usage (from anywhere):
+#   path/to/goose-server/scripts/verify              # offline gate only (default)
+#   RUN_ACQ=1 path/to/.../scripts/verify             # live, via acq (preferred)
+#   KEEP=1 RUN_ACQ=1 path/to/.../scripts/verify      # keep the sandbox to inspect
+#   RUN_SBX=1 SBX_KIT_DIR=<translated> .../verify    # live, via sbx (needs sbx-v2 dir)
+
+set -uo pipefail
+
+KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+REPO_ROOT="$(cd "$KIT_DIR/../../../.." && pwd)"
+# Sibling zscaler kit applied alongside so the goose CLI download works on an
+# HTTPS-inspected network (its CA lands in the system trust store).
+ZSCALER_KIT_DIR="$(cd "$KIT_DIR/../zscaler-ca-certificate" 2>/dev/null && pwd || true)"
+SBX_NAME="goose-server-verify-$$"
+WORK="$(mktemp -d "$KIT_DIR/verify-workspace.XXXXXX")"
+CREATE_LOG="$WORK/create.log"
+KEEP="${KEEP:-0}"
+RUN_ACQ="${RUN_ACQ:-0}"
+RUN_SBX="${RUN_SBX:-0}"
+SBX_KIT_DIR="${SBX_KIT_DIR:-}"
+# Container port goosed binds (ACP API + WebSocket). Keep in sync with spec.
+GOOSE_PORT="${GOOSE_PORT:-3284}"
+# How long to wait for the create-time install + background startup. Override with
+# READY_TIMEOUT.
+READY_TIMEOUT="${READY_TIMEOUT:-90}"
+POLL_INTERVAL="${POLL_INTERVAL:-2}"
+
+pass=0
+fail=0
+ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass+1)); }
+bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail+1)); }
+skip() { printf '  \033[33mSKIP\033[0m %s\n' "$1"; }
+warn() { printf '  \033[33mWARN\033[0m %s\n' "$1"; }
+info() { printf '\n\033[1m%s\033[0m\n' "$1"; }
+
+cleanup() {
+  if [ "$KEEP" = "1" ]; then
+    printf '\nKEEP=1 set; leaving sandbox %s and %s in place.\n' "$SBX_NAME" "$WORK" >&2
+    return
+  fi
+  case "${DRIVER:-}" in
+    acq) acq rm "$SBX_NAME" >/dev/null 2>&1 || true ;;
+    *)   sbx rm -f "$SBX_NAME" >/dev/null 2>&1 || true ;;
+  esac
+  rm -rf "$WORK" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT INT TERM
+
+# --- Driver abstraction: exec a command inside the sandbox (non-TTY). --------
+# PATH SCOPING: a bare `sh -c` sources nothing, so prepend /usr/local/bin (where
+# goose-install.sh installs the binary) for every probe so `goose` resolves.
+in_sbx() {
+  _wrapped='export PATH="/usr/local/bin:$PATH"; '"$1"
+  case "${DRIVER:-}" in
+    acq) acq exec "$SBX_NAME" -- sh -c "$_wrapped" </dev/null 2>/dev/null || true ;;
+    *)   sbx exec "$SBX_NAME" -- sh -c "$_wrapped" </dev/null 2>/dev/null || true ;;
+  esac
+}
+sbx_ports_out() {
+  case "${DRIVER:-}" in
+    acq) acq ports "$SBX_NAME" 2>/dev/null || true ;;
+    *)   sbx ports "$SBX_NAME" 2>/dev/null || true ;;
+  esac
+}
+
+info "0. Preconditions"
+[ -f "$KIT_DIR/spec.yaml" ] && ok "kit spec.yaml present" || { bad "spec.yaml missing"; exit 1; }
+
+info "1. Validate the neutral kit spec"
+VALIDATOR="$REPO_ROOT/integrations/isolation/acq-kits/validate-kits.py"
+if ! command -v python3 >/dev/null 2>&1; then
+  skip "validate-kits.py not run (python3 not on PATH)"
+elif [ ! -f "$VALIDATOR" ]; then
+  skip "validate-kits.py not found at $VALIDATOR"
+elif ! python3 -c 'import jsonschema, yaml' >/dev/null 2>&1; then
+  skip "validate-kits.py needs 'jsonschema' + 'pyyaml' — install them (pip install jsonschema pyyaml) and re-run"
+else
+  if val_out="$(python3 "$VALIDATOR" --root "$REPO_ROOT" 2>&1)"; then
+    ok "acq-kits validate-kits.py passes (schema + registry)"
+  else
+    bad "validate-kits.py failed:"
+    printf '%s\n' "$val_out" | sed 's/^/    | /' >&2
+  fi
+fi
+
+# --- Offline check of the config-merge helper (no sandbox needed). ------------
+info "1b. config-merge helper parses + is idempotent (offline)"
+MERGE="$KIT_DIR/files/home/goose-config/merge-config.mjs"
+SRC_CONF="$KIT_DIR/files/home/goose-config/config.yaml"
+if ! command -v node >/dev/null 2>&1; then
+  skip "node not on PATH — cannot exercise merge-config.mjs"
+elif [ ! -f "$MERGE" ]; then
+  bad "merge-config.mjs missing at $MERGE"
+elif ! node --check "$MERGE" >/dev/null 2>&1; then
+  bad "merge-config.mjs failed node --check"
+else
+  ok "merge-config.mjs parses (node --check)"
+  # First merge into an empty dir copies verbatim; second re-reads + normalizes.
+  # Third must be byte-identical to the second (stable fixed point).
+  _gdir="$WORK/goose-cfg"; mkdir -p "$_gdir"
+  node "$MERGE" --source "$SRC_CONF" --global-dir "$_gdir" >/dev/null 2>&1
+  node "$MERGE" --source "$SRC_CONF" --global-dir "$_gdir" >/dev/null 2>&1
+  _after2="$(cat "$_gdir/config.yaml" 2>/dev/null)"
+  node "$MERGE" --source "$SRC_CONF" --global-dir "$_gdir" >/dev/null 2>&1
+  _after3="$(cat "$_gdir/config.yaml" 2>/dev/null)"
+  if [ -n "$_after2" ] && [ "$_after2" = "$_after3" ]; then
+    ok "merge converges to a stable fixed point (2nd == 3rd write)"
+  else
+    bad "merge did not converge (2nd and 3rd write differ)"
+  fi
+  # The merged config must select the custom_usai provider.
+  if printf '%s\n' "$_after3" | grep -Eq '^active_provider:[[:space:]]*custom_usai'; then
+    ok "merged goose config selects the custom_usai (USAi) provider"
+  else
+    bad "merged goose config does not set active_provider: custom_usai"
+  fi
+fi
+
+# --- Offline: the shipped custom_usai provider definition is valid JSON. --------
+info "1c. custom_usai provider definition is valid + names CUSTOM_USAI_API_KEY (offline)"
+CUSTOM="$KIT_DIR/files/home/goose-config/custom_providers/custom_usai.json"
+if [ ! -f "$CUSTOM" ]; then
+  bad "custom_usai.json missing at $CUSTOM"
+elif ! command -v node >/dev/null 2>&1; then
+  skip "node not on PATH — cannot validate custom_usai.json"
+else
+  _cj="$(node -e 'const j=require(process.argv[1]); process.stdout.write([j.name,j.engine,j.api_key_env,j.base_url].join("|"))' "$CUSTOM" 2>/dev/null)"
+  case "$_cj" in
+    "custom_usai|openai|CUSTOM_USAI_API_KEY|https://api.gsa.usai.gov/api/v1/chat/completions")
+      ok "custom_usai.json is valid JSON with the expected name/engine/api_key_env/base_url" ;;
+    "")
+      bad "custom_usai.json is not valid JSON (node could not parse it)" ;;
+    *)
+      bad "custom_usai.json fields unexpected: '$_cj' (want custom_usai|openai|CUSTOM_USAI_API_KEY|https://api.gsa.usai.gov/api/v1/chat/completions)" ;;
+  esac
+fi
+
+# --- Select the live driver. -------------------------------------------------
+DRIVER=""
+if [ "$RUN_ACQ" = "1" ]; then
+  DRIVER="acq"
+elif [ "$RUN_SBX" = "1" ]; then
+  DRIVER="sbx"
+fi
+
+if [ -z "$DRIVER" ]; then
+  info "Live sandbox checks (2-8): SKIPPED"
+  echo "  Set RUN_ACQ=1 to run the live end-to-end check via acq (preferred)." >&2
+  echo "  (RUN_SBX=1 also works but needs a pre-translated sbx-v2 kit; see header.)" >&2
+  info "Summary"
+  printf '  %d passed, %d failed\n' "$pass" "$fail"
+  [ "$fail" -eq 0 ] && printf '  \033[32mOffline gate passed.\033[0m\n' || printf '  \033[31mOffline gate failed — see above.\033[0m\n'
+  exit "$([ "$fail" -eq 0 ] && echo 0 || echo 1)"
+fi
+
+if ! command -v "$DRIVER" >/dev/null 2>&1; then
+  # NB: portable uppercase (tr), NOT ${DRIVER^^} — macOS ships bash 3.2, which
+  # lacks the ^^ expansion and would abort this line with "bad substitution".
+  echo "  RUN_$(printf '%s' "$DRIVER" | tr '[:lower:]' '[:upper:]')=1 set but '$DRIVER' not on PATH. Install it and retry." >&2
+  exit 1
+fi
+echo "  driver: $DRIVER"
+
+# --- HOST-PORT CONTENTION PRECHECK (before create). --------------------------
+# Same rationale as the paseo kit: on the msb backend create-time publish can map
+# guest 3284 -> host 3284 deterministically, so a pre-existing listener on the
+# host port (another sandbox's msb forwarder, or a local `goose serve`) would make
+# a HOST fetch hit the OTHER owner — a false FAIL. Record it so the host-fetch
+# step can SKIP with accurate guidance rather than FAIL.
+host_port_collision=""
+if command -v lsof >/dev/null 2>&1; then
+  precheck_owner="$(lsof -nP -iTCP:"$GOOSE_PORT" -sTCP:LISTEN 2>/dev/null | awk 'NR>1{print $1" (pid "$2")"}' | sort -u | tr '\n' ',' | sed 's/,$//')"
+  if [ -n "$precheck_owner" ]; then
+    host_port_collision="$precheck_owner"
+    echo "  NOTE: host port $GOOSE_PORT is already in use before create by: $precheck_owner" >&2
+    echo "        (commonly another acq/msb sandbox's 'msb' forwarder, or a local 'goose serve')." >&2
+    echo "        The create-time host mapping may collide; the host-reachability step will SKIP." >&2
+  fi
+fi
+
+info "2. Create a sandbox with the kit (shell agent)"
+if [ "$DRIVER" = "acq" ]; then
+  echo "  creating $SBX_NAME via acq (extra kit: $KIT_DIR)..."
+  # Redirect stdin from /dev/null: `acq create` may prompt; feed it EOF.
+  if ACQ_EXTRA_KITS="$KIT_DIR" acq create --name "$SBX_NAME" shell \
+       "$WORK" </dev/null >"$CREATE_LOG" 2>&1; then
+    ok "sandbox created via acq (kit translated + applied)"
+  else
+    bad "acq create failed (exit $?)"
+    sed 's/^/  | /' "$CREATE_LOG" >&2
+    exit 1
+  fi
+  info "2b. Container port $GOOSE_PORT published at create (neutral publishedPorts)"
+  PORTS_PUBLISH_TIMEOUT="${PORTS_PUBLISH_TIMEOUT:-15}"
+  published=""
+  pub_deadline=$(( $(date +%s) + PORTS_PUBLISH_TIMEOUT ))
+  while :; do
+    if sbx_ports_out | grep -q "$GOOSE_PORT"; then published=yes; break; fi
+    [ "$(date +%s)" -ge "$pub_deadline" ] && break
+    sleep 1
+  done
+  if [ -n "$published" ]; then
+    ok "container $GOOSE_PORT auto-published at create"
+  else
+    warn "container $GOOSE_PORT not auto-published after ${PORTS_PUBLISH_TIMEOUT}s — older acq? falling back to manual publish"
+    if acq ports "$SBX_NAME" --publish "${GOOSE_PORT}:${GOOSE_PORT}" >/dev/null 2>&1; then
+      ok "container $GOOSE_PORT published via fallback (acq ports --publish)"
+    else
+      bad "failed to publish container $GOOSE_PORT (acq ports --publish)"
+    fi
+  fi
+else
+  if [ -z "$SBX_KIT_DIR" ]; then
+    info "Live sandbox checks (2-8): SKIPPED"
+    echo "  RUN_SBX=1 needs a PRE-TRANSLATED sbx-v2 kit dir in SBX_KIT_DIR." >&2
+    echo "  sbx cannot parse the neutral hybrid/v1 spec directly. Prefer RUN_ACQ=1." >&2
+    info "Summary"
+    printf '  %d passed, %d failed\n' "$pass" "$fail"
+    [ "$fail" -eq 0 ] && printf '  \033[32mOffline gate passed; live checks skipped.\033[0m\n' \
+      || printf '  \033[31mOffline gate failed — see above.\033[0m\n'
+    exit "$([ "$fail" -eq 0 ] && echo 0 || echo 1)"
+  fi
+  create_kits=(--kit "$SBX_KIT_DIR")
+  if [ -n "$ZSCALER_KIT_DIR" ] && [ -f "$ZSCALER_KIT_DIR/spec.yaml" ]; then
+    create_kits+=(--kit "$ZSCALER_KIT_DIR")
+    echo "  pairing with zscaler-ca-certificate kit at $ZSCALER_KIT_DIR"
+  else
+    echo "  NOTE: zscaler-ca-certificate kit not found next to this kit. On an" >&2
+    echo "        HTTPS-inspected network the goose CLI download may fail TLS." >&2
+  fi
+  echo "  creating $SBX_NAME (workspace $WORK) from translated kit $SBX_KIT_DIR..."
+  dbg=(); [ "${DEBUG:-0}" = "1" ] && dbg=(-D)
+  if sbx ${dbg[@]+"${dbg[@]}"} create --name "$SBX_NAME" "${create_kits[@]}" shell \
+       "$WORK" </dev/null >"$CREATE_LOG" 2>&1; then
+    ok "sandbox created with --kit"
+  else
+    bad "sbx create failed (exit $?)"
+    sed 's/^/  | /' "$CREATE_LOG" >&2
+    exit 1
+  fi
+fi
+
+info "3. goose CLI installed at create time + goosed answers (up to ${READY_TIMEOUT}s)"
+deadline=$(( $(date +%s) + READY_TIMEOUT ))
+installed=""; server_up=""
+# goosed's /status endpoint is the liveness probe. With GOOSE_SERVER__SECRET_KEY
+# set, /status may require the X-Secret-Key header, so probe WITH the kit secret
+# (read from the guest env) and accept a 200. Falls back to a bare probe if the
+# secret is somehow unset, so the loop still detects a running server.
+status_probe='s="${GOOSE_SERVER__SECRET_KEY:-}"; curl -fsS -H "X-Secret-Key: $s" http://127.0.0.1:'"$GOOSE_PORT"'/status >/dev/null 2>&1 && echo yes || (curl -fsS http://127.0.0.1:'"$GOOSE_PORT"'/status >/dev/null 2>&1 && echo yes)'
+while :; do
+  [ -z "$installed" ] && [ -n "$(in_sbx 'command -v goose')" ] && installed=yes
+  [ -z "$server_up" ] && [ "$(in_sbx "$status_probe")" = "yes" ] && server_up=yes
+  [ -n "$installed" ] && [ -n "$server_up" ] && break
+  [ "$(date +%s)" -ge "$deadline" ] && break
+  sleep "$POLL_INTERVAL"
+done
+if [ -n "$installed" ]; then
+  ok "goose CLI installed (create-time install phase)"
+  goose_ver="$(in_sbx 'goose --version 2>/dev/null | head -1')"
+  [ -n "$goose_ver" ] && echo "    | $goose_ver"
+else
+  bad "goose CLI not installed — see the install phase output"
+  in_sbx 'tail -n 25 ~/.local/state/goose/goose-serve.log 2>/dev/null' | sed 's/^/    | /'
+fi
+
+info "4. Config merge applied + custom_usai provider staged"
+merged_cfg="$(in_sbx 'cat ~/.config/goose/config.yaml 2>/dev/null')"
+if printf '%s\n' "$merged_cfg" | grep -Eq '^active_provider:[[:space:]]*custom_usai'; then
+  ok "goose global config selects the custom_usai (USAi) provider"
+elif [ -n "$merged_cfg" ]; then
+  warn "goose global config exists but does not set active_provider: custom_usai — merge may have skipped an unmodeled shape"
+  printf '%s\n' "$merged_cfg" | sed 's/^/    | /'
+else
+  bad "no goose global config found (~/.config/goose/config.yaml) — merge did not run"
+  in_sbx 'tail -n 20 ~/.local/state/goose/goose-config-merge.log 2>/dev/null' | sed 's/^/    | /'
+fi
+# The server must DEFINE the custom_usai provider (staged by the startup script)
+# or Desktop cannot connect using it. Assert the file landed with the right shape.
+custom_dest="$(in_sbx 'cat ~/.config/goose/custom_providers/custom_usai.json 2>/dev/null')"
+if printf '%s' "$custom_dest" | grep -q '"name": *"custom_usai"' \
+   && printf '%s' "$custom_dest" | grep -q '"api_key_env": *"CUSTOM_USAI_API_KEY"'; then
+  ok "custom_usai provider definition staged in ~/.config/goose/custom_providers/"
+else
+  bad "custom_usai.json not staged in the guest (~/.config/goose/custom_providers/) — Desktop's custom_usai provider would be undefined on the server"
+  in_sbx 'ls -la ~/.config/goose/custom_providers/ 2>&1' | sed 's/^/    | /'
+fi
+# The API key is injected under the provider's api_key_env name. Confirm it is
+# present in the guest env (value is a proxied placeholder — SET vs UNSET only).
+if [ "$(in_sbx 'test -n "$CUSTOM_USAI_API_KEY" && echo SET || echo UNSET')" = "SET" ]; then
+  ok "CUSTOM_USAI_API_KEY is present in the guest env (acq-injected)"
+else
+  warn "CUSTOM_USAI_API_KEY is UNSET in the guest — model calls will fail. Store it: acq secret set -g goose-usai --host api.gsa.usai.gov --env CUSTOM_USAI_API_KEY"
+fi
+
+info "5. goosed server (started by the startup supervisor, on its own)"
+if [ -n "$server_up" ]; then
+  ok "goosed answers /status on 127.0.0.1:$GOOSE_PORT (started by the startup supervisor)"
+else
+  bad "goosed did not answer /status on :$GOOSE_PORT (see the serve log)"
+  in_sbx 'tail -n 25 ~/.local/state/goose/goose-serve.log 2>/dev/null' | sed 's/^/    | /'
+fi
+
+info "5b. Secret-key ACP handshake (what goose Desktop 1.50.0 requires)"
+# Desktop's ACP client sends X-Secret-Key to /status and ?token=<secret> to /acp.
+# The kit sets GOOSE_SERVER__SECRET_KEY. Assert the server ACCEPTS the kit's secret
+# and REJECTS a wrong one, so a Desktop configured with the same secret connects.
+if [ -n "$server_up" ]; then
+  # The secret the guest server was started with (from the kit env).
+  kit_secret="$(in_sbx 'printf %s "${GOOSE_SERVER__SECRET_KEY:-}"')"
+  if [ -z "$kit_secret" ]; then
+    bad "GOOSE_SERVER__SECRET_KEY is empty in the guest — Desktop 1.50.0 cannot connect"
+  else
+    ok "GOOSE_SERVER__SECRET_KEY is set in the guest env"
+    # /status WITH the correct secret must be 200.
+    good_code="$(in_sbx "curl -fsS -o /dev/null -w '%{http_code}' -H 'X-Secret-Key: $kit_secret' http://127.0.0.1:$GOOSE_PORT/status 2>/dev/null")"
+    if [ "$good_code" = "200" ]; then
+      ok "/status returns 200 with the kit secret (handshake accepted)"
+    else
+      warn "/status with the kit secret returned ${good_code:-?} (expected 200)"
+    fi
+    # /acp with the correct secret but no SSE header must be 406 (auth passed,
+    # missing text/event-stream) — NOT 401/403 (which would mean secret rejected).
+    acp_code="$(in_sbx "curl -fsS -o /dev/null -w '%{http_code}' 'http://127.0.0.1:$GOOSE_PORT/acp?token=$kit_secret' 2>/dev/null")"
+    case "$acp_code" in
+      406) ok "/acp?token=<kit secret> returns 406 (auth passed; ACP endpoint live)" ;;
+      401|403) bad "/acp with the kit secret returned $acp_code (secret rejected — Desktop would fail auth)" ;;
+      *) warn "/acp with the kit secret returned ${acp_code:-?} (expected 406)" ;;
+    esac
+  fi
+else
+  skip "secret-key handshake check (server not up)"
+fi
+
+info "6. Host port published + reachable over the create-time publish"
+ports_out="$(sbx_ports_out)"
+if printf '%s' "$ports_out" | grep -q "$GOOSE_PORT"; then
+  ok "ports maps container $GOOSE_PORT to a host port"
+else
+  bad "no host mapping for container $GOOSE_PORT in 'ports' output"
+fi
+printf '%s\n' "$ports_out" | sed 's/^/    | /'
+
+HOST_HP="$(printf '%s' "$ports_out" | grep -Eo '127\.0\.0\.1:[0-9]+' | head -1)"
+host_fetch_ok=""
+if [ -z "$server_up" ]; then
+  skip "host reachability (server not up)"
+elif ! command -v curl >/dev/null 2>&1; then
+  skip "host reachability (no curl on the HOST)"
+elif [ -z "$HOST_HP" ]; then
+  skip "host reachability (could not resolve a 127.0.0.1:<port> host mapping)"
+elif [ -n "$host_port_collision" ] && [ "${HOST_HP##*:}" = "$GOOSE_PORT" ]; then
+  skip "host reachability (host port $GOOSE_PORT was already in use BEFORE create by: $host_port_collision — this sandbox's create-time -p collides; a HOST fetch would hit the OTHER owner. Stop it and re-run. Do NOT substitute 'acq ports --publish': its ssh -L tunnel dials guest loopback and would not exercise the guest-IP transport this step verifies)."
+else
+  # Send the kit secret (Desktop does), matching how /status is guarded.
+  kit_secret_host="$(in_sbx 'printf %s "${GOOSE_SERVER__SECRET_KEY:-}"')"
+  h_code="$(curl -fsS -o /dev/null -w '%{http_code}' -H "X-Secret-Key: $kit_secret_host" "http://$HOST_HP/status" 2>/dev/null)"; h_rc=$?
+  if [ "$h_rc" -eq 0 ] && [ "$h_code" = "200" ]; then
+    ok "goosed /status reachable over the published host port ($HOST_HP) with the kit secret"
+    host_fetch_ok=yes
+  else
+    bad "goosed /status NOT reachable over $HOST_HP (rc=$h_rc code=${h_code:-?}). This is a genuine host->guest transport problem."
+  fi
+fi
+
+info "6b. Guest server bind is 0.0.0.0 (reachable via create-time publish), not loopback"
+# goosed must bind 0.0.0.0:3284 in-guest so acq's create-time publish reaches it
+# (same msb transport lesson as the paseo/openchamber kits: -p dials the guest
+# network IP, not guest loopback). Read the LISTEN address from /proc/net/tcp
+# (hex) so we don't depend on ss/netstat. 0100007F=127.0.0.1; 00000000=0.0.0.0.
+if [ -z "$server_up" ]; then
+  skip "in-guest bind check (server not up)"
+else
+  bind_addr="$(in_sbx '
+    p=$(printf "%04X" '"$GOOSE_PORT"')
+    if command -v ss >/dev/null 2>&1; then
+      ss -ltnH 2>/dev/null | awk -v port='"$GOOSE_PORT"' "\$4 ~ (\":\" port \"\$\") {print \$4}" | head -1
+    else
+      awk -v P="$p" "\$2 ~ (\":\" P \"\$\") && \$4==\"0A\" {print \$2}" /proc/net/tcp 2>/dev/null | head -1
+    fi')"
+  # Port 3284 = 0x0CD4.
+  case "$bind_addr" in
+    0.0.0.0:*|*00000000:0CD4*)
+      ok "goosed LISTEN socket bound to 0.0.0.0 in-guest ($bind_addr) — reachable via create-time publish" ;;
+    127.0.0.1:*|*0100007F:0CD4*)
+      bad "goosed bound to loopback in-guest ($bind_addr) — create-time publish returns 'Empty reply from server' on msb (GOOSE_SERVE_HOST?; see quickstart#333)" ;;
+    "")
+      warn "could not read goosed's LISTEN address (no ss + unreadable /proc/net/tcp); relying on the host-port fetch as the reachability proof" ;;
+    *)
+      warn "unexpected goosed LISTEN address '$bind_addr' (expected 0.0.0.0:$GOOSE_PORT)" ;;
+  esac
+  if [ -n "$host_fetch_ok" ]; then
+    ok "reachable over the published host port (proven by step 6 fetch)"
+  elif [ -n "$host_port_collision" ] && [ "${HOST_HP##*:}" = "$GOOSE_PORT" ]; then
+    skip "host-port reachability (step 6 skipped due to host port $GOOSE_PORT collision with $host_port_collision — bind is confirmed 0.0.0.0 above)"
+  else
+    skip "host-port reachability (step 6 did not complete a successful host fetch — bind is confirmed 0.0.0.0)"
+  fi
+fi
+
+info "7. Respawn supervisor running (auto-restart) — the goosed server"
+sup="$(in_sbx 'pgrep -c -f "supervisor:goose[-]serve" 2>/dev/null')"
+case "${sup:-0}" in
+  1) ok "goose-serve supervisor running (exactly one)" ;;
+  0) bad "no goose-serve supervisor found (server auto-restart not active)" ;;
+  *) bad "found ${sup} goose-serve supervisors (expected 1 — duplicate respawner?)" ;;
+esac
+
+info "8. Server self-heals after being killed"
+if [ -z "$server_up" ]; then
+  skip "self-heal guard: server was not up to kill"
+else
+  sup_before="$(in_sbx 'pgrep -u "$(id -u)" -f "supervisor:goose-serve" | sort | tr "\n" " "')"
+  # Kill ONLY the `goose serve` process tree, NOT the supervisor loop (whose argv
+  # carries the marker). Match "goose serve" but exclude the supervisor marker.
+  in_sbx '
+    for pid in $(pgrep -u "$(id -u)" -f "goose serve"); do
+      if tr "\0" " " </proc/"$pid"/cmdline 2>/dev/null | grep -q "supervisor:goose-serve"; then
+        continue
+      fi
+      kill "$pid" 2>/dev/null
+    done
+    echo killed
+  ' >/dev/null
+  sup_after="$(in_sbx 'pgrep -u "$(id -u)" -f "supervisor:goose-serve" | sort | tr "\n" " "')"
+  if [ -z "$sup_after" ]; then
+    bad "the goose-serve SUPERVISOR was killed by the probe — kill was not precise enough"
+  else
+    ok "goose-serve supervisor survived the kill (before='$sup_before' after='$sup_after')"
+  fi
+  healed=""
+  heal_deadline=$(( $(date +%s) + 45 ))   # RESTART_DELAY (5s) + server readiness
+  while :; do
+    [ "$(in_sbx "$status_probe")" = "yes" ] && { healed=yes; break; }
+    [ "$(date +%s)" -ge "$heal_deadline" ] && break
+    sleep "$POLL_INTERVAL"
+  done
+  if [ -n "$healed" ]; then
+    ok "goosed was re-launched after being killed (supervisor:goose-serve self-healed)"
+  else
+    bad "goosed did NOT come back after being killed — supervisor:goose-serve not respawning"
+    in_sbx 'tail -n 20 ~/.local/state/goose/goose-serve.log 2>/dev/null' | sed 's/^/    | /'
+  fi
+fi
+
+info "Summary"
+[ "$fail" -eq 0 ] && printf '  \033[32mAll checks passed.\033[0m\n' || printf '  \033[31mSome checks failed — see notes above.\033[0m\n'
+
+[ "$fail" -eq 0 ]

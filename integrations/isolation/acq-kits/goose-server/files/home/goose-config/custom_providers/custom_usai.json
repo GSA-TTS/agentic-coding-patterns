@@ -1,0 +1,160 @@
+{
+  "name": "custom_usai",
+  "engine": "openai",
+  "display_name": "USAi",
+  "description": "Custom USAi provider (GSA USAi OpenAI-compatible gateway). Shipped by the goose-server acq kit so the in-sandbox goosed server exposes the SAME provider a goose Desktop client already uses, letting Desktop drive the external server without reconfiguring. The API key is NOT in this file: goose reads it from the CUSTOM_USAI_API_KEY env var (api_key_env), which acq injects at runtime bound to api.gsa.usai.gov. GENERATED from the USAi catalog by the goose emitter — do not hand-edit; regenerate via the emitter.",
+  "api_key_env": "CUSTOM_USAI_API_KEY",
+  "base_url": "https://api.gsa.usai.gov/api/v1/chat/completions",
+  "models": [
+    {
+      "name": "claude-opus-5",
+      "context_limit": 1000000,
+      "input_token_cost": 0.000005,
+      "output_token_cost": 0.000025,
+      "currency": "USD",
+      "supports_cache_control": true,
+      "reasoning": false
+    },
+    {
+      "name": "claude-sonnet-5",
+      "context_limit": 1000000,
+      "input_token_cost": 0.000002,
+      "output_token_cost": 0.00001,
+      "currency": "USD",
+      "supports_cache_control": true,
+      "reasoning": false
+    },
+    {
+      "name": "claude_4_8_opus",
+      "context_limit": 1000000,
+      "input_token_cost": 0.000005,
+      "output_token_cost": 0.000025,
+      "currency": "USD",
+      "supports_cache_control": true,
+      "reasoning": false
+    },
+    {
+      "name": "claude_4_7_opus",
+      "context_limit": 1000000,
+      "input_token_cost": 0.000005,
+      "output_token_cost": 0.000025,
+      "currency": "USD",
+      "supports_cache_control": true,
+      "reasoning": false
+    },
+    {
+      "name": "claude_4_5_sonnet",
+      "context_limit": 200000,
+      "input_token_cost": 0.000003,
+      "output_token_cost": 0.000015,
+      "currency": "USD",
+      "supports_cache_control": true,
+      "reasoning": false
+    },
+    {
+      "name": "claude_4_5_haiku",
+      "context_limit": 200000,
+      "input_token_cost": 0.000001,
+      "output_token_cost": 0.000005,
+      "currency": "USD",
+      "supports_cache_control": true,
+      "reasoning": false
+    },
+    {
+      "name": "gpt_5_5_default_v2",
+      "context_limit": 1050000,
+      "input_token_cost": 0.000005,
+      "output_token_cost": 0.00003,
+      "currency": "USD",
+      "supports_cache_control": true,
+      "reasoning": false
+    },
+    {
+      "name": "gpt_5_4_default_v2",
+      "context_limit": 1050000,
+      "input_token_cost": 0.0000025,
+      "output_token_cost": 0.000015,
+      "currency": "USD",
+      "supports_cache_control": true,
+      "reasoning": false
+    },
+    {
+      "name": "gpt_5_2_default_v2",
+      "context_limit": 400000,
+      "input_token_cost": 0.00000175,
+      "output_token_cost": 0.000014,
+      "currency": "USD",
+      "supports_cache_control": true,
+      "reasoning": false
+    },
+    {
+      "name": "gemini-2.5-pro",
+      "context_limit": 1048576,
+      "input_token_cost": 0.00000125,
+      "output_token_cost": 0.00001,
+      "currency": "USD",
+      "supports_cache_control": true,
+      "reasoning": false
+    },
+    {
+      "name": "gemini-2.5-flash",
+      "context_limit": 1048576,
+      "input_token_cost": 3e-7,
+      "output_token_cost": 0.0000025,
+      "currency": "USD",
+      "supports_cache_control": true,
+      "reasoning": false
+    },
+    {
+      "name": "gemini-2.5-flash-lite",
+      "context_limit": 1048576,
+      "input_token_cost": 1.0000000000000001e-7,
+      "output_token_cost": 4.0000000000000003e-7,
+      "currency": "USD",
+      "supports_cache_control": true,
+      "reasoning": false
+    },
+    {
+      "name": "gemini-3.5-flash",
+      "context_limit": 1048576,
+      "input_token_cost": 0.0000015,
+      "output_token_cost": 0.000009,
+      "currency": "USD",
+      "supports_cache_control": true,
+      "reasoning": false
+    },
+    {
+      "name": "gemini-3-7-flash",
+      "context_limit": 1000000,
+      "input_token_cost": 0.000001875,
+      "output_token_cost": 0.000009375,
+      "currency": "USD",
+      "supports_cache_control": true,
+      "reasoning": false
+    },
+    {
+      "name": "llama_4_maverick",
+      "context_limit": 1000000,
+      "input_token_cost": 2.4e-7,
+      "output_token_cost": 9.7e-7,
+      "currency": "USD",
+      "supports_cache_control": null,
+      "reasoning": false
+    }
+  ],
+  "headers": null,
+  "timeout_seconds": null,
+  "supports_streaming": true,
+  "requires_auth": true,
+  "catalog_provider_id": null,
+  "base_path": null,
+  "env_vars": null,
+  "dynamic_models": null,
+  "skip_canonical_filtering": false,
+  "model_doc_link": null,
+  "setup_steps": [],
+  "fast_model": null,
+  "preserves_thinking": true,
+  "emit_clear_thinking": false,
+  "setup": null
+}
