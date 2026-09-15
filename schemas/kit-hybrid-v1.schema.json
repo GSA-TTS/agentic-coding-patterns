@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://gsa-tts.github.io/agentic-coding-patterns/schemas/kit-hybrid-v1.schema.json",
   "title": "acq Neutral Kit Schema (hybrid/v1)",
-  "description": "Schema for the neutral, backend-agnostic acq kit spec (schemaVersion: \"hybrid/v1\"). Captures the declarative parts of an isolation-sandbox mixin kit (network egress, files to drop, lifecycle commands, agent context) in a vocabulary shared across acq backends (sbx, msb, ppp), plus per-backend shortcuts and extras. See integrations/isolation/docs/decisions/0001-neutral-hybrid-v1-acq-kits.md and the acq-design.md exploration (quickstart repo) for rationale.",
+  "description": "Schema for the neutral, backend-agnostic acq kit spec (schemaVersion: \"hybrid/v1\"). Captures the declarative parts of an isolation-sandbox mixin kit (network egress, files to drop, lifecycle commands, agent context, and acq-managed service gateways) in a vocabulary shared across acq backends (sbx, msb, ppp), plus per-backend shortcuts and extras. See integrations/isolation/docs/decisions/0001-neutral-hybrid-v1-acq-kits.md, integrations/isolation/docs/decisions/0003-service-gateways-vocabulary.md, and the acq-design.md exploration (quickstart repo) for rationale.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -213,6 +213,92 @@
         "^[A-Za-z_][A-Za-z0-9_]*$": {
           "type": "string",
           "description": "Environment variable value (a plain, non-secret string)."
+        }
+      }
+    },
+    "serviceGateways": {
+      "type": "array",
+      "description": "Kit-declared, acq-managed service gateways for the sandbox. The field names the semantic role, not a backend topology: do not encode host/guest IPs, DNS, VSOCK, Podman-machine, Kubernetes, or routing details here. runtime.compose is the v1 runtime shape and may reference only Compose files shipped inside the kit. Existing files[] and commands[] remain responsible for client-side software/config in the sandbox. expose.env injects resolved gateway values into the sandbox/agent environment so the agent gets a narrow policy-controlled endpoint, not broader sandbox egress or API keys. acq owns gateway lifecycle: stop stops gateways; rm removes gateways and gateway-owned state.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "runtime", "interface", "expose"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$",
+            "description": "Stable kit-local gateway identifier. Kebab-case, 1-64 chars, starts/ends alphanumeric."
+          },
+          "runtime": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["compose"],
+            "properties": {
+              "compose": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["files", "service"],
+                "properties": {
+                  "service": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$",
+                    "description": "Compose service name that represents the gateway in the referenced kit-local Compose files. Required so multi-service Compose files can identify which service acq exposes."
+                  },
+                  "files": {
+                    "type": "array",
+                    "minItems": 1,
+                    "description": "Compose files for the v1 service-gateway runtime. Every file path is relative to the kit directory and must stay under the kit. Do not reference workspace files.",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+\\.ya?ml$"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "interface": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["protocol"],
+            "properties": {
+              "protocol": {
+                "type": "string",
+                "enum": ["http", "https", "tcp"],
+                "description": "Stable protocol label for the sandbox-facing service interface. Backend-specific routing remains outside the kit schema."
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535,
+                "description": "Optional sandbox-facing service port. May be omitted only when the named Compose service exposes exactly one candidate port; validators require it when the named service exposes zero or multiple candidate ports."
+              }
+            }
+          },
+          "expose": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["env"],
+            "description": "Values acq exposes into the sandbox/agent environment after resolving the gateway interface. v1 supports exposing the resolved gateway URL.",
+            "properties": {
+              "env": {
+                "type": "object",
+                "additionalProperties": false,
+                "minProperties": 1,
+                "description": "Map of sandbox/agent environment variable names to the resolved gateway value to inject. Values are symbolic names, not literals; v1 supports only 'url'. Example: WEB_GATEWAY_URL: url.",
+                "patternProperties": {
+                  "^[A-Za-z_][A-Za-z0-9_]*$": {
+                    "type": "string",
+                    "const": "url",
+                    "description": "Expose the resolved gateway URL in this environment variable."
+                  }
+                }
+              }
+            }
+          },
+          "description": {
+            "type": "string"
+          }
         }
       }
     },
