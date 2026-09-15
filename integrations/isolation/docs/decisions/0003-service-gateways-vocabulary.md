@@ -17,12 +17,16 @@ nist_controls: ["AC-4", "CM-7", "SC-7", "SI-10"]
 ## Context and Problem Statement
 
 Some agent workflows need a companion service process that is not simply
-software installed inside the sandbox. Examples include a local proxy, broker,
-or control-plane-adjacent service that the sandboxed agent reaches through an
-interface declared by the kit. Today, `hybrid/v1` has vocabulary for guest files,
-lifecycle commands, environment variables, volumes, ports, and backend-specific
-escape hatches, but it has no neutral way to say: "this kit also needs an
-`acq`-managed service gateway."
+software installed inside the sandbox. Examples include a vetted web
+search/fetch gateway that may need broader egress than the sandbox itself, or a
+Jentic-style policy and credential gateway where real credentials and allowed
+operations are enforced outside the agent. The sandboxed agent receives only a
+narrow gateway endpoint, not broad network access or API keys.
+
+Today, `hybrid/v1` has vocabulary for guest files, lifecycle commands,
+environment variables, volumes, ports, and backend-specific escape hatches, but
+it has no neutral way to say: "this kit also needs an `acq`-managed service
+gateway."
 
 Without a neutral field, authors would be pushed toward backend-specific keys,
 ad hoc startup commands, or schema fields that encode one current runtime shape.
@@ -55,8 +59,9 @@ interface the sandbox consumes. The vocabulary must stay backend-neutral:
   ordinary kit files/commands while avoiding a commitment to Docker, Podman,
   Kubernetes, VSOCK, or a particular network topology.
 - **Runtime:** `runtime.compose` is the v1 runtime shape. It references only
-  Compose files that live inside the kit. It must not reference files from the
-  user's workspace or other mutable workspace paths.
+  Compose files that live inside the kit and names the Compose service that is
+  the gateway. It must not reference files from the user's workspace or other
+  mutable workspace paths.
 - **Sources:** local kit sources remain allowed for development and private kits.
   Remote service-gateway kits must come from trusted kit sources; fetching an
   untrusted kit that can start companion services is not acceptable.
@@ -69,15 +74,18 @@ interface the sandbox consumes. The vocabulary must stay backend-neutral:
 - **Lifecycle:** `acq stop` stops service gateways. `acq rm` removes service
   gateways and their gateway-owned state. Gateway lifecycle is not left to each
   kit's arbitrary shell snippets.
-- **Environment injection:** v1 supports explicit environment injection from the
-  kit into the Compose runtime. This is limited to v1 and is not a permanent
-  semantic requirement for future runtimes.
+- **Resolved endpoint exposure:** v1 supports injecting the resolved gateway URL
+  into the sandbox/agent environment via `expose.env`, for example
+  `WEB_GATEWAY_URL: url`. This is the semantic contract: the agent gets a narrow
+  policy-controlled endpoint. The kit does not broaden sandbox egress and does
+  not hand API keys to the agent.
 - **Client-side setup:** existing kit files and commands continue to own
   client-side software installation and configuration inside the sandbox.
   `serviceGateways` is only for the managed service side of the boundary.
-- **Interface ports:** `interface.port` is optional when the interface is
-  unambiguous from the Compose declaration. It may be supplied when a gateway has
-  multiple exposed ports or the intended service port would otherwise be unclear.
+- **Interface ports:** `interface.port` is optional when the named Compose
+  service has exactly one exposed or published candidate port. It is required
+  when the named service has zero or multiple candidate ports. Ports on other
+  Compose services do not identify the gateway interface.
 - **Excluded schema details:** the kit schema must not include host/guest IPs,
   DNS rules, VSOCK details, Podman-machine wiring, Kubernetes resources, or
   backend-specific routing. Those are adapter/runtime concerns.
@@ -92,10 +100,13 @@ The schema should remain minimal. A service gateway entry should include:
 
 - `name` - stable kit-local gateway identifier.
 - `runtime.compose.files[]` - one or more kit-local Compose files.
-- `runtime.compose.env` - optional non-secret environment variables injected into
-  the Compose runtime for v1 only.
-- `interface` - the service interface the sandbox should use, with an optional
-  `port` and a stable protocol label.
+- `runtime.compose.service` - the safe Compose service name that represents the
+  gateway in the referenced Compose files.
+- `interface` - the service interface `acq` resolves, with an optional `port` and
+  a stable protocol label.
+- `expose.env` - a map of sandbox/agent environment variable names to the resolved
+  gateway value to inject. v1 supports `url` as the exposed value, for example
+  `WEB_GATEWAY_URL: url`.
 
 The schema should validate the shape and safe path/name/port basics. The repo
 validator should add field-level errors for unsafe or non-kit-local Compose
