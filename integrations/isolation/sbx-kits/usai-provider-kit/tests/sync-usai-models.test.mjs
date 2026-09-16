@@ -59,13 +59,16 @@ test("updateTemplate selects the highest-priority listed candidate present, rega
 
   const { updatedTemplate } = updateTemplate(templateText, payload)
 
-  // claude-opus-5 is listed in ROLE_PRIORITY.model; the unlisted opus-4-7/4-8
-  // generations must NOT be selected even though they parse as "newer".
+  // claude-opus-5 ranks BELOW claude-sonnet-5/claude_4_5_sonnet in
+  // ROLE_PRIORITY.model (see the priority list), and neither of those is in
+  // this payload, so claude-opus-5 -- the highest-ranked candidate that IS
+  // present -- wins; the unlisted opus-4-7/4-8 generations must NOT be
+  // selected even though they parse as "newer".
   assert.match(updatedTemplate, /"model": "usai\/claude-opus-5"/)
   assert.match(updatedTemplate, /"small_model": "usai\/claude-3-5-haiku"/)
   // None of gpt-5.4/5.5/5.5-mini are in ROLE_PRIORITY.compaction, so the
   // compaction role keeps the template's existing value unchanged.
-  assert.match(updatedTemplate, /"compaction":\s*\{\s*"model": "usai\/gpt_5_5_default_v2"/)
+  assert.match(updatedTemplate, /"compaction":\s*\{\s*"model": "usai\/gpt-5.6-terra"/)
 })
 
 test("updateTemplate preserves the template's existing value when no priority candidate is present (stability over reactivity)", async () => {
@@ -82,9 +85,9 @@ test("updateTemplate preserves the template's existing value when no priority ca
 
   assert.equal(models.length, 2)
   // No ROLE_PRIORITY.model candidate present -> template's existing "model"
-  // value (usai/claude-opus-5) is left completely unchanged, not replaced
+  // value (usai/claude-sonnet-5) is left completely unchanged, not replaced
   // by any fallback literal or fuzzy guess.
-  assert.match(updatedTemplate, /"model": "usai\/claude-opus-5"/)
+  assert.match(updatedTemplate, /"model": "usai\/claude-sonnet-5"/)
   // No ROLE_PRIORITY.small_model candidate present -> existing small_model
   // value is preserved unchanged, NOT overwritten with a gemini id (the old
   // fuzzy scorer would have picked a gemini flash/pro variant here).
@@ -92,7 +95,7 @@ test("updateTemplate preserves the template's existing value when no priority ca
   assert.doesNotMatch(updatedTemplate, /"small_model": "usai\/gemini/, "gemini id must not leak into the small_model role")
   // No ROLE_PRIORITY.compaction candidate present -> existing compaction
   // model value is preserved unchanged.
-  assert.match(updatedTemplate, /"compaction":\s*\{\s*"model": "usai\/gpt_5_5_default_v2"/)
+  assert.match(updatedTemplate, /"compaction":\s*\{\s*"model": "usai\/gpt-5.6-terra"/)
 })
 
 test("updateTemplate handles empty model list gracefully", async () => {
@@ -103,7 +106,7 @@ test("updateTemplate handles empty model list gracefully", async () => {
 
   assert.equal(models.length, 0)
   // No candidates at all -> every role keeps its existing template value.
-  assert.match(updatedTemplate, /"model": "usai\/claude-opus-5"/)
+  assert.match(updatedTemplate, /"model": "usai\/claude-sonnet-5"/)
   assert.match(updatedTemplate, /"small_model": "usai\/claude_4_5_haiku"/)
 })
 
