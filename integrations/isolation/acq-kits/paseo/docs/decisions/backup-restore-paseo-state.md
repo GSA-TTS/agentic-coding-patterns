@@ -33,32 +33,92 @@ We evaluated three durable-storage approaches before this one:
 **Ship two host-side helper scripts — `scripts/paseo-backup` and
 `scripts/paseo-restore` — that snapshot `$PASEO_HOME` to a host tar before
 teardown and replay it into a new sandbox afterward.** They use only `acq exec`
-stdin/stdout streaming (already the kit's universal in-guest mechanism); no new
-`acq` capability, no persistent-storage primitive, no coupling of Paseo state to
-a project repo, and no extra mount argument.
+(already the kit's universal in-guest mechanism); no new `acq` capability, no
+persistent-storage primitive, no coupling of Paseo state to a project repo, and
+no extra mount argument.
 
-- **`paseo-backup [--apply] <sandbox> [dest-dir]`** streams
-  `tar -C "${PASEO_HOME:-$HOME/.paseo}" --exclude ./paseo.pid -cf - .` over
-  `acq exec` stdout into `<dest>/paseo-state-<sandbox>-<UTC>.tar`
-  (default dest `~/.acq-paseo-backups`). It writes to a temp file and atomically
-  renames on success, and verifies the captured stream is a non-empty, valid tar
-  before promoting it — an interrupted capture never leaves a truncated archive.
-- **`paseo-restore [--apply] <sandbox> [backup-tar]`** streams a backup tar into
-  `${PASEO_HOME:-$HOME/.paseo}` in the target sandbox, then bounces the daemon so
-  it re-reads the restored config/projects. With no `backup-tar` it auto-selects
-  the most recent backup for that sandbox.
+- **`paseo-backup [--apply] <sandbox> [dest-dir]`** tars
+  `${PASEO_HOME:-$HOME/.paseo}` (minus the exclusions below) inside the guest and
+  emits it base64-encoded over `acq exec` stdout; the host decodes it into
+  `<dest>/paseo-state-<sandbox>-<UTC>.tar` (default dest `~/.acq-paseo-backups`).
+  It writes to a temp file and atomically renames on success, and verifies the
+  decoded result is a valid tar before promoting it — an interrupted capture
+  never leaves a truncated archive.
+- **`paseo-restore [--apply] <sandbox> [backup-tar]`** base64-encodes the backup
+  tar on the host, pipes the text into the guest which decodes and extracts it
+  into `${PASEO_HOME:-$HOME/.paseo}`, then bounces the daemon so it re-reads the
+  restored config/projects. With no `backup-tar` it auto-selects the most recent
+  backup for that sandbox.
 - Both **default to dry-run**; `--apply` is required to write or mutate anything.
+
+## Transport is base64 text, not raw binary
+
+`acq` must work over **both** isolation backends (msb and sbx). Streaming a raw
+binary tar over `acq exec` stdin/stdout was observed to **hang** on msb: a guest
+`cat | wc -c` fed the tar bytes never saw EOF, so `tar -xf -` blocked forever.
+Plain multi-line **text** stdin, by contrast, reaches EOF normally (verified).
+`msb exec` exposes a `--stream` flag for byte-faithful binary I/O, but relying on
+it would be backend-specific.
+
+So the archive is transported as **base64 text** in both directions — the guest
+encodes on backup, the host encodes on restore — keeping the payload in the safe
+text channel that behaves identically on every backend. `base64` is required on
+both the host and in the guest image (present on the opencode base image). The
+cost is ~33% transport inflation, which is immaterial once the snapshot is kept
+small (see exclusions). This is why excluding the model cache matters: base64 of
+a ~460MB model cache is ~640MB of text piped through `acq exec`, which crawled to
+an apparent hang — trimming the snapshot to real state keeps the text channel
+fast.
+
+## Capture is race-tolerant: snapshot-in-guest, then classify the tar exit code
+
+`acq exec` **faithfully propagates the guest command's exit code** (verified:
+`exit 7` in the guest surfaces as host exit 7). That is a feature — it lets the
+scripts detect real failures — but it means a naive `tar -cf - .` fails
+on an *expected, non-fatal* condition: the daemon writes under `$PASEO_HOME`
+while tar reads it, and GNU tar exits **1** ("file changed as we read it"), or
+**2** when a whole entry is affected, *while still producing a valid archive of
+everything else*. The first live `--apply` failed with exactly this (`rc=2`).
+
+The capture therefore does two things in the guest:
+
+1. **Snapshots to a guest temp file first**, then `cat`s that settled file to
+   stdout — so the bytes streamed to the host can't race the daemon.
+2. **Classifies tar's exit code**: `0` = clean; `1`/`2` = files
+   changed/vanished mid-read (expected here — the archive is usable); `>= 3` =
+   a genuine failure (missing dir, write error), which aborts. `daemon.log` (the
+   busiest file) is excluded outright, and `--warning=no-file-changed
+   --ignore-failed-read` quiet the remaining churn.
+
+Because the guest capture now exits non-zero **only** on a real failure, the host
+side *can* trust the propagated exit code, and additionally verifies the result
+is a non-empty, valid tar (`tar -tf`) before atomically renaming it into place.
+`paseo-restore` likewise checks both the propagated exit code and a completion
+marker the guest prints, so a partial extract is never mistaken for success.
 
 ## What the snapshot includes and excludes
 
-- **Included:** the full `$PASEO_HOME` tree (`config.json`, `projects/`,
-  session/agent records, anything else Paseo persists there). Capturing the whole
-  tree — rather than an allowlist of known files — means a future Paseo state file
-  is preserved automatically.
+- **Included:** the `$PASEO_HOME` tree (`config.json`, `projects/`, `agents/`,
+  session records, anything else Paseo persists there) minus the specific
+  exclusions below. Capturing the tree broadly — rather than an allowlist of
+  known files — means a future Paseo state file is preserved automatically.
 - **Excluded — `paseo.pid`:** a supervisor PID lock. Replaying a stale PID into a
   fresh container is misleading; the daemon recreates it on boot. (Paseo's lock is
   stale-tolerant, so a leftover would be reclaimed anyway, but there is no reason
   to carry it.)
+- **Excluded — `daemon.log`:** the daemon's live log, observed at ~1.8 MB and
+  growing on a real sandbox. Because it is appended *while the tar reads it*, GNU
+  tar reports "file changed as we read it" and exits non-zero (rc 1, or rc 2 when
+  a whole entry is affected) — the observed cause of the first live backup
+  failing. It is pure runtime noise, not restorable state, so it is excluded.
+- **Excluded — `daemon-keypair.json`, `cli-client-id`, `server-id`:**
+  per-daemon/-install identity that the daemon regenerates on first boot.
+  Carrying it into a *different* sandbox is pointless at best and confusing at
+  worst.
+- **Excluded — `models/`:** downloaded model caches (e.g. a ~460 MB sherpa-onnx
+  speech model observed on a live sandbox). Large, re-downloadable, and not
+  state; including it both bloats the archive and makes the base64 transport
+  crawl. The daemon re-fetches on demand.
 - **Not captured — `~/.local/state/paseo`:** logs, install log, CA bundle. All
   regenerated every boot.
 - **Not captured — git worktree contents.** See below.
@@ -81,6 +141,23 @@ of them (its session/worktree records under `$PASEO_HOME`). Restoring the
 `$PASEO_HOME` snapshot is exactly what makes Paseo re-recognize the intact on-disk
 worktrees. This keeps the design simple and avoids leaving either the host or
 Paseo in an inconsistent state.
+
+## The restore daemon bounce must clear the stale PID lock
+
+After extracting the snapshot, `paseo-restore` restarts the daemon so it re-reads
+the restored `config.json` and projects. The kit runs the daemon under a
+`supervisor:paseo-daemon` respawn loop, so the bounce **kills the daemon child**
+(never the supervisor) and lets the supervisor relaunch it.
+
+But killing the daemon leaves its `$PASEO_HOME/paseo.pid` lock behind, and
+Paseo only treats that lock as stale after **five minutes**. The supervisor
+respawns every ~5 s, so without intervention every relaunch loses the race —
+`Failed to acquire PID lock due to race condition` on repeat, and the daemon
+never comes back (observed live). The bounce therefore **kills the daemon, waits
+for it to actually exit, then removes `paseo.pid`** so the next respawn acquires
+the lock cleanly. The lock is meaningless once its owner is dead, so removing it
+is safe. (This is also why `paseo.pid` is excluded from the snapshot — a restored
+stale lock would reintroduce the same stall.)
 
 ## `worktrees.root` reconciliation on restore
 

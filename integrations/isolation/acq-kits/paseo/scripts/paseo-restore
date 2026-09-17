@@ -158,31 +158,57 @@ if ! tar -tf "${BACKUP_TAR}" >/dev/null 2>&1; then
   exit 1
 fi
 
-# The guest-side restore. Recreate $PASEO_HOME if needed and extract the archive
-# into it, then the caller bounces the daemon separately (below). Resolves
-# $PASEO_HOME the same way the kit's helpers do.
+# The guest-side restore. Recreate $PASEO_HOME if needed, then base64-DECODE the
+# archive from stdin and extract it. We transport the tar as BASE64 TEXT, never
+# raw binary: `acq exec` was observed to hang on a binary stdin stream (a guest
+# `cat | wc -c` never saw EOF), while multi-line TEXT stdin reaches EOF normally.
+# base64 keeps the payload in the safe text channel. Prints a unique DONE marker
+# on a completed extract; acq faithfully propagates the guest exit code.
 GUEST_RESTORE='
   set -eu
   PH="${PASEO_HOME:-$HOME/.paseo}"
   mkdir -p "$PH"
-  tar -C "$PH" -xf -
-  echo "paseo-restore: extracted into $PH"
+  base64 -d | tar -C "$PH" -xf -
+  echo "PASEO_RESTORE_EXTRACT_OK $PH"
 '
 
-# The daemon bounce: kill only the Paseo-owned `paseo daemon start` process tree,
-# NEVER the kit's supervisor respawn loop (whose argv carries the marker
-# "supervisor:paseo-daemon"). The supervisor then relaunches the daemon, which
-# re-reads the restored config.json. This mirrors the kill in paseo-agent-shim
-# and docs/decisions/supervisor-owns-daemon-wrapper-pins-worktrees.md.
+# The daemon bounce: kill the Paseo-owned `paseo daemon start` process tree (NEVER
+# the kit's supervisor respawn loop, whose argv carries the marker
+# "supervisor:paseo-daemon"), then REMOVE the stale PID lock so the supervisor's
+# next relaunch can acquire it cleanly.
+#
+# Why the lock removal is required: killing the daemon leaves its `paseo.pid`
+# behind, and Paseo's lock is only treated as stale after >5 minutes. The
+# supervisor respawns every 5s, so without clearing the lock the fresh daemon
+# loses the race every time — "Failed to acquire PID lock due to race condition"
+# on repeat, and the daemon never comes back (observed live). We hold the kill →
+# confirm the process is gone → delete paseo.pid, so the relaunch starts clean.
+# The lock is meaningless once its owner is dead, so removing it is safe.
 GUEST_BOUNCE='
   set -eu
+  PH="${PASEO_HOME:-$HOME/.paseo}"
+  # Kill the daemon tree, but never the supervisor loop.
   for pid in $(pgrep -u "$(id -u)" -f "paseo daemon start" 2>/dev/null); do
     if tr "\0" " " < "/proc/$pid/cmdline" 2>/dev/null | grep -q "supervisor:paseo-daemon"; then
       continue
     fi
     kill "$pid" 2>/dev/null || true
   done
-  echo "paseo-restore: signaled daemon restart; the supervisor will respawn it"
+  # Wait briefly for the daemon (non-supervisor) to actually exit before clearing
+  # the lock, so we do not race a still-shutting-down daemon.
+  i=0
+  while [ "$i" -lt 20 ]; do
+    still=""
+    for pid in $(pgrep -u "$(id -u)" -f "paseo daemon start" 2>/dev/null); do
+      tr "\0" " " < "/proc/$pid/cmdline" 2>/dev/null | grep -q "supervisor:paseo-daemon" && continue
+      still=1
+    done
+    [ -z "$still" ] && break
+    i=$((i + 1))
+    sleep 0.25
+  done
+  rm -f "$PH/paseo.pid"
+  echo "paseo-restore: killed daemon + cleared PID lock; the supervisor will respawn it"
 '
 
 if [[ "${APPLY}" -ne 1 ]]; then
@@ -198,17 +224,38 @@ EOF
   exit 0
 fi
 
-# Stream the archive into the guest.
-if ! acq exec "${SANDBOX}" -- sh -c "${GUEST_RESTORE}" <"${BACKUP_TAR}"; then
-  echo "Error: 'acq exec ${SANDBOX}' failed during extract — is the sandbox running?" >&2
+# Stream the archive into the guest as BASE64 TEXT. Raw binary on acq's stdin was
+# observed to hang (guest never sees EOF); base64 text reaches EOF normally. We
+# pipe `base64 <tar> | acq exec ... 'base64 -d | tar -x'` and write acq's output
+# to a temp file (no `$(...)` around acq, which also held its channel open). acq
+# faithfully propagates the guest exit code; we ALSO require the guest completion
+# marker, since a partial extract is worse than a clean failure.
+if ! command -v base64 >/dev/null 2>&1; then
+  echo "Error: 'base64' is required on the host to transport the archive." >&2
+  exit 2
+fi
+RESTORE_OUT_FILE="$(mktemp "${TMPDIR:-/tmp}/paseo-restore.XXXXXX")"
+restore_rc=0
+base64 <"${BACKUP_TAR}" | acq exec "${SANDBOX}" -- sh -c "${GUEST_RESTORE}" \
+  >"${RESTORE_OUT_FILE}" 2>&1 || restore_rc=$?
+RESTORE_OUT="$(cat "${RESTORE_OUT_FILE}")"
+rm -f "${RESTORE_OUT_FILE}"
+if [[ "${restore_rc}" -ne 0 ]] || ! printf '%s\n' "${RESTORE_OUT}" | grep -q '^PASEO_RESTORE_EXTRACT_OK '; then
+  echo "Error: restore into '${SANDBOX}' did not complete (exit ${restore_rc}). The sandbox / acq reported:" >&2
+  if [[ -n "${RESTORE_OUT}" ]]; then
+    printf '%s\n' "${RESTORE_OUT}" | sed 's/^/    | /' >&2
+  else
+    echo "    | (no output — is 'acq' on PATH and the sandbox running?)" >&2
+  fi
   exit 1
 fi
 
-# Bounce the daemon so the restored config/projects take effect.
-if ! acq exec "${SANDBOX}" -- sh -c "${GUEST_BOUNCE}"; then
+# Bounce the daemon so the restored config/projects take effect. Best-effort:
+# the state is already in place, so a bounce hiccup is a warning, not a failure.
+acq exec "${SANDBOX}" -- sh -c "${GUEST_BOUNCE}" </dev/null >/dev/null 2>&1 || {
   echo "Warning: could not signal a daemon restart. The restored state is in place;" >&2
   echo "         restart the daemon manually (or recreate the sandbox) to load it." >&2
-fi
+}
 
 cat <<EOF
 Restored Paseo state into '${SANDBOX}' from:

@@ -11,18 +11,26 @@
 # `paseo-restore` replays it into a new sandbox afterward.
 #
 # WHAT IS AND IS NOT CAPTURED:
-#   - Captured: the full $PASEO_HOME tree (config.json, projects/, session/agent
-#     records, any other state Paseo persists there) MINUS paseo.pid.
-#   - Excluded: paseo.pid — a supervisor PID lock. Replaying a stale PID into a
-#     fresh container would be misleading; the daemon recreates it on boot.
+#   - Captured: the $PASEO_HOME tree (config.json, projects/, agents/, session
+#     records, and any other state Paseo persists there) MINUS the exclusions
+#     below.
+#   - Excluded:
+#       * paseo.pid — supervisor PID lock; the daemon recreates it on boot.
+#       * daemon.log — the daemon's live, multi-MB log. It is actively appended
+#         while we read (which makes GNU tar exit non-zero) and is pure runtime
+#         noise, not state worth restoring.
+#       * daemon-keypair.json, cli-client-id, server-id — per-daemon/-install
+#         identity the daemon regenerates on first boot; carrying it into a
+#         DIFFERENT sandbox is pointless at best.
+#       * models/ — downloaded model caches (e.g. a ~460MB speech model). Large,
+#         re-downloadable, and not state; excluding it keeps the archive small.
 #   - NOT captured: git worktree CONTENTS. The kit pins Paseo's worktrees under
 #     <primary-project>/.paseo-worktrees, i.e. inside a host bind mount, so the
 #     worktree files ALREADY survive recreation on their own (as long as the
 #     project is re-mounted at the same guest path). What is lost without this
 #     backup is Paseo's KNOWLEDGE of them (its session/worktree records under
 #     $PASEO_HOME) — restoring this snapshot is exactly what makes Paseo
-#     re-recognize the on-disk worktrees. Logs under ~/.local/state/paseo are
-#     regenerated every boot and are also not captured.
+#     re-recognize the on-disk worktrees.
 #     See docs/decisions/backup-restore-paseo-state.md.
 #
 # FILENAME CONTRACT (consumed by paseo-restore's newest-backup default):
@@ -50,13 +58,16 @@ SANDBOX=""
 DEST_DIR=""
 DEFAULT_DEST="${HOME}/.acq-paseo-backups"
 TMP_OUT=""
+TMP_ERR=""
+TMP_B64=""
 
 usage() {
   cat <<'EOF'
 Usage: paseo-backup [--apply] <sandbox> [dest-dir]
 
-Snapshot a running acq sandbox's Paseo state ($PASEO_HOME, minus paseo.pid) to a
-host tar so it survives sandbox recreation.
+Snapshot a running acq sandbox's Paseo state ($PASEO_HOME, minus its PID lock,
+live log, and per-install identity files) to a host tar so it survives sandbox
+recreation.
 
 Arguments:
   <sandbox>    Name of the running acq sandbox to back up.
@@ -134,10 +145,38 @@ STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 OUT_FILE="${DEST_DIR}/paseo-state-${SANDBOX}-${STAMP}.tar"
 
 # The guest-side capture. Resolve $PASEO_HOME exactly like the kit's own helpers
-# (${PASEO_HOME:-$HOME/.paseo}) and stream a tar of its contents (minus the PID
-# lock) to stdout. Read-only against the sandbox. `--exclude ./paseo.pid` is
-# relative to the -C dir. If $PASEO_HOME does not exist yet, tar has nothing to
-# archive and we detect the empty result below rather than write a bogus file.
+# (${PASEO_HOME:-$HOME/.paseo}) and emit a base64-encoded tar of its contents to
+# stdout. Read-only against the sandbox.
+#
+# WHY THIS IS NOT A PLAIN `tar -cf - .`: two independent problems, both fixed
+# here so the capture is backend-agnostic (works over msb AND sbx via acq).
+#
+#   1. LIVE-FILE CHURN. The daemon writes under $PASEO_HOME while we read it, and
+#      GNU tar treats a file changing mid-read as an error — exit 1 ("file
+#      changed as we read it") or 2 for a whole entry — WHILE STILL emitting a
+#      valid archive of everything else. We observed rc=2 on a live sandbox.
+#      Fix: snapshot to a guest TEMP FILE with churn tolerated
+#      (--warning=no-file-changed, --ignore-failed-read), and classify tar's exit
+#      code (0 clean; 1/2 expected churn; >=3 real failure → abort).
+#
+#   2. BINARY STDIN/STDOUT OVER acq. `acq exec` was observed to hang on a RAW
+#      BINARY stream (a guest `cat | wc -c` never saw EOF), while multi-line TEXT
+#      reaches EOF normally. So we do NOT stream raw tar bytes: the guest
+#      base64-ENCODES the archive to stdout, and the host base64-DECODES it. The
+#      restore side mirrors this (host encodes, guest decodes). base64 keeps the
+#      payload in acq's safe text channel on both backends.
+#
+# EXCLUSIONS (paths are relative to the -C dir, i.e. $PASEO_HOME root):
+#   - paseo.pid        — supervisor PID lock; recreated on boot.
+#   - daemon.log       — the daemon's live, multi-MB log; pure runtime noise and
+#                        the most churn-prone file.
+#   - daemon-keypair.json, cli-client-id, server-id — per-daemon/-install
+#                        identity the daemon regenerates on first boot; carrying
+#                        it into a DIFFERENT sandbox is pointless at best.
+#   - models/          — downloaded model caches (e.g. the ~460MB sherpa-onnx
+#                        speech model). Large, re-downloadable, NOT state. Leaving
+#                        it in bloats the archive to hundreds of MB and makes the
+#                        base64 transport crawl; the daemon re-fetches on demand.
 GUEST_CAPTURE='
   set -eu
   PH="${PASEO_HOME:-$HOME/.paseo}"
@@ -145,12 +184,37 @@ GUEST_CAPTURE='
     echo "paseo-backup: $PH does not exist in the sandbox" >&2
     exit 3
   fi
-  tar -C "$PH" --exclude ./paseo.pid -cf - .
+  TMP="$(mktemp "${TMPDIR:-/tmp}/paseo-backup.XXXXXX.tar")"
+  trap "rm -f \"$TMP\"" EXIT INT TERM
+  rc=0
+  tar -C "$PH" \
+    --warning=no-file-changed \
+    --ignore-failed-read \
+    --exclude ./paseo.pid \
+    --exclude ./daemon.log \
+    --exclude ./daemon-keypair.json \
+    --exclude ./cli-client-id \
+    --exclude ./server-id \
+    --exclude ./models \
+    -cf "$TMP" . || rc=$?
+  # rc 0 = clean; 1/2 = files changed/vanished during read (expected here, the
+  # archive is still usable); >=3 = fatal — abort.
+  if [ "$rc" -ge 3 ]; then
+    echo "paseo-backup: tar failed with exit $rc" >&2
+    exit "$rc"
+  fi
+  base64 < "$TMP"
 '
 
 cleanup() {
   if [[ -n "${TMP_OUT}" && -f "${TMP_OUT}" ]]; then
     rm -f "${TMP_OUT}"
+  fi
+  if [[ -n "${TMP_ERR}" && -f "${TMP_ERR}" ]]; then
+    rm -f "${TMP_ERR}"
+  fi
+  if [[ -n "${TMP_B64}" && -f "${TMP_B64}" ]]; then
+    rm -f "${TMP_B64}"
   fi
 }
 trap cleanup EXIT INT TERM
@@ -158,7 +222,7 @@ trap cleanup EXIT INT TERM
 if [[ "${APPLY}" -ne 1 ]]; then
   cat <<EOF
 [dry-run] would back up Paseo state from sandbox '${SANDBOX}'.
-[dry-run]   source (in guest): \${PASEO_HOME:-\$HOME/.paseo} (excluding paseo.pid)
+[dry-run]   source (in guest): \${PASEO_HOME:-\$HOME/.paseo} (excluding the PID lock, live log, and identity files)
 [dry-run]   destination file:  ${OUT_FILE}
 [dry-run] no files written and the sandbox is untouched.
 [dry-run] re-run with --apply to create the backup.
@@ -168,29 +232,66 @@ fi
 
 mkdir -p "${DEST_DIR}"
 
-# Write to a temp file in the destination dir first, then atomically rename on
-# success — an interrupted or failed capture never leaves a truncated .tar that
-# paseo-restore might later pick as "most recent".
-TMP_OUT="$(mktemp "${DEST_DIR}/.paseo-state-${SANDBOX}.XXXXXX.tar.part")"
+if ! command -v base64 >/dev/null 2>&1; then
+  echo "Error: 'base64' is required on the host to decode the archive." >&2
+  exit 2
+fi
 
-# Capture the tar stream. We must distinguish a real guest failure (sandbox not
-# running, $PASEO_HOME missing) from success. `acq exec` does not reliably
-# propagate the guest exit code, so we verify the result is a non-empty, valid
-# tar afterward rather than trusting $?.
-if ! acq exec "${SANDBOX}" -- sh -c "${GUEST_CAPTURE}" >"${TMP_OUT}"; then
-  echo "Error: 'acq exec ${SANDBOX}' failed — is the sandbox running?" >&2
+# The guest emits the archive as base64 TEXT (raw binary over acq stdin/stdout
+# hangs — see the GUEST_CAPTURE header). Capture that text to a temp file, then
+# decode it into the final .tar and atomically rename on success — an interrupted
+# or failed capture never leaves a truncated .tar that paseo-restore might later
+# pick as "most recent".
+TMP_B64="$(mktemp "${DEST_DIR}/.paseo-state-${SANDBOX}.b64.XXXXXX")"
+TMP_OUT="$(mktemp "${DEST_DIR}/.paseo-state-${SANDBOX}.tar.XXXXXX")"
+# Capture the guest's stderr separately so we can surface the ACTUAL cause (e.g.
+# "$PASEO_HOME does not exist", an acq error, a permission problem) rather than a
+# generic guess.
+TMP_ERR="$(mktemp "${DEST_DIR}/.paseo-state-${SANDBOX}.err.XXXXXX")"
+
+# Run the capture. acq faithfully propagates the guest exit code (verified), and
+# the guest capture above exits 0 for the expected file-churn conditions and
+# non-zero only for a real failure — so we CAN branch on the exit code. Redirect
+# stdin from /dev/null so acq never blocks on a TTY; keep guest stderr for
+# diagnostics.
+acq_rc=0
+acq exec "${SANDBOX}" -- sh -c "${GUEST_CAPTURE}" \
+  </dev/null >"${TMP_B64}" 2>"${TMP_ERR}" || acq_rc=$?
+
+if [[ "${acq_rc}" -ne 0 ]]; then
+  echo "Error: backing up '${SANDBOX}' failed (exit ${acq_rc}). The sandbox / acq reported:" >&2
+  if [[ -s "${TMP_ERR}" ]]; then
+    sed 's/^/    | /' "${TMP_ERR}" >&2
+  else
+    echo "    | (no error output — is 'acq' on PATH and the sandbox running?)" >&2
+  fi
   exit 1
 fi
 
-if [[ ! -s "${TMP_OUT}" ]]; then
-  echo "Error: captured an empty archive — the sandbox may not be running or" >&2
-  echo "       \$PASEO_HOME is absent. Nothing was written." >&2
+if [[ ! -s "${TMP_B64}" ]]; then
+  echo "Error: captured an empty archive from '${SANDBOX}'. Nothing was written." >&2
+  if [[ -s "${TMP_ERR}" ]]; then
+    echo "The sandbox / acq reported:" >&2
+    sed 's/^/    | /' "${TMP_ERR}" >&2
+  else
+    echo "    (\$PASEO_HOME may be absent, or the sandbox may not be running.)" >&2
+  fi
+  exit 1
+fi
+
+# Decode the base64 text into the real tar.
+if ! base64 -d <"${TMP_B64}" >"${TMP_OUT}" 2>/dev/null; then
+  echo "Error: could not base64-decode the captured stream; refusing to keep it." >&2
   exit 1
 fi
 
 # Sanity-check that we actually got a readable tar before promoting it.
 if ! tar -tf "${TMP_OUT}" >/dev/null 2>&1; then
-  echo "Error: captured data is not a valid tar archive; refusing to keep it." >&2
+  echo "Error: decoded data is not a valid tar archive; refusing to keep it." >&2
+  if [[ -s "${TMP_ERR}" ]]; then
+    echo "The sandbox / acq reported:" >&2
+    sed 's/^/    | /' "${TMP_ERR}" >&2
+  fi
   exit 1
 fi
 
