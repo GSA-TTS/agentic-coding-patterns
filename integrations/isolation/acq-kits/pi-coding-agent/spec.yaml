@@ -25,43 +25,26 @@
 # openchamber / paseo, which each publish a browser-UI port). Publishes NO
 # ports.
 #
-# The install-method choice (npm registry, not pi.dev/install.sh), the
-# --ignore-scripts residual-risk analysis, the npm-install prefix choice
-# ($HOME/.local, not $HOME/.npm-global) and the CA-bundle wrapper design are
-# each documented ONCE, in docs/decisions/ (a lighter-weight per-decision ADR
-# format, matching openchamber's/paseo's own convention), not restated here
-# — an earlier revision of this kit wrote the same rationale out three times
-# (this header, README.md, and the install script's own comments), and a
-# review flagged that a future change (bumping the pin, adding pi.dev,
-# wiring models.json) would have to be edited consistently in all three
-# places to stay accurate. See docs/decisions/ for the full "why"; this
-# header and the install script's comments now cite it rather than
-# duplicating it.
+# Design rationale (install-method choice, --ignore-scripts residual risk,
+# npm prefix choice, CA-bundle wrapper) lives in docs/decisions/, not here.
 #
-# MODEL PROVIDER CONFIG IS DELIBERATELY DEFERRED, not merely out of scope: an
-# earlier draft of this kit also shipped a models.json install step and a
-# hand-written placeholder catalog with an empty models[] array. Review found
-# that pairing provides ZERO functional value with no USAi-catalog pi emitter
-# yet to populate it (contrast prime-agent's own placeholder, which ships a
-# real, populated model list). Rather than ship functionless scaffolding, that
-# step is cut from this kit entirely and will land together with the real
-# emitter in a follow-up. This kit's own allow-list is pi's install host only;
-# model-provider egress (e.g. api.gsa.usai.gov) remains the separate
-# usai-provider kit's job either way.
+# MODEL PROVIDER CONFIG IS DELIBERATELY DEFERRED, not merely out of scope:
+# pairing a models.json install step with a hand-written placeholder catalog
+# (empty models[] array) provides ZERO functional value with no USAi-catalog
+# pi emitter yet to populate it (contrast prime-agent's own placeholder,
+# which ships a real, populated model list). Rather than ship functionless
+# scaffolding, that step is cut from this kit entirely and will land
+# together with the real emitter in a follow-up. This kit's own allow-list
+# is pi's install host only; model-provider egress (e.g. api.gsa.usai.gov)
+# remains the separate usai-provider kit's job either way.
 #
 # AGENTS.md / CLAUDE.md: pi supports project-level AGENTS.md/CLAUDE.md loading
 # and a global ~/.pi/agent/AGENTS.md. This kit deliberately does NOT touch
 # either — the same single-responsibility boundary prime-agent's kit draws
 # around its own equivalent surface. Leave that to the user or another kit.
 #
-# NAMING: the kit is named `pi-coding-agent` (matching the npm package name),
-# not the bare upstream shorthand `pi`. A bare `pi` kit name would collide
-# conceptually with the ubiquitous mathematical constant/variable name in
-# every log line, script, and error message this kit produces — a real
-# ambiguity risk unique to this product's name that none of the sibling kits'
-# names (openchamber/paseo/prime-agent/zscaler-ca-certificate) share. Every
-# file, script, and log line in this kit says "pi-coding-agent," never bare
-# "pi," for the same reason.
+# NAMING: the kit is named `pi-coding-agent`, not the bare upstream
+# shorthand `pi` — see README.md "Naming" for why.
 schemaVersion: "hybrid/v1"
 kind: mixin
 name: pi-coding-agent

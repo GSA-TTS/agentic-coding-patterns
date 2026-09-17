@@ -89,8 +89,9 @@ become the real thing," not a one-off invention for this kit.
   per-boot; it must be derived (decode + concatenate) from
   `PROXY_CA_CERT_B64` and the system trust store, both of which are
   themselves runtime state, not something `spec.yaml` can compute ahead of
-  time. A wrapper that runs the derivation at invocation is the only point
-  in the lifecycle where both inputs are known to be current.
+  time. The startup script, which reruns this derivation every boot, is the
+  only point in the lifecycle where both inputs are known to be current —
+  the wrapper itself just carries forward the path that derivation produced.
 - **Bake the bundle once at install time to a static file, reference it via
   a persisted var.** Solves persistence but not freshness: doesn't pick up a
   changed proxy CA / trust store on a later boot without re-running the

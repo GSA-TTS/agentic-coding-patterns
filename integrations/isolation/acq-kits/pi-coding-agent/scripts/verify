@@ -86,18 +86,18 @@ trap cleanup EXIT INT TERM
 # `$HOME/.npm-global/bin` (and `~/.local/bin`) because a bare non-login `sh -c`
 # sources no profile, so their installed binaries — which land in a non-default
 # npm-global prefix — are otherwise invisible to a fresh probe. pi-coding-agent's
-# installer is (being) changed to use `$HOME/.local` as its npm prefix
-# specifically BECAUSE `~/.local/bin` is already first on the guest's default
-# PATH (see docs/decisions/ — the install-prefix ADR), so `pi` should resolve
-# from a bare `sh -c` with NO PATH massaging at all.
+# installer uses `$HOME/.local` as its npm prefix specifically BECAUSE
+# `~/.local/bin` is already first on the guest's default PATH (see
+# docs/decisions/ — the install-prefix ADR), so `pi` should resolve from a
+# bare `sh -c` with NO PATH massaging at all.
 #
-# This is intentional and load-bearing for what this script exists to catch
-# (review finding: "a verify that probes `command -v pi` through a bare `sh -c`
-# would have caught finding 1" — the old-prefix/no-wrapper regression). If a
-# future regression puts `pi` back behind a non-default-PATH prefix, THIS
-# script's step 4 below must FAIL, not quietly route around it with a PATH
-# injection the way the sibling kits do — that PATH injection is exactly what
-# would hide the regression again.
+# This is intentional and load-bearing for what this script exists to catch:
+# a verify that probes `command -v pi` through a bare `sh -c` catches a
+# `pi`-installed-but-not-on-the-default-PATH regression. If a future
+# regression puts `pi` back behind a non-default-PATH prefix, THIS script's
+# step 4 below must FAIL, not quietly route around it with a PATH injection
+# the way the sibling kits do — that PATH injection is exactly what would
+# hide the regression again.
 in_sbx() {
   case "${DRIVER:-}" in
     acq) acq exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true ;;
@@ -127,13 +127,13 @@ else
 fi
 
 # --- Offline source checks (no sandbox needed). ------------------------------
-# The review finding this file exists to address: "the live-tested behaviours
+# These regression guards exist because the live-tested behaviours
 # (idempotent re-run, bad-version rejection, old-Node rejection, CA-decode
-# logging) exist only in the PR description, so a regression in any of them
-# goes undetected." Steps 6-8 below re-test these LIVE where practical (idempotent
-# re-run, bad-version rejection, CA-decode logging). The old-Node rejection is
-# checked here OFFLINE instead, at the source level — reliably forcing the
-# guest's own Node to report a stale version without patching the base image is
+# logging) would otherwise go unchecked between runs. Steps 6-8 below
+# re-test these LIVE where practical (idempotent re-run, bad-version
+# rejection, CA-decode logging). The old-Node rejection is checked here
+# OFFLINE instead, at the source level — reliably forcing the guest's own
+# Node to report a stale version without patching the base image is
 # impractical for a host-side script, so the regression guard is the presence
 # of the version-gate logic itself.
 info "1b. Source-level regression guards (offline)"
@@ -152,7 +152,6 @@ if grep -Eq 'base64 -d' "$INSTALL_SCRIPT" && grep -Eq 'failed to base64-decode' 
 else
   bad "install script no longer surfaces a CA decode failure — a malformed PROXY_CA_CERT_B64 could silently ship an incomplete trust bundle"
 fi
-if command -v pi >/dev/null 2>&1; then :; fi   # no-op; keeps shellcheck quiet about unused fn style below
 if grep -Eq 'command -v pi >/dev/null 2>&1; then' "$INSTALL_SCRIPT"; then
   ok "install script is guarded to be idempotent (skips the npm install when pi is already present)"
 else
@@ -228,20 +227,36 @@ while :; do
 done
 
 info "4. \`pi\` reachable via a BARE, fresh \`sh -c\` probe — the exact check this file exists to run"
-# THIS is the specific check the review asked for: "a verify that probes
-# `command -v pi` through a bare `sh -c` would have caught finding 1." in_sbx
-# above injects NO PATH (see its own comment) — command -v here resolves purely
-# off whatever PATH a fresh non-login shell gets from the guest's own
-# /etc/environment, i.e. the SAME PATH a freshly-attached `acq run`/`acq exec`
-# session would have. If `pi` installs somewhere not on that default PATH
-# (e.g. a regression back to a bare `$HOME/.npm-global` prefix with no
-# default-PATH-visible shim), this step FAILS — which is the intended,
-# load-bearing behavior, not a false positive to work around.
+# This is the specific check that would catch a `pi`-installed-but-not-on-
+# the-default-PATH regression. in_sbx above injects NO PATH (see its own
+# comment) — command -v here resolves purely off whatever PATH a fresh
+# non-login shell gets from the guest's own /etc/environment, i.e. the SAME
+# PATH a freshly-attached `acq run`/`acq exec` session would have. If `pi`
+# installs somewhere not on that default PATH (e.g. a regression back to a
+# bare `$HOME/.npm-global` prefix with no default-PATH-visible shim), this
+# step FAILS — which is the intended, load-bearing behavior, not a false
+# positive to work around.
 pi_path="$(in_sbx 'command -v pi')"
 if [ -n "$pi_path" ]; then
   ok "pi resolves on the default guest PATH via a bare sh -c ($pi_path)"
 else
   bad "pi NOT found via a bare, unmodified \`sh -c\` probe — either the install failed (see step 3/5) or pi installed to a prefix that is not on the guest's DEFAULT PATH (the exact regression class this check exists to catch)"
+fi
+
+info "4b. \`pi\` is the CA-bundle wrapper, not npm's bare bin link"
+# REGRESSION GUARD: step 4 above only proves SOMETHING resolves at
+# `command -v pi` on the default PATH — it does not prove that something is
+# THIS kit's wrapper (see docs/decisions/ca-bundle-wrapper-not-env-var.md)
+# rather than npm's plain bin symlink straight to the package's entrypoint.
+# Without the wrapper, `pi` runs with no NODE_EXTRA_CA_CERTS at all on an
+# inspecting network, and every LLM-provider call fails TLS — exactly the
+# most severe finding this kit's wrapper exists to fix, previously with no
+# regression guard of its own.
+wrapper_ok="$(in_sbx 'grep -q NODE_EXTRA_CA_CERTS "$(command -v pi)" && echo yes')"
+if [ "$wrapper_ok" = "yes" ]; then
+  ok "\`pi\` is the wrapper and exports NODE_EXTRA_CA_CERTS"
+else
+  bad "\`pi\` does NOT export NODE_EXTRA_CA_CERTS — the wrapper is missing or has regressed to npm's bare bin link"
 fi
 
 info "5. Real \`pi --version\` output — not just command -v"
@@ -253,17 +268,17 @@ if [ -n "$installed" ] && [ "$ver_rc_ok" = "yes" ] && [ -n "$ver_out" ]; then
   ok "pi --version runs and prints output: ${ver_out}"
 elif [ -z "$installed" ]; then
   bad "pi was never installed by the startup step within ${READY_TIMEOUT}s"
-  in_sbx 'tail -n 25 /tmp/pi-coding-agent-install.*.log 2>/dev/null || true' | sed 's/^/    | /'
+  in_sbx 'tail -n 25 "$HOME/.local/state/pi-coding-agent/install.log" 2>/dev/null || true' | sed 's/^/    | /'
 else
   bad "pi is on PATH but \`pi --version\` did not run cleanly (output: '${ver_out}')"
 fi
 
 info "6. Idempotent re-run — running the install script again is a clean no-op"
-# REGRESSION GUARD: the review's "idempotent re-run" behaviour. Re-invoke the
-# SAME startup script directly (not just rely on a second sandbox boot, which
-# this script does not perform) and confirm it exits 0 and does not clobber the
-# existing binary or re-download anything unnecessarily. The script's own guard
-# is `command -v pi >/dev/null 2>&1 || { …install… }`; with pi already present
+# Re-invoke the SAME startup script directly (not just rely on a second
+# sandbox boot, which this script does not perform) and confirm it exits 0
+# and does not clobber the existing binary or re-download anything
+# unnecessarily. The script's own guard is
+# `command -v pi >/dev/null 2>&1 || { …install… }`; with pi already present
 # this should be fast and silent about installing.
 if [ -z "$installed" ]; then
   skip "idempotent re-run check (pi was never installed — nothing to re-run against)"
@@ -285,10 +300,9 @@ else
 fi
 
 info "7. Bad-version rejection — a malformed PI_CODING_AGENT_VERSION is refused, not installed"
-# REGRESSION GUARD: the review's "bad-version rejection" behaviour. Invoke the
-# script directly with an obviously-invalid pin and confirm it logs a refusal
-# and exits 0 (never fails the sandbox over an optional CLI) WITHOUT disturbing
-# the already-installed pi from step 3.
+# Invoke the script directly with an obviously-invalid pin and confirm it
+# logs a refusal and exits 0 (never fails the sandbox over an optional CLI)
+# WITHOUT disturbing the already-installed pi from step 3.
 bad_ver_out="$(in_sbx 'PI_CODING_AGENT_VERSION="1.0.0; rm -rf /" sh /home/agent/pi-coding-agent-install.sh 2>&1; echo "RC=$?"')"
 pi_after_bad_ver="$(in_sbx 'command -v pi')"
 case "$bad_ver_out" in
@@ -305,24 +319,20 @@ case "$bad_ver_out" in
 esac
 
 info "8. CA-decode failure is surfaced, not silently swallowed"
-# REGRESSION GUARD: the review's "CA-decode failure logging" behaviour. Force a
-# base64 decode failure with a garbage PROXY_CA_CERT_B64 and confirm the script
-# prints its own explicit warning rather than silently shipping an incomplete
-# trust bundle. This does not require pi to be missing — the CA-bundle block
-# only runs on an actual install attempt, so pair it with a throwaway version
-# override to force that branch without disturbing the real install.
-ca_out="$(in_sbx 'PROXY_CA_CERT_B64="not-valid-base64!!!" PI_CODING_AGENT_VERSION=latest sh -c "rm -f \$(command -v pi) 2>/dev/null; true"; PROXY_CA_CERT_B64="not-valid-base64!!!" sh /home/agent/pi-coding-agent-install.sh 2>&1')"
+# The CA-bundle block runs UNCONDITIONALLY on every boot (see the install
+# script's own comment above that block), not only inside the "pi is
+# missing" install branch — so simply re-running the install script with a
+# garbage PROXY_CA_CERT_B64 is enough to force the decode-failure path.
+# No need to remove pi or force a reinstall first.
+ca_out="$(in_sbx 'PROXY_CA_CERT_B64="not-valid-base64!!!" sh /home/agent/pi-coding-agent-install.sh 2>&1')"
 case "$ca_out" in
   *"failed to base64-decode"*)
     ok "a malformed PROXY_CA_CERT_B64 is surfaced with a clear decode-failure message"
     ;;
   *)
-    warn "did not observe the decode-failure message (output: $ca_out) — this step forcibly removes pi first to re-trigger the install branch; if pi failed to reinstall afterward, re-run scripts/verify"
+    bad "a malformed PROXY_CA_CERT_B64 was NOT surfaced with a decode-failure message (output: $ca_out)"
     ;;
 esac
-# Restore: make sure pi is present again after step 8's forced-removal probe,
-# so a KEEP=1 inspection run isn't left in a misleading state.
-in_sbx 'command -v pi >/dev/null 2>&1 || sh /home/agent/pi-coding-agent-install.sh' >/dev/null 2>&1 || true
 
 info "Summary"
 [ "$fail" -eq 0 ] && printf '  \033[32mAll checks passed.\033[0m\n' || printf '  \033[31mSome checks failed — see notes above.\033[0m\n'

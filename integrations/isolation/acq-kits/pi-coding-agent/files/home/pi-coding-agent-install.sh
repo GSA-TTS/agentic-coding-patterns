@@ -61,12 +61,14 @@ fi
 # string later. NOTE: a shell `case` glob's `*` is a WILDCARD, not a
 # quantifier — `[0-9]*.[0-9]*.[0-9]*` matches "one digit followed by ANY
 # characters" three times, so a string like "1.0.0; rm -rf /" or
-# "1.0.0 --registry=evil" MATCHES this pattern too (verified live: it is not
-# shell-injectable regardless — the value is always passed as a single quoted
-# argv word, never re-parsed by the shell — but the format check itself was a
-# silent no-op against exactly the strings it was meant to catch). The second
-# `case` below closes that gap by explicitly rejecting any character outside
-# a safe version-string charset.
+# "1.0.0 --registry=evil" MATCHES this pattern too, so a format check using
+# only this glob would be a silent no-op against exactly the strings it is
+# meant to catch (it is not a shell-injection risk either way — the value is
+# always passed as a single quoted argv word, never re-parsed by the shell —
+# but a malformed pin should still be refused loudly rather than reaching the
+# npm package-spec string unchecked). The second `case` below closes that gap
+# by explicitly rejecting any character outside a safe version-string
+# charset.
 case "$_pi_version" in
   latest) : ;;
   [0-9]*.[0-9]*.[0-9]*)
@@ -83,38 +85,25 @@ case "$_pi_version" in
     ;;
 esac
 
-# Single shared log for this boot's run — the CA-decode-failure path and the
-# npm-install-failure path both append to it, rather than each creating its
-# own separate mktemp file (an earlier version of this script did that; the
-# second file was created even on a fully successful boot, as an empty,
-# never-read leftover under /tmp — mktemp creates the file immediately on
-# call, not lazily on first write).
-_log="$(mktemp "${TMPDIR:-/tmp}/pi-coding-agent-install.XXXXXX.log" 2>/dev/null || true)"
-[ -n "$_log" ] || _log="/tmp/pi-coding-agent-install.$$.log"
+# Single shared, FIXED log path for this boot's run — the CA-decode-failure
+# path and the npm-install-failure path both append to it, rather than each
+# creating its own separate mktemp file: a second, per-path mktemp file would
+# exist even on a fully successful boot as an empty, never-read leftover
+# under /tmp, since mktemp creates the file immediately on call, not lazily
+# on first write. A FIXED path (rather than mktemp) avoids that same problem
+# one level up, since this block runs unconditionally near the top of the
+# script, not only inside an error path. Truncated (not appended-to-forever)
+# at the start of every run, so the log always reflects only the CURRENT
+# boot's run, never a prior one's.
+_log="$HOME/.local/state/pi-coding-agent/install.log"
+mkdir -p "$(dirname "$_log")"
+: > "$_log"
 
-# Explicit, unprivileged per-user npm prefix. $HOME/.local, specifically —
-# NOT $HOME/.npm-global (the convention openchamber/paseo use), and NOT pi's
-# own installer's prefix-detection-with-$HOME/.local-fallback logic either
-# (pi's own installer tries the system global prefix first and only falls
-# back to $HOME/.local if that isn't writable).
-#
-# WHY $HOME/.local, specifically: it is on this kit's target base images'
-# DEFAULT guest PATH already (confirmed live). $HOME/.npm-global/bin is NOT
-# — which is exactly why openchamber's and paseo's own startup scripts each
-# have to prepend it to PATH themselves, and why their `scripts/verify`
-# probes have to inject the same prepend into every `sh -c` they run inside
-# the sandbox (see either sibling's `in_sbx()` helper and its own comment on
-# why: a bare, later `sh -c` — e.g. the one a real user's interactive shell
-# runs, or `acq exec … -- pi` — gets NEITHER kit's PATH prepend, since that
-# prepend is this PROCESS-local, not persisted anywhere a root-owned
-# /etc/profile.d or similar could pick up as the non-root agent user; see
-# openchamber-start.sh's own "SCOPE LIMIT" comment for the full explanation
-# of why there is no agent-user-safe way to persist it). By choosing a
-# prefix whose bin/ directory the base image ALREADY has on PATH, this kit
-# sidesteps that whole class of problem instead of working around it: no
-# process-local PATH prepend is needed here, in `scripts/verify`, or for a
-# user's own later shell — `pi` is reachable the same way regardless of who
-# invokes it or when. See docs/decisions/local-prefix-not-npm-global.md.
+# Explicit, unprivileged per-user npm prefix: $HOME/.local, not
+# $HOME/.npm-global (the openchamber/paseo convention) and not pi's own
+# installer's runtime prefix-detection-with-fallback logic. See
+# docs/decisions/local-prefix-not-npm-global.md for why $HOME/.local
+# specifically.
 #
 # An explicit, unconditional prefix (rather than probing at runtime whether
 # some OTHER prefix happens to be writable) is also more auditable and
@@ -158,13 +147,13 @@ fi
 if ! command -v pi >/dev/null 2>&1; then
   mkdir -p "$NPM_PREFIX"
   # `--prefix` on the command line (below), not just an npm_config_prefix
-  # env-var export: verified live that some base images persistently export
-  # NPM_CONFIG_PREFIX (uppercase) — npm's config precedence reads that over
-  # a lowercase npm_config_prefix export, so setting only the env var here
-  # can silently install into whatever the base image's own uppercase
-  # variable points at instead of this kit's intended per-user prefix. The
-  # CLI flag has the highest precedence and always wins regardless of what
-  # the base image has already exported.
+  # env-var export: some base images persistently export NPM_CONFIG_PREFIX
+  # (uppercase) — npm's config precedence reads that over a lowercase
+  # npm_config_prefix export, so setting only the env var here can silently
+  # install into whatever the base image's own uppercase variable points at
+  # instead of this kit's intended per-user prefix. The CLI flag has the
+  # highest precedence and always wins regardless of what the base image has
+  # already exported.
 
   # The standard install path pi's own installer itself runs — NOT the
   # experimental PI_EXPERIMENTAL=1 managed-install mode (unstable upstream,
@@ -185,12 +174,12 @@ if ! command -v pi >/dev/null 2>&1; then
   [ "$_pi_version" != "latest" ] && _pkg="${_pkg}@${_pi_version}"
 
   # --fetch-timeout bounds how long a hanging (not merely erroring)
-  # connection to the registry can block sandbox startup — verified live,
-  # e.g. a firewall that silently drops packets rather than refusing the
-  # connection outright. --fetch-retries=0: this is a STARTUP-phase script
-  # that runs on every boot, not a one-shot manual install — retrying against
-  # a systemic failure just multiplies the timeout for no benefit, since the
-  # NEXT sandbox start already retries naturally. Fail fast instead.
+  # connection to the registry can block sandbox startup, e.g. a firewall
+  # that silently drops packets rather than refusing the connection
+  # outright. --fetch-retries=0: this is a STARTUP-phase script that runs on
+  # every boot, not a one-shot manual install — retrying against a systemic
+  # failure just multiplies the timeout for no benefit, since the NEXT
+  # sandbox start already retries naturally. Fail fast instead.
   if npm install -g --ignore-scripts --prefix "$NPM_PREFIX" \
       --fetch-timeout=30000 --fetch-retries=0 \
       "$_pkg" >>"$_log" 2>&1; then
@@ -213,18 +202,9 @@ fi
 # be too, or it would keep exporting a stale bundle path forever after the
 # first boot that created it.
 #
-# WHY A WRAPPER, NOT JUST THE NODE_EXTRA_CA_CERTS EXPORT ABOVE: that export
-# is scoped to THIS SCRIPT's own process. It does nothing for the `pi`
-# process a user launches later, in a completely separate shell — an
-# install-time env-var export cannot reach a process that starts after this
-# script has already exited. Concretely, without this wrapper, behind the
-# Zscaler-inspecting proxy this kit is designed for: first boot installs
-# `pi` successfully (the CA bundle IS exported for that process, so npm's own
-# HTTPS calls work), then the user runs `pi` themselves and its first HTTPS
-# call to the LLM provider fails with SELF_SIGNED_CERT_IN_CHAIN /
-# UNABLE_TO_GET_ISSUER_CERT_LOCALLY — the exact failure this kit's CA-bundle
-# logic exists to prevent, just not actually prevented for the process that
-# matters. See docs/decisions/ca-bundle-wrapper-not-env-var.md.
+# WHY A WRAPPER, NOT JUST THE NODE_EXTRA_CA_CERTS EXPORT ABOVE: see
+# docs/decisions/ca-bundle-wrapper-not-env-var.md — that export is scoped to
+# this script's own process and cannot reach a `pi` a user launches later.
 #
 # _pi_real is whatever npm's own global-install bin symlink actually points
 # at — resolved via readlink rather than hardcoding pi's internal package
@@ -262,21 +242,40 @@ if [ -n "$_pi_real" ] && [ -e "$_pi_real" ]; then
   # just above), and a shell redirection into a symlink follows it and
   # truncates the REAL target file underneath — which is $_pi_real itself,
   # i.e. this would silently clobber the actual `pi` binary with the
-  # wrapper's own shell-script text (reproduced live: Node then fails to
-  # parse the clobbered file as JS). Remove the symlink first so the
-  # redirection creates a fresh regular file at $_pi_bin instead.
+  # wrapper's own shell-script text, and Node would then fail to parse the
+  # clobbered file as JS. Remove the symlink first so the redirection
+  # creates a fresh regular file at $_pi_bin instead.
   rm -f "$_pi_bin"
-  cat > "$_pi_bin" <<WRAPPER
+  {
+    cat <<WRAPPER
 #!/bin/sh
 # Auto-generated by pi-coding-agent-install.sh — do not edit by hand; this
 # file is overwritten on every sandbox boot. Exports the CA bundle this kit
-# rebuilds every boot, then execs the real npm-installed entrypoint, so a
-# user's own \`pi\` invocation gets the same TLS trust the installer itself
-# used. See docs/decisions/ca-bundle-wrapper-not-env-var.md.
+# rebuilds every boot (when non-empty — mirrors the same-guarded export
+# above), then execs the real npm-installed entrypoint, so a user's own
+# \`pi\` invocation gets the same TLS trust the installer itself used. See
+# docs/decisions/ca-bundle-wrapper-not-env-var.md.
+WRAPPER
+    # Match the CA bundle's own export above ([ -s "$_ca" ]): only emit the
+    # wrapper's export when the bundle is actually non-empty, so a `pi`
+    # invocation on a boot with no proxy CA and no system bundle falls back
+    # to Node's default CA behavior instead of pointing at a useless,
+    # zero-length cert file.
+    if [ -s "$_ca" ]; then
+      cat <<WRAPPER
 NODE_EXTRA_CA_CERTS="$_ca"
 export NODE_EXTRA_CA_CERTS
-exec node "$_pi_real" "\$@"
 WRAPPER
+    fi
+    # `exec "$_pi_real"`, not `exec node "$_pi_real"`: preserves whatever
+    # interpreter/flags $_pi_real's own shebang declares (matching how npm's
+    # own bin symlink invokes it), rather than hardcoding `node`. npm sets
+    # the executable bit on a package's declared `bin` entry during
+    # install, so $_pi_real is directly executable by convention.
+    cat <<WRAPPER
+exec "$_pi_real" "\$@"
+WRAPPER
+  } > "$_pi_bin"
   chmod 0755 "$_pi_bin"
 elif [ ! -e "$_pi_bin" ]; then
   : # No install this boot and none from a prior boot either; nothing to wrap.

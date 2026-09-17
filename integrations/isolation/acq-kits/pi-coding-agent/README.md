@@ -117,8 +117,10 @@ The kit is named `pi-coding-agent` — matching the npm package name — rather
 than the bare upstream shorthand `pi`. A bare `pi` kit name would collide
 conceptually with the ubiquitous mathematical constant/variable name in every
 log line, script, and error message this kit produces, a real ambiguity risk
-unique to this product's name. Every file, script, and log line in this kit
-says `pi-coding-agent`, never bare `pi`, for the same reason.
+unique to this product's name that none of the sibling kits'
+(`openchamber`/`paseo`/`prime-agent`/`zscaler-ca-certificate`) share. Every
+file, script, and log line in this kit says `pi-coding-agent`, never bare
+`pi`, for the same reason.
 
 ## Backend parity
 
