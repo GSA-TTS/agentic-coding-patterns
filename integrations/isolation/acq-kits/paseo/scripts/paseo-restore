@@ -1,0 +1,270 @@
+#!/usr/bin/env bash
+#
+# paseo-restore — replay a Paseo-state backup (from paseo-backup) into a running
+# sandbox after recreation, then bounce the daemon so it picks the restored state
+# up.
+#
+# WHAT THIS SOLVES: after `acq rm` + a fresh `acq create`/`acq run`, the new
+# sandbox starts with empty Paseo state ($PASEO_HOME): no config.json, no
+# registered projects, no session/agent history, and the on-disk git worktrees
+# (which persist on the host mount) show up orphaned because Paseo no longer has
+# their records. This streams a paseo-backup tar back into $PASEO_HOME and
+# restarts the daemon so it re-reads the restored config and re-recognizes the
+# projects and worktrees.
+#
+# BACKUP SELECTION: pass an explicit backup tar, or omit it to auto-select the
+# MOST RECENT backup for this sandbox in the default backup dir
+# (~/.acq-paseo-backups). "Most recent" is the lexicographically last file
+# matching paseo-state-<sandbox>-*.tar — which is the newest by time because
+# paseo-backup timestamps are colon-free UTC (YYYYMMDDTHHMMSSZ) and sort by time.
+# This coupling is a contract with paseo-backup's filename format; keep them in
+# lockstep.
+#
+# WORKTREES.ROOT RECONCILIATION: a restored config.json carries the OLD
+# sandbox's absolute worktrees.root. On the new sandbox the kit's `opencode`
+# wrapper re-pins worktrees.root to <primary-project>/.paseo-worktrees on the
+# next `acq run` and bounces the daemon, so a stale value self-corrects. If you
+# restored into a detached `acq create`, run `acq run <agent> <project>` once (or
+# re-pin manually) so the root matches this sandbox's mount. As long as the
+# project is re-mounted at the SAME guest path, the on-disk worktrees line up
+# with the restored records. See docs/decisions/backup-restore-paseo-state.md.
+#
+# SAFETY: dry-run by default. It resolves and prints the backup it WOULD restore,
+# the target $PASEO_HOME, and that it would bounce the daemon — but writes nothing
+# and does not touch the sandbox until you pass --apply.
+#
+# Usage:
+#   paseo-restore [--apply] <sandbox> [backup-tar]
+#   paseo-restore --help
+#
+# Requires the `acq` CLI on PATH and a RUNNING sandbox named <sandbox>.
+
+set -euo pipefail
+IFS=$'\n\t'
+
+APPLY=0
+SANDBOX=""
+BACKUP_TAR=""
+DEFAULT_DEST="${HOME}/.acq-paseo-backups"
+
+usage() {
+  cat <<'EOF'
+Usage: paseo-restore [--apply] <sandbox> [backup-tar]
+
+Restore a paseo-backup snapshot into a running acq sandbox and bounce the daemon
+so it re-reads the restored Paseo state.
+
+Arguments:
+  <sandbox>      Name of the running acq sandbox to restore into.
+  [backup-tar]   Path to a backup .tar produced by paseo-backup. If omitted, the
+                 most recent backup for <sandbox> in ~/.acq-paseo-backups is used.
+
+Options:
+  --apply        Actually restore. Without it, this is a dry run that only prints
+                 the resolved backup, target, and planned daemon bounce.
+  --help         Show this help.
+
+After restoring into a detached `acq create`, run `acq run <agent> <project>`
+once so worktrees.root is re-pinned to this sandbox's project mount.
+EOF
+}
+
+# Sandbox name reaches an `acq exec` target and a filename glob, so constrain it
+# to a safe charset (SI-10).
+valid_sandbox_name() {
+  case "$1" in
+    "" | *[!A-Za-z0-9._-]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --apply)
+      APPLY=1
+      shift
+      ;;
+    --help | -h)
+      usage
+      exit 0
+      ;;
+    -*)
+      echo "Error: unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+    *)
+      if [[ -z "${SANDBOX}" ]]; then
+        SANDBOX="$1"
+      elif [[ -z "${BACKUP_TAR}" ]]; then
+        BACKUP_TAR="$1"
+      else
+        echo "Error: unexpected extra argument: $1" >&2
+        usage >&2
+        exit 2
+      fi
+      shift
+      ;;
+  esac
+done
+
+if [[ -z "${SANDBOX}" ]]; then
+  echo "Error: <sandbox> is required." >&2
+  usage >&2
+  exit 2
+fi
+if ! valid_sandbox_name "${SANDBOX}"; then
+  echo "Error: sandbox name '${SANDBOX}' has characters outside [A-Za-z0-9._-]." >&2
+  exit 2
+fi
+if ! command -v acq >/dev/null 2>&1; then
+  echo "Error: the 'acq' CLI is not on PATH." >&2
+  exit 2
+fi
+
+# Resolve the backup to restore. Explicit path wins; otherwise pick the newest
+# matching backup for this sandbox by lexical filename order (time order, per the
+# paseo-backup naming contract).
+if [[ -z "${BACKUP_TAR}" ]]; then
+  if [[ ! -d "${DEFAULT_DEST}" ]]; then
+    echo "Error: no backup given and default backup dir does not exist:" >&2
+    echo "       ${DEFAULT_DEST}" >&2
+    echo "       Create one with:  paseo-backup --apply ${SANDBOX}" >&2
+    exit 1
+  fi
+  # Deterministic newest-by-name selection. Sort ascending, take the last line;
+  # the colon-free UTC stamp makes lexical order equal time order. Restrict the
+  # glob to this exact sandbox's prefix.
+  BACKUP_TAR="$(
+    find "${DEFAULT_DEST}" -maxdepth 1 -type f \
+      -name "paseo-state-${SANDBOX}-*.tar" 2>/dev/null | LC_ALL=C sort | tail -n 1
+  )"
+  if [[ -z "${BACKUP_TAR}" ]]; then
+    echo "Error: no backups found for sandbox '${SANDBOX}' in ${DEFAULT_DEST}" >&2
+    echo "       (expected files named paseo-state-${SANDBOX}-<UTC>.tar)." >&2
+    echo "       Create one with:  paseo-backup --apply ${SANDBOX}" >&2
+    exit 1
+  fi
+  echo "Auto-selected most recent backup for '${SANDBOX}':"
+  echo "  ${BACKUP_TAR}"
+fi
+
+if [[ ! -f "${BACKUP_TAR}" ]]; then
+  echo "Error: backup tar not found: ${BACKUP_TAR}" >&2
+  exit 1
+fi
+if ! tar -tf "${BACKUP_TAR}" >/dev/null 2>&1; then
+  echo "Error: '${BACKUP_TAR}' is not a readable tar archive." >&2
+  exit 1
+fi
+
+# The guest-side restore. Recreate $PASEO_HOME if needed, then base64-DECODE the
+# archive from stdin and extract it. We transport the tar as BASE64 TEXT, never
+# raw binary: `acq exec` was observed to hang on a binary stdin stream (a guest
+# `cat | wc -c` never saw EOF), while multi-line TEXT stdin reaches EOF normally.
+# base64 keeps the payload in the safe text channel. Prints a unique DONE marker
+# on a completed extract; acq faithfully propagates the guest exit code.
+GUEST_RESTORE='
+  set -eu
+  PH="${PASEO_HOME:-$HOME/.paseo}"
+  mkdir -p "$PH"
+  base64 -d | tar -C "$PH" -xf -
+  echo "PASEO_RESTORE_EXTRACT_OK $PH"
+'
+
+# The daemon bounce: kill the Paseo-owned `paseo daemon start` process tree (NEVER
+# the kit's supervisor respawn loop, whose argv carries the marker
+# "supervisor:paseo-daemon"), then REMOVE the stale PID lock so the supervisor's
+# next relaunch can acquire it cleanly.
+#
+# Why the lock removal is required: killing the daemon leaves its `paseo.pid`
+# behind, and Paseo's lock is only treated as stale after >5 minutes. The
+# supervisor respawns every 5s, so without clearing the lock the fresh daemon
+# loses the race every time — "Failed to acquire PID lock due to race condition"
+# on repeat, and the daemon never comes back (observed live). We hold the kill →
+# confirm the process is gone → delete paseo.pid, so the relaunch starts clean.
+# The lock is meaningless once its owner is dead, so removing it is safe.
+GUEST_BOUNCE='
+  set -eu
+  PH="${PASEO_HOME:-$HOME/.paseo}"
+  # Kill the daemon tree, but never the supervisor loop.
+  for pid in $(pgrep -u "$(id -u)" -f "paseo daemon start" 2>/dev/null); do
+    if tr "\0" " " < "/proc/$pid/cmdline" 2>/dev/null | grep -q "supervisor:paseo-daemon"; then
+      continue
+    fi
+    kill "$pid" 2>/dev/null || true
+  done
+  # Wait briefly for the daemon (non-supervisor) to actually exit before clearing
+  # the lock, so we do not race a still-shutting-down daemon.
+  i=0
+  while [ "$i" -lt 20 ]; do
+    still=""
+    for pid in $(pgrep -u "$(id -u)" -f "paseo daemon start" 2>/dev/null); do
+      tr "\0" " " < "/proc/$pid/cmdline" 2>/dev/null | grep -q "supervisor:paseo-daemon" && continue
+      still=1
+    done
+    [ -z "$still" ] && break
+    i=$((i + 1))
+    sleep 0.25
+  done
+  rm -f "$PH/paseo.pid"
+  echo "paseo-restore: killed daemon + cleared PID lock; the supervisor will respawn it"
+'
+
+if [[ "${APPLY}" -ne 1 ]]; then
+  cat <<EOF
+[dry-run] would restore Paseo state into sandbox '${SANDBOX}'.
+[dry-run]   backup:            ${BACKUP_TAR}
+[dry-run]   target (in guest): \${PASEO_HOME:-\$HOME/.paseo}
+[dry-run]   then: bounce the daemon (kill the 'paseo daemon start' tree, not the
+[dry-run]         'supervisor:paseo-daemon' loop) so it re-reads restored config.
+[dry-run] nothing written and the sandbox is untouched.
+[dry-run] re-run with --apply to restore.
+EOF
+  exit 0
+fi
+
+# Stream the archive into the guest as BASE64 TEXT. Raw binary on acq's stdin was
+# observed to hang (guest never sees EOF); base64 text reaches EOF normally. We
+# pipe `base64 <tar> | acq exec ... 'base64 -d | tar -x'` and write acq's output
+# to a temp file (no `$(...)` around acq, which also held its channel open). acq
+# faithfully propagates the guest exit code; we ALSO require the guest completion
+# marker, since a partial extract is worse than a clean failure.
+if ! command -v base64 >/dev/null 2>&1; then
+  echo "Error: 'base64' is required on the host to transport the archive." >&2
+  exit 2
+fi
+RESTORE_OUT_FILE="$(mktemp "${TMPDIR:-/tmp}/paseo-restore.XXXXXX")"
+restore_rc=0
+base64 <"${BACKUP_TAR}" | acq exec "${SANDBOX}" -- sh -c "${GUEST_RESTORE}" \
+  >"${RESTORE_OUT_FILE}" 2>&1 || restore_rc=$?
+RESTORE_OUT="$(cat "${RESTORE_OUT_FILE}")"
+rm -f "${RESTORE_OUT_FILE}"
+if [[ "${restore_rc}" -ne 0 ]] || ! printf '%s\n' "${RESTORE_OUT}" | grep -q '^PASEO_RESTORE_EXTRACT_OK '; then
+  echo "Error: restore into '${SANDBOX}' did not complete (exit ${restore_rc}). The sandbox / acq reported:" >&2
+  if [[ -n "${RESTORE_OUT}" ]]; then
+    printf '%s\n' "${RESTORE_OUT}" | sed 's/^/    | /' >&2
+  else
+    echo "    | (no output — is 'acq' on PATH and the sandbox running?)" >&2
+  fi
+  exit 1
+fi
+
+# Bounce the daemon so the restored config/projects take effect. Best-effort:
+# the state is already in place, so a bounce hiccup is a warning, not a failure.
+acq exec "${SANDBOX}" -- sh -c "${GUEST_BOUNCE}" </dev/null >/dev/null 2>&1 || {
+  echo "Warning: could not signal a daemon restart. The restored state is in place;" >&2
+  echo "         restart the daemon manually (or recreate the sandbox) to load it." >&2
+}
+
+cat <<EOF
+Restored Paseo state into '${SANDBOX}' from:
+  ${BACKUP_TAR}
+The daemon is restarting to load it (a few seconds).
+
+If you restored into a detached 'acq create', run:
+  acq run <agent> <project>
+once, so worktrees.root is re-pinned to this sandbox's project mount. As long as
+the project is mounted at the same guest path, your worktrees line up with the
+restored records.
+EOF
