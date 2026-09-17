@@ -13,6 +13,23 @@ kit that configures the USAi provider for **multiple agents** (e.g. Codex,
 Claude Code, Cursor) as their config formats are added. Until then, applying it
 on a non-OpenCode agent has no effect beyond the network allow-list.
 
+## Shared config with acq-kits
+
+`files/home/usai-config/opencode.jsonc` is a **symlink** to the identical file
+in the `acq-kits/usai-provider` kit — the two kits are the same OpenCode
+config, staged for two different backends (this legacy sbx-native kit and the
+current `hybrid/v1` acq kit; see `integrations/isolation/acq-kits/usai-provider/README.md`
+"Scope and roadmap" and the retirement discussion tracked from
+`GSA-TTS/agentic-coding-patterns` issue #273 / `GSA-TTS/agentic-coding-quickstart`
+issue #235). This was previously two independently-committed copies that had to
+be kept in sync by hand on every model-catalog refresh or permission-policy
+change — they drifted apart more than once. The symlink makes that drift
+structurally impossible: there is only one file to edit, and both kits' startup
+merge scripts read the same bytes. `merge-global-config.mjs` itself is
+unaffected — it never inspects the marker comment's exact text, so both kits'
+merge behavior is identical regardless of which kit's name a reader might
+expect the marker to say.
+
 ## What it does
 
 - **Network egress** — allow-lists `api.gsa.usai.gov` (`caps.network`), since

@@ -195,12 +195,17 @@ def _generated_models_block(text: str) -> str:
 
 
 class TestAcqSbxDriftGuard:
-    """The two usai-provider opencode.jsonc payloads must not diverge (#273).
+    """The two usai-provider opencode.jsonc payloads must not diverge (GSA-TTS/agentic-coding-patterns#273).
 
-    They are byte-identical today except the ownership-marker comment. The most
-    important invariant is that the GENERATED MODELS block matches — otherwise a
-    `sync:usai-models` run applied to one variant but not the other would ship
-    two different model catalogs.
+    sbx-kits/usai-provider-kit's opencode.jsonc is now a SYMLINK to the
+    acq-kits copy (see that kit's README "Shared config with acq-kits") --
+    they are the same file on disk, so byte divergence between them is no
+    longer possible to introduce accidentally. These tests still run and
+    still matter: they catch a REGRESSION of the symlink itself (someone
+    replacing it with a real file again, e.g. by running a tool that
+    dereferences and rewrites symlinks in place) rather than catching
+    ongoing hand-maintained drift, which was their original purpose before
+    the symlink existed.
     """
 
     def test_generated_model_blocks_match(self):
@@ -212,11 +217,17 @@ class TestAcqSbxDriftGuard:
         )
 
     def test_parsed_json_payloads_match(self):
-        # Full JSON payload equality (comments differ by design — the ownership
-        # marker — so compare parsed JSON, not raw text).
+        # Comments are now byte-identical too (same shared marker text, see
+        # class docstring), but compare parsed JSON rather than raw text
+        # regardless -- this test's job is "the effective config is the
+        # same," which should hold independent of how the sharing is
+        # implemented.
         acq = json.loads(_strip_jsonc((ACQ_USAI / "files/home/usai-config/opencode.jsonc").read_text()))
         sbx = json.loads(_strip_jsonc((SBX_USAI / "files/home/usai-config/opencode.jsonc").read_text()))
-        assert acq == sbx, "acq-kits and sbx-kits usai opencode.jsonc JSON payloads have diverged (#273)"
+        assert acq == sbx, (
+            "acq-kits and sbx-kits usai opencode.jsonc JSON payloads have "
+            "diverged (GSA-TTS/agentic-coding-patterns#273)"
+        )
 
     def test_merge_and_sync_scripts_identical(self):
         for rel in (
