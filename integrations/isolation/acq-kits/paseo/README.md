@@ -141,6 +141,56 @@ To override the location, pre-set `worktrees.root` to an absolute path in
 replaced on the next run — set it via the entrypoint's working directory instead,
 or remove the shim's pinning if you need a custom fixed root.
 
+## Backing up and restoring Paseo state across recreation
+
+An `acq` sandbox is ephemeral: only your host bind mounts survive its
+destruction. The whole guest home — including `$PASEO_HOME` (default `~/.paseo`:
+`config.json`, the projects registry, and Paseo's session/agent records) — is
+**lost** when you `acq rm` and recreate. Your git worktrees themselves survive
+(they live under `<project>/.paseo-worktrees` on the host mount), but after a
+recreate Paseo no longer has their records, so they show up orphaned.
+
+Two host-side helper scripts snapshot Paseo state before teardown and replay it
+into the new sandbox afterward:
+
+```bash
+# Before recreating — snapshot state to the host (default ~/.acq-paseo-backups).
+# Dry-run first (prints what it would do), then --apply to actually write it:
+scripts/paseo-backup <sandbox>
+scripts/paseo-backup --apply <sandbox>
+
+# Recreate the sandbox as usual:
+acq rm <sandbox>
+acq run opencode /path/to/your/project        # (or acq create …)
+
+# After the new sandbox is up — restore. With no tar given it auto-selects the
+# most recent backup for that sandbox. Dry-run first, then --apply:
+scripts/paseo-restore <sandbox>
+scripts/paseo-restore --apply <sandbox>
+```
+
+`paseo-restore` streams the snapshot back into `$PASEO_HOME` and restarts the
+daemon so it re-reads the restored config and re-recognizes your projects and
+worktrees.
+
+- **What's captured:** the full `$PASEO_HOME` tree **minus `paseo.pid`** (a
+  supervisor PID lock the daemon recreates on boot). Logs under
+  `~/.local/state/paseo` are regenerated every boot and are not captured.
+- **Worktrees:** their contents are **not** in the backup — they already persist
+  on the host mount. The restored `$PASEO_HOME` is what makes Paseo re-recognize
+  them, as long as the project is re-mounted at the **same guest path** (acq's
+  normal behavior).
+- **`worktrees.root`:** a restored `config.json` carries the old sandbox's root.
+  It self-corrects on the next `acq run` (the wrapper re-pins it). If you
+  restored into a **detached** `acq create`, run `acq run opencode <project>`
+  once so the root matches this sandbox's mount.
+- **Safety:** both scripts default to dry-run; pass `--apply` to actually write
+  or restore. The backup is read-only against the sandbox.
+
+Backups are plain tars — inspect one with `tar -tf <file>`. See
+`docs/decisions/backup-restore-paseo-state.md` for the design and the worktree
+rationale.
+
 ## No shared session with a terminal TUI
 
 Unlike a shared-server setup (e.g. the `openchamber` kit), Paseo is **not** an
@@ -239,6 +289,8 @@ paseo/
 ├── README.md                       # this file
 ├── TROUBLESHOOTING.md              # failure modes and fixes
 ├── scripts/verify                  # host-side live check
+├── scripts/paseo-backup            # snapshot $PASEO_HOME to a host tar (dry-run default)
+├── scripts/paseo-restore           # replay a snapshot into a new sandbox + bounce the daemon
 └── docs/decisions/                 # design records (ADRs)
 ```
 
@@ -248,5 +300,7 @@ Rationale and the decisions behind this kit's structure live in
 [`docs/decisions/`](docs/decisions/) — notably why one daemon serves everything
 on a single port, why worktrees can only be pinned to the first project dir (and
 why that needs a daemon restart), why the startup script owns the daemon while
-the entrypoint pins worktrees, why the install runs at startup, and why the
-entrypoint is split into a thin agent-named wrapper over a generic kit shim.
+the entrypoint pins worktrees, why the install runs at startup, why the
+entrypoint is split into a thin agent-named wrapper over a generic kit shim, and
+why Paseo state is preserved across sandbox recreation with backup/restore
+scripts rather than a persistent volume.

@@ -184,6 +184,59 @@ else
   bad "paseo-register-mounts.mjs failed node --check"
 fi
 
+# --- Offline check of the backup/restore host scripts (no sandbox needed). -----
+# Assert they parse, are executable, and (with 'acq' stubbed out) behave in
+# dry-run by default — printing "[dry-run]" and writing/mutating NOTHING — plus
+# the newest-backup auto-selection and the sandbox-name charset guard. This
+# exercises the host-side logic without a live sandbox; the live round-trip
+# (backup -> clear -> restore) runs later under RUN_ACQ.
+info "1d. backup/restore host scripts (offline)"
+BACKUP_SH="$KIT_DIR/scripts/paseo-backup"
+RESTORE_SH="$KIT_DIR/scripts/paseo-restore"
+for _s in "$BACKUP_SH" "$RESTORE_SH"; do
+  if [ ! -f "$_s" ]; then
+    bad "$(basename "$_s") missing at $_s"
+  elif [ ! -x "$_s" ]; then
+    bad "$(basename "$_s") is not executable"
+  elif bash -n "$_s" >/dev/null 2>&1; then
+    ok "$(basename "$_s") parses (bash -n)"
+  else
+    bad "$(basename "$_s") failed bash -n"
+  fi
+done
+if [ -x "$BACKUP_SH" ] && [ -x "$RESTORE_SH" ]; then
+  # Stub 'acq' so the scripts pass their CLI-present guard without a real sandbox.
+  _stubdir="$WORK/stub-bin"; mkdir -p "$_stubdir"
+  printf '#!/bin/sh\nexit 0\n' > "$_stubdir/acq"; chmod +x "$_stubdir/acq"
+  _hostbackups="$WORK/host-backups"
+  # Dry-run backup must announce dry-run and write no file.
+  _bout="$(PATH="$_stubdir:$PATH" HOME="$WORK/fakehome" "$BACKUP_SH" verify-sbx "$_hostbackups" 2>&1 || true)"
+  if printf '%s' "$_bout" | grep -q '\[dry-run\]' && [ ! -d "$_hostbackups" ]; then
+    ok "paseo-backup defaults to dry-run and writes nothing"
+  else
+    bad "paseo-backup dry-run did not behave (out='$_bout', dir-exists=$([ -d "$_hostbackups" ] && echo yes || echo no))"
+  fi
+  # Sandbox-name charset guard (SI-10): a bad name must be rejected non-zero.
+  if PATH="$_stubdir:$PATH" "$BACKUP_SH" 'bad name!' >/dev/null 2>&1; then
+    bad "paseo-backup accepted an unsafe sandbox name"
+  else
+    ok "paseo-backup rejects an unsafe sandbox name"
+  fi
+  # Restore auto-selects the NEWEST backup for a sandbox by lexical (=time) order.
+  # The script reads ~/.acq-paseo-backups, so seed that under a fake HOME. The
+  # seeds must be VALID (if empty) tar archives — the restore validity-checks the
+  # resolved tar before printing its dry-run plan.
+  mkdir -p "$WORK/fakehome/.acq-paseo-backups"
+  tar -cf "$WORK/fakehome/.acq-paseo-backups/paseo-state-verify-sbx-20200101T000000Z.tar" -T /dev/null 2>/dev/null
+  tar -cf "$WORK/fakehome/.acq-paseo-backups/paseo-state-verify-sbx-20990101T000000Z.tar" -T /dev/null 2>/dev/null
+  _rout="$(PATH="$_stubdir:$PATH" HOME="$WORK/fakehome" "$RESTORE_SH" verify-sbx 2>&1 || true)"
+  if printf '%s' "$_rout" | grep -q '20990101T000000Z' && printf '%s' "$_rout" | grep -q '\[dry-run\]'; then
+    ok "paseo-restore auto-selects the newest backup and defaults to dry-run"
+  else
+    bad "paseo-restore newest-select/dry-run did not behave (out='$_rout')"
+  fi
+fi
+
 # --- Select the live driver. -------------------------------------------------
 DRIVER=""
 if [ "$RUN_ACQ" = "1" ]; then
@@ -818,7 +871,73 @@ else
   fi
 fi
 
+info "11. Backup/restore round-trip (live, via $DRIVER)"
+# Prove the host-side backup/restore scripts survive a real teardown-shaped
+# scenario against THIS sandbox: back up $PASEO_HOME to the host, drop a sentinel
+# into the guest's $PASEO_HOME and remove it (simulating a fresh, stateless
+# sandbox where the sentinel is gone), then restore and confirm the sentinel
+# comes back — i.e. the snapshot round-trips through the host tar and the guest
+# extract. paseo.pid must NOT appear in the archive.
+if [ -z "$daemon_up" ]; then
+  skip "backup/restore round-trip (daemon not up, so no $PASEO_HOME to snapshot)"
+elif [ ! -x "$KIT_DIR/scripts/paseo-backup" ] || [ ! -x "$KIT_DIR/scripts/paseo-restore" ]; then
+  skip "backup/restore round-trip (scripts missing/not executable)"
+else
+  # Guest paths. Resolve $PASEO_HOME the same way the scripts do.
+  _guest_ph="$(in_sbx 'printf %s "${PASEO_HOME:-$HOME/.paseo}"')"
+  _sentinel="verify-roundtrip-$$-$(date -u +%s)"
+  # Seed a sentinel file + a fake paseo.pid so we can assert both round-trip and
+  # exclusion. Fail-open: if we can't seed, skip rather than falsely fail.
+  _seeded="$(in_sbx "mkdir -p \"$_guest_ph\" && printf '%s' '$_sentinel' > \"$_guest_ph/$_sentinel\" && printf 'stale' > \"$_guest_ph/paseo.pid\" && echo seeded")"
+  if [ "$_seeded" != "seeded" ]; then
+    skip "backup/restore round-trip (could not seed guest \$PASEO_HOME at $_guest_ph)"
+  else
+    _bkdir="$WORK/roundtrip-backups"
+    if ! "$KIT_DIR/scripts/paseo-backup" --apply "$SBX_NAME" "$_bkdir" >/dev/null 2>&1; then
+      bad "paseo-backup --apply failed against the live sandbox"
+    else
+      _tar="$(ls -1 "$_bkdir"/paseo-state-"$SBX_NAME"-*.tar 2>/dev/null | LC_ALL=C sort | tail -n 1)"
+      if [ -z "$_tar" ] || [ ! -s "$_tar" ]; then
+        bad "paseo-backup produced no non-empty tar in $_bkdir"
+      elif tar -tf "$_tar" 2>/dev/null | grep -qx "./paseo.pid"; then
+        bad "backup archive wrongly INCLUDES paseo.pid (should be excluded)"
+      else
+        ok "paseo-backup produced a valid tar excluding paseo.pid"
+        # Remove the sentinel from the guest to simulate lost state, then restore.
+        in_sbx "rm -f \"$_guest_ph/$_sentinel\"" >/dev/null
+        _gone="$(in_sbx "[ -e \"$_guest_ph/$_sentinel\" ] && echo present || echo gone")"
+        if [ "$_gone" != "gone" ]; then
+          bad "could not clear the sentinel before restore (round-trip inconclusive)"
+        elif ! "$KIT_DIR/scripts/paseo-restore" --apply "$SBX_NAME" "$_tar" >/dev/null 2>&1; then
+          bad "paseo-restore --apply failed against the live sandbox"
+        else
+          _back="$(in_sbx "cat \"$_guest_ph/$_sentinel\" 2>/dev/null")"
+          if [ "$_back" = "$_sentinel" ]; then
+            ok "restore round-tripped the sentinel back into \$PASEO_HOME"
+          else
+            bad "sentinel not restored (got '$_back', expected '$_sentinel')"
+          fi
+          # The restore bounces the daemon; confirm it heals back up (bounded).
+          _rt_deadline=$(( $(date +%s) + 45 ))
+          _healed=""
+          while :; do
+            [ "$(in_sbx "$health_probe")" = "yes" ] && { _healed=yes; break; }
+            [ "$(date +%s)" -ge "$_rt_deadline" ] && break
+            sleep "$POLL_INTERVAL"
+          done
+          if [ -n "$_healed" ]; then
+            ok "daemon healed after the restore-triggered bounce"
+          else
+            bad "daemon did not come back within 45s after the restore bounce"
+          fi
+        fi
+      fi
+    fi
+    # Tidy the guest sentinel + fake pid regardless of outcome (fail-open).
+    in_sbx "rm -f \"$_guest_ph/$_sentinel\" \"$_guest_ph/paseo.pid\"" >/dev/null 2>&1 || true
+  fi
+fi
+
 info "Summary"
 [ "$fail" -eq 0 ] && printf '  \033[32mAll checks passed.\033[0m\n' || printf '  \033[31mSome checks failed — see notes above.\033[0m\n'
-
 [ "$fail" -eq 0 ]

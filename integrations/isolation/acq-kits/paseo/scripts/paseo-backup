@@ -1,0 +1,203 @@
+#!/usr/bin/env bash
+#
+# paseo-backup — snapshot a running sandbox's Paseo state to a host tar so it
+# survives sandbox recreation (`acq rm` + a fresh `acq create`/`acq run`).
+#
+# WHAT THIS SOLVES: an acq sandbox is an ephemeral container. Everything under
+# the guest home — including $PASEO_HOME (default ~/.paseo): config.json, the
+# projects registry (projects/projects.json), and Paseo's session/agent metadata
+# — is LOST when the sandbox is destroyed. Only host bind mounts survive. This
+# script copies $PASEO_HOME out to the host BEFORE teardown; the companion
+# `paseo-restore` replays it into a new sandbox afterward.
+#
+# WHAT IS AND IS NOT CAPTURED:
+#   - Captured: the full $PASEO_HOME tree (config.json, projects/, session/agent
+#     records, any other state Paseo persists there) MINUS paseo.pid.
+#   - Excluded: paseo.pid — a supervisor PID lock. Replaying a stale PID into a
+#     fresh container would be misleading; the daemon recreates it on boot.
+#   - NOT captured: git worktree CONTENTS. The kit pins Paseo's worktrees under
+#     <primary-project>/.paseo-worktrees, i.e. inside a host bind mount, so the
+#     worktree files ALREADY survive recreation on their own (as long as the
+#     project is re-mounted at the same guest path). What is lost without this
+#     backup is Paseo's KNOWLEDGE of them (its session/worktree records under
+#     $PASEO_HOME) — restoring this snapshot is exactly what makes Paseo
+#     re-recognize the on-disk worktrees. Logs under ~/.local/state/paseo are
+#     regenerated every boot and are also not captured.
+#     See docs/decisions/backup-restore-paseo-state.md.
+#
+# FILENAME CONTRACT (consumed by paseo-restore's newest-backup default):
+#   <dest>/paseo-state-<sandbox>-<UTC>.tar
+# where <UTC> is a colon-free ISO-8601 basic timestamp (YYYYMMDDTHHMMSSZ) that
+# sorts lexicographically by time. paseo-restore picks the lexicographically
+# last file matching this sandbox prefix as "most recent", so DO NOT change this
+# naming without updating paseo-restore in lockstep.
+#
+# SAFETY: dry-run by default. It only reports what it WOULD capture until you
+# pass --apply. Even the capture is read-only against the sandbox (a `tar -cf -`
+# streamed over `acq exec` stdout); it never mutates guest state.
+#
+# Usage:
+#   paseo-backup [--apply] <sandbox> [dest-dir]
+#   paseo-backup --help
+#
+# Requires the `acq` CLI on PATH and a RUNNING sandbox named <sandbox>.
+
+set -euo pipefail
+IFS=$'\n\t'
+
+APPLY=0
+SANDBOX=""
+DEST_DIR=""
+DEFAULT_DEST="${HOME}/.acq-paseo-backups"
+TMP_OUT=""
+
+usage() {
+  cat <<'EOF'
+Usage: paseo-backup [--apply] <sandbox> [dest-dir]
+
+Snapshot a running acq sandbox's Paseo state ($PASEO_HOME, minus paseo.pid) to a
+host tar so it survives sandbox recreation.
+
+Arguments:
+  <sandbox>    Name of the running acq sandbox to back up.
+  [dest-dir]   Host directory to write the tar into.
+               Default: ~/.acq-paseo-backups
+
+Options:
+  --apply      Actually create the backup. Without it, this is a dry run that
+               only prints what it would do.
+  --help       Show this help.
+
+Output file (naming is a contract with paseo-restore):
+  <dest-dir>/paseo-state-<sandbox>-<UTC>.tar   (UTC = YYYYMMDDTHHMMSSZ)
+EOF
+}
+
+# Sandbox name flows into a filename and an `acq exec` target, so constrain it to
+# a safe charset rather than trusting arbitrary input (SI-10).
+valid_sandbox_name() {
+  case "$1" in
+    "" | *[!A-Za-z0-9._-]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --apply)
+      APPLY=1
+      shift
+      ;;
+    --help | -h)
+      usage
+      exit 0
+      ;;
+    -*)
+      echo "Error: unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+    *)
+      if [[ -z "${SANDBOX}" ]]; then
+        SANDBOX="$1"
+      elif [[ -z "${DEST_DIR}" ]]; then
+        DEST_DIR="$1"
+      else
+        echo "Error: unexpected extra argument: $1" >&2
+        usage >&2
+        exit 2
+      fi
+      shift
+      ;;
+  esac
+done
+
+if [[ -z "${SANDBOX}" ]]; then
+  echo "Error: <sandbox> is required." >&2
+  usage >&2
+  exit 2
+fi
+if ! valid_sandbox_name "${SANDBOX}"; then
+  echo "Error: sandbox name '${SANDBOX}' has characters outside [A-Za-z0-9._-]." >&2
+  exit 2
+fi
+if ! command -v acq >/dev/null 2>&1; then
+  echo "Error: the 'acq' CLI is not on PATH." >&2
+  exit 2
+fi
+
+DEST_DIR="${DEST_DIR:-${DEFAULT_DEST}}"
+
+# Colon-free UTC timestamp so the filename is valid on every filesystem AND sorts
+# lexicographically by time (paseo-restore relies on that ordering).
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+OUT_FILE="${DEST_DIR}/paseo-state-${SANDBOX}-${STAMP}.tar"
+
+# The guest-side capture. Resolve $PASEO_HOME exactly like the kit's own helpers
+# (${PASEO_HOME:-$HOME/.paseo}) and stream a tar of its contents (minus the PID
+# lock) to stdout. Read-only against the sandbox. `--exclude ./paseo.pid` is
+# relative to the -C dir. If $PASEO_HOME does not exist yet, tar has nothing to
+# archive and we detect the empty result below rather than write a bogus file.
+GUEST_CAPTURE='
+  set -eu
+  PH="${PASEO_HOME:-$HOME/.paseo}"
+  if [ ! -d "$PH" ]; then
+    echo "paseo-backup: $PH does not exist in the sandbox" >&2
+    exit 3
+  fi
+  tar -C "$PH" --exclude ./paseo.pid -cf - .
+'
+
+cleanup() {
+  if [[ -n "${TMP_OUT}" && -f "${TMP_OUT}" ]]; then
+    rm -f "${TMP_OUT}"
+  fi
+}
+trap cleanup EXIT INT TERM
+
+if [[ "${APPLY}" -ne 1 ]]; then
+  cat <<EOF
+[dry-run] would back up Paseo state from sandbox '${SANDBOX}'.
+[dry-run]   source (in guest): \${PASEO_HOME:-\$HOME/.paseo} (excluding paseo.pid)
+[dry-run]   destination file:  ${OUT_FILE}
+[dry-run] no files written and the sandbox is untouched.
+[dry-run] re-run with --apply to create the backup.
+EOF
+  exit 0
+fi
+
+mkdir -p "${DEST_DIR}"
+
+# Write to a temp file in the destination dir first, then atomically rename on
+# success — an interrupted or failed capture never leaves a truncated .tar that
+# paseo-restore might later pick as "most recent".
+TMP_OUT="$(mktemp "${DEST_DIR}/.paseo-state-${SANDBOX}.XXXXXX.tar.part")"
+
+# Capture the tar stream. We must distinguish a real guest failure (sandbox not
+# running, $PASEO_HOME missing) from success. `acq exec` does not reliably
+# propagate the guest exit code, so we verify the result is a non-empty, valid
+# tar afterward rather than trusting $?.
+if ! acq exec "${SANDBOX}" -- sh -c "${GUEST_CAPTURE}" >"${TMP_OUT}"; then
+  echo "Error: 'acq exec ${SANDBOX}' failed — is the sandbox running?" >&2
+  exit 1
+fi
+
+if [[ ! -s "${TMP_OUT}" ]]; then
+  echo "Error: captured an empty archive — the sandbox may not be running or" >&2
+  echo "       \$PASEO_HOME is absent. Nothing was written." >&2
+  exit 1
+fi
+
+# Sanity-check that we actually got a readable tar before promoting it.
+if ! tar -tf "${TMP_OUT}" >/dev/null 2>&1; then
+  echo "Error: captured data is not a valid tar archive; refusing to keep it." >&2
+  exit 1
+fi
+
+mv "${TMP_OUT}" "${OUT_FILE}"
+TMP_OUT=""
+
+BYTES="$(wc -c <"${OUT_FILE}" | tr -d ' ')"
+echo "Backed up Paseo state from '${SANDBOX}' to:"
+echo "  ${OUT_FILE} (${BYTES} bytes)"
+echo "Restore it into a new sandbox with:  paseo-restore --apply ${SANDBOX}"

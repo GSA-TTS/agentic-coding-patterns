@@ -328,6 +328,55 @@ rewrites `config.json` when the value differs. If you need a custom fixed root,
 don't rely on the wrapper's pin — the current kit does not expose an override env
 var.
 
+## I recreated the sandbox and lost my Paseo state / my worktrees show as orphaned
+
+**Symptom.** After `acq rm` + a fresh `acq create`/`acq run`, the Paseo UI has no
+projects, no session history, and any git worktrees under
+`<project>/.paseo-worktrees` are present on disk but unknown to Paseo.
+
+**Cause.** The sandbox is ephemeral — only host bind mounts survive. `$PASEO_HOME`
+(default `~/.paseo`: `config.json`, the projects registry, session/agent records)
+is lost on recreate. The worktree *files* persist (they live on the host mount),
+but Paseo's *records* of them do not, so they look orphaned.
+
+**Prevention + recovery.** Use the kit's host-side scripts. Snapshot before you
+recreate, restore after the new sandbox is up:
+
+```bash
+# BEFORE recreating (dry-run prints what it would do; --apply writes it):
+scripts/paseo-backup --apply <sandbox>      # → ~/.acq-paseo-backups/paseo-state-<sandbox>-<UTC>.tar
+
+# recreate as usual …
+acq rm <sandbox>
+acq run opencode /path/to/your/project
+
+# AFTER the new sandbox is up (auto-selects the most recent backup for it):
+scripts/paseo-restore --apply <sandbox>
+```
+
+`paseo-restore` streams the snapshot back into `$PASEO_HOME` and bounces the
+daemon so it re-reads the restored config and re-recognizes your projects and
+worktrees. Confirm it took:
+
+```bash
+acq exec <sandbox> -- sh -c 'cat "${PASEO_HOME:-$HOME/.paseo}/config.json"; ls "${PASEO_HOME:-$HOME/.paseo}/projects" 2>/dev/null'
+acq exec <sandbox> -- sh -c 'curl -fsS http://127.0.0.1:6767/api/health && echo OK'
+```
+
+Notes:
+
+- **You must have made a backup first** — restore replays a prior snapshot; it
+  cannot recover state that was never captured. Recreation is unplanned by
+  definition, so back up proactively when your Paseo state matters.
+- **`worktrees.root` self-corrects on the next `acq run`** (the wrapper re-pins
+  it). If you restored into a **detached** `acq create`, run
+  `acq run opencode <project>` once so the root matches this sandbox's mount.
+- **Same guest path required.** Worktrees line up with the restored records only
+  if the project is re-mounted at the same guest path (acq's normal behavior).
+- **`paseo.pid` is intentionally not in the backup**; the daemon recreates it.
+
+See `docs/decisions/backup-restore-paseo-state.md` for the design.
+
 ## Endless `relay_error` / `relay_control_disconnected` in the daemon log
 
 **Symptom.** The daemon log fills with, every ~30s:
