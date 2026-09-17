@@ -71,7 +71,11 @@ test("computeOutput: no existing config copies verbatim (comments preserved)", a
   assert.equal(merged, false)
   assert.equal(output, sourceText)
   assert.deepEqual(conflicts, [])
-  assert.match(output, /usai-provider-kit:owns-opencode-config/)
+  // The kit's own opencode.jsonc is a symlink to the acq-kits copy (the two
+  // kits share one file; see integrations/isolation/sbx-kits/usai-provider-kit/README.md
+  // "Shared config with acq-kits"), so the marker text is the shared,
+  // un-suffixed form -- there is no separate "-kit"-suffixed marker anymore.
+  assert.match(output, /usai-provider:owns-opencode-config/)
 })
 
 test("computeOutput: existing config merges, USAi provider survives, foreign key kept", async () => {
