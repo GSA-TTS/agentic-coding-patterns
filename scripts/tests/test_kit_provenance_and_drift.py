@@ -224,7 +224,10 @@ class TestAcqSbxDriftGuard:
         # implemented.
         acq = json.loads(_strip_jsonc((ACQ_USAI / "files/home/usai-config/opencode.jsonc").read_text()))
         sbx = json.loads(_strip_jsonc((SBX_USAI / "files/home/usai-config/opencode.jsonc").read_text()))
-        assert acq == sbx, "acq-kits and sbx-kits usai opencode.jsonc JSON payloads have diverged (GSA-TTS/agentic-coding-patterns#273)"
+        assert acq == sbx, (
+            "acq-kits and sbx-kits usai opencode.jsonc JSON payloads have "
+            "diverged (GSA-TTS/agentic-coding-patterns#273)"
+        )
 
     def test_merge_and_sync_scripts_identical(self):
         for rel in (
