@@ -1,0 +1,84 @@
+# spec.yaml - cloud-gov (a neutral acq mixin kit, hybrid/v1)
+#
+# Configures a sandbox for cloud.gov work:
+#   - install/verify the Cloud Foundry CLI (`cf`) at create time;
+#   - allow-list cloud.gov control-plane, app-route, and documentation domains;
+#   - document the acq secret binding needed for CF OAuth token injection without
+#     placing the token in environment variables or files readable by the agent.
+#
+# AUTH MODEL: the kit does NOT store or expose a Cloud Foundry token. Users set a
+# custom acq secret from `cf oauth-token` and bind it to api.fr.cloud.gov. acq's
+# active backend injects a placeholder in CF_OAUTH_TOKEN and swaps it on the
+# egress path for requests to the CF API host; the raw token stays in the
+# host-side secret store / backend proxy.
+schemaVersion: "hybrid/v1"
+kind: mixin
+name: cloud-gov
+displayName: cloud.gov Cloud Foundry CLI
+description: >
+  Installs the Cloud Foundry CLI and allow-lists cloud.gov control-plane,
+  application-route, and documentation domains so agents can inspect and operate
+  cloud.gov applications through proxied egress. Cloud Foundry authorization is
+  supplied through acq's custom secret mechanism, using a token captured from
+  `cf oauth-token`, so credentials are not stored in the kit or exposed in the
+  sandbox environment.
+
+caps:
+  network:
+    allow:
+      # cloud.gov apex and every cloud.gov subdomain, including API, login/UAA,
+      # dashboard, docs, and public application routes. Keep wildcard hosts
+      # quoted: leading-* YAML scalars can otherwise be parsed as aliases by
+      # downstream translators.
+      - cloud.gov:443
+      - "**.cloud.gov:443"
+      # Upstream Cloud Foundry documentation.
+      - docs.cloudfoundry.org:443
+      - cli.cloudfoundry.org:443
+      # Pinned CF CLI release tarballs used by cloud-gov-install-cf-cli.sh.
+      - github.com:443
+      - objects.githubusercontent.com:443
+
+files:
+  - path: /home/agent/cloud-gov-install-cf-cli.sh
+    mode: "0755"
+    source: files/home/cloud-gov-install-cf-cli.sh
+    description: Install or verify the Cloud Foundry CLI at sandbox create time
+  - path: /home/agent/cloud-gov-configure-cf-auth.sh
+    mode: "0755"
+    source: files/home/cloud-gov-configure-cf-auth.sh
+    description: Target cloud.gov and configure cf with the injected token placeholder
+
+commands:
+  - phase: install
+    user: "0"
+    description: Install the Cloud Foundry CLI if it is missing
+    command:
+      - sh
+      - /home/agent/cloud-gov-install-cf-cli.sh
+  - phase: startup
+    user: "1000"
+    description: Target cloud.gov and configure cf auth from the injected placeholder
+    command:
+      - sh
+      - /home/agent/cloud-gov-configure-cf-auth.sh
+
+agentContext: |
+  ## cloud.gov
+
+  This sandbox has the Cloud Foundry CLI (`cf`) available for cloud.gov work and
+  egress allow-listed for the cloud.gov API, login/UAA, log streaming, common app
+  route domains, and cloud.gov / Cloud Foundry documentation domains.
+
+  Authorization is handled through acq's secret injection path. The sandbox may
+  contain a backend placeholder in `CF_OAUTH_TOKEN` and `~/.cf/config.json`, but
+  not the real token. The user should set the secret from a host shell where they
+  are already logged in to cloud.gov:
+
+  ```
+  cf oauth-token | acq secret set -g cloud-gov --host api.fr.cloud.gov --env CF_OAUTH_TOKEN
+  ```
+
+  Do not ask the user to paste the token into chat or write it to the workspace.
+  Use normal `cf` commands; real token material remains outside agent-readable
+  files.

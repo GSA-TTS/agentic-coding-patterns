@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+#
+# verify - host-side validation for the cloud-gov acq mixin kit.
+#
+# By default this runs offline checks only. Set RUN_ACQ=1 to create a throwaway
+# sandbox and verify the CF CLI plus cloud.gov/docs network reachability.
+
+set -uo pipefail
+
+KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+REPO_ROOT="$(cd "$KIT_DIR/../../../.." && pwd)"
+SBX_NAME="cloud-gov-verify-$$"
+WORK="$(mktemp -d "$KIT_DIR/verify-workspace.XXXXXX")"
+CREATE_LOG="$WORK/create.log"
+KEEP="${KEEP:-0}"
+RUN_ACQ="${RUN_ACQ:-0}"
+
+pass=0
+fail=0
+ok() { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass + 1)); }
+bad() { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail + 1)); }
+skip() { printf '  \033[33mSKIP\033[0m %s\n' "$1"; }
+info() { printf '\n\033[1m%s\033[0m\n' "$1"; }
+
+cleanup() {
+  if [ "$KEEP" = "1" ]; then
+    printf '\nKEEP=1 set; leaving sandbox %s and %s in place.\n' "$SBX_NAME" "$WORK" >&2
+    return
+  fi
+  acq rm "$SBX_NAME" >/dev/null 2>&1 || true
+  rm -rf "$WORK" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT INT TERM
+
+in_acq() { acq exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true; }
+
+info "0. Offline preconditions"
+[ -f "$KIT_DIR/spec.yaml" ] && ok "kit spec.yaml present" || { bad "spec.yaml missing"; exit 1; }
+[ -f "$KIT_DIR/files/home/cloud-gov-install-cf-cli.sh" ] && ok "install script present" || bad "install script missing"
+
+if command -v bash >/dev/null 2>&1; then
+  if bash -n "$KIT_DIR/files/home/cloud-gov-install-cf-cli.sh"; then
+    ok "install script parses"
+  else
+    bad "install script has a shell syntax error"
+  fi
+else
+  skip "bash not on PATH - skipped shell parse check"
+fi
+
+info "1. Validate the neutral kit spec"
+VALIDATOR="$REPO_ROOT/integrations/isolation/acq-kits/validate-kits.py"
+if ! command -v python3 >/dev/null 2>&1; then
+  skip "validate-kits.py not run (python3 not on PATH)"
+elif [ ! -f "$VALIDATOR" ]; then
+  skip "validate-kits.py not found at $VALIDATOR"
+elif ! python3 -c 'import jsonschema, yaml' >/dev/null 2>&1; then
+  skip "validate-kits.py needs jsonschema + pyyaml"
+else
+  if val_out="$(python3 "$VALIDATOR" --root "$REPO_ROOT" 2>&1)"; then
+    ok "acq-kits validate-kits.py passes"
+  else
+    bad "validate-kits.py failed:"
+    printf '%s\n' "$val_out" | sed 's/^/    | /' >&2
+  fi
+fi
+
+if [ "$RUN_ACQ" != "1" ]; then
+  info "2. Live sandbox check"
+  skip "RUN_ACQ=1 not set - skipped live cloud.gov sandbox verification"
+  printf '\nSummary\n  %d passed, %d failed\n' "$pass" "$fail"
+  [ "$fail" -eq 0 ]
+  exit $?
+fi
+
+info "2. Live sandbox preconditions"
+if ! command -v acq >/dev/null 2>&1; then
+  bad "acq not on PATH"
+  exit 1
+fi
+ok "acq on PATH"
+
+if acq secret has -g cloud-gov >/dev/null 2>&1; then
+  ok "global cloud-gov secret is set"
+else
+  bad "RUN_ACQ=1 requires a global cloud-gov secret for authenticated verification"
+  printf '  Set it from a host shell with: cf oauth-token | acq secret set -g cloud-gov --host api.fr.cloud.gov --env CF_OAUTH_TOKEN\n' >&2
+  exit 1
+fi
+
+info "3. Create sandbox with the kit"
+printf '  creating %s (workspace %s)...\n' "$SBX_NAME" "$WORK"
+if acq create --name "$SBX_NAME" --kit "$KIT_DIR" opencode "$WORK" >"$CREATE_LOG" 2>&1; then
+  ok "sandbox created with cloud-gov kit"
+else
+  bad "acq create failed"
+  sed 's/^/  | /' "$CREATE_LOG" >&2
+  exit 1
+fi
+
+info "4. CF CLI installed"
+cf_version="$(in_acq 'cf version')"
+printf '  %s\n' "${cf_version:-<no output>}"
+case "$cf_version" in
+  *"cf version"*) ok "cf CLI reports a version" ;;
+  *) bad "cf CLI did not report a version" ;;
+esac
+
+info "5. cloud.gov API and docs reachable"
+for url in \
+  https://api.fr.cloud.gov/v3/info \
+  https://cloud.gov/ \
+  https://docs.cloud.gov/ \
+  https://docs.cloudfoundry.org/ \
+  https://cli.cloudfoundry.org/; do
+  status="$(in_acq "curl -sS -o /dev/null -w '%{http_code}' '$url'")"
+  printf '  %s -> %s\n' "$url" "${status:-<none>}"
+  case "$status" in
+    2*|3*|401|403) ok "$url reachable" ;;
+    *) bad "$url not reachable (status ${status:-none})" ;;
+  esac
+done
+
+info "6. Authenticated CF API wiring"
+auth_status="$(in_acq "curl -sS -o /dev/null -w '%{http_code}' -H \"Authorization: \$CF_OAUTH_TOKEN\" https://api.fr.cloud.gov/v3/organizations")"
+printf '  authenticated /v3/organizations -> %s\n' "${auth_status:-<none>}"
+case "$auth_status" in
+  2*|3*) ok "authenticated CF API probe succeeded" ;;
+  401|403) bad "authenticated CF API probe rejected credentials (status $auth_status)" ;;
+  *) bad "authenticated CF API probe failed (status ${auth_status:-none})" ;;
+esac
+
+cf_auth="$(in_acq 'cf orgs >/dev/null 2>&1 && printf ok || printf fail')"
+case "$cf_auth" in
+  ok) ok "cf CLI authenticated command succeeds" ;;
+  *) bad "cf CLI authenticated command failed" ;;
+esac
+
+info "Summary"
+printf '  %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ] && printf '  \033[32mAll checks passed.\033[0m\n' || printf '  \033[31mSome checks failed - see notes above.\033[0m\n'
+
+[ "$fail" -eq 0 ]

@@ -58,6 +58,7 @@ globs:
 # Ignore files
 ignores:
   - "node_modules"
+  - ".venv"
   - "deleteme"
   - "**/fixtures/**"
 
