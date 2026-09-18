@@ -13,8 +13,13 @@ live feeds -> build-catalog.mjs -> catalog.json -> per-harness emitters
 - **live feeds** — the USAi models list plus enrichment metadata.
 - **build-catalog.mjs** — derives `catalog.json` (added in a later issue).
 - **catalog.json** — the generated catalog. **GENERATED — do not hand-edit.**
-- **per-harness emitters** — render `catalog.json` into each harness config
-  (e.g. the OpenCode `opencode.jsonc` model block).
+- **per-harness emitters** — render `catalog.json` into each harness config:
+  - `emitters/opencode.mjs` — the OpenCode `opencode.jsonc` model block.
+  - `emitters/prime-agent.mjs` — the prime-agent kit `models.json`.
+  - `emitters/goose.mjs` — the goose-server kit `custom_providers/custom_usai.json`
+    (a goose custom provider; `name` per model is the catalog model **id** goose
+    selects by, and `api_key_env` is the goose guest's injected env-var name
+    `CUSTOM_USAI_API_KEY`, not the catalog's `USAI_API_KEY`).
 
 ## Files
 
@@ -25,10 +30,13 @@ live feeds -> build-catalog.mjs -> catalog.json -> per-harness emitters
 
 ## Safety guarantee
 
-A byte-exact round-trip test against the shipped `opencode.jsonc` is the safety
-guarantee: the emitter must reproduce the current, human-reviewed config exactly.
-That test is the gate that lets us treat `catalog.json` as the source of truth
-without silently changing any shipped kit.
+Byte-exact round-trip / lockstep tests against each shipped config are the safety
+guarantee: every emitter must reproduce the current, human-reviewed shipped file
+exactly (`tests/emitters.test.mjs` for OpenCode; `tests/models-json-regen.test.mjs`
+for prime-agent; `tests/goose-provider-regen.test.mjs` for goose). Those tests are
+the gate that lets us treat `catalog.json` as the source of truth without silently
+changing any shipped kit — if the catalog changes and a shipped config is not
+regenerated, CI fails.
 
 ## `apiKeyEnv` is a name, not a secret
 
