@@ -44,11 +44,12 @@ no extra mount argument.
   It writes to a temp file and atomically renames on success, and verifies the
   decoded result is a valid tar before promoting it — an interrupted capture
   never leaves a truncated archive.
-- **`paseo-restore [--apply] <sandbox> [backup-tar]`** base64-encodes the backup
-  tar on the host, pipes the text into the guest which decodes and extracts it
-  into `${PASEO_HOME:-$HOME/.paseo}`, then bounces the daemon so it re-reads the
-  restored config/projects. With no `backup-tar` it auto-selects the most recent
-  backup for that sandbox.
+- **`paseo-restore [--apply] <sandbox> [backup-tar]`** prunes legacy runtime logs
+  from older backups, base64-encodes the backup tar on the host, pipes the text
+  into the guest which decodes and extracts it into a temporary sibling directory,
+  atomically swaps that directory into `${PASEO_HOME:-$HOME/.paseo}`, then bounces
+  the daemon so it re-reads the restored config/projects. With no `backup-tar` it
+  auto-selects the most recent backup for that sandbox.
 - Both **default to dry-run**; `--apply` is required to write or mutate anything.
 
 ## Transport is base64 text, not raw binary
@@ -106,11 +107,13 @@ marker the guest prints, so a partial extract is never mistaken for success.
   fresh container is misleading; the daemon recreates it on boot. (Paseo's lock is
   stale-tolerant, so a leftover would be reclaimed anyway, but there is no reason
   to carry it.)
-- **Excluded — `daemon.log`:** the daemon's live log, observed at ~1.8 MB and
-  growing on a real sandbox. Because it is appended *while the tar reads it*, GNU
+- **Excluded — `daemon.log`, `daemon.log.*`, `daemon.log.txt`, and
+  `*-daemon.log`:** live or rotated daemon logs can be multi-MB and are not
+  restorable state. Because live logs are appended *while the tar reads them*, GNU
   tar reports "file changed as we read it" and exits non-zero (rc 1, or rc 2 when
   a whole entry is affected) — the observed cause of the first live backup
-  failing. It is pure runtime noise, not restorable state, so it is excluded.
+  failing. Rotated logs have also made restore appear hung because they can be
+  streamed before useful state files over acq's base64 text channel.
 - **Excluded — `daemon-keypair.json`, `cli-client-id`, `server-id`:**
   per-daemon/-install identity that the daemon regenerates on first boot.
   Carrying it into a *different* sandbox is pointless at best and confusing at

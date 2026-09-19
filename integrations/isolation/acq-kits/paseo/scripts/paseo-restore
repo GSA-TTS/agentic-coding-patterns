@@ -46,6 +46,8 @@ APPLY=0
 SANDBOX=""
 BACKUP_TAR=""
 DEFAULT_DEST="${HOME}/.acq-paseo-backups"
+TMP_FILTER_DIR=""
+TMP_FILTERED_TAR=""
 
 usage() {
   cat <<'EOF'
@@ -158,17 +160,53 @@ if ! tar -tf "${BACKUP_TAR}" >/dev/null 2>&1; then
   exit 1
 fi
 
-# The guest-side restore. Recreate $PASEO_HOME if needed, then base64-DECODE the
-# archive from stdin and extract it. We transport the tar as BASE64 TEXT, never
-# raw binary: `acq exec` was observed to hang on a binary stdin stream (a guest
-# `cat | wc -c` never saw EOF), while multi-line TEXT stdin reaches EOF normally.
-# base64 keeps the payload in the safe text channel. Prints a unique DONE marker
-# on a completed extract; acq faithfully propagates the guest exit code.
+cleanup() {
+  if [[ -n "${TMP_FILTER_DIR}" && -d "${TMP_FILTER_DIR}" ]]; then
+    rm -rf "${TMP_FILTER_DIR}"
+  fi
+  if [[ -n "${TMP_FILTERED_TAR}" && -f "${TMP_FILTERED_TAR}" ]]; then
+    rm -f "${TMP_FILTERED_TAR}"
+  fi
+}
+trap cleanup EXIT INT TERM
+
+# The guest-side restore. Decode and extract into a sibling temp directory, then
+# swap it into $PASEO_HOME only after the extract is complete. We transport the
+# tar as BASE64 TEXT, never raw binary: `acq exec` was observed to hang on a
+# binary stdin stream (a guest `cat | wc -c` never saw EOF), while multi-line TEXT
+# stdin reaches EOF normally. base64 keeps the payload in the safe text channel.
+# Prints a unique DONE marker on a completed extract; acq faithfully propagates
+# the guest exit code.
 GUEST_RESTORE='
   set -eu
   PH="${PASEO_HOME:-$HOME/.paseo}"
-  mkdir -p "$PH"
-  base64 -d | tar -C "$PH" -xf -
+  parent="$(dirname "$PH")"
+  base="$(basename "$PH")"
+  mkdir -p "$parent"
+  tmp="$(mktemp -d "$parent/.${base}.restore.XXXXXX")"
+  old=""
+  cleanup_restore() {
+    [ -n "$tmp" ] && [ -d "$tmp" ] && rm -rf "$tmp"
+    if [ -n "$old" ] && [ -e "$old" ] && [ ! -e "$PH" ]; then
+      mv "$old" "$PH" 2>/dev/null || true
+    fi
+  }
+  trap cleanup_restore EXIT INT TERM
+  base64 -d | tar -C "$tmp" -xf -
+  if [ -e "$PH" ]; then
+    old="$(mktemp -d "$parent/.${base}.old.XXXXXX")"
+    rmdir "$old"
+    mv "$PH" "$old"
+  fi
+  if ! mv "$tmp" "$PH"; then
+    if [ -n "$old" ] && [ -e "$old" ] && [ ! -e "$PH" ]; then
+      mv "$old" "$PH" 2>/dev/null || true
+    fi
+    exit 1
+  fi
+  tmp=""
+  [ -n "$old" ] && rm -rf "$old"
+  trap - EXIT INT TERM
   echo "PASEO_RESTORE_EXTRACT_OK $PH"
 '
 
@@ -224,6 +262,21 @@ EOF
   exit 0
 fi
 
+# Older backups may include rotated daemon logs. They are not state, and when
+# they appear before config/projects/agents in tar order they make restore look
+# hung over acq's base64 text transport. Prune them before streaming.
+if tar -tf "${BACKUP_TAR}" | grep -Eq '(^|/)daemon\.log(\.|$)|(^|/)[0-9]{8}-[0-9]{4}-[0-9]{2}-daemon\.log$|(^|/)daemon\.log\.txt$'; then
+  TMP_FILTER_DIR="$(mktemp -d "${TMPDIR:-/tmp}/paseo-restore-filter.XXXXXX")"
+  TMP_FILTERED_TAR="$(mktemp "${TMPDIR:-/tmp}/paseo-restore-filtered.XXXXXX.tar")"
+  echo "paseo-restore: pruning runtime log files from backup before transport" >&2
+  tar -xf "${BACKUP_TAR}" -C "${TMP_FILTER_DIR}"
+  find "${TMP_FILTER_DIR}" -type f \
+    \( -name 'daemon.log' -o -name 'daemon.log.*' -o -name 'daemon.log.txt' -o -name '*-daemon.log' \) \
+    -delete
+  tar -C "${TMP_FILTER_DIR}" -cf "${TMP_FILTERED_TAR}" .
+  BACKUP_TAR="${TMP_FILTERED_TAR}"
+fi
+
 # Stream the archive into the guest as BASE64 TEXT. Raw binary on acq's stdin was
 # observed to hang (guest never sees EOF); base64 text reaches EOF normally. We
 # pipe `base64 <tar> | acq exec ... 'base64 -d | tar -x'` and write acq's output
@@ -235,6 +288,8 @@ if ! command -v base64 >/dev/null 2>&1; then
   exit 2
 fi
 RESTORE_OUT_FILE="$(mktemp "${TMPDIR:-/tmp}/paseo-restore.XXXXXX")"
+RESTORE_BYTES="$(wc -c <"${BACKUP_TAR}" | tr -d ' ')"
+echo "paseo-restore: streaming ${RESTORE_BYTES} bytes into '${SANDBOX}' (waiting for completion marker)" >&2
 restore_rc=0
 base64 <"${BACKUP_TAR}" | acq exec "${SANDBOX}" -- sh -c "${GUEST_RESTORE}" \
   >"${RESTORE_OUT_FILE}" 2>&1 || restore_rc=$?

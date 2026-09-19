@@ -16,9 +16,8 @@
 #     below.
 #   - Excluded:
 #       * paseo.pid — supervisor PID lock; the daemon recreates it on boot.
-#       * daemon.log — the daemon's live, multi-MB log. It is actively appended
-#         while we read (which makes GNU tar exit non-zero) and is pure runtime
-#         noise, not state worth restoring.
+#       * daemon.log and rotated daemon logs — live/runtime noise that can bloat
+#         the archive and make restore look hung over acq's text transport.
 #       * daemon-keypair.json, cli-client-id, server-id — per-daemon/-install
 #         identity the daemon regenerates on first boot; carrying it into a
 #         DIFFERENT sandbox is pointless at best.
@@ -168,8 +167,8 @@ OUT_FILE="${DEST_DIR}/paseo-state-${SANDBOX}-${STAMP}.tar"
 #
 # EXCLUSIONS (paths are relative to the -C dir, i.e. $PASEO_HOME root):
 #   - paseo.pid        — supervisor PID lock; recreated on boot.
-#   - daemon.log       — the daemon's live, multi-MB log; pure runtime noise and
-#                        the most churn-prone file.
+#   - daemon.log, daemon.log.*, *-daemon.log, daemon.log.txt — live/runtime
+#                        log artifacts; pure noise and the most churn-prone files.
 #   - daemon-keypair.json, cli-client-id, server-id — per-daemon/-install
 #                        identity the daemon regenerates on first boot; carrying
 #                        it into a DIFFERENT sandbox is pointless at best.
@@ -192,6 +191,9 @@ GUEST_CAPTURE='
     --ignore-failed-read \
     --exclude ./paseo.pid \
     --exclude ./daemon.log \
+    --exclude ./daemon.log.* \
+    --exclude ./daemon.log.txt \
+    --exclude ./*-daemon.log \
     --exclude ./daemon-keypair.json \
     --exclude ./cli-client-id \
     --exclude ./server-id \

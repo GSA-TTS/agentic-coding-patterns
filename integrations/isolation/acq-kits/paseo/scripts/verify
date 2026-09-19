@@ -235,6 +235,43 @@ if [ -x "$BACKUP_SH" ] && [ -x "$RESTORE_SH" ]; then
   else
     bad "paseo-restore newest-select/dry-run did not behave (out='$_rout')"
   fi
+
+  _legacy_src="$WORK/legacy-restore-src"
+  _legacy_out="$WORK/legacy-restore-out"
+  _legacy_tar="$WORK/legacy-restore.tar"
+  mkdir -p "$_legacy_src/projects" "$_legacy_src/agents/example" "$_legacy_out"
+  printf 'noise' > "$_legacy_src/20260101-0000-01-daemon.log"
+  printf 'noise' > "$_legacy_src/daemon.log.txt"
+  printf '{"ok":true}\n' > "$_legacy_src/config.json"
+  printf '[]\n' > "$_legacy_src/projects/projects.json"
+  printf '[]\n' > "$_legacy_src/projects/workspaces.json"
+  printf '{}\n' > "$_legacy_src/agents/example/agent.json"
+  tar -C "$_legacy_src" -cf "$_legacy_tar" .
+  cat > "$_stubdir/acq" <<'SH'
+#!/bin/sh
+if [ "$1" = "exec" ]; then
+  while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do
+    shift
+  done
+  [ "$#" -gt 0 ] && shift
+  case "$*" in
+    *'base64 -d'*) exec "$@" ;;
+    *) exit 0 ;;
+  esac
+else
+  exit 0
+fi
+SH
+  chmod +x "$_stubdir/acq"
+  _restore_apply_out="$(PATH="$_stubdir:$PATH" HOME="$WORK/fakehome" PASEO_HOME="$_legacy_out/.paseo" "$RESTORE_SH" --apply verify-sbx "$_legacy_tar" 2>&1 || true)"
+  if [ -f "$_legacy_out/.paseo/config.json" ] \
+    && [ ! -e "$_legacy_out/.paseo/20260101-0000-01-daemon.log" ] \
+    && [ ! -e "$_legacy_out/.paseo/daemon.log.txt" ] \
+    && printf '%s' "$_restore_apply_out" | grep -q 'streaming'; then
+    ok "paseo-restore filters legacy logs and reports progress"
+  else
+    bad "paseo-restore legacy filter/progress failed (out='$_restore_apply_out')"
+  fi
 fi
 
 # --- Select the live driver. -------------------------------------------------
@@ -883,12 +920,14 @@ if [ -z "$daemon_up" ]; then
 elif [ ! -x "$KIT_DIR/scripts/paseo-backup" ] || [ ! -x "$KIT_DIR/scripts/paseo-restore" ]; then
   skip "backup/restore round-trip (scripts missing/not executable)"
 else
-  # Guest paths. Resolve $PASEO_HOME the same way the scripts do.
-  _guest_ph="$(in_sbx 'printf %s "${PASEO_HOME:-$HOME/.paseo}"')"
-  _sentinel="verify-roundtrip-$$-$(date -u +%s)"
-  # Seed a sentinel file + a fake paseo.pid so we can assert both round-trip and
-  # exclusion. Fail-open: if we can't seed, skip rather than falsely fail.
-  _seeded="$(in_sbx "mkdir -p \"$_guest_ph\" && printf '%s' '$_sentinel' > \"$_guest_ph/$_sentinel\" && printf 'stale' > \"$_guest_ph/paseo.pid\" && echo seeded")"
+    # Guest paths. Resolve $PASEO_HOME the same way the scripts do.
+    _guest_ph="$(in_sbx 'printf %s "${PASEO_HOME:-$HOME/.paseo}"')"
+    _sentinel="verify-roundtrip-$$-$(date -u +%s)"
+    # Seed a sentinel file, fake paseo.pid, and rotated log artifacts so we can
+    # assert round-trip and exclusions. Fail-open: if we can't seed, skip rather
+    # than falsely fail.
+    _seeded="$(in_sbx "mkdir -p \"$_guest_ph\" && printf '%s' '$_sentinel' > \"$_guest_ph/$_sentinel\" && printf 'stale' > \"$_guest_ph/paseo.pid\" && printf 'noise' > \"$_guest_ph/20260101-0000-01-daemon.log\" && printf 'noise' > \"$_guest_ph/daemon.log.txt\" && echo seeded")"
+
   if [ "$_seeded" != "seeded" ]; then
     skip "backup/restore round-trip (could not seed guest \$PASEO_HOME at $_guest_ph)"
   else
@@ -899,10 +938,10 @@ else
       _tar="$(ls -1 "$_bkdir"/paseo-state-"$SBX_NAME"-*.tar 2>/dev/null | LC_ALL=C sort | tail -n 1)"
       if [ -z "$_tar" ] || [ ! -s "$_tar" ]; then
         bad "paseo-backup produced no non-empty tar in $_bkdir"
-      elif tar -tf "$_tar" 2>/dev/null | grep -qx "./paseo.pid"; then
-        bad "backup archive wrongly INCLUDES paseo.pid (should be excluded)"
+      elif tar -tf "$_tar" 2>/dev/null | grep -Eq "^\./(paseo\.pid|20260101-0000-01-daemon\.log|daemon\.log\.txt)$"; then
+        bad "backup archive wrongly INCLUDES runtime-only files"
       else
-        ok "paseo-backup produced a valid tar excluding paseo.pid"
+        ok "paseo-backup produced a valid tar excluding runtime-only files"
         # Remove the sentinel from the guest to simulate lost state, then restore.
         in_sbx "rm -f \"$_guest_ph/$_sentinel\"" >/dev/null
         _gone="$(in_sbx "[ -e \"$_guest_ph/$_sentinel\" ] && echo present || echo gone")"
@@ -934,7 +973,7 @@ else
       fi
     fi
     # Tidy the guest sentinel + fake pid regardless of outcome (fail-open).
-    in_sbx "rm -f \"$_guest_ph/$_sentinel\" \"$_guest_ph/paseo.pid\"" >/dev/null 2>&1 || true
+    in_sbx "rm -f \"$_guest_ph/$_sentinel\" \"$_guest_ph/paseo.pid\" \"$_guest_ph/20260101-0000-01-daemon.log\" \"$_guest_ph/daemon.log.txt\"" >/dev/null 2>&1 || true
   fi
 fi
 

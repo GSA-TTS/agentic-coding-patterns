@@ -169,18 +169,20 @@ scripts/paseo-restore <sandbox>
 scripts/paseo-restore --apply <sandbox>
 ```
 
-`paseo-restore` streams the snapshot back into `$PASEO_HOME` and restarts the
-daemon so it re-reads the restored config and re-recognizes your projects and
-worktrees.
+`paseo-restore` prunes legacy runtime logs from older backups, streams the
+snapshot back into a temporary directory in the sandbox, atomically swaps it into
+`$PASEO_HOME` after a complete extract, and restarts the daemon so it re-reads
+the restored config and re-recognizes your projects and worktrees.
 
 - **What's captured:** the `$PASEO_HOME` tree (`config.json`, `projects/`,
   `schedules/`, session records) minus files that should not travel between
-  sandboxes: `paseo.pid` (a PID lock the daemon recreates), `daemon.log` (the
-  live, multi-MB log — excluded so a concurrent write can't fail the archive),
-  the per-install identity `daemon-keypair.json` / `cli-client-id` / `server-id`
-  (regenerated on boot), and `models/` (large, re-downloadable model caches — a
-  speech model alone is ~460 MB). Logs under `~/.local/state/paseo` are also
-  regenerated every boot and are not captured.
+  sandboxes: `paseo.pid` (a PID lock the daemon recreates), `daemon.log`,
+  `daemon.log.*`, `daemon.log.txt`, and `*-daemon.log` (live or rotated runtime
+  logs — excluded so concurrent writes cannot fail the archive and restore does
+  not crawl through non-state data), the per-install identity `daemon-keypair.json`
+  / `cli-client-id` / `server-id` (regenerated on boot), and `models/` (large,
+  re-downloadable model caches — a speech model alone is ~460 MB). Logs under
+  `~/.local/state/paseo` are also regenerated every boot and are not captured.
 - **Worktrees:** their contents are **not** in the backup — they already persist
   on the host mount. The restored `$PASEO_HOME` is what makes Paseo re-recognize
   them, as long as the project is re-mounted at the **same guest path** (acq's
