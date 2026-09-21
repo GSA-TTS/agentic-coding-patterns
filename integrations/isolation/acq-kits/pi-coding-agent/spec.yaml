@@ -25,8 +25,12 @@
 # openchamber / paseo, which each publish a browser-UI port). Publishes NO
 # ports.
 #
-# Design rationale (install-method choice, --ignore-scripts residual risk,
-# npm prefix choice, CA-bundle wrapper) lives in docs/decisions/, not here.
+# Design rationale for the npm prefix choice and the CA-bundle wrapper lives
+# in docs/decisions/. The install-method choice (npm registry, not
+# pi.dev/install.sh) and the --ignore-scripts residual risk are each
+# contained enough to stay where they're used: see README.md "Install
+# method" and "Supply-chain notes", and this file's own commands: block and
+# the install script's comments.
 #
 # MODEL PROVIDER CONFIG IS DELIBERATELY DEFERRED, not merely out of scope:
 # pairing a models.json install step with a hand-written placeholder catalog
@@ -71,15 +75,15 @@ caps:
       # needed — see openchamber's own note on why one host, unsuffixed, is
       # sufficient). Deliberately NOT pi.dev and NOT any
       # github.com/*.githubusercontent.com release-asset host — see
-      # docs/decisions/ for why. This kit's egress surface is intentionally
-      # the smallest in the family.
+      # README.md "Install method" for why. This kit's egress surface is
+      # intentionally the smallest in the family.
       - registry.npmjs.org
 
 files:
-  # Lifecycle script. Mode 0755 (executable). Builds a per-user npm prefix,
-  # a per-boot CA trust bundle, and the runtime wrapper that carries that
-  # bundle into `pi`'s own invocations — see docs/decisions/ for why each of
-  # these exists.
+  # Lifecycle script. Mode 0755 (executable). Builds a per-user npm prefix
+  # (docs/decisions/local-prefix-not-npm-global.md), a per-boot CA trust
+  # bundle, and the runtime wrapper that carries that bundle into `pi`'s own
+  # invocations (docs/decisions/ca-bundle-wrapper-not-env-var.md).
   - path: /home/agent/pi-coding-agent-install.sh
     mode: "0755"
     source: files/home/pi-coding-agent-install.sh

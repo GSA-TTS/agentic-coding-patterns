@@ -120,7 +120,7 @@ become the real thing," not a one-off invention for this kit.
 ## Links
 
 - `../files/home/pi-coding-agent-install.sh` — the install-time CA-bundle
-  block this decision's runtime rebuild parallels.
+  block this decision's boot-time wrapper rewrite parallels.
 - [`local-prefix-not-npm-global.md`](local-prefix-not-npm-global.md) — why the
   wrapper lives at `$HOME/.local/bin/pi` specifically.
 - `../../openchamber/docs/decisions/wrapper-entrypoint-owns-server.md` — the

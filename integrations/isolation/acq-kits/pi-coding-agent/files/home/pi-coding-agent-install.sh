@@ -85,49 +85,18 @@ case "$_pi_version" in
     ;;
 esac
 
-# Single shared, FIXED log path for this boot's run — the CA-decode-failure
-# path and the npm-install-failure path both append to it, rather than each
-# creating its own separate mktemp file: a second, per-path mktemp file would
-# exist even on a fully successful boot as an empty, never-read leftover
-# under /tmp, since mktemp creates the file immediately on call, not lazily
-# on first write. A FIXED path (rather than mktemp) avoids that same problem
-# one level up, since this block runs unconditionally near the top of the
-# script, not only inside an error path. Truncated (not appended-to-forever)
-# at the start of every run, so the log always reflects only the CURRENT
-# boot's run, never a prior one's.
+# Single shared, FIXED log path for this boot's run (see
+# docs/decisions/ for why fixed, not mktemp).
 _log="$HOME/.local/state/pi-coding-agent/install.log"
 mkdir -p "$(dirname "$_log")"
 : > "$_log"
 
-# Explicit, unprivileged per-user npm prefix: $HOME/.local, not
-# $HOME/.npm-global (the openchamber/paseo convention) and not pi's own
-# installer's runtime prefix-detection-with-fallback logic. See
-# docs/decisions/local-prefix-not-npm-global.md for why $HOME/.local
-# specifically.
-#
-# An explicit, unconditional prefix (rather than probing at runtime whether
-# some OTHER prefix happens to be writable) is also more auditable and
-# idempotent in a sandbox startup script — this remains true independent of
-# the .local-vs-.npm-global choice above, and is why this script still does
-# not use pi's own installer's runtime-detection logic.
+# Explicit, unprivileged per-user npm prefix — see
+# docs/decisions/local-prefix-not-npm-global.md for why $HOME/.local.
 NPM_PREFIX="$HOME/.local"
 
-# Build a CA bundle for Node's HTTPS requests — UNCONDITIONALLY, on every
-# boot, not only when pi is freshly installed: (1) npm's own tarball download
-# below needs it during an install, and (2) the exported wrapper this script
-# writes near the end needs an ALWAYS-CURRENT bundle path for pi's own later
-# LLM-provider calls, since a proxy CA could change between boots and a stale
-# bundle would fail closed with a confusing TLS error rather than a clear one.
-# NODE_EXTRA_CA_CERTS *appends* to Node's built-in roots, which lack both the
-# sandbox proxy CA and any HTTPS-inspection CA (e.g. Zscaler). This block is
-# ADAPTED from openchamber's own script (same PROXY_CA_CERT_B64 decode +
-# system-bundle-append + NODE_EXTRA_CA_CERTS-export structure and trust
-# rationale), with one deliberate improvement: a failed base64 decode is
-# surfaced with a clear error (into the shared $_log above, not a second,
-# separate temp file) instead of silently producing an incomplete bundle
-# (openchamber's own block swallows that same decode failure via
-# `2>/dev/null` — not fixed here, since that's a pre-existing, separately-
-# tracked concern in a different kit).
+# Build a CA bundle for Node's HTTPS requests, unconditionally, every boot —
+# see docs/decisions/ca-bundle-wrapper-not-env-var.md.
 _ca="$HOME/.local/state/pi-coding-agent/ca-bundle.pem"
 mkdir -p "$(dirname "$_ca")"
 : > "$_ca"
@@ -148,38 +117,19 @@ if ! command -v pi >/dev/null 2>&1; then
   mkdir -p "$NPM_PREFIX"
   # `--prefix` on the command line (below), not just an npm_config_prefix
   # env-var export: some base images persistently export NPM_CONFIG_PREFIX
-  # (uppercase) — npm's config precedence reads that over a lowercase
-  # npm_config_prefix export, so setting only the env var here can silently
-  # install into whatever the base image's own uppercase variable points at
-  # instead of this kit's intended per-user prefix. The CLI flag has the
-  # highest precedence and always wins regardless of what the base image has
-  # already exported.
+  # (uppercase), which npm's config precedence reads over a lowercase
+  # npm_config_prefix export — the CLI flag always wins regardless.
 
   # The standard install path pi's own installer itself runs — NOT the
-  # experimental PI_EXPERIMENTAL=1 managed-install mode (unstable upstream,
-  # could change or break without notice). --ignore-scripts: verified
-  # against the published npm registry metadata that
-  # @earendil-works/pi-coding-agent AND every one of its transitive
-  # dependencies (checked individually, not assumed) declare NO
-  # preinstall/postinstall lifecycle script, so this flag has nothing to
-  # skip anywhere in the dependency tree for this exact pinned version.
-  # NOTE (residual risk, see spec.yaml header): --ignore-scripts blocks
-  # lifecycle HOOKS only — npm still performs ordinary package-manager
-  # bookkeeping regardless (e.g. linking the package's declared `bin` entry
-  # onto PATH), and none of that vets the code that runs when `pi` is later
-  # INVOKED. A compromised package can still run arbitrary code on first
-  # `pi` execution with full agent-user privilege. The sandbox itself
-  # remains the real containment boundary.
+  # experimental PI_EXPERIMENTAL=1 managed-install mode. --ignore-scripts
+  # residual risk: see docs/decisions/ for the full analysis; in short, it
+  # blocks npm lifecycle hooks at install time only, not code that runs when
+  # `pi` is later invoked.
   _pkg="@earendil-works/pi-coding-agent"
   [ "$_pi_version" != "latest" ] && _pkg="${_pkg}@${_pi_version}"
 
-  # --fetch-timeout bounds how long a hanging (not merely erroring)
-  # connection to the registry can block sandbox startup, e.g. a firewall
-  # that silently drops packets rather than refusing the connection
-  # outright. --fetch-retries=0: this is a STARTUP-phase script that runs on
-  # every boot, not a one-shot manual install — retrying against a systemic
-  # failure just multiplies the timeout for no benefit, since the NEXT
-  # sandbox start already retries naturally. Fail fast instead.
+  # --fetch-timeout bounds a hanging (not merely erroring) registry
+  # connection; --fetch-retries=0 because the next boot already retries.
   if npm install -g --ignore-scripts --prefix "$NPM_PREFIX" \
       --fetch-timeout=30000 --fetch-retries=0 \
       "$_pkg" >>"$_log" 2>&1; then

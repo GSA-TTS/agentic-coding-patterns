@@ -63,7 +63,6 @@ fail=0
 ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass+1)); }
 bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail+1)); }
 skip() { printf '  \033[33mSKIP\033[0m %s\n' "$1"; }
-warn() { printf '  \033[33mWARN\033[0m %s\n' "$1"; }
 info() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 
 cleanup() {
@@ -244,14 +243,12 @@ else
 fi
 
 info "4b. \`pi\` is the CA-bundle wrapper, not npm's bare bin link"
-# REGRESSION GUARD: step 4 above only proves SOMETHING resolves at
-# `command -v pi` on the default PATH — it does not prove that something is
-# THIS kit's wrapper (see docs/decisions/ca-bundle-wrapper-not-env-var.md)
-# rather than npm's plain bin symlink straight to the package's entrypoint.
-# Without the wrapper, `pi` runs with no NODE_EXTRA_CA_CERTS at all on an
-# inspecting network, and every LLM-provider call fails TLS — exactly the
-# most severe finding this kit's wrapper exists to fix, previously with no
-# regression guard of its own.
+# Step 4 above only proves SOMETHING resolves at `command -v pi` on the
+# default PATH — it does not prove that something is THIS kit's wrapper (see
+# docs/decisions/ca-bundle-wrapper-not-env-var.md) rather than npm's plain
+# bin symlink straight to the package's entrypoint. Without the wrapper,
+# `pi` runs with no NODE_EXTRA_CA_CERTS at all on an inspecting network, and
+# every LLM-provider call fails TLS.
 wrapper_ok="$(in_sbx 'grep -q NODE_EXTRA_CA_CERTS "$(command -v pi)" && echo yes')"
 if [ "$wrapper_ok" = "yes" ]; then
   ok "\`pi\` is the wrapper and exports NODE_EXTRA_CA_CERTS"
@@ -278,8 +275,8 @@ info "6. Idempotent re-run — running the install script again is a clean no-op
 # sandbox boot, which this script does not perform) and confirm it exits 0
 # and does not clobber the existing binary or re-download anything
 # unnecessarily. The script's own guard is
-# `command -v pi >/dev/null 2>&1 || { …install… }`; with pi already present
-# this should be fast and silent about installing.
+# `if ! command -v pi >/dev/null 2>&1; then …install… fi`; with pi already
+# present this should be fast and silent about installing.
 if [ -z "$installed" ]; then
   skip "idempotent re-run check (pi was never installed — nothing to re-run against)"
 else

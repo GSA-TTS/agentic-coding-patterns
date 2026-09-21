@@ -57,10 +57,10 @@ way the `openchamber`/`paseo` web-UI kits do.
 ## Install method: npm registry, not `pi.dev/install.sh`
 
 pi.dev publishes a curl-pipe-to-shell installer, but this kit does **not**
-fetch it — see [`docs/decisions/`](docs/decisions/) for the full rationale
-(a mutable live script with an interactive Node/npm preflight path, and
-`pi.dev` egress this kit's allow-list deliberately omits). The short version:
-`npm install -g @earendil-works/pi-coding-agent` needs only
+fetch it (a mutable live script with an interactive Node/npm preflight path,
+and `pi.dev` egress this kit's allow-list deliberately omits — see the
+install script's own header comment for the full rationale). The short
+version: `npm install -g @earendil-works/pi-coding-agent` needs only
 `registry.npmjs.org`.
 
 **Open question, not yet verified:** does the installed `pi` binary itself
@@ -75,7 +75,7 @@ Deny-by-default. The allow-list in `spec.yaml` is pi's own install host only:
 - `registry.npmjs.org` — npm package metadata and tarballs (no wildcard
   subdomain needed)
 
-Deliberately **absent** (see `docs/decisions/` for why): `pi.dev`,
+Deliberately **absent** (see "Install method" above for why): `pi.dev`,
 `github.com` / `*.githubusercontent.com`.
 
 Model-provider egress (`api.gsa.usai.gov`) is **not** here — that is the
@@ -100,11 +100,11 @@ Model-provider egress (`api.gsa.usai.gov`) is **not** here — that is the
   well past a minute, which would delay sandbox startup. Retries are set to 0
   deliberately: this is a startup-phase script that runs on every boot, not a
   one-shot manual install, so the *next* boot already retries naturally.
-- **`--ignore-scripts` is not a complete mitigation.** See
-  [`docs/decisions/`](docs/decisions/) for the full residual-risk analysis;
-  in short, it blocks npm lifecycle hooks at install time, not code that runs
-  when `pi` is later **invoked** — the ephemeral, single-tenant sandbox
-  remains the real containment boundary.
+- **`--ignore-scripts` is not a complete mitigation.** It blocks npm
+  lifecycle hooks at install time, not code that runs when `pi` is later
+  **invoked** (see the install script's own comment on this exact flag) —
+  the ephemeral, single-tenant sandbox remains the real containment
+  boundary.
 - **CA-bundle handling is load-bearing, not defensive** — see
   [`docs/decisions/ca-bundle-wrapper-not-env-var.md`](docs/decisions/ca-bundle-wrapper-not-env-var.md)
   for the full design and why a runtime wrapper, not an install-time
