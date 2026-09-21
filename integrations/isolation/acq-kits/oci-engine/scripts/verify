@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+#
+# verify — host-side live validation for the oci-engine acq mixin kit.
+#
+# Creates a throwaway sandbox with this kit applied and confirms that a ROOTLESS
+# podman OCI engine actually works the way an agent uses it:
+#   - `podman version` / `podman info` succeed as the agent user (rootless);
+#   - a real `podman build` FROM scratch succeeds (this is stronger than `podman
+#     info`: info does not open /dev/fuse or mount a layer, so it can pass even
+#     when the storage mount would fail — the exact /dev/fuse trap ADR-0020
+#     describes); and
+#   - the `docker` -> `podman` wrapper resolves on PATH.
+#
+# NOTE (hybrid/v1): this is a LIVE check and needs a sandbox-capable host with
+# `sbx` installed and logged in. It is NOT run in CI (CI cannot nest sandboxes),
+# exactly like the zscaler-ca-certificate kit's verify. The backend-agnostic gate
+# is integrations/isolation/acq-kits/validate-kits.py (`make validate-kits`).
+#
+# It creates a temporary sandbox named "oci-engine-verify-*" and removes it at
+# the end (and on interrupt); it does not touch your other sandboxes. Set KEEP=1
+# to retain the sandbox for inspection. Nothing here is secret — podman needs no
+# credentials to run rootless.
+#
+# Usage (from anywhere):
+#   path/to/oci-engine/scripts/verify
+#   KEEP=1 path/to/oci-engine/scripts/verify        # keep the sandbox
+
+set -uo pipefail
+
+KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+SPEC_FILE="$KIT_DIR/spec.yaml"
+SBX_NAME="oci-engine-verify-$$"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/oci-engine-verify.XXXXXX")"
+CREATE_LOG="$WORK/sbx-create.log"
+KEEP="${KEEP:-0}"
+
+pass=0
+fail=0
+ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass+1)); }
+bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail+1)); }
+info() { printf '\n\033[1m%s\033[0m\n' "$1"; }
+
+cleanup() {
+  if [ "$KEEP" = "1" ]; then
+    printf '\nKEEP=1 set; leaving sandbox %s and %s in place.\n' "$SBX_NAME" "$WORK" >&2
+    return
+  fi
+  sbx rm -f "$SBX_NAME" >/dev/null 2>&1 || true
+  rm -rf "$WORK" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT INT TERM
+
+# Run a command in the sandbox AS THE AGENT USER (rootless is the whole point).
+in_sbx_agent() { sbx exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true; }
+
+info "0. Preconditions"
+if ! command -v sbx >/dev/null 2>&1; then
+  echo "  sbx not on PATH. Install sbx and retry (this live check is skipped in CI)." >&2
+  exit 1
+fi
+echo "  sbx version: $(sbx version 2>/dev/null | grep -oE 'v?[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1)"
+if [ -f "$SPEC_FILE" ]; then ok "kit spec.yaml present"; else bad "spec.yaml missing"; exit 1; fi
+
+info "1. sbx kit validate"
+if sbx kit validate "$KIT_DIR" >/dev/null 2>&1; then ok "kit validates"; else bad "kit failed validation"; fi
+
+info "2. Create a sandbox with the kit"
+echo "  creating $SBX_NAME (workspace $WORK)..."
+agent="shell"
+if ! sbx create --name "$SBX_NAME" --kit "$KIT_DIR" "$agent" "$WORK" >"$CREATE_LOG" 2>&1; then
+  agent="opencode"
+  if sbx create --name "$SBX_NAME" --kit "$KIT_DIR" "$agent" "$WORK" >"$CREATE_LOG" 2>&1; then
+    ok "sandbox created with --kit (agent: $agent)"
+  else
+    bad "sbx create failed (exit $?)"
+    sed 's/^/  | /' "$CREATE_LOG" >&2
+    exit 1
+  fi
+else
+  ok "sandbox created with --kit (agent: $agent)"
+fi
+sleep 2
+
+info "3. podman is installed and reports version (as the agent)"
+pv="$(in_sbx_agent "podman version --format '{{.Client.Version}}' 2>/dev/null || podman --version 2>/dev/null")"
+if [ -n "$pv" ]; then ok "podman present (version: $pv)"; else bad "podman not runnable as the agent"; fi
+
+info "4. rootless podman info succeeds as the agent"
+# rootlessness: podman reports its security rootless flag. We accept a non-empty
+# 'true' but do not hard-fail if the format key differs across podman versions —
+# the authoritative rootless proof is the build in step 5 running as the agent.
+rootless="$(in_sbx_agent "podman info --format '{{.Host.Security.Rootless}}' 2>/dev/null")"
+if [ "$(in_sbx_agent "podman info >/dev/null 2>&1 && echo ok")" = "ok" ]; then
+  ok "podman info succeeds (rootless=${rootless:-unknown})"
+else
+  bad "podman info failed as the agent (storage-driver or rootless setup issue)"
+fi
+
+info "5. real layer mount: podman build FROM scratch as the agent (rootless)"
+# Stronger than `podman info`: this opens /dev/fuse and mounts a layer, so it
+# catches the fuse-overlayfs/vfs storage trap ADR-0020 describes. No registry
+# pull, no egress (FROM scratch).
+built="$(in_sbx_agent '
+  d=$(mktemp -d) || exit 1
+  printf "FROM scratch\nCOPY hi /hi\n" > "$d/Containerfile"
+  echo hi > "$d/hi"
+  if podman build -q -t oci-engine-verify:local "$d" >/dev/null 2>&1; then echo ok; fi
+  podman rmi -f oci-engine-verify:local >/dev/null 2>&1 || true
+  rm -rf "$d"
+')"
+if [ "$built" = "ok" ]; then
+  ok "podman build FROM scratch succeeded (rootless layer mount works)"
+else
+  bad "podman build failed rootless (storage driver may not work on this base)"
+fi
+
+info "6. docker -> podman wrapper resolves on PATH"
+which_docker="$(in_sbx_agent "command -v docker")"
+if [ "$which_docker" = "/usr/local/bin/docker" ]; then
+  ok "docker resolves to the kit wrapper ($which_docker)"
+else
+  bad "docker does not resolve to /usr/local/bin/docker (got: ${which_docker:-<none>})"
+fi
+docker_routes="$(in_sbx_agent "docker version --format '{{.Client.Version}}' 2>/dev/null || docker --version 2>/dev/null")"
+if [ -n "$docker_routes" ]; then
+  ok "docker wrapper routes to podman (reported: $docker_routes)"
+else
+  bad "docker wrapper did not produce a version (wrapper may not exec podman)"
+fi
+
+info "Summary"
+printf '  %d passed, %d failed\n' "$pass" "$fail"
+if [ "$fail" -eq 0 ]; then
+  printf '  \033[32mAll checks passed.\033[0m\n'
+else
+  printf '  \033[31mSome checks failed — see notes above.\033[0m\n'
+fi
+
+[ "$fail" -eq 0 ]

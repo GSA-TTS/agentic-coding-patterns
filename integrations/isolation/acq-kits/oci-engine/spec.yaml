@@ -1,0 +1,156 @@
+# spec.yaml — oci-engine (a neutral acq mixin kit, hybrid/v1)
+#
+# WHAT oci-engine IS: a rootless OCI container engine (podman) provided as a
+# neutral, OPT-IN capability. Agents frequently need to run OCI images inside the
+# sandbox (`docker run`, bringing up a docker-compose.yaml). This kit installs
+# podman + its rootless prerequisites, configures a storage driver that works on
+# an overlay root, grants the device nodes rootless podman needs, writes a
+# Docker-Hub-first registry config, and shadows the base image's (dead-socket)
+# docker CLI with a wrapper that routes to podman.
+#
+# WHY A KIT (ADR-0030 — "move the OCI engine out of the msb adapter into a neutral
+# opt-in kit"): this provisioning used to live inside the msb backend adapter (in
+# the sibling agentic-coding-quickstart repo). ADR-0030 moves it here so it is a
+# neutral, backend-agnostic capability every acq backend can apply through the
+# shared hybrid/v1 vocabulary, and so it is OFF by default — acq selects this kit
+# only when the operator opts in via ACQ_ENABLE_OCI_KIT on the quickstart side.
+#
+# SECURITY POSTURE (ADR-0020 — "rootless podman OCI engine"):
+#   - The engine RUNS ROOTLESS as the agent, never root. Only the install/config
+#     step needs root; the `startup` device-grant step group-scopes /dev/net/tun
+#     and /dev/fuse to the agent so the unprivileged agent can use them.
+#   - NO docker-in-docker daemon lifecycle: podman is daemonless (forks runc/crun
+#     per invocation), so there is no socket and no supervisor to keep alive.
+#   - Explicit, minimal device/capability handling (the two device nodes above,
+#     group-scoped 0660 — not world-writable).
+#   - Deterministic Docker-Hub-first registry resolution with
+#     short-name-mode = "enforcing" as the DEFAULT (least-privilege /
+#     prompt-injection defense): unqualified names resolve deterministically to
+#     Docker Hub, and interactively-ambiguous short names fail closed instead of
+#     being silently substituted (image-substitution / typosquatting defense). We
+#     deliberately do NOT default to "permissive".
+#
+# NEUTRAL (backend-agnostic) hybrid/v1 form, structured like the sibling kits
+# (prime-agent / usai-provider). acq's kit-translate layer maps the declarative
+# caps/files/commands/environment below onto whichever isolation backend acq has
+# active (sbx, msb) — this kit carries no backend-specific config and no backend
+# shortcut (podman has no native primitive on either backend; see README parity).
+schemaVersion: "hybrid/v1"
+kind: mixin
+name: oci-engine
+displayName: OCI Engine (rootless podman)
+description: >
+  Provides a rootless OCI container engine (podman) inside the sandbox so agents
+  can run OCI images (docker run / docker compose). Installs podman and the
+  rootless prerequisites at create time, selects a storage driver that works on
+  an overlay root, grants the required device nodes on every start, and aliases
+  docker -> podman. Docker-Hub-first registry resolution with
+  short-name-mode=enforcing by default (least-privilege / prompt-injection
+  defense, ADR-0020). Opt-in mixin selected by acq only when ACQ_ENABLE_OCI_KIT
+  is set; the engine runs rootless as the agent, never as root.
+
+# EGRESS (deny-by-default): deliberately NO caps.network.allow here.
+#
+# The install pulls podman + the rootless prerequisites from the OS package
+# MIRROR (apt/dnf/apk). The correct mirror host depends on the base distro
+# (archive.ubuntu.com / ports.ubuntu.com / security.ubuntu.com for Ubuntu,
+# *.debian.org for Debian, dl-cdn.alpinelinux.org for Alpine, ...), and under
+# acq's DEFAULT balanced egress baseline (isolation ADR-0002 / balanced.yaml)
+# those OS-package-mirror hosts are ALREADY reachable — they are in the curated
+# `core` baseline. Hardcoding a single distro's mirror here would be (a) wrong for
+# the other distros and (b) redundant with the baseline for the common case.
+#
+# So this kit adds NO kit-level egress and relies on the balanced baseline. With
+# ACQ_NETWORK_TIER=strict (kit hosts only) or a base whose egress is otherwise
+# narrowed, the mirror is unreachable and the install fails soft (a clear
+# warning; provision continues; OCI is simply unavailable) — the operator then
+# widens egress or bakes the packages into the base image. This mirrors the
+# fail-soft behavior of the original adapter implementation (ADR-0020/ADR-0030).
+# No leading-`*` host would appear here anyway (YAML alias trap), since there are
+# no entries.
+
+files:
+  # Lifecycle scripts. Mode 0755 (executable); each backend's file-drop
+  # materializes them at the in-guest path as the agent user.
+  - path: /home/agent/oci-engine-install.sh
+    mode: "0755"
+    source: files/home/oci-engine-install.sh
+    description: Install + configure rootless podman (create-time, root). Idempotent, fails soft.
+  - path: /home/agent/oci-engine-grant-devs.sh
+    mode: "0755"
+    source: files/home/oci-engine-grant-devs.sh
+    description: Group-scope /dev/net/tun + /dev/fuse to the agent (every start, root). Idempotent.
+  # Config payloads staged in the agent home, then installed into /etc/containers
+  # by the root install script (the stage-in-home-then-move-as-root pattern the
+  # zscaler-ca-certificate kit uses: uid 1000 cannot write the root-owned
+  # /etc/containers dir directly). Mode 0644 for config data; 0755 for the wrapper
+  # (it is exec'd as a program). These are NOT referenced in commands[] argv —
+  # the install script reads them — so they need no matching command entry.
+  - path: /home/agent/oci-engine-config/01-acq-shortnames.conf
+    mode: "0644"
+    source: files/home/oci-engine-config/01-acq-shortnames.conf
+    description: podman short-name aliases (hello/hello-world -> docker.io). Installed to /etc/containers/registries.conf.d/.
+  - path: /home/agent/oci-engine-config/docker
+    mode: "0755"
+    source: files/home/oci-engine-config/docker
+    description: docker->podman wrapper. Installed to /usr/local/bin/docker (shadows the dead-socket base docker CLI).
+
+commands:
+  # INSTALL phase — create-time, once, as root (uid "0"). Installs podman + the
+  # rootless prerequisites and writes the storage/registry config + docker
+  # wrapper. Idempotent and best-effort (a missing mirror or unsupported base
+  # exits 0 with a clear message rather than aborting provision).
+  - phase: install
+    user: "0"
+    description: Install + configure the rootless podman OCI engine (create-time, root).
+    command:
+      - sh
+      - /home/agent/oci-engine-install.sh
+  # STARTUP phase — every start, as root (uid "0"). Re-grants /dev/net/tun +
+  # /dev/fuse to the agent: /dev is a devtmpfs re-created each boot, so the
+  # create-time grant is lost on restart and must be re-applied. Cheap +
+  # idempotent; runs to completion (NOT background: true — it is not a supervisor
+  # loop). Schema note: the hybrid/v1 `user` field is a numeric uid (^[0-9]+$);
+  # "0" is root, which both the chown and the /dev/net directory create require.
+  - phase: startup
+    user: "0"
+    description: Re-grant the rootless-podman device nodes (/dev/net/tun, /dev/fuse) on every start.
+    command:
+      - sh
+      - /home/agent/oci-engine-grant-devs.sh
+
+# NO publishedPorts / volumes: podman needs neither. It is a CLI engine (no web
+# UI to publish) and uses fuse-overlayfs/vfs on the existing overlay root (no
+# dedicated block device — the whole point of choosing podman over docker:dind).
+
+# Non-secret guest env knobs. NO secrets (podman needs none to run rootless).
+#   OCI_ENGINE_PKGS            — override the installed package set / mirror names.
+#   OCI_ENGINE_SHORT_NAME_MODE — enforcing (default) | permissive | disabled;
+#                                "permissive" REMOVES the typosquatting guardrail
+#                                and is an explicit operator opt-out (ADR-0020).
+#   OCI_ENGINE_AGENT_USER      — the unprivileged user the engine runs as (for a
+#                                base whose agent account is not named "agent").
+environment:
+  OCI_ENGINE_PKGS: "podman podman-compose fuse-overlayfs uidmap passt slirp4netns"
+  OCI_ENGINE_SHORT_NAME_MODE: "enforcing"
+  OCI_ENGINE_AGENT_USER: "agent"
+
+agentContext: |
+  ## OCI Engine (rootless podman)
+
+  This sandbox has a rootless **podman** OCI engine installed, and `docker`
+  aliases to it — so `docker run …`, `docker build …`, and `docker compose …`
+  all work (they route to podman; `docker compose` uses the podman-compose
+  provider). The engine runs **rootless as you (the agent)**, never as root, and
+  is daemonless (no dockerd, no socket to start).
+
+  Unqualified image names resolve to **Docker Hub** by default. Short-name
+  resolution is `enforcing`: an ambiguous unqualified name fails closed rather
+  than being silently substituted — prefer fully-qualified names (e.g.
+  `docker.io/library/nginx`) when in doubt. This is a deliberate least-privilege
+  / prompt-injection defense (ADR-0020), not a bug.
+
+# No backend_shortcuts / backend_extras: podman has no native primitive on either
+# sbx or msb, so this kit is written entirely in the neutral vocabulary (caps /
+# files / commands / environment), which acq's kit translation feeds to whichever
+# backend is active. See the README parity note.

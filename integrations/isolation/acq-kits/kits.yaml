@@ -80,6 +80,28 @@ kits:
       ONE port. The daemon runs unsecured (no PASEO_PASSWORD); the sandbox is the
       security boundary and the port is host loopback only.
 
+  oci-engine:
+    backends: [sbx, msb]
+    parity: |
+      Opt-in mixin that provides a rootless OCI container engine (podman) so
+      agents can run OCI images (docker run / docker compose). Written entirely
+      in the neutral vocabulary with no backend shortcut or extras: neither sbx
+      nor msb has a native "provide a container engine" primitive, so both apply
+      the identical sequence — an install-phase script
+      (files/home/oci-engine-install.sh) installs podman + the rootless
+      prerequisites at create time and drops the storage/registry config and the
+      docker->podman wrapper (files/home/oci-engine-config/), and a startup-phase
+      script (files/home/oci-engine-grant-devs.sh) re-grants /dev/net/tun +
+      /dev/fuse to the agent on every start (/dev is re-created each boot). The
+      engine runs ROOTLESS as the agent (never root); registry resolution is
+      Docker-Hub-first with short-name-mode=enforcing by default (least-privilege
+      / prompt-injection defense, ADR-0020). Publishes NO ports and needs NO
+      volumes. Off by default: acq applies it only when the operator opts in via
+      ACQ_ENABLE_OCI_KIT (ADR-0030 moved this provisioning out of the msb adapter
+      into this neutral kit). Egress: none declared — the OS package mirror is
+      already in the balanced baseline (ADR-0002); a strict tier fails the install
+      soft.
+
   prime-agent:
     backends: [sbx, msb]
     parity: |
