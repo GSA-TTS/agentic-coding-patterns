@@ -31,9 +31,23 @@ On **every start** (the `startup` phase, run as root) it group-scopes
 podman networking and the fuse-overlayfs storage mount work. `/dev` is a devtmpfs
 re-created each boot, so this must re-run on restart, not just at create.
 
+Also on **every start** (a second `startup` step, run as the **agent**) it runs a
+rootless self-test — a real `podman build` FROM scratch, which opens `/dev/fuse`
+and mounts a layer (stronger than `podman info`, which does not). If that fails,
+it writes a **user-level `~/.config/containers/storage.conf`** selecting the `vfs`
+driver and retries. This is the documented recovery for a base whose
+overlay+fuse-overlayfs combo is rejected under rootless (where `podman info`
+passes but a layer mount fails). It is idempotent (only writes on a failed build
+when no user driver is already set) and fails soft (a failed self-test never
+aborts the boot).
+
 Every step is **idempotent** and **best-effort**: a missing package mirror or an
 unsupported base image produces a clear warning and leaves provision to continue
-(OCI is simply unavailable) rather than aborting the sandbox.
+(OCI is simply unavailable) rather than aborting the sandbox. In particular the
+`install` step **exits 0 even when the package install fails** — a non-zero
+`install`-phase exit would fail `sbx create` (a dead sandbox), the opposite of
+the promised fail-soft behavior, so the package-manager step is caught and falls
+through to a single warn-and-exit-0 re-check. See `docs/decisions/`.
 
 ## Rootless / security posture (ADR-0020)
 

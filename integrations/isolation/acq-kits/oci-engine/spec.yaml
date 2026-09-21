@@ -80,6 +80,10 @@ files:
     mode: "0755"
     source: files/home/oci-engine-grant-devs.sh
     description: Group-scope /dev/net/tun + /dev/fuse to the agent (every start, root). Idempotent.
+  - path: /home/agent/oci-engine-vfs-fallback.sh
+    mode: "0755"
+    source: files/home/oci-engine-vfs-fallback.sh
+    description: Rootless self-test; on failure write a user-level vfs storage.conf (every start, agent). Idempotent, fails soft.
   # Config payloads staged in the agent home, then installed into /etc/containers
   # by the root install script (the stage-in-home-then-move-as-root pattern the
   # zscaler-ca-certificate kit uses: uid 1000 cannot write the root-owned
@@ -118,6 +122,23 @@ commands:
     command:
       - sh
       - /home/agent/oci-engine-grant-devs.sh
+  # STARTUP phase — every start, as the AGENT user (uid "1000"). Reproduces the
+  # reference adapter's rootless recovery path: run a real rootless layer-mount
+  # self-test (podman build FROM scratch) and, if it fails, write a user-level
+  # ~/.config/containers/storage.conf selecting the vfs driver (the documented
+  # fallback for a base whose overlay+fuse-overlayfs combo is rejected under
+  # rootless — where `podman info` passes but a layer mount fails). Runs as the
+  # agent because it owns ~/.config, and after the root device grant above.
+  # Idempotent (only writes on a failed build when no user driver is set) and
+  # fails soft (always exits 0 — a failed self-test must not abort the boot).
+  # NOT background: true (runs to completion). Schema note: `user` is a numeric
+  # uid (^[0-9]+$); "1000" is the agent (same convention as the sibling kits).
+  - phase: startup
+    user: "1000"
+    description: Rootless self-test; write a user-level vfs storage.conf fallback on failure (every start, agent).
+    command:
+      - sh
+      - /home/agent/oci-engine-vfs-fallback.sh
 
 # NO publishedPorts / volumes: podman needs neither. It is a CLI engine (no web
 # UI to publish) and uses fuse-overlayfs/vfs on the existing overlay root (no

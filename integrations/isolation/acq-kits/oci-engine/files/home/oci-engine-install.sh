@@ -64,18 +64,40 @@ esac
 STAGE_DIR="/home/agent/oci-engine-config"
 
 # 1) Ensure the podman binary is present (idempotent; distro-detected).
+#
+# FAIL-SOFT (critical): this is an `install`-phase command, and a non-zero
+# install exit FAILS `sbx create` (a dead sandbox) — see the sibling
+# zscaler-ca-certificate kit's docs/decisions and this kit's docs/decisions. The
+# package-manager step MUST NOT abort the script on failure (an unreachable
+# mirror, a locked dpkg, an unsupported base). The top-level `set -eu` would
+# otherwise abort on the FIRST non-zero return from apt-get/dnf/apk before the
+# fail-soft re-check below is ever reached. So we run the whole install in a
+# SUBSHELL under its own `set -e` and swallow its exit: any failure inside falls
+# through to the single fail-soft exit at the `command -v podman` re-check, which
+# prints a clear warning and exits 0 so provision continues.
+#
+# The reference adapter (_acq_msb_ensure_oci) did not have this bug only because
+# its `set -e` install block ran inside an outer `if _acq_msb_cli exec … ; then …
+# else <warn>; return 0; fi` that caught the failure. As a standalone kit script
+# there is no outer catch, so we provide the equivalent catch here.
 if ! command -v podman >/dev/null 2>&1; then
   if command -v apt-get >/dev/null 2>&1; then
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get update
-    # shellcheck disable=SC2086  # deliberate word-split of the package list
-    apt-get install -y --no-install-recommends $OCI_ENGINE_PKGS
+    ( set -e
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update
+      # shellcheck disable=SC2086  # deliberate word-split of the package list
+      apt-get install -y --no-install-recommends $OCI_ENGINE_PKGS
+    ) || echo "oci-engine: WARNING: apt-get install failed (mirror unreachable?); OCI may be unavailable." >&2
   elif command -v dnf >/dev/null 2>&1; then
-    # shellcheck disable=SC2086
-    dnf install -y $OCI_ENGINE_PKGS
+    ( set -e
+      # shellcheck disable=SC2086
+      dnf install -y $OCI_ENGINE_PKGS
+    ) || echo "oci-engine: WARNING: dnf install failed (mirror unreachable?); OCI may be unavailable." >&2
   elif command -v apk >/dev/null 2>&1; then
-    # shellcheck disable=SC2086
-    apk add --no-cache $OCI_ENGINE_PKGS
+    ( set -e
+      # shellcheck disable=SC2086
+      apk add --no-cache $OCI_ENGINE_PKGS
+    ) || echo "oci-engine: WARNING: apk add failed (mirror unreachable?); OCI may be unavailable." >&2
   else
     echo "oci-engine: no supported package manager (apt-get/dnf/apk); cannot install podman." >&2
     echo "oci-engine: OCI images (docker run / docker compose) will be unavailable." >&2
@@ -83,6 +105,9 @@ if ! command -v podman >/dev/null 2>&1; then
   fi
 fi
 
+# Single fail-soft exit: if podman is still absent (install failed or the mirror
+# was unreachable), warn and exit 0 so `sbx create` succeeds — the sandbox is
+# usable, it just cannot run OCI images.
 if ! command -v podman >/dev/null 2>&1; then
   echo "oci-engine: WARNING: podman still not on PATH after install; OCI images unavailable." >&2
   echo "oci-engine: the OS package mirror may be unreachable (see README egress note)." >&2

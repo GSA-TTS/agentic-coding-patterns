@@ -51,7 +51,10 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # Run a command in the sandbox AS THE AGENT USER (rootless is the whole point).
-in_sbx_agent() { sbx exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true; }
+# The explicit `-u agent` matches the reference adapter's rootless verify: without
+# it, `sbx exec` may run as root and the "rootless" checks would silently exercise
+# the wrong path.
+in_sbx_agent() { sbx exec "$SBX_NAME" -u agent -- sh -c "$1" </dev/null 2>/dev/null || true; }
 
 info "0. Preconditions"
 if ! command -v sbx >/dev/null 2>&1; then
@@ -86,14 +89,29 @@ pv="$(in_sbx_agent "podman version --format '{{.Client.Version}}' 2>/dev/null ||
 if [ -n "$pv" ]; then ok "podman present (version: $pv)"; else bad "podman not runnable as the agent"; fi
 
 info "4. rootless podman info succeeds as the agent"
-# rootlessness: podman reports its security rootless flag. We accept a non-empty
-# 'true' but do not hard-fail if the format key differs across podman versions —
-# the authoritative rootless proof is the build in step 5 running as the agent.
-rootless="$(in_sbx_agent "podman info --format '{{.Host.Security.Rootless}}' 2>/dev/null")"
+# Assert the engine is actually ROOTLESS. podman reports its rootless flag; we
+# hard-FAIL if it is not `true`. If the format key differs across podman versions
+# and comes back empty, fall back to asserting a non-zero uid inside the sandbox
+# (the agent's `id -u` != 0) rather than silently passing. The verify MUST be
+# able to fail when the engine is rootful.
 if [ "$(in_sbx_agent "podman info >/dev/null 2>&1 && echo ok")" = "ok" ]; then
-  ok "podman info succeeds (rootless=${rootless:-unknown})"
+  ok "podman info succeeds as the agent"
 else
   bad "podman info failed as the agent (storage-driver or rootless setup issue)"
+fi
+rootless="$(in_sbx_agent "podman info --format '{{.Host.Security.Rootless}}' 2>/dev/null")"
+if [ "$rootless" = "true" ]; then
+  ok "podman reports rootless=true"
+elif [ -z "$rootless" ]; then
+  # Format key unavailable on this podman version — fall back to a uid check.
+  agent_uid="$(in_sbx_agent "id -u")"
+  if [ -n "$agent_uid" ] && [ "$agent_uid" != "0" ]; then
+    ok "rootless flag unavailable; agent runs as non-root uid $agent_uid (rootless)"
+  else
+    bad "cannot confirm rootless: no rootless flag AND agent uid is '$agent_uid' (expected non-zero)"
+  fi
+else
+  bad "podman reports rootless=$rootless (expected true — engine is running ROOTFUL)"
 fi
 
 info "5. real layer mount: podman build FROM scratch as the agent (rootless)"
