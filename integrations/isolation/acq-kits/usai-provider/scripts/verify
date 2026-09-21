@@ -74,6 +74,33 @@ fi
 info "1. sbx kit validate"
 if sbx kit validate "$KIT_DIR" >/dev/null 2>&1; then ok "kit validates"; else bad "kit failed validation"; fi
 
+info "1b. Provider facts file names an env var the kit itself declares"
+# Static check — no sandbox needed, just inspects spec.yaml on the host. The
+# facts file at /var/lib/acq/models/providers/usai.json (see spec.yaml's
+# startup command) advertises `keyEnv`, the NAME of the env var a future
+# consumer should read the API key from for this provider. This is
+# security-load-bearing: if `keyEnv` named an arbitrary/unrelated variable, a
+# consumer could be pointed at the wrong credential. Prove the kit is
+# self-consistent by confirming the SAME keyEnv value also appears elsewhere in
+# spec.yaml (the header comment / agentContext, where USAI_API_KEY is already
+# documented as the injected credential env var) — i.e. the kit declares and
+# expects that variable itself, rather than the facts file naming something
+# the kit has no relationship to.
+facts_key_env="$(grep -o '"keyEnv"[[:space:]]*:[[:space:]]*"[A-Za-z_][A-Za-z0-9_]*"' "$KIT_DIR/spec.yaml" | head -n1 | sed -E 's/.*"([A-Za-z_][A-Za-z0-9_]*)"$/\1/')"
+if [ -z "$facts_key_env" ]; then
+  bad "could not extract keyEnv from the facts-file heredoc in spec.yaml"
+else
+  # Count occurrences of the extracted value across the WHOLE file, then
+  # require at least 2 (the facts-file line itself, plus at least one other
+  # mention proving the kit declares/expects it elsewhere).
+  occurrences="$(grep -c "$facts_key_env" "$KIT_DIR/spec.yaml")"
+  if [ "$occurrences" -ge 2 ]; then
+    ok "facts keyEnv '$facts_key_env' also declared elsewhere in spec.yaml ($occurrences occurrences)"
+  else
+    bad "facts keyEnv '$facts_key_env' appears only in the facts-file heredoc — the kit does not itself declare/expect this variable (possible arbitrary/unrelated env var name)"
+  fi
+fi
+
 info "2. Create a sandbox with the kit"
 echo "  creating $SBX_NAME (workspace $WORK)..."
 if sbx create --name "$SBX_NAME" --kit "$KIT_DIR" opencode "$WORK" >"$CREATE_LOG" 2>&1; then
