@@ -100,10 +100,14 @@ files:
     description: docker->podman wrapper. Installed to /usr/local/bin/docker (shadows the dead-socket base docker CLI).
 
 commands:
-  # INSTALL phase — create-time, once, as root (uid "0"). Installs podman + the
-  # rootless prerequisites and writes the storage/registry config + docker
-  # wrapper. Idempotent and best-effort (a missing mirror or unsupported base
-  # exits 0 with a clear message rather than aborting provision).
+  # INSTALL phase — create-time, once, as root (uid "0"). If the base already
+  # has a FUNCTIONAL container engine (a clean `docker info`), it EARLY-OUTS and
+  # leaves the base alone (do not shadow a working engine). Otherwise it installs
+  # podman + the rootless prerequisites and writes the storage/registry config +
+  # docker wrapper. The config + wrapper run whenever podman ends up present
+  # (installed by the kit OR pre-existing), not only when the kit ran the install.
+  # Idempotent and best-effort (a missing mirror or unsupported base exits 0 with
+  # a clear message rather than aborting provision).
   - phase: install
     user: "0"
     description: Install + configure the rootless podman OCI engine (create-time, root).

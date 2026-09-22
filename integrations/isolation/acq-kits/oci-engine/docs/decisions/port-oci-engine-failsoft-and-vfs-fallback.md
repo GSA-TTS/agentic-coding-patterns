@@ -73,3 +73,26 @@ must not abort the boot).
 - Security posture (rootless, no dind daemon, group-scoped devices,
   Docker-Hub-first with `short-name-mode=enforcing` by default) follows the
   isolation ADR-0020 decision; the neutral-egress-tier reliance follows ADR-0002.
+
+## Addendum: functional-engine early-out and config/install decoupling
+
+Live testing on a base that already bundles a docker CLI (the msb default
+`…:shell-docker`) surfaced two structural issues:
+
+1. **Do not shadow a working engine.** If the base already provides a *functional*
+   engine, layering podman on top and shadowing `docker` only complicates a setup
+   that already works. The install script now **early-outs on a clean
+   `docker info`** — probing the engine's *function*, not merely the presence of a
+   `docker` binary (many bases ship a docker CLI whose daemon socket is dead in
+   the sandbox — the exact case this kit fixes, which must NOT early-out).
+
+2. **Config/wrapper decoupled from the package step.** Previously the storage +
+   registry config and the `docker`->podman wrapper only ran as a consequence of
+   the kit's package install succeeding; on a base that already had podman (or
+   where the wrapper was wanted regardless), a skipped package step skipped the
+   config too. The config + wrapper now run whenever **podman is present** at that
+   point — installed by the kit *or* pre-existing — so the outcome is the same
+   regardless of who installed the engine.
+
+Both keep the fail-soft posture: the early-out and every skip path exit 0.
+

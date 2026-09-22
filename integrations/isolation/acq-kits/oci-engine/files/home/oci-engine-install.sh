@@ -63,6 +63,25 @@ esac
 # move-as-root pattern the zscaler-ca-certificate kit uses.
 STAGE_DIR="/home/agent/oci-engine-config"
 
+# 0) EARLY-OUT if the base image already provides a FUNCTIONAL container engine.
+#
+# If the operator picked a base that bundles a working docker/Docker-daemon setup
+# (e.g. the msb default `…:shell-docker`), this kit should NOT layer podman on top
+# and shadow the working `docker` — that only complicates a setup that already
+# works. We probe `docker info` (as the invoking user); a clean exit means a
+# usable engine is already present, so we leave the base alone and exit 0.
+#
+# We deliberately do NOT early-out merely because a `docker` BINARY exists: many
+# bases ship a docker CLI whose daemon socket is dead in the sandbox (the exact
+# case this kit exists to fix). Only a functional `docker info` counts. If podman
+# is already present and working we likewise leave it (the config step below is
+# idempotent and will still ensure our drop-ins, but we do not reinstall).
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+  echo "oci-engine: a functional 'docker' engine is already present on this base; leaving it as-is." >&2
+  echo "oci-engine: (skipping podman install + docker->podman wrapper to avoid shadowing a working engine)." >&2
+  exit 0
+fi
+
 # 1) Ensure the podman binary is present (idempotent; distro-detected).
 #
 # FAIL-SOFT (critical): this is an `install`-phase command, and a non-zero
@@ -70,11 +89,10 @@ STAGE_DIR="/home/agent/oci-engine-config"
 # zscaler-ca-certificate kit's docs/decisions and this kit's docs/decisions. The
 # package-manager step MUST NOT abort the script on failure (an unreachable
 # mirror, a locked dpkg, an unsupported base). The top-level `set -eu` would
-# otherwise abort on the FIRST non-zero return from apt-get/dnf/apk before the
-# fail-soft re-check below is ever reached. So we run the whole install in a
-# SUBSHELL under its own `set -e` and swallow its exit: any failure inside falls
-# through to the single fail-soft exit at the `command -v podman` re-check, which
-# prints a clear warning and exits 0 so provision continues.
+# otherwise abort on the FIRST non-zero return from apt-get/dnf/apk. So we run the
+# whole install in a SUBSHELL under its own `set -e` and swallow its exit: a
+# failure just leaves podman absent, which the config step below detects and
+# skips (warning, exit 0) so provision continues.
 #
 # The reference adapter (_acq_msb_ensure_oci) did not have this bug only because
 # its `set -e` install block ran inside an outer `if _acq_msb_cli exec … ; then …
@@ -105,11 +123,15 @@ if ! command -v podman >/dev/null 2>&1; then
   fi
 fi
 
-# Single fail-soft exit: if podman is still absent (install failed or the mirror
-# was unreachable), warn and exit 0 so `sbx create` succeeds — the sandbox is
-# usable, it just cannot run OCI images.
+# CONFIG GATE (decoupled from the package step): the storage/registry/wrapper
+# config below runs whenever podman is PRESENT at this point — whether this kit
+# just installed it OR it was already on the base (installed by other means). It
+# is NOT gated on "the kit ran the package install", so a base that already ships
+# podman still gets the Docker-Hub-first config and the docker->podman wrapper.
+# If podman is still absent (install failed / mirror unreachable), warn and
+# exit 0 so `sbx create` succeeds — the sandbox is usable, just without OCI.
 if ! command -v podman >/dev/null 2>&1; then
-  echo "oci-engine: WARNING: podman still not on PATH after install; OCI images unavailable." >&2
+  echo "oci-engine: WARNING: podman not present after install; OCI images unavailable." >&2
   echo "oci-engine: the OS package mirror may be unreachable (see README egress note)." >&2
   exit 0
 fi

@@ -9,6 +9,12 @@ sandbox, so it can run OCI images (`docker run`, `docker build`,
 
 At sandbox **create time** (the `install` phase, run once as root) it:
 
+- **Early-out on a base that already works.** If the base image already provides
+  a **functional** container engine (a clean `docker info`), the kit leaves it
+  alone and does nothing — it will not layer podman on top or shadow a working
+  `docker`. It probes `docker info`, not merely the presence of a `docker`
+  binary: many bases ship a docker CLI whose daemon socket is dead in the sandbox
+  (the exact case this kit exists to fix), and only a working engine short-circuits.
 - Installs **podman** and the rootless prerequisites (`podman-compose`,
   `fuse-overlayfs`, `uidmap`, `passt`, `slirp4netns`) via the base image's
   package manager (apt / dnf / apk, auto-detected).
@@ -25,6 +31,11 @@ At sandbox **create time** (the `install` phase, run once as root) it:
   `/usr/bin` on `PATH`), **shadowing** the base image's bundled docker CLI (which
   talks to a dead socket here, since no `dockerd` runs). It never touches the base
   image's `/usr/bin/docker`.
+
+The storage/registry config and the `docker` wrapper are **decoupled from the
+package install**: they are applied whenever podman ends up present at that point
+— whether this kit installed it or the base already had podman — not only when
+the kit ran the package step.
 
 On **every start** (the `startup` phase, run as root) it group-scopes
 `/dev/net/tun` and `/dev/fuse` to the agent (`root:agent`, `0660`) so rootless
@@ -128,16 +139,20 @@ this kit. Once the adapter's auto-install is removed, that setting becomes a
 harmless no-op and this script is the standing regression test that the kit still
 provisions podman on its own.
 
-For the same attribution reason it pins a **neutral base image that ships neither
-docker nor podman** (`VERIFY_OCI_IMAGE`, default
-`docker/sandbox-templates:shell`) via acq's `--image`. The msb *default* base
-(`…:shell-docker`) already bundles a container engine and puts the agent in the
-`docker` group, so a `docker`/`podman` present there would not prove the kit
-installed it. On the neutral base the kit is the only thing that can produce a
-working rootless podman — it installs it from the OS package mirror at create, so
-the base must reach that mirror under the active egress tier (the balanced
-baseline, ADR-0002, allows the common Debian/Ubuntu mirrors). Override with
-`VERIFY_OCI_IMAGE=<ref>`.
+For the same attribution reason it pins an **engine-free base image**
+(`VERIFY_OCI_IMAGE`, default `docker/sandbox-templates:shell`) via acq's
+`--image`. Per the Docker sandbox-templates docs, the msb *default* base
+(`…:shell-docker`, a `*-docker` variant) runs a full Docker Engine (`dockerd`)
+inside the sandbox — so `docker info` succeeds there, the kit correctly
+early-outs (it will not shadow a working engine), and no podman is installed:
+right behavior, but it proves nothing about this kit. The non-`-docker` `shell`
+template ships the Docker *CLI* but no engine (a dead socket) — the exact case
+this kit fixes, which does not early-out — so on it the kit is the only thing
+that can produce a working rootless podman. It installs podman from the OS
+package mirror at create, so the base must reach that mirror under the active
+egress tier (the balanced baseline, ADR-0002, allows the common Debian/Ubuntu
+mirrors). Override with `VERIFY_OCI_IMAGE=<engine-free ref>` (do NOT use a
+`*-docker` variant — its live engine would trigger the early-out).
 
 It needs a sandbox-capable host with `acq` on `PATH` and a ready msb backend
 (`msb doctor`), and is **skipped in CI** (CI cannot nest sandboxes), like the
