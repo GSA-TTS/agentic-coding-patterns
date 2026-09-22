@@ -110,7 +110,7 @@ rootless podman (and `docker` aliased to it) either way.
 ## Verifying (host-side live check)
 
 `scripts/verify` creates a throwaway **msb** sandbox with this kit applied
-**through acq** (`acq --backend msb run --kit … shell …`) and confirms rootless
+**through acq** (`acq --backend msb create shell … --kit …`) and confirms rootless
 podman actually works: podman reports `rootless=true`, a real `podman build` from
 `scratch` mounts a layer as the agent, and the `docker` -> `podman` wrapper this
 kit drops resolves and routes to podman.
@@ -128,6 +128,17 @@ this kit. Once the adapter's auto-install is removed, that setting becomes a
 harmless no-op and this script is the standing regression test that the kit still
 provisions podman on its own.
 
+For the same attribution reason it pins a **neutral base image that ships neither
+docker nor podman** (`VERIFY_OCI_IMAGE`, default
+`docker/sandbox-templates:shell`) via acq's `--image`. The msb *default* base
+(`…:shell-docker`) already bundles a container engine and puts the agent in the
+`docker` group, so a `docker`/`podman` present there would not prove the kit
+installed it. On the neutral base the kit is the only thing that can produce a
+working rootless podman — it installs it from the OS package mirror at create, so
+the base must reach that mirror under the active egress tier (the balanced
+baseline, ADR-0002, allows the common Debian/Ubuntu mirrors). Override with
+`VERIFY_OCI_IMAGE=<ref>`.
+
 It needs a sandbox-capable host with `acq` on `PATH` and a ready msb backend
 (`msb doctor`), and is **skipped in CI** (CI cannot nest sandboxes), like the
 `zscaler-ca-certificate` kit's verify. It cleans up the temporary sandbox on
@@ -136,6 +147,8 @@ exit/interrupt; set `KEEP=1` to retain it for inspection.
 ```sh
 integrations/isolation/acq-kits/oci-engine/scripts/verify
 KEEP=1 integrations/isolation/acq-kits/oci-engine/scripts/verify   # keep the sandbox
+VERIFY_OCI_IMAGE=docker.io/library/ubuntu:24.04 \
+  integrations/isolation/acq-kits/oci-engine/scripts/verify        # different base
 ```
 
 The backend-agnostic gate (schema + cross-field rules) is

@@ -34,6 +34,17 @@
 # is eventually removed, this export becomes a harmless no-op and this script is
 # the standing regression test that the kit still provisions podman on its own.
 #
+# WHY a pinned NEUTRAL base image (important): the msb default base
+# (docker/sandbox-templates:shell-docker) ALREADY ships a container engine and
+# puts the agent in the `docker` group — so a `docker`/`podman` present there is
+# NOT proof the kit installed it, defeating the whole point of ACQ_MSB_ENSURE_OCI=0.
+# This check pins a plain Debian/Ubuntu base that ships NEITHER docker NOR podman
+# (VERIFY_OCI_IMAGE, default below) via acq's neutral --image, so the ONLY thing
+# that can produce a working rootless podman is this kit. The base must still meet
+# acq's msb prerequisite contract (a non-root `agent` user, sudo, ca-certificates)
+# and reach an OS package mirror under the active egress tier — the kit installs
+# podman from that mirror at create. Override with VERIFY_OCI_IMAGE=<ref>.
+#
 # NOTE: this is a LIVE check and needs a sandbox-capable host with `acq` on PATH
 # and an msb backend ready (`acq --backend msb version`; `msb doctor`). It is NOT
 # run in CI (CI cannot nest sandboxes), like the zscaler-ca-certificate kit's
@@ -46,7 +57,8 @@
 #
 # Usage (from anywhere):
 #   path/to/oci-engine/scripts/verify
-#   KEEP=1 path/to/oci-engine/scripts/verify        # keep the sandbox
+#   KEEP=1 path/to/oci-engine/scripts/verify              # keep the sandbox
+#   VERIFY_OCI_IMAGE=<oci-ref> path/to/.../verify         # use a different base
 
 set -uo pipefail
 
@@ -55,6 +67,14 @@ SPEC_FILE="$KIT_DIR/spec.yaml"
 WORK="$(mktemp -d "${HOME:-/tmp}/.oci-engine-verify.XXXXXX")"
 AGENT="shell"
 KEEP="${KEEP:-0}"
+
+# Plain base image that ships NEITHER docker NOR podman, so a working engine is
+# attributable to the kit (see the header note). Ubuntu 24.04 has the `agent`
+# user + sudo the msb prerequisite contract needs on the sandbox-templates line;
+# a truly bare ubuntu:24.04 would need acq to synthesize the agent user, which it
+# does on a plain OCI base. We default to the shell (NON-docker) sandbox template:
+# same family as the msb default, minus the bundled engine. Override as needed.
+VERIFY_OCI_IMAGE="${VERIFY_OCI_IMAGE:-docker.io/docker/sandbox-templates:shell}"
 
 # Disable the msb adapter's legacy OCI auto-install so podman is attributable to
 # THIS kit, not the adapter (see the header note / ADR-0030). Exported for every
@@ -128,8 +148,10 @@ else
 fi
 
 info "2. Create an msb sandbox with the kit applied (adapter OCI auto-install OFF)"
+echo "  base image: $VERIFY_OCI_IMAGE (neutral; ships neither docker nor podman)"
 echo "  creating $SBX_NAME (workspace $WORK; ACQ_MSB_ENSURE_OCI=0)..."
-if acq --backend msb create "$AGENT" "$WORK" --kit "$KIT_DIR" >"$WORK/acq-create.log" 2>&1; then
+if acq --backend msb create "$AGENT" "$WORK" --image "$VERIFY_OCI_IMAGE" --kit "$KIT_DIR" \
+     >"$WORK/acq-create.log" 2>&1; then
   ok "sandbox created via acq with --kit"
 else
   bad "acq --backend msb create --kit failed (exit $?)"
@@ -138,8 +160,26 @@ else
 fi
 
 info "3. podman is installed and reports version (as the agent)"
+# GATE: if the kit's install phase did not land podman, every later rootless
+# check is moot — so this is a hard gate. On failure, dump the create log so the
+# install failure (unreachable mirror, unsupported base, etc.) is visible instead
+# of cascading into confusing downstream FAILs. The kit's install is fail-soft (it
+# exits 0 so `sbx create` succeeds even when the mirror is unreachable), which is
+# exactly why a missing podman is otherwise silent from the outside.
 pv="$(in_sbx "podman version --format '{{.Client.Version}}' 2>/dev/null || podman --version 2>/dev/null")"
-if [ -n "$pv" ]; then ok "podman present (version: $pv)"; else bad "podman not runnable as the agent"; fi
+if [ -n "$pv" ]; then
+  ok "podman present (version: $pv)"
+else
+  bad "podman NOT installed by the kit (see create log below)"
+  echo "  --- oci-engine lines from the create log (why the install did not land) ---" >&2
+  grep -i 'oci-engine' "$WORK/acq-create.log" 2>/dev/null | sed 's/^/    | /' >&2 \
+    || echo "    | (no oci-engine lines captured in the create log)" >&2
+  echo "  Skipping the remaining rootless checks (nothing to test without podman)." >&2
+  info "Summary"
+  printf '  %d passed, %d failed\n' "$pass" "$fail"
+  printf '  \033[31mSome checks failed — see notes above.\033[0m\n'
+  exit 1
+fi
 
 info "4. rootless podman info succeeds as the agent"
 # Assert the engine is actually ROOTLESS. podman reports its rootless flag; we
