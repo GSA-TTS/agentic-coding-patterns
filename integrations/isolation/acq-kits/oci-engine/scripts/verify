@@ -96,7 +96,13 @@ trap cleanup EXIT INT TERM
 
 # Run a command in the sandbox via acq. acq's exec runs as the agent user (uid
 # 1000, HOME=/home/agent) on msb, so this is already the rootless-agent path.
-in_sbx() { acq --backend msb exec "$SBX_NAME" -- sh -c "$1" 2>/dev/null || true; }
+#
+# CR-STRIP: msb's exec transport terminates guest output lines with CRLF, so a
+# trailing \r rides into the captured value. Left in, it breaks exact-string
+# compares (e.g. "/usr/local/bin/docker\r" != "/usr/local/bin/docker") and, when
+# printed, the CR overwrites the start of the line. Strip all \r once here so
+# every caller sees clean LF/plain text — same fix the quickstart's run_acq uses.
+in_sbx() { acq --backend msb exec "$SBX_NAME" -- sh -c "$1" 2>/dev/null | tr -d '\r' || true; }
 
 info "0. Preconditions"
 if ! command -v acq >/dev/null 2>&1; then
@@ -145,6 +151,9 @@ if [ "$(in_sbx "podman info >/dev/null 2>&1 && echo ok")" = "ok" ]; then
   ok "podman info succeeds as the agent"
 else
   bad "podman info failed as the agent (storage-driver or rootless setup issue)"
+  # Surface the actual error so a failure is diagnosable, not a black box.
+  info_err="$(acq --backend msb exec "$SBX_NAME" -- sh -c 'podman info 2>&1 1>/dev/null' 2>/dev/null | tr -d '\r' | head -n 6)"
+  [ -n "$info_err" ] && printf '        podman info stderr:\n%s\n' "$(printf '%s\n' "$info_err" | sed 's/^/          | /')" >&2
 fi
 rootless="$(in_sbx "podman info --format '{{.Host.Security.Rootless}}' 2>/dev/null")"
 if [ "$rootless" = "true" ]; then
