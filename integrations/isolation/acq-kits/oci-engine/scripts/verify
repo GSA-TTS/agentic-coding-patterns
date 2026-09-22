@@ -2,24 +2,47 @@
 #
 # verify — host-side live validation for the oci-engine acq mixin kit.
 #
-# Creates a throwaway sandbox with this kit applied and confirms that a ROOTLESS
-# podman OCI engine actually works the way an agent uses it:
-#   - `podman version` / `podman info` succeed as the agent user (rootless);
-#   - a real `podman build` FROM scratch succeeds (this is stronger than `podman
-#     info`: info does not open /dev/fuse or mount a layer, so it can pass even
-#     when the storage mount would fail — the exact /dev/fuse trap ADR-0020
-#     describes); and
-#   - the `docker` -> `podman` wrapper resolves on PATH.
+# Creates a throwaway msb sandbox with THIS kit applied through acq's normal
+# provision path, and confirms a ROOTLESS podman OCI engine actually works the
+# way an agent uses it:
+#   - podman is present and reports rootless=true (as the agent);
+#   - a real `podman build` FROM scratch succeeds (stronger than `podman info`:
+#     info does not open /dev/fuse or mount a layer, so it can pass even when the
+#     storage mount would fail — the exact /dev/fuse trap ADR-0020 describes);
+#   - the `docker` -> `podman` wrapper this kit drops resolves on PATH and routes
+#     to podman.
 #
-# NOTE (hybrid/v1): this is a LIVE check and needs a sandbox-capable host with
-# `sbx` installed and logged in. It is NOT run in CI (CI cannot nest sandboxes),
-# exactly like the zscaler-ca-certificate kit's verify. The backend-agnostic gate
-# is integrations/isolation/acq-kits/validate-kits.py (`make validate-kits`).
+# BACKEND: msb ONLY. msb is acq's default backend, and per ADR-0020 the OCI
+# engine behavior is demonstrated on msb; sbx has its own base-image selection
+# logic that is out of scope here.
 #
-# It creates a temporary sandbox named "oci-engine-verify-*" and removes it at
-# the end (and on interrupt); it does not touch your other sandboxes. Set KEEP=1
-# to retain the sandbox for inspection. Nothing here is secret — podman needs no
-# credentials to run rootless.
+# WHY acq (not raw sbx/msb): acq drives create + kit-translate + kit apply exactly
+# as a real user would (`acq --backend msb create shell <ws> --kit <this kit>`),
+# so this exercises the neutral hybrid/v1 spec end-to-end on the real path. We use
+# `acq create` (detached) + `acq exec`, NOT `acq run` (which attaches
+# interactively and would hang a non-interactive check). acq's `exec` runs as the
+# agent user (uid 1000) with HOME=/home/agent on msb, so the checks below
+# genuinely exercise the ROOTLESS path without a manual -u flag.
+#
+# WHY ACQ_MSB_ENSURE_OCI=0 (important): the msb backend adapter STILL auto-installs
+# podman on its own today (the legacy pre-kit path, gated on ACQ_MSB_ENSURE_OCI,
+# default on). If we left it on, a plain provision would install podman regardless
+# of whether THIS kit did — a false positive that would prove the adapter's work,
+# not the kit's. ADR-0030 moves that provisioning OUT of the adapter and into this
+# opt-in kit; to prove the kit does the job in isolation we DISABLE the adapter's
+# auto-install for this run (ACQ_MSB_ENSURE_OCI=0). When the adapter's auto-install
+# is eventually removed, this export becomes a harmless no-op and this script is
+# the standing regression test that the kit still provisions podman on its own.
+#
+# NOTE: this is a LIVE check and needs a sandbox-capable host with `acq` on PATH
+# and an msb backend ready (`acq --backend msb version`; `msb doctor`). It is NOT
+# run in CI (CI cannot nest sandboxes), like the zscaler-ca-certificate kit's
+# verify. The backend-agnostic gate is
+# integrations/isolation/acq-kits/validate-kits.py (`make validate-kits`).
+#
+# It creates a temporary sandbox and removes it at the end (and on interrupt); it
+# does not touch your other sandboxes. Set KEEP=1 to retain it for inspection.
+# Nothing here is secret — podman needs no credentials to run rootless.
 #
 # Usage (from anywhere):
 #   path/to/oci-engine/scripts/verify
@@ -29,10 +52,31 @@ set -uo pipefail
 
 KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SPEC_FILE="$KIT_DIR/spec.yaml"
-SBX_NAME="oci-engine-verify-$$"
-WORK="$(mktemp -d "${TMPDIR:-/tmp}/oci-engine-verify.XXXXXX")"
-CREATE_LOG="$WORK/sbx-create.log"
+WORK="$(mktemp -d "${HOME:-/tmp}/.oci-engine-verify.XXXXXX")"
+AGENT="shell"
 KEEP="${KEEP:-0}"
+
+# Disable the msb adapter's legacy OCI auto-install so podman is attributable to
+# THIS kit, not the adapter (see the header note / ADR-0030). Exported for every
+# acq call below.
+export ACQ_MSB_ENSURE_OCI=0
+
+# The sandbox name acq derives from (agent + workspace basename). Derive it the
+# way acq itself does by sourcing acq under ACQ_SOURCE_ONLY (acq resolves its own
+# ACQ_SCRIPT_DIR and sources common.sh, which defines derive_name), so cleanup +
+# exec address the exact sandbox acq creates. Fall back to a best-effort slug if
+# the helper is unavailable.
+ACQ_BIN="$(command -v acq || true)"
+SBX_NAME=""
+if [ -n "$ACQ_BIN" ]; then
+  SBX_NAME="$(
+    ACQ_SOURCE_ONLY=1 . "$ACQ_BIN" >/dev/null 2>&1
+    derive_name "$AGENT" "$WORK" 2>/dev/null
+  )"
+fi
+if [ -z "$SBX_NAME" ]; then
+  SBX_NAME="${AGENT}-$(basename "$WORK" | tr '[:upper:]' '[:lower:]' | sed -e 's/[^a-z0-9]\{1,\}/-/g' -e 's/^-*//' -e 's/-*$//')"
+fi
 
 pass=0
 fail=0
@@ -45,47 +89,50 @@ cleanup() {
     printf '\nKEEP=1 set; leaving sandbox %s and %s in place.\n' "$SBX_NAME" "$WORK" >&2
     return
   fi
-  sbx rm -f "$SBX_NAME" >/dev/null 2>&1 || true
+  acq --backend msb rm "$SBX_NAME" >/dev/null 2>&1 || true
   rm -rf "$WORK" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM
 
-# Run a command in the sandbox AS THE AGENT USER (rootless is the whole point).
-# The explicit `-u agent` matches the reference adapter's rootless verify: without
-# it, `sbx exec` may run as root and the "rootless" checks would silently exercise
-# the wrong path.
-in_sbx_agent() { sbx exec "$SBX_NAME" -u agent -- sh -c "$1" </dev/null 2>/dev/null || true; }
+# Run a command in the sandbox via acq. acq's exec runs as the agent user (uid
+# 1000, HOME=/home/agent) on msb, so this is already the rootless-agent path.
+in_sbx() { acq --backend msb exec "$SBX_NAME" -- sh -c "$1" 2>/dev/null || true; }
 
 info "0. Preconditions"
-if ! command -v sbx >/dev/null 2>&1; then
-  echo "  sbx not on PATH. Install sbx and retry (this live check is skipped in CI)." >&2
+if ! command -v acq >/dev/null 2>&1; then
+  echo "  acq not on PATH. This live check needs acq + a ready msb backend (skipped in CI)." >&2
   exit 1
 fi
-echo "  sbx version: $(sbx version 2>/dev/null | grep -oE 'v?[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1)"
+if ! acq --backend msb version >/dev/null 2>&1; then
+  echo "  msb backend not ready (acq --backend msb version failed). Run 'msb doctor'." >&2
+  exit 1
+fi
+echo "  acq present; msb backend responds."
 if [ -f "$SPEC_FILE" ]; then ok "kit spec.yaml present"; else bad "spec.yaml missing"; exit 1; fi
 
-info "1. sbx kit validate"
-if sbx kit validate "$KIT_DIR" >/dev/null 2>&1; then ok "kit validates"; else bad "kit failed validation"; fi
-
-info "2. Create a sandbox with the kit"
-echo "  creating $SBX_NAME (workspace $WORK)..."
-agent="shell"
-if ! sbx create --name "$SBX_NAME" --kit "$KIT_DIR" "$agent" "$WORK" >"$CREATE_LOG" 2>&1; then
-  agent="opencode"
-  if sbx create --name "$SBX_NAME" --kit "$KIT_DIR" "$agent" "$WORK" >"$CREATE_LOG" 2>&1; then
-    ok "sandbox created with --kit (agent: $agent)"
-  else
-    bad "sbx create failed (exit $?)"
-    sed 's/^/  | /' "$CREATE_LOG" >&2
-    exit 1
-  fi
+info "1. Backend-agnostic gate (validate-kits) sees this kit"
+# A convenience echo; the authoritative gate is `make validate-kits`. We only
+# confirm the spec parses as the right kind/name here (cheap, no python dep).
+if grep -q '^schemaVersion: "hybrid/v1"' "$SPEC_FILE" \
+   && grep -q '^kind: mixin' "$SPEC_FILE" \
+   && grep -q '^name: oci-engine' "$SPEC_FILE"; then
+  ok "spec.yaml is the oci-engine hybrid/v1 mixin"
 else
-  ok "sandbox created with --kit (agent: $agent)"
+  bad "spec.yaml is not the expected hybrid/v1 oci-engine mixin"
 fi
-sleep 2
+
+info "2. Create an msb sandbox with the kit applied (adapter OCI auto-install OFF)"
+echo "  creating $SBX_NAME (workspace $WORK; ACQ_MSB_ENSURE_OCI=0)..."
+if acq --backend msb create "$AGENT" "$WORK" --kit "$KIT_DIR" >"$WORK/acq-create.log" 2>&1; then
+  ok "sandbox created via acq with --kit"
+else
+  bad "acq --backend msb create --kit failed (exit $?)"
+  sed 's/^/  | /' "$WORK/acq-create.log" >&2
+  exit 1
+fi
 
 info "3. podman is installed and reports version (as the agent)"
-pv="$(in_sbx_agent "podman version --format '{{.Client.Version}}' 2>/dev/null || podman --version 2>/dev/null")"
+pv="$(in_sbx "podman version --format '{{.Client.Version}}' 2>/dev/null || podman --version 2>/dev/null")"
 if [ -n "$pv" ]; then ok "podman present (version: $pv)"; else bad "podman not runnable as the agent"; fi
 
 info "4. rootless podman info succeeds as the agent"
@@ -94,17 +141,17 @@ info "4. rootless podman info succeeds as the agent"
 # and comes back empty, fall back to asserting a non-zero uid inside the sandbox
 # (the agent's `id -u` != 0) rather than silently passing. The verify MUST be
 # able to fail when the engine is rootful.
-if [ "$(in_sbx_agent "podman info >/dev/null 2>&1 && echo ok")" = "ok" ]; then
+if [ "$(in_sbx "podman info >/dev/null 2>&1 && echo ok")" = "ok" ]; then
   ok "podman info succeeds as the agent"
 else
   bad "podman info failed as the agent (storage-driver or rootless setup issue)"
 fi
-rootless="$(in_sbx_agent "podman info --format '{{.Host.Security.Rootless}}' 2>/dev/null")"
+rootless="$(in_sbx "podman info --format '{{.Host.Security.Rootless}}' 2>/dev/null")"
 if [ "$rootless" = "true" ]; then
   ok "podman reports rootless=true"
 elif [ -z "$rootless" ]; then
   # Format key unavailable on this podman version — fall back to a uid check.
-  agent_uid="$(in_sbx_agent "id -u")"
+  agent_uid="$(in_sbx "id -u")"
   if [ -n "$agent_uid" ] && [ "$agent_uid" != "0" ]; then
     ok "rootless flag unavailable; agent runs as non-root uid $agent_uid (rootless)"
   else
@@ -118,7 +165,7 @@ info "5. real layer mount: podman build FROM scratch as the agent (rootless)"
 # Stronger than `podman info`: this opens /dev/fuse and mounts a layer, so it
 # catches the fuse-overlayfs/vfs storage trap ADR-0020 describes. No registry
 # pull, no egress (FROM scratch).
-built="$(in_sbx_agent '
+built="$(in_sbx '
   d=$(mktemp -d) || exit 1
   printf "FROM scratch\nCOPY hi /hi\n" > "$d/Containerfile"
   echo hi > "$d/hi"
@@ -132,14 +179,17 @@ else
   bad "podman build failed rootless (storage driver may not work on this base)"
 fi
 
-info "6. docker -> podman wrapper resolves on PATH"
-which_docker="$(in_sbx_agent "command -v docker")"
+info "6. docker -> podman wrapper (dropped by THIS kit) resolves on PATH"
+# This is the most kit-ATTRIBUTABLE signal: the adapter's legacy path also aliased
+# docker->podman, but with ACQ_MSB_ENSURE_OCI=0 the adapter is out of the picture,
+# so a resolving /usr/local/bin/docker proves the kit's file-drop landed.
+which_docker="$(in_sbx "command -v docker")"
 if [ "$which_docker" = "/usr/local/bin/docker" ]; then
   ok "docker resolves to the kit wrapper ($which_docker)"
 else
   bad "docker does not resolve to /usr/local/bin/docker (got: ${which_docker:-<none>})"
 fi
-docker_routes="$(in_sbx_agent "docker version --format '{{.Client.Version}}' 2>/dev/null || docker --version 2>/dev/null")"
+docker_routes="$(in_sbx "docker version --format '{{.Client.Version}}' 2>/dev/null || docker --version 2>/dev/null")"
 if [ -n "$docker_routes" ]; then
   ok "docker wrapper routes to podman (reported: $docker_routes)"
 else

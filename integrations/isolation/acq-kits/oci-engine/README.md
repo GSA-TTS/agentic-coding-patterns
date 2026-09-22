@@ -109,13 +109,29 @@ rootless podman (and `docker` aliased to it) either way.
 
 ## Verifying (host-side live check)
 
-`scripts/verify` creates a throwaway sandbox with this kit applied and confirms
-rootless podman actually works (a real `podman build` from `scratch` as the
-agent, plus that the `docker` -> `podman` wrapper resolves). It needs a
-sandbox-capable host (`sbx` installed and logged in) and is **skipped in CI**
-(CI cannot nest sandboxes), exactly like the `zscaler-ca-certificate` kit's
-verify. It cleans up the temporary sandbox on exit/interrupt; set `KEEP=1` to
-retain it for inspection.
+`scripts/verify` creates a throwaway **msb** sandbox with this kit applied
+**through acq** (`acq --backend msb run --kit … shell …`) and confirms rootless
+podman actually works: podman reports `rootless=true`, a real `podman build` from
+`scratch` mounts a layer as the agent, and the `docker` -> `podman` wrapper this
+kit drops resolves and routes to podman.
+
+msb-only, on purpose: msb is acq's default backend and (per ADR-0020) the backend
+that demonstrates the OCI-engine behavior; sbx has its own base-image selection
+logic that is out of scope here.
+
+The check disables the msb adapter's **legacy OCI auto-install**
+(`ACQ_MSB_ENSURE_OCI=0`) for its run. That auto-install is the pre-kit path
+ADR-0030 is retiring; leaving it on would install podman regardless of whether
+this kit did, masking a broken kit with a false pass. With it off, podman — and
+especially the `docker` wrapper at `/usr/local/bin/docker` — is attributable to
+this kit. Once the adapter's auto-install is removed, that setting becomes a
+harmless no-op and this script is the standing regression test that the kit still
+provisions podman on its own.
+
+It needs a sandbox-capable host with `acq` on `PATH` and a ready msb backend
+(`msb doctor`), and is **skipped in CI** (CI cannot nest sandboxes), like the
+`zscaler-ca-certificate` kit's verify. It cleans up the temporary sandbox on
+exit/interrupt; set `KEEP=1` to retain it for inspection.
 
 ```sh
 integrations/isolation/acq-kits/oci-engine/scripts/verify
