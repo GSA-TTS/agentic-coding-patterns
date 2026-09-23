@@ -24,9 +24,11 @@
 //
 // SECURITY POSTURE (unchanged by this file)
 //
-// The relay does not widen exposure. The guest network interface was already
-// the reachable surface when the daemon bound 0.0.0.0; the host side of the
-// mapping remains loopback-only, which is the kit's actual boundary. See
+// The relay does not intentionally widen exposure. The guest network interface
+// was already the reachable surface when the daemon bound 0.0.0.0; the host side
+// of the mapping remains loopback-only. The relay additionally accepts only
+// loopback and the default gateway peer by default, with an explicit
+// OPENDESIGN_RELAY_ALLOWED_PEERS override for backend-specific forwarders. See
 // docs/decisions/disable-api-auth-loopback-boundary.md. The relay deliberately
 // does NOT rewrite the Host header: OpenDesign's own origin middleware already
 // accepts the loopback Host a browser sends to a published localhost port.
@@ -34,6 +36,7 @@
 // Fail-soft, like the rest of the kit: a bind failure is logged and the process
 // keeps serving whatever else bound, rather than taking the UI down.
 
+import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 
@@ -80,8 +83,55 @@ const bound = new Set();
 // Addresses whose bind failed for a reason a rescan will never fix. Retrying
 // them every interval would turn one misconfiguration into an endless log.
 const permanentlyFailed = new Set();
+const warnedDeniedPeers = new Set();
+
+function normalizePeerAddress(address) {
+  if (typeof address !== 'string') return '';
+  const normalized = address.trim().toLowerCase().replace(/^\[|\]$/g, '');
+  return normalized.startsWith('::ffff:') ? normalized.slice('::ffff:'.length) : normalized;
+}
+
+function defaultIpv4Gateway() {
+  try {
+    const routes = fs.readFileSync('/proc/net/route', 'utf8').trim().split('\n').slice(1);
+    for (const line of routes) {
+      const fields = line.trim().split(/\s+/);
+      if (fields[1] !== '00000000' || !fields[2]) continue;
+      const hex = fields[2].match(/../g);
+      if (!hex) continue;
+      return hex.reverse().map((part) => Number.parseInt(part, 16)).join('.');
+    }
+  } catch {
+    // Non-Linux or unreadable route table: fall back to loopback-only peers.
+  }
+  return '';
+}
+
+function allowedPeerAddresses() {
+  const configured = (process.env.OPENDESIGN_RELAY_ALLOWED_PEERS ?? '')
+    .split(',')
+    .map((value) => normalizePeerAddress(value))
+    .filter(Boolean);
+  return new Set([
+    '127.0.0.1',
+    '::1',
+    '0:0:0:0:0:0:0:1',
+    defaultIpv4Gateway(),
+    ...configured,
+  ].filter(Boolean));
+}
 
 function relayConnection(client) {
+  const peer = normalizePeerAddress(client.remoteAddress);
+  if (!allowedPeerAddresses().has(peer)) {
+    if (!warnedDeniedPeers.has(peer)) {
+      warnedDeniedPeers.add(peer);
+      log(`denying non-forwarder peer ${peer || '(unknown)'}`);
+    }
+    client.destroy();
+    return;
+  }
+
   const upstream = net.connect({
     port: PORT,
     host: TARGET_HOST,

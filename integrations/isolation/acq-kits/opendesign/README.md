@@ -143,7 +143,9 @@ OpenDesign daemon and the agents it launches.
 network IP, not guest `127.0.0.1`, so something in the guest must listen there.
 The kit does that with a small supervised relay (`~/opendesign-relay.mjs`) that
 forwards the guest network address to the loopback daemon — rather than binding
-the daemon to `0.0.0.0`.
+the daemon to `0.0.0.0`. The relay accepts loopback, the default gateway peer,
+and optional backend-specific `OPENDESIGN_RELAY_ALLOWED_PEERS` entries; other
+guest-network peers are denied before forwarding.
 
 That distinction matters functionally, not just cosmetically. OpenDesign gates
 several routes on the request **peer** address being loopback
@@ -172,11 +174,13 @@ in neutral `hybrid/v1` vocabulary (`caps`, `files`, `commands`, `publishedPorts`
 ## Validating
 
 ```bash
-# Offline gate: schema + file paths + registry. Needs python3 + jsonschema + pyyaml.
-python ../validate-kits.py
-
-# Kit-local offline checks.
+# Offline gate: schema + file paths + registry + kit-specific invariants.
+# Needs python3 + jsonschema + pyyaml; run from this kit directory.
 ./scripts/verify
+
+# Lightweight smoke-only mode if Python deps are unavailable. This is not enough
+# for review completion because it skips validate-kits.py --strict.
+ALLOW_PARTIAL_VERIFY=1 ./scripts/verify
 
 # Live end-to-end via acq, from a sandbox-capable host.
 RUN_ACQ=1 ./scripts/verify
@@ -186,7 +190,9 @@ KEEP=1 RUN_ACQ=1 ./scripts/verify
 ```
 
 CI for this repo cannot create nested sandboxes, so live verification is a
-host-side step before PR review/merge.
+host-side step before PR review/merge. Treat skipped schema validation as
+incomplete unless `ALLOW_PARTIAL_VERIFY=1` was intentionally used for a local
+smoke check.
 
 ## Layout
 

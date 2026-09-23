@@ -3,6 +3,11 @@
 Symptoms, causes, and fixes for the OpenDesign headless browser kit. Most
 diagnosis is done with `acq exec <sandbox> -- sh -c '…'`.
 
+OpenDesign state and logs can contain prompts, run metadata, generated file
+paths, and local provider/media settings. Do not paste full logs, diagnostics, or
+`OD_DATA_DIR` files into public issues or PR comments; redact first or share a
+reviewed diagnostics bundle through the approved channel.
+
 ---
 
 ## Browser UI never loads / connection refused
@@ -124,7 +129,11 @@ log and effective Node path:
 
 ```bash
 acq exec <sandbox> -- sh -c 'tail -n 80 ~/.local/state/opendesign/opendesign-daemon.log'
-acq exec <sandbox> -- sh -c 'PATH="$HOME/.local/share/opendesign/tools/node-v24.21.0-linux-arm64/bin:$PATH" node -p "process.version + " " + process.versions.modules"'
+acq exec <sandbox> -- sh -c '
+  case "$(uname -m)" in x86_64|amd64) a=x64 ;; aarch64|arm64) a=arm64 ;; *) a=unknown ;; esac
+  PATH="$HOME/.local/share/opendesign/tools/node-v24.21.0-linux-$a/bin:$PATH"
+  node -p '\''process.version + " " + process.versions.modules'\''
+'
 ```
 
 ## Host curl returns "Empty reply from server" / connection refused while guest curl works
@@ -192,7 +201,8 @@ The daemon also journals its own API failures, which is the fastest way to
 confirm the cause — the peer-gated routes appear there and nothing else does:
 
 ```bash
-acq exec <sandbox> -- sh -c 'cat "$OD_DATA_DIR/diagnostics/environment-evidence.json"'
+acq exec <sandbox> -- sh -c 'node -e "const fs=require(\"fs\"); const p=process.env.OD_DATA_DIR+\"/diagnostics/environment-evidence.json\"; const j=JSON.parse(fs.readFileSync(p,\"utf8\")); console.log(JSON.stringify({recentApiFailures:j.recentApiFailures||j.apiFailures||null}, null, 2))"'
+# The full file may contain environment and diagnostic details; redact before sharing.
 ```
 
 As a fallback that bypasses HTTP entirely, the CLI writes the same bundle:
@@ -227,7 +237,7 @@ acq exec <sandbox> -- sh -c 'grep -E "loading path|providerID|stream error" ~/.l
 And check the failed run's own record:
 
 ```bash
-acq exec <sandbox> -- sh -c 'cat ~/.local/share/opendesign/data/runs/*/state.json | grep -E "status|failureDetail"'
+acq exec <sandbox> -- sh -c 'grep -h -E "status|failureDetail" ~/.local/share/opendesign/data/runs/*/state.json 2>/dev/null | tail -n 40'
 ```
 
 The current kit fixes this by exporting `OPENCODE_CONFIG`. Verify it reached the
@@ -263,7 +273,7 @@ Check:
 
 ```bash
 acq exec <sandbox> -- sh -c 'command -v opencode || command -v opencode-cli || true'
-acq exec <sandbox> -- sh -c 'cat ~/.local/share/opendesign/data/app-config.json 2>/dev/null'
+acq exec <sandbox> -- sh -c 'node -e "const fs=require(\"fs\"); const p=process.env.OD_DATA_DIR+\"/app-config.json\"; const c=JSON.parse(fs.readFileSync(p,\"utf8\")); console.log(JSON.stringify({agentId:c.agentId,onboardingCompleted:c.onboardingCompleted,telemetry:c.telemetry}, null, 2))" 2>/dev/null || true'
 ```
 
 The startup script seeds `agentId: "opencode"` only when no user choice exists.

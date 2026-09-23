@@ -23,11 +23,15 @@ carry a different Node major, so assuming the base `node` is fragile.
 Install OpenDesign from the pinned upstream source tag
 `open-design-v0.24.0`, verify the checked-out commit, install a kit-managed Node
 24 runtime under the kit volume, activate pnpm 10.33.2 through Corepack, and run
-the built daemon headlessly with:
+the built daemon headlessly on guest loopback:
 
 ```bash
-node apps/daemon/dist/cli.js --host 0.0.0.0 --port 7456 --no-open
+node apps/daemon/dist/cli.js --host 127.0.0.1 --port 7456 --no-open
 ```
+
+A supervised relay publishes that loopback listener on the guest network address
+that ACQ/MSB create-time port publishing dials; see
+[`disable-api-auth-loopback-boundary.md`](disable-api-auth-loopback-boundary.md).
 
 The install runs during the startup phase, not create time. It is idempotent and
 fail-soft: failures are logged but do not fail sandbox creation/startup.

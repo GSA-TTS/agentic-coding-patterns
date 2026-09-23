@@ -86,12 +86,14 @@ port must not be forwarded to a wider interface.
   becomes unreachable from the host while remaining reachable in-guest, which is
   a clear and diagnosable failure. `TROUBLESHOOTING.md` names it first for any
   403 or connection-refused symptom.
-- Exposure is unchanged relative to the `0.0.0.0` draft: the guest network
-  interface was already the reachable surface, and the host side of the mapping
-  is still loopback-only.
-- Anyone with access to the host loopback port can drive OpenDesign and the
-  agents it launches, so the kit must not be used on untrusted multi-user hosts
-  or with forwarded public ports.
+- Exposure is narrower than the `0.0.0.0` draft: the guest network interface is
+  still the surface ACQ publishing reaches, but the relay accepts only loopback,
+  the default gateway peer, and optional `OPENDESIGN_RELAY_ALLOWED_PEERS` entries
+  for backend-specific forwarders.
+- Anyone with access to the host loopback port, or to an explicitly allowed relay
+  peer on the guest network, can drive OpenDesign and the agents it launches, so
+  the kit must not be used on untrusted multi-user hosts or with forwarded public
+  ports.
 - If upstream later accepts an operator-declared-origin exemption for
   `requireLocalDaemonRequest`, the relay can be deleted and `OD_BIND_HOST`
   returned to `0.0.0.0`.

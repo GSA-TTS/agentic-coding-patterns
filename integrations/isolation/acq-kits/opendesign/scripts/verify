@@ -52,14 +52,13 @@ info "0. Preconditions"
 
 info "1. Offline gates"
 VALIDATOR="$REPO_ROOT/integrations/isolation/acq-kits/validate-kits.py"
-validator_required=0
-[ "$RUN_ACQ" = "1" ] && validator_required=1
-[ "${STRICT_VERIFY:-0}" = "1" ] && validator_required=1
+validator_required=1
+[ "${ALLOW_PARTIAL_VERIFY:-0}" = "1" ] && validator_required=0
 if ! command -v python3 >/dev/null 2>&1; then
   if [ "$validator_required" -eq 1 ]; then
     bad "validate-kits.py not run (python3 not on PATH)"
   else
-    skip "validate-kits.py not run (python3 not on PATH); set STRICT_VERIFY=1 to require it"
+    skip "validate-kits.py not run (python3 not on PATH); ALLOW_PARTIAL_VERIFY=1 permits this skip"
   fi
 elif [ ! -f "$VALIDATOR" ]; then
   if [ "$validator_required" -eq 1 ]; then
@@ -71,7 +70,7 @@ elif ! python3 -c 'import jsonschema, yaml' >/dev/null 2>&1; then
   if [ "$validator_required" -eq 1 ]; then
     bad "validate-kits.py needs jsonschema + pyyaml"
   else
-    skip "validate-kits.py needs jsonschema + pyyaml; set STRICT_VERIFY=1 to require it"
+    skip "validate-kits.py needs jsonschema + pyyaml; ALLOW_PARTIAL_VERIFY=1 permits this skip"
   fi
 else
   if val_out="$(python3 "$VALIDATOR" --root "$REPO_ROOT" --strict 2>&1)"; then
@@ -149,6 +148,10 @@ case "$relay_src" in
   *'entry.internal'*) ok "relay skips loopback interfaces so it cannot collide with the daemon" ;;
   *) bad "relay does not skip loopback interfaces" ;;
 esac
+case "$relay_src" in
+  *'OPENDESIGN_RELAY_ALLOWED_PEERS'*'defaultIpv4Gateway'*'allowedPeerAddresses'*) ok "relay restricts client peers to loopback/default gateway plus explicit overrides" ;;
+  *) bad "relay does not restrict client peers before forwarding" ;;
+esac
 # OpenDesign rewrites HOME/XDG_CONFIG_HOME for agent children (OD_SANDBOX_MODE),
 # so OpenCode needs an absolute config path or it silently falls back to its own
 # hosted gateway and every run fails. See docs/decisions/acq-owned-byok.md.
@@ -223,6 +226,9 @@ if ! command -v acq >/dev/null 2>&1; then
 fi
 
 echo "  creating $SBX_NAME via acq with extra kit $KIT_DIR..."
+# Live verification injects a synthetic value through the process environment so
+# the negative persistence check can search for a known non-secret sentinel. The
+# documented operational path remains `acq secret set-custom ... --env USAI_API_KEY`.
 if USAI_API_KEY="$SENTINEL_SECRET" ACQ_EXTRA_KITS="$KIT_DIR" acq create --name "$SBX_NAME" opencode "$WORK" >"$CREATE_LOG" 2>&1; then
   ok "sandbox created via acq"
 else
