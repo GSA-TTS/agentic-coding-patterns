@@ -19,7 +19,10 @@ OD_PORT="${OD_PORT:-7456}"
 # Reachability for acq/msb port publishing is provided by opendesign-relay.mjs,
 # which binds the guest network address and forwards to this loopback listener.
 # See docs/decisions/disable-api-auth-loopback-boundary.md.
-OD_BIND_HOST="${OD_BIND_HOST:-127.0.0.1}"
+# Do not inherit OD_BIND_HOST from the backend: acq/msb may set it to 0.0.0.0
+# for ordinary services, but that makes OpenDesign's peer-loopback-gated routes
+# return 403. Use the kit-specific override only when deliberately testing.
+OD_BIND_HOST="${OPENDESIGN_DAEMON_BIND_HOST:-127.0.0.1}"
 OD_DATA_DIR="${OD_DATA_DIR:-$APP_HOME/data}"
 DAEMON_LOG="$STATE_HOME/opendesign-daemon.log"
 RELAY_LOG="$STATE_HOME/opendesign-relay.log"

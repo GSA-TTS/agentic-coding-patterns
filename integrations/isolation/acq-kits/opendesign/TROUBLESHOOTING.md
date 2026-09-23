@@ -185,8 +185,10 @@ acq exec <sandbox> -- sh -c 'grep -i ":1D20" /proc/net/tcp'
 # want 0100007F:1D20 (127.0.0.1) for the daemon, NOT 00000000:1D20 (0.0.0.0)
 ```
 
-A daemon on `0.0.0.0` means `OD_BIND_HOST` was overridden, or the sandbox was
-created with an earlier kit version — recreate it with the current kit.
+A daemon on `0.0.0.0` means the sandbox was created with an earlier kit version
+or `OPENDESIGN_DAEMON_BIND_HOST` was deliberately set for testing. The startup
+script intentionally ignores backend-provided `OD_BIND_HOST` values for the
+daemon, because `0.0.0.0` breaks peer-loopback-gated routes.
 
 Confirm the fix from the host with the exact request the UI button makes:
 

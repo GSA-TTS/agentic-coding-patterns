@@ -52,6 +52,10 @@ OD_BIND_HOST=127.0.0.1
 OD_PORT=7456
 ```
 
+The startup script forces the daemon bind through its own
+`OPENDESIGN_DAEMON_BIND_HOST` default instead of inheriting a backend-provided
+`OD_BIND_HOST`, because ordinary service defaults may be `0.0.0.0`.
+
 and publish that loopback listener on the guest network address with a small,
 supervised, kit-managed TCP relay (`files/home/opendesign-relay.mjs`). The relay
 is a plain byte forwarder — no parsing and no header rewriting — so SSE run

@@ -127,8 +127,8 @@ case "$spec" in
   *) bad "spec does not install opendesign-relay.mjs" ;;
 esac
 case "$start_src" in
-  *'OD_BIND_HOST="${OD_BIND_HOST:-127.0.0.1}"'*) ok "startup defaults the daemon bind to loopback" ;;
-  *) bad "startup does not default the daemon bind to loopback" ;;
+  *'OD_BIND_HOST="${OPENDESIGN_DAEMON_BIND_HOST:-127.0.0.1}"'*) ok "startup forces the daemon bind to loopback unless the kit-specific override is set" ;;
+  *) bad "startup can inherit OD_BIND_HOST instead of forcing loopback" ;;
 esac
 case "$start_src" in
   *'supervisor:opendesign-relay'*) ok "startup supervises the publish relay" ;;
