@@ -413,6 +413,7 @@ if [ -n "$host_url" ]; then
   else
     bad "OD Next rollout route returned HTTP ${rollout_code:-none} from the host"
     sed 's/^/    | /' "$rollout_body" 2>/dev/null || true
+    in_acq 'tail -n 60 ~/.local/state/opendesign/opendesign-relay.log 2>/dev/null || true' | sed 's/^/    | relay: /'
   fi
 
   export_body="$WORK/diagnostics-export.body"
@@ -423,6 +424,7 @@ if [ -n "$host_url" ]; then
   else
     bad "diagnostics export returned HTTP ${export_code:-none} from the host"
     sed 's/^/    | /' "$export_body" 2>/dev/null || true
+    in_acq 'tail -n 60 ~/.local/state/opendesign/opendesign-relay.log 2>/dev/null || true' | sed 's/^/    | relay: /'
   fi
 else
   bad "could not parse host-loopback URL from acq ports output"

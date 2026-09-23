@@ -83,6 +83,7 @@ const bound = new Set();
 // Addresses whose bind failed for a reason a rescan will never fix. Retrying
 // them every interval would turn one misconfiguration into an endless log.
 const permanentlyFailed = new Set();
+const warnedAcceptedPeers = new Set();
 const warnedDeniedPeers = new Set();
 
 function normalizePeerAddress(address) {
@@ -130,6 +131,10 @@ function relayConnection(client) {
     }
     client.destroy();
     return;
+  }
+  if (!warnedAcceptedPeers.has(peer)) {
+    warnedAcceptedPeers.add(peer);
+    log(`accepting peer ${peer || '(unknown)'}`);
   }
 
   const upstream = net.connect({
