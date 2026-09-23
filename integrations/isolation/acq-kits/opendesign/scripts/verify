@@ -142,6 +142,10 @@ case "$relay_src" in
   *) bad "relay does not forward to loopback only" ;;
 esac
 case "$relay_src" in
+  *'localAddress: TARGET_HOST'*) ok "relay originates upstream connections from loopback" ;;
+  *) bad "relay does not originate upstream connections from loopback" ;;
+esac
+case "$relay_src" in
   *'entry.internal'*) ok "relay skips loopback interfaces so it cannot collide with the daemon" ;;
   *) bad "relay does not skip loopback interfaces" ;;
 esac
@@ -341,21 +345,34 @@ for line in sys.stdin:
         break
 ')"
 if [ -n "$host_url" ]; then
-  if curl -fsS "$host_url/" >/dev/null 2>&1 && curl -fsS "$host_url/api/daemon/status" >/dev/null 2>&1; then
+  host_status_body="$WORK/daemon-status-host.json"
+  if curl -fsS "$host_url/" >/dev/null 2>&1 && curl -fsS "$host_url/api/daemon/status" -o "$host_status_body" >/dev/null 2>&1; then
     ok "published host-loopback URL is reachable: $host_url"
+    sed 's/^/    | daemon-status: /' "$host_status_body" 2>/dev/null || true
   else
     bad "published host-loopback URL is not reachable: $host_url"
   fi
-  # Regression gate for the 0.0.0.0 bind bug: this is the exact request the
-  # browser's Settings -> About -> Export diagnostics button makes. It returned
-  # 403 FORBIDDEN ("request peer must be a loopback address") whenever the daemon
-  # bound 0.0.0.0, because acq/msb publishing dials the guest network IP.
-  export_code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 120 \
+  # Regression gates for the loopback-peer bug: these are browser-visible routes
+  # guarded by requireLocalDaemonRequest. They returned 403 whenever the daemon
+  # observed a non-loopback peer through create-time port publishing.
+  rollout_body="$WORK/od-next-rollout.json"
+  rollout_code="$(curl -s -o "$rollout_body" -w '%{http_code}' --max-time 30 \
+    -H "Origin: $host_url" "$host_url/api/strategies/od-next/rollout" 2>/dev/null || true)"
+  if [ "$rollout_code" = "200" ]; then
+    ok "OD Next rollout route is reachable from the host browser path (HTTP 200)"
+  else
+    bad "OD Next rollout route returned HTTP ${rollout_code:-none} from the host"
+    sed 's/^/    | /' "$rollout_body" 2>/dev/null || true
+  fi
+
+  export_body="$WORK/diagnostics-export.body"
+  export_code="$(curl -s -o "$export_body" -w '%{http_code}' --max-time 120 \
     -H "Origin: $host_url" "$host_url/api/diagnostics/export" 2>/dev/null || true)"
   if [ "$export_code" = "200" ]; then
     ok "diagnostics export is reachable from the host browser path (HTTP 200)"
   else
-    bad "diagnostics export returned HTTP ${export_code:-none} from the host (expected 200; 403 means the daemon saw a non-loopback peer)"
+    bad "diagnostics export returned HTTP ${export_code:-none} from the host"
+    sed 's/^/    | /' "$export_body" 2>/dev/null || true
   fi
 else
   bad "could not parse host-loopback URL from acq ports output"

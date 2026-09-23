@@ -18,9 +18,9 @@
 //
 // This relay resolves the conflict. The daemon binds 127.0.0.1 only. The relay
 // binds the guest network address(es) and forwards each connection to
-// 127.0.0.1, so the daemon always observes a loopback peer. It is a plain byte
-// relay: no parsing, no header rewriting, so websockets, SSE, and streaming
-// responses pass through untouched.
+// 127.0.0.1 from localAddress 127.0.0.1, so the daemon always observes a
+// loopback peer. It is a plain byte relay: no parsing, no header rewriting, so
+// websockets, SSE, and streaming responses pass through untouched.
 //
 // SECURITY POSTURE (unchanged by this file)
 //
@@ -82,7 +82,11 @@ const bound = new Set();
 const permanentlyFailed = new Set();
 
 function relayConnection(client) {
-  const upstream = net.connect(PORT, TARGET_HOST);
+  const upstream = net.connect({
+    port: PORT,
+    host: TARGET_HOST,
+    localAddress: TARGET_HOST,
+  });
   // A relay must not inherit the default 'error' -> throw behaviour on either
   // side: a client that hangs up mid-response, or a daemon restart, is normal
   // operation here and must not take the relay down.
