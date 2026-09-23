@@ -15,12 +15,12 @@
 #
 # DESIGN (see docs/decisions/):
 #   - The STARTUP script (paseo-start.sh) owns the daemon: on every sandbox start
-#     it installs/updates the pinned Paseo CLI and supervises the daemon with
-#     `paseo daemon start --foreground --listen 0.0.0.0:6767 --web-ui`. A single
-#     Paseo process serves the daemon API, the WebSocket, AND the bundled web UI,
-#     all on ONE container port (6767). Because a `startup` command fires on EVERY
-#     start — including a detached `acq create` with nobody attached, held open by
-#     the sandbox's tini keepalive (PID 1) — the daemon + UI come up on their own.
+#     it installs/updates the pinned Paseo CLI, persists the daemon settings Paseo
+#     0.9 reads from config.json, and supervises `paseo daemon run`. A single Paseo
+#     process serves the daemon API, the WebSocket, AND the bundled web UI, all on
+#     ONE container port (6767). Because a `startup` command fires on EVERY start —
+#     including a detached `acq create` with nobody attached, held open by the
+#     sandbox's tini keepalive (PID 1) — the daemon + UI come up on their own.
 #     There is deliberately NO install phase (see the install note below).
 #   - The sandbox entrypoint runs the bare command `opencode`. This kit drops a
 #     THIN, agent-named WRAPPER at ~/.local/bin/opencode, which is first on the
@@ -63,10 +63,10 @@
 # runs). The daemon reads worktrees.root ONCE at boot (no SIGHUP / no runtime
 # reread — verified against the Paseo source), so the shim — which runs in the
 # primary-workspace cwd on `acq run` — writes worktrees.root = <PWD>/.paseo-worktrees
-# into config.json and BOUNCES the daemon (kills the supervised child; the
-# supervisor respawns it and re-reads config). The supervisor starts the daemon
-# immediately with Paseo's default root; the shim rewrites + restarts only when
-# the value actually changes. See docs/decisions/worktrees-root-global-only.md and
+# into config.json and restarts the daemon worker with `paseo daemon restart`.
+# The supervisor starts the daemon immediately with Paseo's default root; the shim
+# rewrites + restarts only when the value actually changes. See
+# docs/decisions/worktrees-root-global-only.md and
 # supervisor-owns-daemon-wrapper-pins-worktrees.md.
 #
 # PROJECT PRE-POPULATION: at startup (after the daemon answers /api/health) the
@@ -196,10 +196,11 @@ publishedPorts:
     protocol: tcp
     name: paseo
 
-# Non-secret guest env. PASEO_WEB_UI_ENABLED enables the bundled UI (equivalent to
-# the daemon's --web-ui flag; both are set, harmlessly). PASEO_LISTEN fixes the
-# bind address/port. ONNXRUNTIME_NODE_INSTALL=skip mirrors Paseo's own Docker
-# image and keeps the voice dep's install from attempting an onnxruntime fetch.
+# Non-secret guest env. PASEO_WEB_UI_ENABLED enables the bundled UI on the
+# `daemon run` path, and paseo-start.sh also persists the same value into
+# config.json for Paseo 0.9 managed/config tooling. PASEO_LISTEN fixes the bind
+# address/port. ONNXRUNTIME_NODE_INSTALL=skip mirrors Paseo's own Docker image and
+# keeps the voice dep's install from attempting an onnxruntime fetch.
 # No secret goes here (PASEO_PASSWORD is intentionally unset — unsecured; see
 # AUTH note above).
 #
@@ -226,9 +227,8 @@ publishedPorts:
 # daemon logs an endless stream of `relay_error` / `relay_control_disconnected`
 # (ECONNRESET). The relay is unnecessary here — the host reaches the web UI over
 # the loopback-published port (see publishedPorts + README "Reaching it from the
-# host"), not through Paseo's cloud relay. The env var is read at daemon config
-# load (server/config.js) and takes precedence over persisted config, so it holds
-# across daemon restarts/self-updates without editing config.json.
+# host"), not through Paseo's cloud relay. paseo-start.sh also persists this to
+# config.json because Paseo 0.9 managed launches strip daemon-setting env vars.
 environment:
   PASEO_WEB_UI_ENABLED: "true"
   PASEO_LISTEN: "0.0.0.0:6767"

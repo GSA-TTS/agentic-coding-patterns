@@ -23,11 +23,10 @@
 #      relative root resolves against PASEO_HOME. On `acq run <path>` the entrypoint
 #      runs with cwd = the primary (first mounted) workspace, so the shim computes
 #      <PWD>/.paseo-worktrees and writes it to $PASEO_HOME/config.json (via
-#      paseo-set-worktrees-root.mjs). The daemon reads worktrees.root ONLY at boot
-#      (no SIGHUP / no runtime reread), so when the value CHANGES the shim bounces
-#      the daemon — it kills the supervised daemon child (never the supervisor),
-#      and the startup script's supervisor:paseo-daemon loop respawns it, re-reading
-#      the new root.
+#      paseo-set-worktrees-root.mjs). The daemon reads worktrees.root at worker
+#      start, so when the value CHANGES the shim restarts the daemon worker via
+#      `paseo daemon restart` (falling back to a marker-scoped process kill only
+#      if the CLI restart cannot run).
 #   2. PRINT HOST-CONNECT INSTRUCTIONS and, when it IS PID 1 (the `acq run`
 #      entrypoint), HOLD the foreground so that session's sandbox — and thus the
 #      daemon/UI — stays up.
@@ -79,13 +78,12 @@ if [ -f "$SET_ROOT_SCRIPT" ] && command -v node >/dev/null 2>&1; then
   esac
 fi
 
-# 2. If the root changed, bounce the daemon so it re-reads config.json. We kill
-#    ONLY the daemon process tree, never the startup script's supervisor loop, so
-#    the supervisor relaunches the daemon with the new worktrees.root. The
-#    supervisor loop's argv carries the marker "supervisor:paseo-daemon"; the
-#    actual daemon is a `paseo daemon start --foreground ...` CHILD of that loop.
-#    We select PIDs whose argv matches the daemon-start pattern but EXCLUDE the
-#    supervisor marker, and kill just those.
+# 2. If the root changed, restart the daemon worker so it re-reads config.json.
+#    Paseo 0.9 exposes `paseo daemon restart` for this. If the daemon is wedged or
+#    the CLI surface changes again, fall back to killing ONLY the supervised Paseo
+#    tree, never the startup script's supervisor loop. The supervisor loop's argv
+#    carries the marker "supervisor:paseo-daemon"; the actual daemon child is a
+#    `paseo daemon run` tree beneath that loop.
 daemon_up() {
   # /api/health is unauthenticated and returns 200 when the daemon is listening.
   curl -fsS "http://127.0.0.1:$PASEO_PORT/api/health" >/dev/null 2>&1
@@ -130,14 +128,20 @@ ui_ready() {
 }
 if [ -n "$worktrees_changed" ]; then
   echo "paseo: pinned Paseo worktree root to $WORKTREES_ROOT; restarting the daemon to apply it ..."
-  for _pid in $(pgrep -u "$(id -u)" -f "paseo daemon start" 2>/dev/null); do
-    # Skip the supervisor loop (its cmdline carries the marker).
-    if tr '\0' ' ' < "/proc/$_pid/cmdline" 2>/dev/null | grep -q "supervisor:paseo-daemon"; then
-      continue
-    fi
-    kill "$_pid" 2>/dev/null || true
-  done
-  # Wait for the supervisor to bring it back on the new root (bounded).
+  if command -v paseo >/dev/null 2>&1 && paseo daemon restart --home "$PASEO_HOME_DIR" --timeout 30 >/dev/null 2>&1; then
+    :
+  else
+    echo "paseo: daemon restart command failed; falling back to supervisor respawn" >&2
+    for _pid in $(pgrep -u "$(id -u)" -f "paseo daemon run" 2>/dev/null); do
+      # Skip the supervisor loop (its cmdline carries the marker).
+      if tr '\0' ' ' < "/proc/$_pid/cmdline" 2>/dev/null | grep -q "supervisor:paseo-daemon"; then
+        continue
+      fi
+      kill "$_pid" 2>/dev/null || true
+    done
+    rm -f "$PASEO_HOME_DIR/paseo.pid" 2>/dev/null || true
+  fi
+  # Wait for the daemon to return on the new root (bounded).
   _i=0
   while [ "$_i" -lt 30 ]; do
     daemon_up && break
