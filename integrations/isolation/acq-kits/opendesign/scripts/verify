@@ -1,0 +1,259 @@
+#!/usr/bin/env bash
+# verify — host-side validation for the opendesign acq mixin kit.
+#
+# Default: offline checks only (schema, source paths, script syntax, and source
+# invariants). Live sandbox verification is opt-in with RUN_ACQ=1 and must be run
+# from a host that can create ACQ sandboxes.
+
+set -uo pipefail
+
+KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+REPO_ROOT="$(cd "$KIT_DIR/../../../.." && pwd)"
+SBX_NAME="opendesign-verify-$$"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/opendesign-verify.XXXXXX")"
+CREATE_LOG="$WORK/create.log"
+KEEP="${KEEP:-0}"
+RUN_ACQ="${RUN_ACQ:-0}"
+READY_TIMEOUT="${READY_TIMEOUT:-600}"
+POLL_INTERVAL="${POLL_INTERVAL:-5}"
+SENTINEL_SECRET="OPENDESIGN_VERIFY_SENTINEL_${SBX_NAME}"
+
+pass=0
+fail=0
+skip_count=0
+ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass+1)); }
+bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail+1)); }
+skip() { printf '  \033[33mSKIP\033[0m %s\n' "$1"; skip_count=$((skip_count+1)); }
+info() { printf '\n\033[1m%s\033[0m\n' "$1"; }
+
+cleanup() {
+  if [ "$KEEP" = "1" ]; then
+    printf '\nKEEP=1 set; leaving sandbox %s and %s in place.\n' "$SBX_NAME" "$WORK" >&2
+    return
+  fi
+  acq rm "$SBX_NAME" >/dev/null 2>&1 || true
+  rm -rf "$WORK" >/dev/null 2>&1 || true
+}
+
+interrupt() {
+  trap - INT TERM
+  cleanup
+  exit 130
+}
+trap cleanup EXIT
+trap interrupt INT TERM
+
+in_acq() {
+  acq exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true
+}
+
+info "0. Preconditions"
+[ -f "$KIT_DIR/spec.yaml" ] && ok "kit spec.yaml present" || { bad "spec.yaml missing"; exit 1; }
+
+info "1. Offline gates"
+VALIDATOR="$REPO_ROOT/integrations/isolation/acq-kits/validate-kits.py"
+validator_required=0
+[ "$RUN_ACQ" = "1" ] && validator_required=1
+[ "${STRICT_VERIFY:-0}" = "1" ] && validator_required=1
+if ! command -v python3 >/dev/null 2>&1; then
+  if [ "$validator_required" -eq 1 ]; then
+    bad "validate-kits.py not run (python3 not on PATH)"
+  else
+    skip "validate-kits.py not run (python3 not on PATH); set STRICT_VERIFY=1 to require it"
+  fi
+elif [ ! -f "$VALIDATOR" ]; then
+  if [ "$validator_required" -eq 1 ]; then
+    bad "validate-kits.py not found at $VALIDATOR"
+  else
+    skip "validate-kits.py not found at $VALIDATOR"
+  fi
+elif ! python3 -c 'import jsonschema, yaml' >/dev/null 2>&1; then
+  if [ "$validator_required" -eq 1 ]; then
+    bad "validate-kits.py needs jsonschema + pyyaml"
+  else
+    skip "validate-kits.py needs jsonschema + pyyaml; set STRICT_VERIFY=1 to require it"
+  fi
+else
+  if val_out="$(python3 "$VALIDATOR" --root "$REPO_ROOT" --strict 2>&1)"; then
+    ok "validate-kits.py --strict passes"
+  else
+    bad "validate-kits.py --strict failed"
+    printf '%s\n' "$val_out" | sed 's/^/    | /' >&2
+  fi
+fi
+
+for script in "$KIT_DIR/files/home/opendesign-install.sh" "$KIT_DIR/files/home/opendesign-start.sh"; do
+  if sh -n "$script"; then
+    ok "$(basename "$script") parses with sh -n"
+  else
+    bad "$(basename "$script") has shell syntax errors"
+  fi
+done
+
+spec="$(cat "$KIT_DIR/spec.yaml")"
+install_src="$(cat "$KIT_DIR/files/home/opendesign-install.sh")"
+start_src="$(cat "$KIT_DIR/files/home/opendesign-start.sh")"
+case "$spec" in
+  *'OD_DISABLE_API_AUTH: "1"'*) ok "spec disables OpenDesign API auth intentionally" ;;
+  *) bad "spec does not set OD_DISABLE_API_AUTH=1" ;;
+esac
+case "$spec" in
+  *'guest: 7456'*) ok "spec publishes guest port 7456" ;;
+  *) bad "spec does not publish guest port 7456" ;;
+esac
+case "$spec" in
+  *'/home/agent/.local/share/opendesign'*) ok "spec declares the OpenDesign persistent volume/data path" ;;
+  *) bad "spec does not declare the OpenDesign persistent volume/data path" ;;
+esac
+case "$spec" in
+  *'user: "0"'*'chown 1000:1000 /home/agent/.local/share/opendesign'*) ok "spec initializes persistent volume ownership as root before agent startup" ;;
+  *) bad "spec does not initialize persistent volume ownership before agent startup" ;;
+esac
+case "$install_src" in
+  *'npm_config_store_dir="$APP_HOME/pnpm-store"'*) ok "install script pins pnpm store to the OpenDesign volume" ;;
+  *) bad "install script does not pin pnpm store to the OpenDesign volume" ;;
+esac
+case "$install_src" in
+  *'node-v${OPENDESIGN_NODE_VERSION}-linux-${node_arch}.tar.gz'*|*'node-v${OPENDESIGN_NODE_VERSION}-linux-'*) ok "install script uses a pinned kit-managed Node archive" ;;
+  *) bad "install script does not use a kit-managed Node archive" ;;
+esac
+case "$install_src" in
+  *'sha256sum'*'node_sha'*) ok "install script verifies Node archive SHA-256" ;;
+  *) bad "install script does not verify Node archive SHA-256" ;;
+esac
+case "$install_src" in
+  *'git checkout --detach FETCH_HEAD'*'OPENDESIGN_COMMIT'*) ok "install script verifies pinned OpenDesign commit" ;;
+  *) bad "install script does not verify pinned OpenDesign commit" ;;
+esac
+case "$start_src" in
+  *'refresh PATH before seeding config or launching the daemon'*'export PATH'*) ok "startup refreshes PATH after installing kit-managed Node" ;;
+  *) bad "startup does not refresh PATH after installing kit-managed Node" ;;
+esac
+case "$start_src" in
+  *"config.agentId = 'opencode'"*) ok "startup seeds OpenDesign default agent to opencode" ;;
+  *) bad "startup does not seed opencode as default agent" ;;
+esac
+case "$start_src" in
+  *agentModels*|*'model":'*|*"model':"*) bad "startup appears to seed a model, which v1 must not do" ;;
+  *) ok "startup does not seed a default model" ;;
+esac
+case "$start_src" in
+  *USAI_API_KEY*'media-config'*|*media-config*'USAI_API_KEY'*) bad "startup appears to copy USAI_API_KEY into OpenDesign media config" ;;
+  *) ok "startup does not copy USAi credentials into OpenDesign config" ;;
+esac
+
+if [ "$RUN_ACQ" != "1" ]; then
+  info "Live sandbox checks: SKIPPED"
+  echo "  Set RUN_ACQ=1 to create a real sandbox and verify OpenDesign end-to-end." >&2
+  info "Summary"
+  printf '  %d passed, %d failed, %d skipped\n' "$pass" "$fail" "$skip_count"
+  if [ "$fail" -eq 0 ] && [ "$skip_count" -eq 0 ]; then
+    printf '  \033[32mOffline gate passed.\033[0m\n'
+  elif [ "$fail" -eq 0 ]; then
+    printf '  \033[33mPartial offline gate passed; skipped checks were not required in this mode.\033[0m\n'
+  else
+    printf '  \033[31mOffline gate failed.\033[0m\n'
+  fi
+  exit "$([ "$fail" -eq 0 ] && echo 0 || echo 1)"
+fi
+
+info "2. Live sandbox create"
+if ! command -v acq >/dev/null 2>&1; then
+  echo "  RUN_ACQ=1 set but acq is not on PATH." >&2
+  exit 1
+fi
+
+echo "  creating $SBX_NAME via acq with extra kit $KIT_DIR..."
+if USAI_API_KEY="$SENTINEL_SECRET" ACQ_EXTRA_KITS="$KIT_DIR" acq create --name "$SBX_NAME" opencode "$WORK" >"$CREATE_LOG" 2>&1; then
+  ok "sandbox created via acq"
+else
+  bad "acq create failed"
+  sed 's/^/    | /' "$CREATE_LOG" >&2
+  exit 1
+fi
+
+info "3. Wait for OpenDesign daemon"
+start_time="$(date +%s)"
+deadline=$(( start_time + READY_TIMEOUT ))
+next_progress=$(( start_time + 30 ))
+startup_checked=0
+health=""
+while :; do
+  now="$(date +%s)"
+  if [ "$(in_acq 'curl -fsS http://127.0.0.1:7456/api/daemon/status >/dev/null 2>&1 && curl -fsS http://127.0.0.1:7456/ >/dev/null 2>&1 && echo yes')" = "yes" ]; then
+    health=yes
+    break
+  fi
+
+  if [ "$now" -ge "$next_progress" ]; then
+    elapsed=$(( now - start_time ))
+    printf '  still waiting after %ss; latest sandbox state:\n' "$elapsed"
+    in_acq 'stat -c "%U:%G %a %n" /home/agent/.local/share/opendesign /home/agent/.local/state/opendesign 2>/dev/null; ps -ef | grep -E "opendesign|node|pnpm|next|tsc|git|curl" | grep -v grep || true; tail -n 20 ~/.local/state/opendesign/opendesign-install.log 2>/dev/null || true; tail -n 20 ~/.local/state/opendesign/opendesign-daemon.log 2>/dev/null || true' | sed 's/^/    | /'
+    next_progress=$(( now + 30 ))
+  fi
+
+  if [ "$startup_checked" -eq 0 ] && [ $(( now - start_time )) -ge 60 ]; then
+    startup_checked=1
+    startup_state="$(in_acq 'test -s ~/.local/state/opendesign/opendesign-install.log || test -s ~/.local/state/opendesign/opendesign-daemon.log || ps -ef | grep -E "opendesign|node|pnpm|next|tsc|git|curl" | grep -v grep >/dev/null; rc=$?; test "$rc" -eq 0 && echo active || echo inactive')"
+    if [ "$startup_state" = "inactive" ]; then
+      bad "OpenDesign startup produced no logs and no active install/daemon process after 60s"
+      in_acq 'stat -c "%U:%G %a %n" /home/agent/.local/share/opendesign /home/agent/.local/state/opendesign 2>/dev/null; ls -l /home/agent/opendesign-start.sh /home/agent/opendesign-install.sh 2>/dev/null; ls -la ~/.local/state/opendesign ~/.local/share/opendesign 2>/dev/null' | sed 's/^/    | /'
+      break
+    fi
+  fi
+
+  [ "$now" -ge "$deadline" ] && break
+  sleep "$POLL_INTERVAL"
+done
+
+if [ -n "$health" ]; then
+  ok "OpenDesign answers /api/daemon/status and serves the UI inside the sandbox"
+else
+  bad "OpenDesign did not answer /api/daemon/status and serve the UI before timeout"
+  in_acq 'tail -n 80 ~/.local/state/opendesign/opendesign-install.log 2>/dev/null; tail -n 80 ~/.local/state/opendesign/opendesign-daemon.log 2>/dev/null' | sed 's/^/    | /'
+fi
+
+info "4. Live configuration checks"
+[ "$(in_acq 'command -v opencode >/dev/null 2>&1 && echo yes')" = "yes" ] && ok "opencode is on PATH" || bad "opencode is not on PATH"
+app_config_ok="$(in_acq 'node -p '\''const fs=require("fs"); const c=JSON.parse(fs.readFileSync((process.env.OD_DATA_DIR||"")+"/app-config.json","utf8")); const t=c.telemetry||{}; (c.agentId==="opencode" && c.onboardingCompleted===true && (!c.agentModels || Object.keys(c.agentModels).length===0) && t.metrics===false && t.content===false) ? "yes" : "no"'\'' 2>/dev/null')"
+if [ "$app_config_ok" = "yes" ]; then
+  ok "OpenDesign app-config seeded opencode, disabled telemetry, and did not seed a model"
+else
+  bad "OpenDesign app-config was not seeded as expected"
+  in_acq 'cat "$OD_DATA_DIR/app-config.json" 2>/dev/null || echo "missing app-config.json"' | sed 's/^/    | /'
+fi
+[ "$(in_acq 'test "$OD_DISABLE_API_AUTH" = 1 && echo yes')" = "yes" ] && ok "OD_DISABLE_API_AUTH is set" || bad "OD_DISABLE_API_AUTH is not set"
+[ "$(in_acq 'test -n "$USAI_API_KEY" && grep -R -F -- "$USAI_API_KEY" "$OD_DATA_DIR" >/dev/null 2>&1; rc=$?; test "$rc" -eq 1 && echo yes')" = "yes" ] \
+  && ok "OD_DATA_DIR does not contain the injected USAI_API_KEY value" \
+  || bad "OD_DATA_DIR contains the injected USAI_API_KEY value or grep failed unexpectedly"
+
+info "5. Host port published"
+ports_out="$(acq ports "$SBX_NAME" 2>/dev/null || true)"
+if printf '%s' "$ports_out" | grep -q 7456; then
+  ok "acq ports reports a mapping for guest 7456"
+else
+  bad "acq ports does not report guest 7456"
+fi
+printf '%s\n' "$ports_out" | sed 's/^/    | /'
+
+host_url="$(printf '%s\n' "$ports_out" | python3 -c 'import re, sys
+for line in sys.stdin:
+    match = re.search(r"sandbox\s+7456\s*->\s*host\s+(127\.0\.0\.1|localhost):(\d+)", line)
+    if match:
+        print(f"http://{match.group(1)}:{match.group(2)}")
+        break
+')"
+if [ -n "$host_url" ]; then
+  if curl -fsS "$host_url/" >/dev/null 2>&1 && curl -fsS "$host_url/api/daemon/status" >/dev/null 2>&1; then
+    ok "published host-loopback URL is reachable: $host_url"
+  else
+    bad "published host-loopback URL is not reachable: $host_url"
+  fi
+else
+  bad "could not parse host-loopback URL from acq ports output"
+fi
+
+info "Summary"
+printf '  %d passed, %d failed, %d skipped\n' "$pass" "$fail" "$skip_count"
+[ "$fail" -eq 0 ] && printf '  \033[32mAll required checks passed.\033[0m\n' || printf '  \033[31mSome checks failed.\033[0m\n'
+[ "$fail" -eq 0 ]
