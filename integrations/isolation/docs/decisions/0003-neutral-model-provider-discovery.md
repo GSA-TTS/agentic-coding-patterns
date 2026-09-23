@@ -158,6 +158,18 @@ snapshot, run from the read-only mount (ADR-0030 Mechanism 2), so a sudo-capable
 agent cannot tamper the startup code between restarts and have `acq` re-run a
 tampered copy.
 
+> **Open ordering risk, not yet resolved by this ADR:** the catalog write
+> (Layer 2) and the harness's own render (Layer 3) are both ordinary in-guest
+> `startup`-phase writes. Quickstart's kit-reference docs state, and live
+> reproduction against `sbx` v0.43.0 confirms, that a backend's agent
+> entrypoint launches once `startup` commands are *dispatched*, not once they
+> finish — `acq`'s pre-attach readiness check only confirms the agent binary
+> is executable, not that any kit's config write has completed. This already
+> affects the shipped `usai-provider` config-merge step; Layers 2–3 add two
+> more sequential writes ahead of the same entrypoint. The read-only mount
+> above hardens this pipeline's *inputs*; it does not guarantee the *harness's
+> config file* is complete before the harness first reads it.
+
 ### Layer 3 — Harness kit owns its own rendering
 
 Each harness kit, at its own `startup` phase (after the orchestrator, per the
@@ -286,6 +298,9 @@ sequenceDiagram
   it also depends on live-vs-snapshot state at boot. The snapshot fallback and
   per-provider provenance recording make any degraded state visible rather than
   silent.
+- **Standing startup-ordering gap, inherited not introduced by this ADR** — see
+  the Layer 2 callout above. Affects the shipped `usai-provider` config-merge
+  step too; Layers 2–3 add to the same exposure rather than create it.
 
 ### Neutral
 
@@ -320,6 +335,11 @@ sequenceDiagram
 - Whether the models orchestrator kit becomes a "core, always-on" built-in — that
   changes default behavior for every user (analogous to ADR 0002's federally
   shipped `balanced` allowlist) and needs human/CODEOWNERS review.
+- **The startup-ordering gap's fix.** Belongs upstream as a general completion
+  barrier in `acq`'s provision→attach sequencing (mirroring what already,
+  incidentally, closes it on `msb`) — not a per-kit workaround here, which
+  would just be a second, divergent mechanism. Quickstart-owned; needs
+  quickstart maintainer review.
 
 ## References
 
@@ -334,3 +354,8 @@ sequenceDiagram
   permission-hardening precedent this design's security conditions follow.
 - `goose-server` ADR 0004 — the harness-adapter open questions this ADR's Layer 3
   boundary answers for the model-config slice.
+- Quickstart [issue #506](https://github.com/GSA-TTS/agentic-coding-quickstart/issues/506)
+  tracking the startup-ordering race flagged above (`acq run` does not wait
+  for an in-guest `startup`-phase config write to finish before attach,
+  reproduced live against `sbx` v0.43.0) — the upstream fix this ADR's
+  Layers 2–3 depend on but do not themselves provide.
