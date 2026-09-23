@@ -274,12 +274,29 @@ fi
 
 info "4. Live configuration checks"
 [ "$(in_acq 'command -v opencode >/dev/null 2>&1 && echo yes')" = "yes" ] && ok "opencode is on PATH" || bad "opencode is not on PATH"
-app_config_ok="$(in_acq 'node -p '\''const fs=require("fs"); const c=JSON.parse(fs.readFileSync((process.env.OD_DATA_DIR||"")+"/app-config.json","utf8")); const t=c.telemetry||{}; (c.agentId==="opencode" && c.onboardingCompleted===true && (!c.agentModels || Object.keys(c.agentModels).length===0) && t.metrics===false && t.content===false) ? "yes" : "no"'\'' 2>/dev/null')"
+# Assert only the fields the kit actually seeds. `agentModels` is deliberately
+# excluded: the kit-must-not-seed-a-model invariant is proven offline against the
+# startup source ("startup does not seed a default model"), while the live file is
+# runtime state OpenDesign owns and rewrites. Merely opening the UI is enough for
+# OpenDesign to persist agentModels.opencode.model (observed: "default", written
+# by the app, not by a user), alongside orbit/projectLocations/privacyDecisionAt.
+# Failing on that conflates "the kit seeded a model" with "a model is configured"
+# and would report a defect for normal use.
+app_config_ok="$(in_acq 'node -p '\''const fs=require("fs"); const c=JSON.parse(fs.readFileSync((process.env.OD_DATA_DIR||"")+"/app-config.json","utf8")); const t=c.telemetry||{}; (c.agentId==="opencode" && c.onboardingCompleted===true && t.metrics===false && t.content===false) ? "yes" : "no"'\'' 2>/dev/null')"
 if [ "$app_config_ok" = "yes" ]; then
-  ok "OpenDesign app-config seeded opencode, disabled telemetry, and did not seed a model"
+  ok "OpenDesign app-config seeded opencode and disabled telemetry"
 else
   bad "OpenDesign app-config was not seeded as expected"
   in_acq 'cat "$OD_DATA_DIR/app-config.json" 2>/dev/null || echo "missing app-config.json"' | sed 's/^/    | /'
+fi
+# Report, without judging, whether a model ended up configured. On a freshly
+# created sandbox that nobody has driven yet this should be empty; anything else
+# is information for the operator, not a kit failure.
+seeded_models="$(in_acq 'node -p '\''const fs=require("fs"); const c=JSON.parse(fs.readFileSync((process.env.OD_DATA_DIR||"")+"/app-config.json","utf8")); JSON.stringify(c.agentModels||{})'\'' 2>/dev/null')"
+if [ -z "$seeded_models" ] || [ "$seeded_models" = "{}" ]; then
+  ok "no agent model is configured in app-config (kit seeded none)"
+else
+  skip "a model is configured in app-config: $seeded_models (runtime state, not kit-seeded; see the offline no-seed check)"
 fi
 [ "$(in_acq 'test "$OD_DISABLE_API_AUTH" = 1 && echo yes')" = "yes" ] && ok "OD_DISABLE_API_AUTH is set" || bad "OD_DISABLE_API_AUTH is not set"
 [ "$(in_acq 'test -n "$USAI_API_KEY" && grep -R -F -- "$USAI_API_KEY" "$OD_DATA_DIR" >/dev/null 2>&1; rc=$?; test "$rc" -eq 1 && echo yes')" = "yes" ] \
@@ -298,10 +315,22 @@ case "$daemon_bind" in
   *00000000:1D20*) bad "port 7456 is bound to 0.0.0.0; peer-loopback-gated routes will 403 from the host" ;;
   *) ok "port 7456 is not bound to 0.0.0.0" ;;
 esac
-if [ "$(in_acq 'pgrep -f "supervisor:opendesign-relay" >/dev/null 2>&1 && echo yes')" = "yes" ]; then
-  ok "publish relay supervisor is running in-guest"
+# Check the relay's own node process, not the supervisor wrapper: the node
+# process is what actually holds the published port.
+#
+# The bracketed first character is load-bearing. `acq exec` runs this check in a
+# shell whose own cmdline contains the pattern text, and `pgrep -f` matches
+# against every process's full cmdline — including that shell's. A plain
+# "opendesign-relay" pattern therefore reports "running" even when no relay
+# exists anywhere, which is a false PASS on exactly the failure this assertion
+# is here to catch. `[o]pendesign` does not match the literal text
+# "[o]pendesign" in the checking shell's cmdline, but does match the real
+# process's "opendesign-relay.mjs". Verified in both directions (relay absent /
+# relay present, bare and under its supervisor).
+if [ "$(in_acq 'pgrep -f "[o]pendesign-relay\.mjs" >/dev/null 2>&1 && echo yes')" = "yes" ]; then
+  ok "publish relay is running in-guest"
 else
-  bad "publish relay supervisor is not running in-guest"
+  bad "publish relay is not running in-guest"
   in_acq 'tail -n 40 ~/.local/state/opendesign/opendesign-relay.log 2>/dev/null || echo "missing opendesign-relay.log"' | sed 's/^/    | /'
 fi
 
@@ -310,7 +339,22 @@ fi
 # its own hosted gateway, which this kit's egress policy blocks. Assert that the
 # named config is the usai-provider one AND that OpenCode resolves usai models
 # through it in the environment OpenDesign will actually launch.
-opencode_config="$(in_acq 'pgrep -a -f "apps/daemon/dist/cli.js" >/dev/null 2>&1 && tr "\0" "\n" < /proc/$(pgrep -f "apps/daemon/dist/cli.js" | head -n1)/environ | sed -n "s/^OPENCODE_CONFIG=//p"')"
+#
+# Resolving the daemon pid needs two guards, both found by running this against a
+# live sandbox rather than reasoning about it:
+#
+#  1. Anchor on argv[0] being node. The daemon's supervisor shell carries the
+#     same "apps/daemon/dist/cli.js" string later in its own cmdline, so an
+#     unanchored pattern can resolve to the supervisor's pid and read the wrong
+#     process's environ. The shell does inherit the exports, so that reads as a
+#     pass — a wrong-target read that happens to agree, which is worse than a
+#     failure because it hides the mistake.
+#  2. Select by OD_PORT rather than taking the first match. A host may have more
+#     than one daemon alive (a leftover, or a second sandbox), and "first pid
+#     wins" silently inspects whichever one sorts lowest. Matching the port this
+#     verification actually targets makes the check say what it means.
+daemon_pid_cmd='for p in $(pgrep -f "^[^ ]*node .*apps/daemon/dist/cli\.js"); do [ -r "/proc/$p/environ" ] || continue; got=$(tr "\0" "\n" < "/proc/$p/environ" | sed -n "s/^OD_PORT=//p"); [ "$got" = "7456" ] || continue; echo "$p"; break; done'
+opencode_config="$(in_acq "pid=\$($daemon_pid_cmd); [ -n \"\$pid\" ] && tr '\\0' '\\n' < \"/proc/\$pid/environ\" | sed -n 's/^OPENCODE_CONFIG=//p'")"
 if [ -n "$opencode_config" ]; then
   ok "daemon process carries OPENCODE_CONFIG=$opencode_config"
 else
