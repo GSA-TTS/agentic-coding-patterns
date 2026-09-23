@@ -47,16 +47,38 @@ case "$_mode_lc" in
 esac
 unset _mode_lc
 
-# Charset-guard the package set: it is passed to the package manager unquoted
-# (word-splitting is intentional — it is a space-separated list). Package names
-# are word-safe (letters, digits, . _ + - and spaces); refuse anything else
-# rather than risk a surprise token reaching the elevated install.
-case "$OCI_ENGINE_PKGS" in
-  *[!A-Za-z0-9._+\ -]*)
-    echo "oci-engine: WARNING: OCI_ENGINE_PKGS contains unsafe characters; skipping OCI setup." >&2
-    exit 0
-    ;;
-esac
+# Validate the package set: it is passed to the package manager UNQUOTED
+# (word-splitting is intentional — it is a space-separated list), so each token
+# reaches an ELEVATED install verbatim. Two guards, both required:
+#
+#   (a) Charset: package names are word-safe (letters, digits, . _ + -).
+#   (b) NO token may begin with `-`. A charset check ALONE is insufficient: `-`
+#       is a legal char in package names, but a LEADING `-` makes the token an
+#       OPTION, not a package. Without this, OCI_ENGINE_PKGS="podman
+#       --allow-unauthenticated" (apt), "... --nogpgcheck" (dnf), or
+#       "... --allow-untrusted" (apk) would word-split straight into the install
+#       and DISABLE package-signature verification — a supply-chain hole. We
+#       validate token-by-token so a leading `-` on ANY token is rejected, and
+#       fail CLOSED (skip OCI setup) rather than run a tampered install.
+_pkg_bad=0
+for _pkg in $OCI_ENGINE_PKGS; do
+  case "$_pkg" in
+    -*)
+      echo "oci-engine: WARNING: OCI_ENGINE_PKGS token '$_pkg' looks like an option (leading '-')," \
+           "not a package name; refusing (would reach the elevated install)." >&2
+      _pkg_bad=1
+      ;;
+    *[!A-Za-z0-9._+-]*)
+      echo "oci-engine: WARNING: OCI_ENGINE_PKGS token '$_pkg' has unsafe characters; refusing." >&2
+      _pkg_bad=1
+      ;;
+  esac
+done
+if [ "$_pkg_bad" -ne 0 ]; then
+  echo "oci-engine: skipping OCI setup due to an unsafe OCI_ENGINE_PKGS value." >&2
+  exit 0
+fi
+unset _pkg _pkg_bad
 
 # Where the kit staged its config payloads (dropped by files[] as the agent user,
 # then installed into /etc/containers here by root). Same stage-in-home-then-
@@ -79,6 +101,13 @@ STAGE_DIR="/home/agent/oci-engine-config"
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   echo "oci-engine: a functional 'docker' engine is already present on this base; leaving it as-is." >&2
   echo "oci-engine: (skipping podman install + docker->podman wrapper to avoid shadowing a working engine)." >&2
+  # Record the DELIBERATE early-out so it is distinguishable from a fail-soft
+  # miss (finding #1). state=base-engine means "kit ran, chose to defer".
+  mkdir -p /var/lib/acq 2>/dev/null || true
+  printf 'installed_at=%s\nstate=base-engine\npodman=%s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)" \
+    "$(command -v podman || echo none)" \
+    > /var/lib/acq/oci-engine-ready 2>/dev/null || true
   exit 0
 fi
 
@@ -136,27 +165,15 @@ if ! command -v podman >/dev/null 2>&1; then
   exit 0
 fi
 
-# 2) Select a storage driver that works on an overlay ROOT filesystem. Only write
-#    the config if none already names a driver (idempotent; do not clobber an
-#    operator file). Prefer overlay+fuse-overlayfs (fast, thin on disk); else vfs
-#    (works everywhere, no /dev/fuse, but disk-heavy — a full copy per layer).
+# 2) Select a storage driver that works on an overlay ROOT filesystem, via the
+#    shared helper the every-boot grant step also calls. Writing it here at create
+#    seeds a sane default; the grant step (root, every boot) RE-EVALUATES it so a
+#    transient /dev/fuse miss at create is not permanently baked in — see the
+#    helper's comment and finding #4 in the kit's docs/decisions.
 mkdir -p /etc/containers
-if ! grep -q '^[[:space:]]*driver' /etc/containers/storage.conf 2>/dev/null; then
-  _fuse=""
-  for _c in /usr/bin/fuse-overlayfs /usr/local/bin/fuse-overlayfs /bin/fuse-overlayfs; do
-    if [ -x "$_c" ]; then _fuse="$_c"; break; fi
-  done
-  if [ -z "$_fuse" ] && command -v fuse-overlayfs >/dev/null 2>&1; then
-    _fuse="$(command -v fuse-overlayfs)"
-  fi
-  if [ -n "$_fuse" ] && [ -e /dev/fuse ]; then
-    printf '[storage]\ndriver = "overlay"\n[storage.options.overlay]\nmount_program = "%s"\n' \
-      "$_fuse" > /etc/containers/storage.conf
-  else
-    printf '[storage]\ndriver = "vfs"\n' > /etc/containers/storage.conf
-  fi
-  unset _fuse _c
-fi
+# shellcheck source=files/home/oci-engine-storage-driver.sh
+. "$STAGE_DIR/oci-engine-storage-driver.sh"
+oci_engine_write_storage_conf
 
 # 3) Docker-Hub-first registry resolution (ADR-0020). System-level so it applies
 #    to the rootless agent (read as the lowest-precedence source). Install the
@@ -179,5 +196,18 @@ if [ -f "$STAGE_DIR/docker" ]; then
   mkdir -p /usr/local/bin
   install -m 0755 "$STAGE_DIR/docker" /usr/local/bin/docker
 fi
+
+# 5) SUCCESS MARKER (observability — finding #1). Record that the kit reached a
+#    configured state, so an operator / CI / the host-side scripts/verify can tell
+#    a genuinely-provisioned sandbox from one where the install fell soft (the
+#    fail-soft `exit 0` paths above deliberately do NOT touch this marker). This
+#    is the same durable-marker discipline the msb adapter uses (/var/lib/acq/*).
+mkdir -p /var/lib/acq
+printf 'installed_at=%s\nstate=configured\npodman=%s\ndocker_wrapper=%s\nshort_name_mode=%s\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)" \
+  "$(command -v podman || echo none)" \
+  "$([ -x /usr/local/bin/docker ] && echo /usr/local/bin/docker || echo none)" \
+  "$OCI_ENGINE_SHORT_NAME_MODE" \
+  > /var/lib/acq/oci-engine-ready
 
 echo "oci-engine: rootless podman installed and configured (short-name-mode=$OCI_ENGINE_SHORT_NAME_MODE)."

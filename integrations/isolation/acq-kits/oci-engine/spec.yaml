@@ -49,25 +49,38 @@ description: >
   defense, ADR-0020). Opt-in mixin selected by acq only when ACQ_ENABLE_OCI_KIT
   is set; the engine runs rootless as the agent, never as root.
 
-# EGRESS (deny-by-default): deliberately NO caps.network.allow here.
+# EGRESS. Two distinct needs, handled differently on purpose:
 #
-# The install pulls podman + the rootless prerequisites from the OS package
-# MIRROR (apt/dnf/apk). The correct mirror host depends on the base distro
-# (archive.ubuntu.com / ports.ubuntu.com / security.ubuntu.com for Ubuntu,
-# *.debian.org for Debian, dl-cdn.alpinelinux.org for Alpine, ...), and under
-# acq's DEFAULT balanced egress baseline (isolation ADR-0002 / balanced.yaml)
-# those OS-package-mirror hosts are ALREADY reachable — they are in the curated
-# `core` baseline. Hardcoding a single distro's mirror here would be (a) wrong for
-# the other distros and (b) redundant with the baseline for the common case.
+# 1) The OS package MIRROR (apt/dnf/apk) the create-time install pulls podman
+#    from. The mirror host is DISTRO-DEPENDENT (archive/ports/security.ubuntu.com,
+#    *.debian.org, dl-cdn.alpinelinux.org, ...) and is ALREADY in acq's DEFAULT
+#    balanced egress baseline `core` set (isolation ADR-0002 / balanced.yaml).
+#    Hardcoding one distro's mirror here would be wrong for the others and
+#    redundant with the baseline, so it is NOT listed below. Under a narrower tier
+#    (e.g. ACQ_NETWORK_TIER=strict) the mirror is unreachable and the install
+#    fails soft (warning; provision continues; OCI unavailable) — the operator
+#    then widens egress or bakes podman into the base image.
 #
-# So this kit adds NO kit-level egress and relies on the balanced baseline. With
-# ACQ_NETWORK_TIER=strict (kit hosts only) or a base whose egress is otherwise
-# narrowed, the mirror is unreachable and the install fails soft (a clear
-# warning; provision continues; OCI is simply unavailable) — the operator then
-# widens egress or bakes the packages into the base image. This mirrors the
-# fail-soft behavior of the original adapter implementation (ADR-0020/ADR-0030).
-# No leading-`*` host would appear here anyway (YAML alias trap), since there are
-# no entries.
+# 2) The CONTAINER REGISTRY the kit's PURPOSE requires — pulling images at runtime
+#    (`docker run` / `docker compose`). Unlike the distro mirror this is NOT
+#    distro-dependent: it is always Docker Hub (the kit's Docker-Hub-first
+#    default). We DECLARE these explicitly in caps.network.allow so the runtime
+#    works even on a `strict` tier that carries no baseline — a kit should name
+#    the egress its own function needs rather than silently depend on a baseline
+#    (finding #5). deny-by-default is preserved: these are an allow-LIST.
+#
+# No entry begins with a leading `*` (YAML would parse a bare leading-`*` host as
+# an alias and break the translated spec — the documented alias trap).
+caps:
+  network:
+    allow:
+      # Docker Hub registry API (image manifests) + token auth.
+      - registry-1.docker.io
+      - auth.docker.io
+      - index.docker.io
+      # Docker Hub image blob CDNs (layer downloads are redirected here).
+      - production.cloudflare.docker.com
+      - production.cloudfront.docker.com
 
 files:
   # Lifecycle scripts. Mode 0755 (executable); each backend's file-drop
@@ -94,6 +107,10 @@ files:
     mode: "0644"
     source: files/home/oci-engine-config/01-acq-shortnames.conf
     description: podman short-name aliases (hello/hello-world -> docker.io). Installed to /etc/containers/registries.conf.d/.
+  - path: /home/agent/oci-engine-config/oci-engine-storage-driver.sh
+    mode: "0644"
+    source: files/home/oci-engine-config/oci-engine-storage-driver.sh
+    description: Shared helper sourced by install + grant steps to (re)select the podman storage driver. Convergent vfs->overlay.
   - path: /home/agent/oci-engine-config/docker
     mode: "0755"
     source: files/home/oci-engine-config/docker
@@ -114,15 +131,18 @@ commands:
     command:
       - sh
       - /home/agent/oci-engine-install.sh
-  # STARTUP phase — every start, as root (uid "0"). Re-grants /dev/net/tun +
-  # /dev/fuse to the agent: /dev is a devtmpfs re-created each boot, so the
-  # create-time grant is lost on restart and must be re-applied. Cheap +
-  # idempotent; runs to completion (NOT background: true — it is not a supervisor
-  # loop). Schema note: the hybrid/v1 `user` field is a numeric uid (^[0-9]+$);
-  # "0" is root, which both the chown and the /dev/net directory create require.
+  # STARTUP phase — every start, as root (uid "0"). GATED ON PODMAN: does nothing
+  # if podman is absent (install fell soft, or the base had its own engine and the
+  # kit early-outed) — no engine, no device grant (finding #3). Otherwise re-grants
+  # /dev/net/tun + /dev/fuse to the agent (/dev is a devtmpfs re-created each boot,
+  # so the create-time grant is lost on restart) AND re-evaluates the system
+  # storage driver so a transient /dev/fuse miss at create is not permanently
+  # pinned to vfs (finding #4). Cheap + idempotent; runs to completion (NOT
+  # background: true). Schema note: `user` is a numeric uid (^[0-9]+$); "0" is
+  # root, which the chown, /dev/net create, and /etc/containers write require.
   - phase: startup
     user: "0"
-    description: Re-grant the rootless-podman device nodes (/dev/net/tun, /dev/fuse) on every start.
+    description: If podman present, re-grant device nodes + re-evaluate the storage driver (every start, root).
     command:
       - sh
       - /home/agent/oci-engine-grant-devs.sh
@@ -155,10 +175,14 @@ commands:
 #                                and is an explicit operator opt-out (ADR-0020).
 #   OCI_ENGINE_AGENT_USER      — the unprivileged user the engine runs as (for a
 #                                base whose agent account is not named "agent").
+#   OCI_ENGINE_SELFTEST_TIMEOUT — seconds to bound the per-boot rootless self-test
+#                                build (default 120) so a wedged mount cannot hang
+#                                the boot sequence (finding #6).
 environment:
   OCI_ENGINE_PKGS: "podman podman-compose fuse-overlayfs uidmap passt slirp4netns"
   OCI_ENGINE_SHORT_NAME_MODE: "enforcing"
   OCI_ENGINE_AGENT_USER: "agent"
+  OCI_ENGINE_SELFTEST_TIMEOUT: "120"
 
 agentContext: |
   ## OCI Engine (rootless podman)

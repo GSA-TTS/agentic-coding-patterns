@@ -37,20 +37,27 @@ package install**: they are applied whenever podman ends up present at that poin
 — whether this kit installed it or the base already had podman — not only when
 the kit ran the package step.
 
-On **every start** (the `startup` phase, run as root) it group-scopes
-`/dev/net/tun` and `/dev/fuse` to the agent (`root:agent`, `0660`) so rootless
-podman networking and the fuse-overlayfs storage mount work. `/dev` is a devtmpfs
-re-created each boot, so this must re-run on restart, not just at create.
+On **every start** (the `startup` phase, run as root) — **only if podman is
+installed** — it group-scopes `/dev/net/tun` and `/dev/fuse` to the agent
+(`root:agent`, `0660`) so rootless podman networking and the fuse-overlayfs
+storage mount work, and it **re-evaluates the system storage driver**. `/dev` is a
+devtmpfs re-created each boot, so both must re-run on restart, not just at create;
+re-evaluating the driver each boot lets it **converge from `vfs` to `overlay`**
+once `fuse-overlayfs` and `/dev/fuse` are both available (a transient `/dev/fuse`
+miss at create is not permanently baked in). If podman is absent (install fell
+soft, or the base had its own engine and the kit early-outed) this step does
+nothing — it never widens device access for an engine that does not exist.
 
 Also on **every start** (a second `startup` step, run as the **agent**) it runs a
 rootless self-test — a real `podman build` FROM scratch, which opens `/dev/fuse`
-and mounts a layer (stronger than `podman info`, which does not). If that fails,
-it writes a **user-level `~/.config/containers/storage.conf`** selecting the `vfs`
-driver and retries. This is the documented recovery for a base whose
-overlay+fuse-overlayfs combo is rejected under rootless (where `podman info`
-passes but a layer mount fails). It is idempotent (only writes on a failed build
-when no user driver is already set) and fails soft (a failed self-test never
-aborts the boot).
+and mounts a layer (stronger than `podman info`, which does not). The build is
+bounded by `timeout` (`OCI_ENGINE_SELFTEST_TIMEOUT`, default 120s) so a wedged
+mount cannot hang the boot. If it fails, it writes a **user-level
+`~/.config/containers/storage.conf`** selecting the `vfs` driver and retries. This
+is the documented recovery for a base whose overlay+fuse-overlayfs combo is
+rejected under rootless (where `podman info` passes but a layer mount fails). It
+is idempotent (only writes on a failed build when no user driver is already set)
+and fails soft (a failed self-test never aborts the boot).
 
 Every step is **idempotent** and **best-effort**: a missing package mirror or an
 unsupported base image produces a clear warning and leaves provision to continue
@@ -58,7 +65,12 @@ unsupported base image produces a clear warning and leaves provision to continue
 `install` step **exits 0 even when the package install fails** — a non-zero
 `install`-phase exit would fail `sbx create` (a dead sandbox), the opposite of
 the promised fail-soft behavior, so the package-manager step is caught and falls
-through to a single warn-and-exit-0 re-check. See `docs/decisions/`.
+through to a single warn-and-exit-0 re-check. So that a fail-soft miss is not
+*silent*, a genuinely-configured sandbox records a **success marker** at
+`/var/lib/acq/oci-engine-ready` (`state=configured`, or `state=base-engine` for
+the functional-engine early-out); the fail-soft paths deliberately do not write
+it, so an operator, CI, or `scripts/verify` can tell a provisioned sandbox from
+one where OCI setup fell soft. See `docs/decisions/`.
 
 ## Rootless / security posture (ADR-0020)
 
@@ -90,15 +102,26 @@ Nothing in this kit is a secret. podman needs no credentials to run rootless.
 
 ## Network egress
 
-This kit declares **no `caps.network.allow`**. The install pulls packages from
-the OS package **mirror**, whose host depends on the base distro. Under acq's
-default **balanced** egress tier (isolation ADR-0002; see
-`integrations/isolation/network-tiers/balanced.yaml`) the OS-package-mirror hosts
-are already in the curated `core` baseline, so no kit-level egress is needed for
-the common case — and hardcoding one distro's mirror host would be wrong for the
-others. With `ACQ_NETWORK_TIER=strict` (kit hosts only) or a narrowed base, the
-mirror is unreachable and the install fails soft; the operator then widens egress
-or bakes the packages into the base image.
+Two distinct egress needs, handled differently on purpose:
+
+- **Container registry (declared).** The kit's *purpose* — pulling images at
+  runtime (`docker run` / `docker compose`) — needs Docker Hub, which is *not*
+  distro-dependent. The kit declares the Docker Hub hosts explicitly in
+  `caps.network.allow` (`registry-1.docker.io`, `auth.docker.io`,
+  `index.docker.io`, and the `production.cloudflare.docker.com` /
+  `production.cloudfront.docker.com` blob CDNs), so pulls work even on a `strict`
+  tier that carries no baseline. deny-by-default is preserved (it is an
+  allow-list).
+- **OS package mirror (left to the baseline).** The create-time install pulls
+  podman from the distro package mirror, whose host *is* distro-dependent
+  (`archive/ports/security.ubuntu.com`, `*.debian.org`,
+  `dl-cdn.alpinelinux.org`, …). Under acq's default **balanced** tier (isolation
+  ADR-0002; see `integrations/isolation/network-tiers/balanced.yaml`) those hosts
+  are already in the curated `core` baseline, so hardcoding one distro's mirror
+  here would be wrong for the others and redundant. With `ACQ_NETWORK_TIER=strict`
+  or a narrowed base the mirror is unreachable and the install fails soft
+  (recorded by the absence of the success marker); the operator then widens
+  egress or bakes podman into the base image.
 
 ## Opt-in
 

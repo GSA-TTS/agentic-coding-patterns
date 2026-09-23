@@ -42,11 +42,32 @@ USER_STORAGE_CONF="$USER_STORAGE_DIR/storage.conf"
 # A real LAYER MOUNT self-test: `podman build` FROM scratch opens /dev/fuse and
 # mounts a layer, so it catches the rootless overlay+fuse-overlayfs trap that a
 # bare `podman info` misses. No registry pull, no egress (FROM scratch).
+#
+# TIMEOUT (finding #6): this runs on EVERY boot. A wedged storage lock, a stalled
+# newuidmap, or a hung mount could otherwise block the boot sequence forever, so
+# the build is bounded by `timeout` when available (best-effort: if `timeout` is
+# absent we run unbounded rather than skip the self-test). OCI_ENGINE_SELFTEST_TIMEOUT
+# (seconds) is overridable via spec.yaml environment.
+OCI_ENGINE_SELFTEST_TIMEOUT="${OCI_ENGINE_SELFTEST_TIMEOUT:-120}"
+case "$OCI_ENGINE_SELFTEST_TIMEOUT" in
+  ''|*[!0-9]*) OCI_ENGINE_SELFTEST_TIMEOUT=120 ;;
+esac
+
+_oci_build() {
+  # Run podman build, bounded by `timeout` if present. A timeout kill returns
+  # 124 (GNU) — treated as a failed self-test, which triggers the vfs fallback.
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$OCI_ENGINE_SELFTEST_TIMEOUT" podman build -q -t oci-engine-selftest:local "$1" >/dev/null 2>&1
+  else
+    podman build -q -t oci-engine-selftest:local "$1" >/dev/null 2>&1
+  fi
+}
+
 _oci_selftest() {
   _d="$(mktemp -d)" || return 1
   printf 'FROM scratch\nCOPY hi /hi\n' > "$_d/Containerfile"
   echo hi > "$_d/hi"
-  podman build -q -t oci-engine-selftest:local "$_d" >/dev/null 2>&1
+  _oci_build "$_d"
   _rc=$?
   podman rmi -f oci-engine-selftest:local >/dev/null 2>&1 || true
   rm -rf "$_d"

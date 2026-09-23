@@ -1,11 +1,18 @@
 #!/bin/sh
 # oci-engine-grant-devs.sh — grant the agent the device nodes rootless podman
-# needs, re-applied on EVERY sandbox start.
+# needs, and re-evaluate the storage driver — re-applied on EVERY sandbox start.
 #
 # Runs as root (uid 0) in the kit's `startup` phase. /dev is a devtmpfs re-created
 # on every boot, so a create-time grant would be lost after a restart — this step
 # re-applies the grant each start (idempotent, cheap). See README.md and the
 # isolation ADR-0020.
+#
+# GATED ON PODMAN (finding #3): if podman is NOT installed (the install fell soft
+# — unreachable mirror, unsupported base — or the base had its own engine and the
+# kit early-outed), this step does NOTHING. Widening /dev/net/tun and /dev/fuse
+# access for a container engine that does not exist is pointless and needlessly
+# enlarges the in-guest attack surface (/dev/net/tun in particular is egress-
+# relevant — it enables in-guest tunnelling). No engine, no grant.
 #
 # WHAT + WHY (ADR-0020):
 #   /dev/net/tun — rootless podman's network backend (netavark/pasta or
@@ -19,6 +26,11 @@
 # attack surface. It is a group-scope, not world-writable (0666): only the agent
 # (in the `agent` group) gains access, not every uid in the guest.
 #
+# It also RE-EVALUATES the system storage driver each boot (finding #4): because
+# /dev is recreated per boot, a transient /dev/fuse miss at create must not
+# permanently pin the slow vfs driver — the shared helper converges to overlay
+# once fuse-overlayfs + /dev/fuse are both present.
+#
 # Best-effort per device: a missing node (e.g. /dev/net/tun absent because the
 # kernel module is not present) is a clear message, not a hard failure — podman
 # then falls back to a networking/storage mode that does not need that node.
@@ -26,6 +38,18 @@
 # POSIX sh only (no bashisms).
 
 set -eu
+
+# GATE (finding #3): do nothing unless a container engine this grant is FOR
+# exists. `podman` is what this kit installs; if it is absent the grant serves no
+# purpose and would only widen device access, so skip entirely.
+if ! command -v podman >/dev/null 2>&1; then
+  echo "oci-engine: podman not installed; skipping device grant + storage re-eval (nothing to enable)." >&2
+  exit 0
+fi
+
+# Directory this kit staged its helpers into (the storage-driver helper lives
+# alongside this script's source).
+STAGE_DIR="/home/agent/oci-engine-config"
 
 # The unprivileged user the engine runs as. Non-secret; overridable via the
 # OCI_ENGINE_AGENT_USER env var (declared in spec.yaml environment) for a base
@@ -63,3 +87,12 @@ _grant() {
 
 _grant /dev/net/tun
 _grant /dev/fuse
+
+# Re-evaluate the system storage driver now that this boot's /dev is populated
+# (finding #4): converge to overlay+fuse-overlayfs when possible, else vfs. The
+# helper only rewrites a kit-owned storage.conf and no-ops when already correct.
+if [ -f "$STAGE_DIR/oci-engine-storage-driver.sh" ]; then
+  # shellcheck source=files/home/oci-engine-storage-driver.sh
+  . "$STAGE_DIR/oci-engine-storage-driver.sh"
+  oci_engine_write_storage_conf
+fi

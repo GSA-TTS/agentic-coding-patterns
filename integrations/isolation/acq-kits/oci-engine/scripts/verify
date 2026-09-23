@@ -34,16 +34,19 @@
 # is eventually removed, this export becomes a harmless no-op and this script is
 # the standing regression test that the kit still provisions podman on its own.
 #
-# WHY a pinned NEUTRAL base image (important): the msb default base
-# (docker/sandbox-templates:shell-docker) ALREADY ships a container engine and
-# puts the agent in the `docker` group — so a `docker`/`podman` present there is
-# NOT proof the kit installed it, defeating the whole point of ACQ_MSB_ENSURE_OCI=0.
-# This check pins a plain Debian/Ubuntu base that ships NEITHER docker NOR podman
-# (VERIFY_OCI_IMAGE, default below) via acq's neutral --image, so the ONLY thing
-# that can produce a working rootless podman is this kit. The base must still meet
-# acq's msb prerequisite contract (a non-root `agent` user, sudo, ca-certificates)
-# and reach an OS package mirror under the active egress tier — the kit installs
-# podman from that mirror at create. Override with VERIFY_OCI_IMAGE=<ref>.
+# WHY a pinned engine-free base image (important): the msb default base
+# (docker/sandbox-templates:shell-docker, a `*-docker` variant) runs a FULL Docker
+# Engine (dockerd) inside the sandbox — so `docker info` succeeds there, the kit
+# correctly EARLY-OUTS (do not shadow a working engine), and no podman is
+# installed. That is right behavior, but it proves nothing about THIS kit. This
+# check pins the NON-`-docker` `shell` template (VERIFY_OCI_IMAGE, default below)
+# via acq's neutral --image: per the sandbox-templates docs it ships the Docker
+# CLI but NO engine (dead socket) — the exact case this kit fixes and which does
+# NOT early-out — so the ONLY thing that can produce a working rootless podman is
+# this kit. The base still meets acq's msb prerequisite contract (non-root `agent`
+# user, sudo, ca-certificates) and reaches an OS package mirror under the active
+# egress tier — the kit installs podman from that mirror at create. Override with
+# VERIFY_OCI_IMAGE=<engine-free ref>.
 #
 # NOTE: this is a LIVE check and needs a sandbox-capable host with `acq` on PATH
 # and an msb backend ready (`acq --backend msb version`; `msb doctor`). It is NOT
@@ -68,12 +71,19 @@ WORK="$(mktemp -d "${HOME:-/tmp}/.oci-engine-verify.XXXXXX")"
 AGENT="shell"
 KEEP="${KEEP:-0}"
 
-# Plain base image that ships NEITHER docker NOR podman, so a working engine is
-# attributable to the kit (see the header note). Ubuntu 24.04 has the `agent`
-# user + sudo the msb prerequisite contract needs on the sandbox-templates line;
-# a truly bare ubuntu:24.04 would need acq to synthesize the agent user, which it
-# does on a plain OCI base. We default to the shell (NON-docker) sandbox template:
-# same family as the msb default, minus the bundled engine. Override as needed.
+# Base image for the check. We default to the `shell` sandbox template (NOTE: the
+# plain `shell`, NOT `shell-docker`). Per the Docker sandbox-templates docs, the
+# non-`-docker` variants ship the Docker *CLI* but NO Docker *Engine*/daemon — so
+# `docker info` FAILS there (a dead socket), which is precisely the case this kit
+# fixes (shadow the dead-socket docker CLI with a podman-backed wrapper) and which
+# does NOT trigger the kit's functional-engine early-out. It also ships the
+# non-root `agent` user + sudo the msb prerequisite contract needs, and `apt-get`
+# for the kit's podman install. This is a realistic, engine-free base.
+#
+# Do NOT point this at a `*-docker` variant: those run a full Docker Engine
+# (dockerd) inside the sandbox, so `docker info` SUCCEEDS, the kit correctly
+# EARLY-OUTS (do not shadow a working engine), and the podman checks below would
+# then fail — a false negative. Override with VERIFY_OCI_IMAGE=<engine-free ref>.
 VERIFY_OCI_IMAGE="${VERIFY_OCI_IMAGE:-docker.io/docker/sandbox-templates:shell}"
 
 # Disable the msb adapter's legacy OCI auto-install so podman is attributable to
@@ -148,7 +158,7 @@ else
 fi
 
 info "2. Create an msb sandbox with the kit applied (adapter OCI auto-install OFF)"
-echo "  base image: $VERIFY_OCI_IMAGE (neutral; ships neither docker nor podman)"
+echo "  base image: $VERIFY_OCI_IMAGE (engine-free: docker CLI w/ dead socket, no podman)"
 echo "  creating $SBX_NAME (workspace $WORK; ACQ_MSB_ENSURE_OCI=0)..."
 if acq --backend msb create "$AGENT" "$WORK" --image "$VERIFY_OCI_IMAGE" --kit "$KIT_DIR" \
      >"$WORK/acq-create.log" 2>&1; then
@@ -159,7 +169,21 @@ else
   exit 1
 fi
 
-info "3. podman is installed and reports version (as the agent)"
+info "3. Kit success marker + podman installed (as the agent)"
+# The install step writes /var/lib/acq/oci-engine-ready ONLY on a real success
+# (state=configured) or a deliberate base-engine early-out (state=base-engine);
+# the fail-soft paths do NOT touch it. Check it first so a "kit applied but did
+# nothing" sandbox is legible to CI/operators (finding #1).
+marker="$(in_sbx "cat /var/lib/acq/oci-engine-ready 2>/dev/null")"
+if [ -n "$marker" ]; then
+  ok "kit success marker present (/var/lib/acq/oci-engine-ready)"
+  printf '        %s\n' "$(printf '%s' "$marker" | tr '\n' ';')"
+else
+  bad "kit success marker ABSENT — the install fell soft (see create log below)"
+  echo "  --- oci-engine lines from the create log (why the install did not land) ---" >&2
+  grep -i 'oci-engine' "$WORK/acq-create.log" 2>/dev/null | sed 's/^/    | /' >&2 \
+    || echo "    | (no oci-engine lines captured in the create log)" >&2
+fi
 # GATE: if the kit's install phase did not land podman, every later rootless
 # check is moot — so this is a hard gate. On failure, dump the create log so the
 # install failure (unreachable mirror, unsupported base, etc.) is visible instead

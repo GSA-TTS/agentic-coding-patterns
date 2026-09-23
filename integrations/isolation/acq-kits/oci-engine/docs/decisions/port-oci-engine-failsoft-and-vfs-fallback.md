@@ -96,3 +96,52 @@ Live testing on a base that already bundles a docker CLI (the msb default
 
 Both keep the fail-soft posture: the early-out and every skip path exit 0.
 
+## Addendum: adversarial-review hardening
+
+An AI-assisted 5-role adversarial PR review (advisory) confirmed the design
+direction and flagged six implementation defects, all addressed here:
+
+1. **Fail-SILENT vs fail-soft / no verifiability.** Fail-soft is right (a
+   non-zero `install` exit fails `sbx create`), but a silent one is not
+   observable. The install now writes a durable success marker
+   `/var/lib/acq/oci-engine-ready` (`state=configured` on a real install,
+   `state=base-engine` on the deliberate functional-engine early-out); the
+   fail-soft paths deliberately do NOT write it. `scripts/verify` (the
+   kit-library convention this kit follows) checks the marker first, so a
+   "kit applied but did nothing" sandbox is legible to CI/operators.
+
+2. **Package-manager flag injection.** The old `OCI_ENGINE_PKGS` sanitizer
+   allowed a leading `-` in a token, so `OCI_ENGINE_PKGS="podman
+   --allow-unauthenticated"` (apt) / `--nogpgcheck` (dnf) / `--allow-untrusted`
+   (apk) passed validation and word-split into the elevated install, disabling
+   signature verification. The sanitizer now validates **token by token** and
+   rejects any leading-`-` token (and any non-word-safe char), failing closed
+   (skip OCI setup) rather than running a tampered install.
+
+3. **Unconditional device grant.** `oci-engine-grant-devs.sh` chown/chmod'd
+   `/dev/net/tun` + `/dev/fuse` on every boot even when podman was never
+   installed — widening in-guest device access (`/dev/net/tun` is
+   egress-relevant) for a capability that does not exist. It is now **gated on
+   `command -v podman`**: no engine, no grant.
+
+4. **Storage driver permanently mis-pinned from a boot-transient probe.** The
+   driver was chosen from `[ -e /dev/fuse ]` at create and then never rewritten,
+   so a transient miss at create permanently pinned slow `vfs`. Driver selection
+   moved into a shared helper (`oci-engine-storage-driver.sh`) that the
+   every-boot grant step also runs, **converging** vfs→overlay once
+   fuse-overlayfs + `/dev/fuse` are both present. It only ever rewrites a
+   kit-owned `storage.conf` (sentinel comment), never an operator's.
+
+5. **Missing `caps.network` for the registry.** The kit's *purpose* (pulling
+   images) needs Docker Hub, which — unlike the distro package mirror — is not
+   distro-dependent. `spec.yaml` now declares the Docker Hub registry + auth +
+   blob-CDN hosts in `caps.network.allow`, so runtime pulls work even on a
+   `strict` tier. The distro mirror is still left to the balanced baseline (it
+   is distro-specific and already in the baseline `core` set).
+
+6. **Unbounded self-test build on the boot path.** The per-boot rootless
+   `podman build` self-test now runs under `timeout`
+   (`OCI_ENGINE_SELFTEST_TIMEOUT`, default 120s) when available, so a wedged
+   mount / stalled `newuidmap` cannot hang the boot; a timeout is treated as a
+   failed self-test and triggers the vfs fallback.
+
