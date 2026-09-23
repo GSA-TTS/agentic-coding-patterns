@@ -54,7 +54,9 @@ especially `usai-provider`.
 - A kit-managed Node `24.21.0` runtime under the kit volume, verified by
   SHA-256.
 - pnpm `10.33.2` through Corepack.
-- OpenDesign daemon startup on `0.0.0.0:7456` with `--no-open`.
+- OpenDesign daemon startup on `127.0.0.1:7456` with `--no-open`, plus a
+  supervised relay that publishes that loopback listener on the guest network
+  address (see [Security](#security)).
 - Root startup initialization that makes the root of the persistent OpenDesign
   volume writable by the `agent` user before the daemon supervisor runs.
 - OpenDesign state, source checkout, kit-managed Node runtime, Corepack state,
@@ -62,6 +64,9 @@ especially `usai-provider`.
 - OpenDesign app-config seeding for `agentId: "opencode"`,
   `onboardingCompleted: true`, and local telemetry disabled when no user choice
   exists.
+- `OPENCODE_CONFIG` pointing at the `usai-provider` OpenCode config, so
+  OpenDesign-launched runs actually reach USAi (see [Credential
+  model](#credential-model)).
 
 The kit deliberately does **not** seed a default model. OpenCode/OpenDesign use
 their existing configured defaults.
@@ -80,6 +85,28 @@ acq secret store
 
 Do not paste model-provider keys into chat. For the core OpenCode/USAi flow,
 OpenDesign never needs a copy of the provider key in its `OD_DATA_DIR`.
+
+One wrinkle makes an extra step necessary. OpenDesign launches agent children
+with `OD_SANDBOX_MODE=1`, which rewrites `HOME` and `XDG_CONFIG_HOME` to a
+private agent home under `OD_DATA_DIR`. OpenCode resolves its global config from
+those variables, so it would look inside
+`$OD_DATA_DIR/sandbox/config/opencode/` — where it auto-creates an empty stub —
+and never read the `usai-provider` config. With no `usai` provider defined,
+OpenCode falls back to its own hosted gateway (`opencode.ai/zen`), which is not
+in this kit's egress allowlist, and every run fails with `Cannot connect to API`
+after burning its retry budget.
+
+Startup therefore exports `OPENCODE_CONFIG` (OpenCode's documented absolute-path
+override, which survives that rewrite):
+
+```text
+OPENCODE_CONFIG=/home/agent/.config/opencode/opencode.jsonc
+```
+
+That names a config **path** only. `USAI_API_KEY` stays in the environment and is
+resolved by the config's own `{env:USAI_API_KEY}` substitution at run time, so no
+key material moves into OpenDesign state. Startup logs which config it selected,
+and warns when it finds none.
 
 If you configure extra OpenDesign media providers in the UI, OpenDesign stores
 those settings in its own local data directory. Treat that directory as sensitive
@@ -104,17 +131,29 @@ acq ports <sandbox> --publish 7456:7456
 
 ## Security
 
-The daemon runs with `OD_DISABLE_API_AUTH=1` and binds `0.0.0.0` inside the
-sandbox. This is safe only because the sandbox is the security boundary and the
-host-side published port is loopback-only.
+The daemon runs with `OD_DISABLE_API_AUTH=1` and binds guest `127.0.0.1` only.
+This is safe only because the sandbox is the security boundary and the host-side
+published port is loopback-only.
 
 Run this only on a trusted, single-user host. Do not forward the mapped port to a
 wider interface. Anyone who can reach the host loopback port can drive the
 OpenDesign daemon and the agents it launches.
 
-The in-guest `0.0.0.0` bind is required for `acq` create-time port publishing on
-msb-style backends: the host listener dials the sandbox guest network IP, not
-guest `127.0.0.1`.
+`acq` create-time port publishing on msb-style backends dials the sandbox guest
+network IP, not guest `127.0.0.1`, so something in the guest must listen there.
+The kit does that with a small supervised relay (`~/opendesign-relay.mjs`) that
+forwards the guest network address to the loopback daemon — rather than binding
+the daemon to `0.0.0.0`.
+
+That distinction matters functionally, not just cosmetically. OpenDesign gates
+several routes on the request **peer** address being loopback
+(`requireLocalDaemonRequest`). With the daemon on `0.0.0.0`, every request
+arriving from the host carries a guest-network peer, and those routes return
+`403 Forbidden` while the rest of the UI works — most visibly Settings → About →
+**Export diagnostics**, and `POST /api/strategies/od-next/rollout`. The relay
+keeps the peer loopback, so they work. Details and the rejected alternatives are
+in
+[`docs/decisions/disable-api-auth-loopback-boundary.md`](docs/decisions/disable-api-auth-loopback-boundary.md).
 
 ## HTTPS-inspected networks
 
@@ -156,7 +195,8 @@ opendesign/
 ├── spec.yaml                         # kit declaration
 ├── files/home/
 │   ├── opendesign-install.sh         # Node 24 + OpenDesign source install/build
-│   └── opendesign-start.sh           # app-config seed + daemon supervisor
+│   ├── opendesign-relay.mjs          # guest-network -> loopback publish relay
+│   └── opendesign-start.sh           # app-config seed + daemon/relay supervisors
 ├── README.md
 ├── TROUBLESHOOTING.md
 ├── scripts/verify                    # offline + optional live verification

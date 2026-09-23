@@ -14,11 +14,18 @@ SOURCE_DIR="$APP_HOME/source"
 NODE_VERSION="${OPENDESIGN_NODE_VERSION:-24.21.0}"
 PNPM_VERSION="${OPENDESIGN_PNPM_VERSION:-10.33.2}"
 OD_PORT="${OD_PORT:-7456}"
-OD_BIND_HOST="${OD_BIND_HOST:-0.0.0.0}"
+# Loopback-only on purpose. OpenDesign gates several routes on the request PEER
+# being a loopback address, so the daemon must never see a guest-network peer.
+# Reachability for acq/msb port publishing is provided by opendesign-relay.mjs,
+# which binds the guest network address and forwards to this loopback listener.
+# See docs/decisions/disable-api-auth-loopback-boundary.md.
+OD_BIND_HOST="${OD_BIND_HOST:-127.0.0.1}"
 OD_DATA_DIR="${OD_DATA_DIR:-$APP_HOME/data}"
 DAEMON_LOG="$STATE_HOME/opendesign-daemon.log"
+RELAY_LOG="$STATE_HOME/opendesign-relay.log"
 SEED_LOG="$STATE_HOME/opendesign-seed.log"
 INSTALL_SCRIPT="$HOME/opendesign-install.sh"
+RELAY_SCRIPT="$HOME/opendesign-relay.mjs"
 RESTART_DELAY="${OPENDESIGN_RESTART_DELAY:-5}"
 
 mkdir -p "$APP_HOME" "$STATE_HOME" "$OD_DATA_DIR"
@@ -53,6 +60,38 @@ export OD_SANDBOX_MODE="${OD_SANDBOX_MODE:-1}"
 # into OpenDesign state; usai-provider + acq injection remain the credential path.
 if command -v opencode >/dev/null 2>&1; then
   export OPENCODE_BIN="$(command -v opencode)"
+fi
+
+# Name the OpenCode global config explicitly.
+#
+# OpenDesign runs agent children with OD_SANDBOX_MODE=1, which rewrites HOME and
+# XDG_CONFIG_HOME to a private agent home under OD_DATA_DIR (upstream
+# apps/daemon/src/sandbox-mode.ts). OpenCode then resolves its global config to
+# <OD_DATA_DIR>/sandbox/config/opencode/, where it auto-creates an empty stub —
+# so the usai-provider kit's config is never read, no `usai` provider is defined,
+# and OpenCode silently falls back to its own hosted gateway (opencode.ai/zen),
+# which is not in this kit's egress allowlist. Every run then burns its retry
+# budget and fails with "Cannot connect to API".
+#
+# OPENCODE_CONFIG is OpenCode's documented absolute-path override and survives
+# the HOME/XDG rewrite, so the same config the sandbox uses interactively is the
+# one OpenDesign-launched runs use. This names a config PATH only; no key
+# material is copied. USAI_API_KEY stays in the environment and is resolved by
+# that config's own {env:USAI_API_KEY} substitution at run time.
+if [ -z "${OPENCODE_CONFIG:-}" ]; then
+  for candidate in \
+    "${XDG_CONFIG_HOME:-$HOME/.config}/opencode/opencode.jsonc" \
+    "${XDG_CONFIG_HOME:-$HOME/.config}/opencode/opencode.json"
+  do
+    if [ -f "$candidate" ]; then
+      export OPENCODE_CONFIG="$candidate"
+      log "using OpenCode config $candidate for OpenDesign-launched runs"
+      break
+    fi
+  done
+  if [ -z "${OPENCODE_CONFIG:-}" ]; then
+    log "no OpenCode global config found; OpenDesign runs will use OpenCode defaults"
+  fi
 fi
 
 if [ -x "$INSTALL_SCRIPT" ]; then
@@ -113,6 +152,30 @@ NODE
 seed_app_config || true
 
 supervisor_running() { pgrep -u "$(id -u)" -f "supervisor:$1" >/dev/null 2>&1; }
+
+# Publish the loopback daemon on the guest network address so acq/msb port
+# publishing can reach it, WITHOUT letting the daemon see a non-loopback peer.
+# Supervised separately from the daemon: the relay is cheap to restart and must
+# survive a daemon restart, and a missing relay must not stop the UI from
+# working in-guest. See opendesign-relay.mjs for the full rationale.
+if [ "$OD_BIND_HOST" = "127.0.0.1" ] || [ "$OD_BIND_HOST" = "localhost" ]; then
+  if [ ! -f "$RELAY_SCRIPT" ]; then
+    log "relay script missing at $RELAY_SCRIPT; published port will not be reachable from the host"
+  elif supervisor_running opendesign-relay; then
+    log "OpenDesign relay supervisor already running"
+  else
+    (
+      sh -c '
+        while :; do
+          echo "[supervisor] starting OpenDesign relay at $(date -u +%FT%TZ)"
+          node "$3" "$1" || true
+          echo "[supervisor] OpenDesign relay exited; restarting in ${2}s"
+          sleep "$2"
+        done
+      ' "supervisor:opendesign-relay" "$OD_PORT" "$RESTART_DELAY" "$RELAY_SCRIPT"
+    ) >>"$RELAY_LOG" 2>&1 &
+  fi
+fi
 
 if supervisor_running opendesign-daemon; then
   log "OpenDesign daemon supervisor already running"

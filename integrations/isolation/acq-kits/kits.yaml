@@ -94,7 +94,11 @@ kits:
       native primitives. The kit installs a pinned OpenDesign source checkout with
       a kit-managed Node 24 runtime, runs the daemon unsecured
       (OD_DISABLE_API_AUTH=1), seeds OpenDesign to use the existing `opencode`
-      CLI, and leaves model credentials to acq + the usai-provider kit.
+      CLI, and leaves model credentials to acq + the usai-provider kit. The
+      daemon binds guest loopback only and a kit-managed Node relay publishes it
+      on the guest network address, because OpenDesign gates some routes on a
+      loopback peer address; that relay is a plain byte forwarder with no
+      backend-specific assumptions.
 
   prime-agent:
     backends: [sbx, msb]

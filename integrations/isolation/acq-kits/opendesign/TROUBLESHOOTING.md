@@ -15,13 +15,16 @@ acq exec <sandbox> -- sh -c 'curl -fsS http://127.0.0.1:7456/api/daemon/status &
 ```
 
 - `/api/daemon/status` returns 200 and the port is mapped: open
-  `http://localhost:<host-port-for-7456>`.
+  `http://localhost:<host-port-for-7456>`. If the browser still cannot connect,
+  the in-guest daemon is healthy but the publish relay is not — see "Host curl
+  returns Empty reply from server" below.
 - `/api/daemon/status` fails: first boot may still be installing/building OpenDesign.
   Watch the logs:
 
   ```bash
   acq exec <sandbox> -- sh -c 'tail -n 80 ~/.local/state/opendesign/opendesign-install.log'
   acq exec <sandbox> -- sh -c 'tail -n 80 ~/.local/state/opendesign/opendesign-daemon.log'
+  acq exec <sandbox> -- sh -c 'tail -n 40 ~/.local/state/opendesign/opendesign-relay.log'
   ```
 
 ## First boot takes a long time
@@ -124,21 +127,132 @@ acq exec <sandbox> -- sh -c 'tail -n 80 ~/.local/state/opendesign/opendesign-dae
 acq exec <sandbox> -- sh -c 'PATH="$HOME/.local/share/opendesign/tools/node-v24.21.0-linux-arm64/bin:$PATH" node -p "process.version + " " + process.versions.modules"'
 ```
 
-## Host curl returns "Empty reply from server" while guest curl works
+## Host curl returns "Empty reply from server" / connection refused while guest curl works
 
-The daemon likely bound guest loopback only. This kit sets `OD_BIND_HOST=0.0.0.0`
-and starts with `--host 0.0.0.0` because msb/acq create-time publishing dials the
-sandbox guest network IP, not guest `127.0.0.1`.
+The publish relay is probably not running. The daemon binds guest `127.0.0.1`
+only (on purpose — see the 403 entry below), and `~/opendesign-relay.mjs` is what
+listens on the guest network address that msb/acq publishing actually dials.
 
-Confirm the bind:
+```bash
+acq exec <sandbox> -- sh -c 'tail -n 40 ~/.local/state/opendesign/opendesign-relay.log'
+acq exec <sandbox> -- sh -c 'pgrep -af "supervisor:opendesign-relay" || echo "relay supervisor not running"'
+```
+
+Confirm both listeners. `1D20` hex = 7456:
 
 ```bash
 acq exec <sandbox> -- sh -c 'grep -i ":1D20" /proc/net/tcp'
-# 1D20 hex = 7456. 00000000:1D20 is 0.0.0.0:7456.
+# 0100007F:1D20 state 0A  -> daemon on 127.0.0.1:7456   (expected)
+# <guest-ip-hex>:1D20 0A  -> relay on the guest network (expected)
+# 00000000:1D20 state 0A  -> daemon on 0.0.0.0: WRONG, see the 403 entry below
 ```
 
-If it is loopback-only, rebuild the sandbox with the current kit or use a
-post-hoc publish path that tunnels from inside the guest.
+If the relay log shows `no non-loopback address yet`, the guest network came up
+late; the relay rescans every 10s and should recover on its own. If it shows
+`bind failed`, read the reported error code. If `~/opendesign-relay.mjs` is
+missing entirely, the sandbox was created with an older kit version — recreate
+it.
+
+## Export diagnostics (or another UI action) returns 403 Forbidden
+
+OpenDesign gates a subset of its API on the request **peer** address being
+loopback (`requireLocalDaemonRequest`, upstream
+`apps/daemon/src/http/local-daemon-request.ts`). If the daemon is bound to
+`0.0.0.0`, requests published from the host arrive with a guest-network peer
+address and these routes 403 while the rest of the UI works normally:
+
+```text
+GET  /api/diagnostics/export                 <- Settings -> About -> Export diagnostics
+POST /api/strategies/od-next/rollout         <- OD Next strategy switch (fails silently)
+POST /api/diagnostics/chat-scroll-forensics
+```
+
+The current kit avoids this by binding the daemon to `127.0.0.1` and publishing
+it through the relay. If you see a 403 anyway, check which address holds port
+7456:
+
+```bash
+acq exec <sandbox> -- sh -c 'grep -i ":1D20" /proc/net/tcp'
+# want 0100007F:1D20 (127.0.0.1) for the daemon, NOT 00000000:1D20 (0.0.0.0)
+```
+
+A daemon on `0.0.0.0` means `OD_BIND_HOST` was overridden, or the sandbox was
+created with an earlier kit version — recreate it with the current kit.
+
+Confirm the fix from the host with the exact request the UI button makes:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' \
+  -H "Origin: http://localhost:<host-port>" \
+  http://localhost:<host-port>/api/diagnostics/export
+# 200 = working. 403 = the daemon saw a non-loopback peer.
+```
+
+The daemon also journals its own API failures, which is the fastest way to
+confirm the cause — the peer-gated routes appear there and nothing else does:
+
+```bash
+acq exec <sandbox> -- sh -c 'cat "$OD_DATA_DIR/diagnostics/environment-evidence.json"'
+```
+
+As a fallback that bypasses HTTP entirely, the CLI writes the same bundle:
+
+```bash
+acq exec <sandbox> -- sh -c 'cd ~/.local/share/opendesign/source && node apps/daemon/dist/cli.js diagnostics export /tmp/od-diag.zip --json'
+```
+
+## Every run fails with "Cannot connect to API" after a long delay
+
+Symptom: a prompt runs for ~2-3 minutes and the UI shows "This task failed to
+run. Please retry."
+
+Cause: OpenCode never read the `usai-provider` config, so it has no `usai`
+provider and fell back to its own hosted gateway (`opencode.ai/zen`), which this
+kit's egress policy does not allow. It then exhausts its retry budget.
+
+OpenDesign launches agent children with `OD_SANDBOX_MODE=1`, which rewrites
+`HOME` and `XDG_CONFIG_HOME` to a private agent home under `OD_DATA_DIR`.
+OpenCode resolves its global config from those variables, finds the empty stub it
+auto-created at `$OD_DATA_DIR/sandbox/config/opencode/opencode.jsonc`, and never
+looks at `~/.config/opencode/opencode.jsonc`.
+
+Confirm from the child's own log — the provider and model names are the tell:
+
+```bash
+acq exec <sandbox> -- sh -c 'grep -E "loading path|providerID|stream error" ~/.local/share/opendesign/data/sandbox/config/data/opencode/log/opencode.log | tail -n 20'
+# BAD:  providerID=opencode modelID=big-pickle   ... url: https://opencode.ai/zen/...
+# GOOD: providerID=usai     modelID=claude-opus-5
+```
+
+And check the failed run's own record:
+
+```bash
+acq exec <sandbox> -- sh -c 'cat ~/.local/share/opendesign/data/runs/*/state.json | grep -E "status|failureDetail"'
+```
+
+The current kit fixes this by exporting `OPENCODE_CONFIG`. Verify it reached the
+daemon, and that OpenCode resolves `usai/*` models under the same rewritten
+environment OpenDesign uses:
+
+```bash
+acq exec <sandbox> -- sh -c 'tr "\0" "\n" < /proc/$(pgrep -f "apps/daemon/dist/cli.js" | head -n1)/environ | grep OPENCODE_CONFIG'
+
+acq exec <sandbox> -- sh -c '
+  OPENCODE_CONFIG="$HOME/.config/opencode/opencode.jsonc" \
+  HOME="$OD_DATA_DIR/sandbox/agent-home" \
+  XDG_CONFIG_HOME="$OD_DATA_DIR/sandbox/config" \
+  XDG_DATA_HOME="$OD_DATA_DIR/sandbox/config/data" \
+  XDG_CACHE_HOME="$OD_DATA_DIR/sandbox/cache" \
+  opencode models | grep "^usai/" | head'
+```
+
+If `OPENCODE_CONFIG` is absent, the sandbox predates this fix — recreate it. If
+it is present but no `usai/*` models resolve, `usai-provider` is not paired or
+`USAI_API_KEY` is not injected; see the USAi section below.
+
+Note there is no workaround through the OpenDesign UI: Settings → Local CLI only
+accepts `OPENCODE_BIN` for the opencode agent (upstream `app-config.ts`
+allowlist), not a config path or an API key.
 
 ## OpenDesign shows no usable OpenCode agent
 
@@ -171,6 +285,10 @@ Then check inside the sandbox:
 acq exec <sandbox> -- sh -c 'test -n "$USAI_API_KEY" && echo USAI_API_KEY-present'
 acq exec <sandbox> -- sh -c 'grep -n "api.gsa.usai.gov" ~/.config/opencode/opencode.jsonc 2>/dev/null || true'
 ```
+
+If the config exists and the key is present but OpenDesign runs still fail, see
+"Every run fails with Cannot connect to API" above — the config exists but
+OpenDesign's sandbox mode may be pointing OpenCode somewhere else.
 
 Do not copy `USAI_API_KEY` into OpenDesign `media-config.json`; OpenDesign should
 launch OpenCode, and OpenCode should read USAi through its own config/env path.

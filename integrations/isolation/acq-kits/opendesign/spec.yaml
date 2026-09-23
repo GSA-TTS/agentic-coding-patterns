@@ -14,12 +14,24 @@
 #   - Kit-managed Node 24. The OpenCode sandbox base may carry another Node major,
 #     so this kit downloads a pinned Linux Node 24 archive into its persistent
 #     volume and verifies SHA-256 before use.
-#   - OpenDesign runs as a headless daemon: `od --host 0.0.0.0 --port 7456
-#     --no-open`. In-guest 0.0.0.0 is required for msb/acq create-time port
-#     publishing to reach the guest service; the host side remains loopback-only.
+#   - OpenDesign runs as a headless daemon bound to guest loopback:
+#     `od --host 127.0.0.1 --port 7456 --no-open`. A small kit-managed relay
+#     (opendesign-relay.mjs) binds the guest network address and forwards to that
+#     loopback listener, because msb/acq create-time port publishing dials the
+#     guest network IP rather than guest 127.0.0.1. Binding the daemon itself to
+#     0.0.0.0 would make it observe a non-loopback PEER address for every request
+#     arriving from the host, and upstream's `requireLocalDaemonRequest` guard
+#     then answers 403 on routes the browser UI calls directly — including
+#     Settings -> About -> Export diagnostics. See
+#     docs/decisions/disable-api-auth-loopback-boundary.md.
 #   - Authentication is disabled with OD_DISABLE_API_AUTH=1. The sandbox boundary
 #     and host-loopback port are the control, matching the approved posture for
 #     this kit and the sibling paseo/openchamber UI kits.
+#   - OpenCode's global config is named to OpenDesign-launched runs via
+#     OPENCODE_CONFIG. OpenDesign sets OD_SANDBOX_MODE=1, which rewrites HOME and
+#     XDG_CONFIG_HOME for agent children, so OpenCode would otherwise never read
+#     the usai-provider kit's config and would fall back to its own hosted
+#     gateway. This names a config PATH only; no key material is copied.
 #   - OD_DATA_DIR lives on a persistent kit volume. BYOK/model credentials should
 #     continue to flow through acq + usai-provider + OpenCode, not through files in
 #     this kit.
@@ -58,6 +70,10 @@ files:
     mode: "0755"
     source: files/home/opendesign-start.sh
     description: Install first boot, seed OpenDesign app config, and supervise the daemon/UI
+  - path: /home/agent/opendesign-relay.mjs
+    mode: "0644"
+    source: files/home/opendesign-relay.mjs
+    description: Forward the published guest-network port to the loopback-bound daemon so peer-loopback-gated routes work
 
 commands:
   - phase: startup
@@ -94,7 +110,10 @@ volumes:
     size: "10G"
 
 environment:
-  OD_BIND_HOST: "0.0.0.0"
+  # Loopback-only. opendesign-relay.mjs publishes this on the guest network
+  # address; see the DESIGN note above and the ADR for why the daemon itself
+  # must not bind 0.0.0.0.
+  OD_BIND_HOST: "127.0.0.1"
   OD_PORT: "7456"
   OD_WEB_PORT: "7456"
   OD_DATA_DIR: "/home/agent/.local/share/opendesign/data"
@@ -119,9 +138,13 @@ agentContext: |
 
   **Model credentials.** Pair this kit with `usai-provider` for the GSA default
   path. `usai-provider` configures OpenCode to use USAi, and `acq` injects
-  `USAI_API_KEY` at runtime. Do not paste provider keys into chat. If you choose
-  to configure extra OpenDesign media providers through the UI, those settings
-  are stored under the persistent OpenDesign data directory.
+  `USAI_API_KEY` at runtime. Startup exports `OPENCODE_CONFIG` pointing at that
+  kit's `~/.config/opencode/opencode.jsonc`, because OpenDesign's sandbox mode
+  rewrites `HOME`/`XDG_CONFIG_HOME` for agent children and OpenCode would
+  otherwise fall back to its own hosted gateway and fail every run. Do not paste
+  provider keys into chat. If you choose to configure extra OpenDesign media
+  providers through the UI, those settings are stored under the persistent
+  OpenDesign data directory.
 
   **Default agent.** Startup seeds OpenDesign's app config to select OpenCode,
   complete onboarding, and disable local telemetry when no user choice exists. It
@@ -132,7 +155,15 @@ agentContext: |
   is the security boundary and the host port is loopback-only. Run this only on a
   trusted, single-user host and do not forward the mapped port.
 
-  Logs: `~/.local/state/opendesign/opendesign-daemon.log` and
+  **Networking.** The daemon binds guest `127.0.0.1` only; a supervised relay
+  (`~/opendesign-relay.mjs`) forwards the published guest-network port to it.
+  This is required because OpenDesign gates some routes on the request peer being
+  loopback, and would otherwise return 403 for the browser (visibly: Settings ->
+  About -> Export diagnostics). If a UI action returns 403, check the relay log
+  before anything else.
+
+  Logs: `~/.local/state/opendesign/opendesign-daemon.log`,
+  `~/.local/state/opendesign/opendesign-relay.log`, and
   `~/.local/state/opendesign/opendesign-install.log`.
 
 # No backend_shortcuts / backend_extras: the port, volume, files, env, and

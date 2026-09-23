@@ -90,9 +90,23 @@ for script in "$KIT_DIR/files/home/opendesign-install.sh" "$KIT_DIR/files/home/o
   fi
 done
 
+RELAY="$KIT_DIR/files/home/opendesign-relay.mjs"
+if [ ! -f "$RELAY" ]; then
+  bad "opendesign-relay.mjs missing (required by the loopback-bind decision)"
+elif command -v node >/dev/null 2>&1; then
+  if node --check "$RELAY" >/dev/null 2>&1; then
+    ok "opendesign-relay.mjs parses with node --check"
+  else
+    bad "opendesign-relay.mjs has syntax errors"
+  fi
+else
+  skip "opendesign-relay.mjs not syntax-checked (node not on PATH)"
+fi
+
 spec="$(cat "$KIT_DIR/spec.yaml")"
 install_src="$(cat "$KIT_DIR/files/home/opendesign-install.sh")"
 start_src="$(cat "$KIT_DIR/files/home/opendesign-start.sh")"
+relay_src="$(cat "$RELAY" 2>/dev/null || true)"
 case "$spec" in
   *'OD_DISABLE_API_AUTH: "1"'*) ok "spec disables OpenDesign API auth intentionally" ;;
   *) bad "spec does not set OD_DISABLE_API_AUTH=1" ;;
@@ -100,6 +114,47 @@ esac
 case "$spec" in
   *'guest: 7456'*) ok "spec publishes guest port 7456" ;;
   *) bad "spec does not publish guest port 7456" ;;
+esac
+# The daemon must NOT bind 0.0.0.0: upstream requireLocalDaemonRequest gates
+# /api/diagnostics/export and /api/strategies/od-next/rollout on a loopback peer
+# address, so a guest-network peer gets 403. Reachability comes from the relay.
+# See docs/decisions/disable-api-auth-loopback-boundary.md.
+case "$spec" in
+  *'OD_BIND_HOST: "127.0.0.1"'*) ok "spec binds the daemon to guest loopback" ;;
+  *) bad "spec does not bind the daemon to guest loopback (peer-loopback-gated routes will 403)" ;;
+esac
+case "$spec" in
+  *'source: files/home/opendesign-relay.mjs'*) ok "spec installs the loopback publish relay" ;;
+  *) bad "spec does not install opendesign-relay.mjs" ;;
+esac
+case "$start_src" in
+  *'OD_BIND_HOST="${OD_BIND_HOST:-127.0.0.1}"'*) ok "startup defaults the daemon bind to loopback" ;;
+  *) bad "startup does not default the daemon bind to loopback" ;;
+esac
+case "$start_src" in
+  *'supervisor:opendesign-relay'*) ok "startup supervises the publish relay" ;;
+  *) bad "startup does not supervise the publish relay" ;;
+esac
+# A relay that rewrote or parsed traffic would break SSE run streams; keep it a
+# byte pipe that only forwards to loopback.
+case "$relay_src" in
+  *"TARGET_HOST = '127.0.0.1'"*) ok "relay forwards to loopback only" ;;
+  *) bad "relay does not forward to loopback only" ;;
+esac
+case "$relay_src" in
+  *'entry.internal'*) ok "relay skips loopback interfaces so it cannot collide with the daemon" ;;
+  *) bad "relay does not skip loopback interfaces" ;;
+esac
+# OpenDesign rewrites HOME/XDG_CONFIG_HOME for agent children (OD_SANDBOX_MODE),
+# so OpenCode needs an absolute config path or it silently falls back to its own
+# hosted gateway and every run fails. See docs/decisions/acq-owned-byok.md.
+case "$start_src" in
+  *'export OPENCODE_CONFIG='*) ok "startup names the OpenCode global config for sandbox-mode children" ;;
+  *) bad "startup does not export OPENCODE_CONFIG (OpenDesign runs will not reach USAi)" ;;
+esac
+case "$start_src" in
+  *'opencode/opencode.jsonc'*'OPENCODE_CONFIG="$candidate"'*) ok "startup resolves OPENCODE_CONFIG from the usai-provider config path" ;;
+  *) bad "startup does not resolve OPENCODE_CONFIG from the usai-provider config path" ;;
 esac
 case "$spec" in
   *'/home/agent/.local/share/opendesign'*) ok "spec declares the OpenDesign persistent volume/data path" ;;
@@ -227,6 +282,48 @@ fi
   && ok "OD_DATA_DIR does not contain the injected USAI_API_KEY value" \
   || bad "OD_DATA_DIR contains the injected USAI_API_KEY value or grep failed unexpectedly"
 
+# 1D20 hex = 7456. The daemon must hold ONLY 127.0.0.1:1D20 (0100007F), and the
+# relay must hold the guest-network address. A daemon on 00000000:1D20 means the
+# loopback-peer-gated routes will 403 for the host browser.
+daemon_bind="$(in_acq 'awk "\$4 == \"0A\" && \$2 ~ /:1D20$/ { print \$2 }" /proc/net/tcp | sort -u | tr "\n" " "')"
+case "$daemon_bind" in
+  *0100007F:1D20*) ok "a loopback listener holds port 7456 in-guest" ;;
+  *) bad "no loopback listener on port 7456 in-guest (saw: ${daemon_bind:-none})" ;;
+esac
+case "$daemon_bind" in
+  *00000000:1D20*) bad "port 7456 is bound to 0.0.0.0; peer-loopback-gated routes will 403 from the host" ;;
+  *) ok "port 7456 is not bound to 0.0.0.0" ;;
+esac
+if [ "$(in_acq 'pgrep -f "supervisor:opendesign-relay" >/dev/null 2>&1 && echo yes')" = "yes" ]; then
+  ok "publish relay supervisor is running in-guest"
+else
+  bad "publish relay supervisor is not running in-guest"
+  in_acq 'tail -n 40 ~/.local/state/opendesign/opendesign-relay.log 2>/dev/null || echo "missing opendesign-relay.log"' | sed 's/^/    | /'
+fi
+
+# OpenDesign sandbox-mode rewrites HOME/XDG_CONFIG_HOME for agent children, so
+# without OPENCODE_CONFIG OpenCode reads an empty stub config and falls back to
+# its own hosted gateway, which this kit's egress policy blocks. Assert that the
+# named config is the usai-provider one AND that OpenCode resolves usai models
+# through it in the environment OpenDesign will actually launch.
+opencode_config="$(in_acq 'pgrep -a -f "apps/daemon/dist/cli.js" >/dev/null 2>&1 && tr "\0" "\n" < /proc/$(pgrep -f "apps/daemon/dist/cli.js" | head -n1)/environ | sed -n "s/^OPENCODE_CONFIG=//p"')"
+if [ -n "$opencode_config" ]; then
+  ok "daemon process carries OPENCODE_CONFIG=$opencode_config"
+else
+  bad "daemon process does not carry OPENCODE_CONFIG; OpenDesign runs will not reach USAi"
+fi
+if [ "$(in_acq 'grep -q "api.gsa.usai.gov" "${OPENCODE_CONFIG:-$HOME/.config/opencode/opencode.jsonc}" 2>/dev/null && echo yes')" = "yes" ]; then
+  ok "the named OpenCode config points at the USAi gateway"
+else
+  skip "named OpenCode config does not mention api.gsa.usai.gov (usai-provider may not be paired)"
+fi
+usai_models="$(in_acq 'OPENCODE_CONFIG="${OPENCODE_CONFIG:-$HOME/.config/opencode/opencode.jsonc}" HOME="$OD_DATA_DIR/sandbox/agent-home" XDG_CONFIG_HOME="$OD_DATA_DIR/sandbox/config" XDG_DATA_HOME="$OD_DATA_DIR/sandbox/config/data" XDG_CACHE_HOME="$OD_DATA_DIR/sandbox/cache" timeout 60 opencode models 2>/dev/null | grep -c "^usai/"')"
+if [ "${usai_models:-0}" -gt 0 ] 2>/dev/null; then
+  ok "OpenCode resolves $usai_models usai/* models under OpenDesign's sandbox-mode env"
+else
+  bad "OpenCode resolves no usai/* models under OpenDesign's sandbox-mode env (runs would fall back to the hosted gateway)"
+fi
+
 info "5. Host port published"
 ports_out="$(acq ports "$SBX_NAME" 2>/dev/null || true)"
 if printf '%s' "$ports_out" | grep -q 7456; then
@@ -248,6 +345,17 @@ if [ -n "$host_url" ]; then
     ok "published host-loopback URL is reachable: $host_url"
   else
     bad "published host-loopback URL is not reachable: $host_url"
+  fi
+  # Regression gate for the 0.0.0.0 bind bug: this is the exact request the
+  # browser's Settings -> About -> Export diagnostics button makes. It returned
+  # 403 FORBIDDEN ("request peer must be a loopback address") whenever the daemon
+  # bound 0.0.0.0, because acq/msb publishing dials the guest network IP.
+  export_code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 120 \
+    -H "Origin: $host_url" "$host_url/api/diagnostics/export" 2>/dev/null || true)"
+  if [ "$export_code" = "200" ]; then
+    ok "diagnostics export is reachable from the host browser path (HTTP 200)"
+  else
+    bad "diagnostics export returned HTTP ${export_code:-none} from the host (expected 200; 403 means the daemon saw a non-loopback peer)"
   fi
 else
   bad "could not parse host-loopback URL from acq ports output"
