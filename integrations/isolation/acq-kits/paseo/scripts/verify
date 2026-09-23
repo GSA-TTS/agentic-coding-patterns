@@ -721,7 +721,7 @@ else
       [ -f "$CLIENT" ] || exit 0
       CLIENT_URL="file://$CLIENT" node --input-type=module -e "
         const { connectToDaemon } = await import(process.env.CLIENT_URL);
-        const c = await connectToDaemon({ target: { kind: "instance", home: process.env.PASEO_HOME || (process.env.HOME + "/.paseo") } });
+        const c = await connectToDaemon({ target: { kind: \"instance\", home: process.env.PASEO_HOME || (process.env.HOME + \"/.paseo\") } });
         try {
           const r = await c.listProjects();
           for (const p of r.projects ?? []) {
