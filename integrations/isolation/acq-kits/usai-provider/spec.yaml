@@ -32,7 +32,7 @@
 # central registry — can read every file under /var/lib/acq/models/providers/
 # instead. Each provider kit registers its own facts; no kit needs to know
 # about any other. See
-# integrations/isolation/docs/decisions/0003-neutral-model-provider-discovery.md
+# integrations/isolation/docs/decisions/0004-neutral-model-provider-discovery.md
 # (this ADR is pending merge in a separate PR; the path will resolve once it
 # lands) for the full rationale.
 schemaVersion: "hybrid/v1"
