@@ -7,7 +7,7 @@
 // that discover providers via the facts self-registration mechanism (see
 // spec.yaml's header comment and its startup command that writes
 // /var/lib/acq/models/providers/usai.json). See
-// integrations/isolation/docs/decisions/0003-neutral-model-provider-discovery.md
+// integrations/isolation/docs/decisions/0004-neutral-model-provider-discovery.md
 // (this ADR is pending merge in a separate PR; the path will resolve once it
 // lands) for why a provider-neutral shape exists at all: a future consumer
 // (e.g. a models orchestrator) should be able to read pricing/limits for
