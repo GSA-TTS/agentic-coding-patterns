@@ -41,15 +41,23 @@ set -eu
 
 # GATE (finding #3): do nothing unless a container engine this grant is FOR
 # exists. `podman` is what this kit installs; if it is absent the grant serves no
-# purpose and would only widen device access, so skip entirely.
+# purpose and would only widen device access, so skip grant/storage work and
+# best-effort revoke any stale grant from an earlier boot.
 if ! command -v podman >/dev/null 2>&1; then
-  echo "oci-engine: podman not installed; skipping device grant + storage re-eval (nothing to enable)." >&2
+  for _dev in /dev/net/tun /dev/fuse; do
+    if [ -e "$_dev" ]; then
+      chown root:root "$_dev" 2>/dev/null || true
+      chmod 0600 "$_dev" 2>/dev/null || true
+    fi
+  done
+  unset _dev
+  echo "oci-engine: podman not installed; skipped device grant + storage re-eval (nothing to enable)." >&2
   exit 0
 fi
 
-# Directory this kit staged its helpers into (the storage-driver helper lives
-# alongside this script's source).
-STAGE_DIR="/home/agent/oci-engine-config"
+# Root-owned helper installed by oci-engine-install.sh. Do not source helper code
+# from the agent-writable staging path on startup.
+TRUSTED_STORAGE_HELPER="/usr/local/lib/acq/oci-engine/oci-engine-storage-driver.sh"
 
 # The unprivileged user the engine runs as. Non-secret; overridable via the
 # OCI_ENGINE_AGENT_USER env var (declared in spec.yaml environment) for a base
@@ -91,8 +99,10 @@ _grant /dev/fuse
 # Re-evaluate the system storage driver now that this boot's /dev is populated
 # (finding #4): converge to overlay+fuse-overlayfs when possible, else vfs. The
 # helper only rewrites a kit-owned storage.conf and no-ops when already correct.
-if [ -f "$STAGE_DIR/oci-engine-storage-driver.sh" ]; then
-  # shellcheck source=files/home/oci-engine-storage-driver.sh
-  . "$STAGE_DIR/oci-engine-storage-driver.sh"
+if [ -f "$TRUSTED_STORAGE_HELPER" ]; then
+  # shellcheck source=files/home/oci-engine-config/oci-engine-storage-driver.sh
+  . "$TRUSTED_STORAGE_HELPER"
   oci_engine_write_storage_conf
+else
+  echo "oci-engine: WARNING: trusted storage helper missing; skipping storage re-eval." >&2
 fi

@@ -40,13 +40,16 @@ the kit ran the package step.
 On **every start** (the `startup` phase, run as root) — **only if podman is
 installed** — it group-scopes `/dev/net/tun` and `/dev/fuse` to the agent
 (`root:agent`, `0660`) so rootless podman networking and the fuse-overlayfs
-storage mount work, and it **re-evaluates the system storage driver**. `/dev` is a
-devtmpfs re-created each boot, so both must re-run on restart, not just at create;
+storage mount work, and it **re-evaluates the system storage driver**. The elevated install and startup scripts, plus the storage helper sourced by
+them, are copied into `/usr/local/lib/acq/oci-engine/` and executed/sourced only
+from those root-owned copies, not from the agent-home staging files. `/dev` is a devtmpfs
+re-created each boot, so both must re-run on restart, not just at create;
 re-evaluating the driver each boot lets it **converge from `vfs` to `overlay`**
 once `fuse-overlayfs` and `/dev/fuse` are both available (a transient `/dev/fuse`
 miss at create is not permanently baked in). If podman is absent (install fell
-soft, or the base had its own engine and the kit early-outed) this step does
-nothing — it never widens device access for an engine that does not exist.
+soft, or the base had its own engine and the kit early-outed) this step
+best-effort revokes any stale device grant and exits — it never leaves a fresh
+wide grant for an engine that does not exist.
 
 Also on **every start** (a second `startup` step, run as the **agent**) it runs a
 rootless self-test — a real `podman build` FROM scratch, which opens `/dev/fuse`
@@ -85,8 +88,13 @@ engine")** decision, declaratively:
   keep alive across restarts.
 - **Explicit, minimal device handling.** Exactly two device nodes are exposed,
   and they are **group-scoped `0660` to the agent** — not world-writable
-  (`0666`). No new host attack surface is opened: this is all inside the sandbox,
-  which is itself the security boundary.
+  (`0666`). The startup script is podman-gated and best-effort reverts stale
+  grants if podman disappears. No new host attack surface is opened: this is all
+  inside the sandbox, which is itself the security boundary.
+- **Trusted elevated code.** Files are staged in the agent home by the neutral
+  kit mechanism, but root phases do not execute or source those mutable copies.
+  The root command wrappers publish the install script, startup script, and sourced
+  helper into `/usr/local/lib/acq/oci-engine/` and use only those root-owned files.
 - **Least-privilege registry resolution.** `short-name-mode` defaults to
   **`enforcing`**, not `permissive`. Because there is a single search registry
   (`docker.io`), unqualified names still resolve deterministically to Docker Hub

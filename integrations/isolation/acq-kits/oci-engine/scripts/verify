@@ -100,6 +100,7 @@ ACQ_BIN="$(command -v acq || true)"
 SBX_NAME=""
 if [ -n "$ACQ_BIN" ]; then
   SBX_NAME="$(
+    # shellcheck disable=SC1090  # acq path is discovered from PATH at runtime.
     ACQ_SOURCE_ONLY=1 . "$ACQ_BIN" >/dev/null 2>&1
     derive_name "$AGENT" "$WORK" 2>/dev/null
   )"
@@ -205,7 +206,29 @@ else
   exit 1
 fi
 
-info "4. rootless podman info succeeds as the agent"
+info "4. Trusted root startup payloads are root-owned"
+# The root startup command must not execute or source agent-home staging files on
+# later boots. The install step publishes trusted copies under /usr/local/lib.
+trusted="$(in_sbx 'for f in /usr/local/lib/acq /usr/local/lib/acq/oci-engine /usr/local/lib/acq/oci-engine/oci-engine-install.sh /usr/local/lib/acq/oci-engine/oci-engine-grant-devs.sh /usr/local/lib/acq/oci-engine/oci-engine-storage-driver.sh; do [ -e "$f" ] || { echo "missing:$f"; continue; }; stat -c "%u:%g %a %n" "$f" 2>/dev/null || echo "stat-failed:$f"; done')"
+if printf '%s\n' "$trusted" | grep -q '^missing:'; then
+  bad "trusted root startup path missing"
+  printf '        %s\n' "$trusted" >&2
+elif printf '%s\n' "$trusted" | grep -q '^stat-failed:'; then
+  bad "could not stat trusted root startup path"
+  printf '        %s\n' "$trusted" >&2
+elif printf '%s\n' "$trusted" | grep -q '^0:0 755 /usr/local/lib/acq$' \
+  && printf '%s\n' "$trusted" | grep -q '^0:0 755 /usr/local/lib/acq/oci-engine$' \
+  && printf '%s\n' "$trusted" | grep -q '^0:0 755 /usr/local/lib/acq/oci-engine/oci-engine-install\.sh$' \
+  && printf '%s\n' "$trusted" | grep -q '^0:0 755 /usr/local/lib/acq/oci-engine/oci-engine-grant-devs\.sh$' \
+  && printf '%s\n' "$trusted" | grep -q '^0:0 644 /usr/local/lib/acq/oci-engine/oci-engine-storage-driver\.sh$'; then
+  ok "trusted startup path and payloads are root-owned under /usr/local/lib/acq/oci-engine"
+  printf '        %s\n' "$(printf '%s' "$trusted" | tr '\n' ';')"
+else
+  bad "trusted startup path ownership/mode unexpected"
+  printf '        %s\n' "$trusted" >&2
+fi
+
+info "5. rootless podman info succeeds as the agent"
 # Assert the engine is actually ROOTLESS. podman reports its rootless flag; we
 # hard-FAIL if it is not `true`. If the format key differs across podman versions
 # and comes back empty, fall back to asserting a non-zero uid inside the sandbox
@@ -234,7 +257,7 @@ else
   bad "podman reports rootless=$rootless (expected true — engine is running ROOTFUL)"
 fi
 
-info "5. real layer mount: podman build FROM scratch as the agent (rootless)"
+info "6. real layer mount: podman build FROM scratch as the agent (rootless)"
 # Stronger than `podman info`: this opens /dev/fuse and mounts a layer, so it
 # catches the fuse-overlayfs/vfs storage trap ADR-0020 describes. No registry
 # pull, no egress (FROM scratch).
@@ -252,7 +275,7 @@ else
   bad "podman build failed rootless (storage driver may not work on this base)"
 fi
 
-info "6. docker -> podman wrapper (dropped by THIS kit) resolves on PATH"
+info "7. docker -> podman wrapper (dropped by THIS kit) resolves on PATH"
 # This is the most kit-ATTRIBUTABLE signal: the adapter's legacy path also aliased
 # docker->podman, but with ACQ_MSB_ENSURE_OCI=0 the adapter is out of the picture,
 # so a resolving /usr/local/bin/docker proves the kit's file-drop landed.

@@ -144,3 +144,16 @@ direction and flagged six implementation defects, all addressed here:
    (`OCI_ENGINE_SELFTEST_TIMEOUT`, default 120s) when available, so a wedged
    mount / stalled `newuidmap` cannot hang the boot; a timeout is treated as a
    failed self-test and triggers the vfs fallback.
+
+7. **Root code sourced from agent-writable staging.** The neutral file-drop path
+   stages payloads under `/home/agent`, but root commands must not execute or
+   source those files after the agent has had a session to modify them. The spec's
+   root command wrappers publish `oci-engine-install.sh`,
+   `oci-engine-grant-devs.sh`, and `oci-engine-storage-driver.sh` into
+   `/usr/local/lib/acq/oci-engine/` as root-owned files, and execute/source only
+   those trusted copies. The grant script does not fall back to agent-home staging.
+
+8. **Stale device grant after podman disappears.** The no-podman startup path now
+   best-effort resets `/dev/net/tun` and `/dev/fuse` to `root:root` `0600` before
+   exiting, so a grant from an earlier successful boot is not intentionally left in
+   place for a capability that is no longer present.

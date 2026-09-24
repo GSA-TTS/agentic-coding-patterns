@@ -83,8 +83,11 @@ caps:
       - production.cloudfront.docker.com
 
 files:
-  # Lifecycle scripts. Mode 0755 (executable); each backend's file-drop
-  # materializes them at the in-guest path as the agent user.
+  # Staged payloads. Backends materialize files[] in the agent home, so root code
+  # that runs on every boot must not execute or source these paths directly after
+  # the agent has had a chance to modify them. The install step copies the trusted
+  # root startup script and helper into /usr/local/lib/acq/oci-engine/ as root-owned
+  # files; the startup command below executes only that trusted copy.
   - path: /home/agent/oci-engine-install.sh
     mode: "0755"
     source: files/home/oci-engine-install.sh
@@ -92,17 +95,17 @@ files:
   - path: /home/agent/oci-engine-grant-devs.sh
     mode: "0755"
     source: files/home/oci-engine-grant-devs.sh
-    description: Group-scope /dev/net/tun + /dev/fuse to the agent (every start, root). Idempotent.
+    description: Staged source for the root-owned startup grant script installed under /usr/local/lib/acq/oci-engine/.
   - path: /home/agent/oci-engine-vfs-fallback.sh
     mode: "0755"
     source: files/home/oci-engine-vfs-fallback.sh
     description: Rootless self-test; on failure write a user-level vfs storage.conf (every start, agent). Idempotent, fails soft.
-  # Config payloads staged in the agent home, then installed into /etc/containers
+  # Config payloads staged in the agent home, then installed into root-owned paths
   # by the root install script (the stage-in-home-then-move-as-root pattern the
-  # zscaler-ca-certificate kit uses: uid 1000 cannot write the root-owned
-  # /etc/containers dir directly). Mode 0644 for config data; 0755 for the wrapper
-  # (it is exec'd as a program). These are NOT referenced in commands[] argv —
-  # the install script reads them — so they need no matching command entry.
+  # zscaler-ca-certificate kit uses: uid 1000 cannot write root-owned destinations
+  # directly). Mode 0644 for config data; 0755 for the wrapper (it is exec'd as a
+  # program). These are NOT referenced in commands[] argv — the install script
+  # reads them — so they need no matching command entry.
   - path: /home/agent/oci-engine-config/01-acq-shortnames.conf
     mode: "0644"
     source: files/home/oci-engine-config/01-acq-shortnames.conf
@@ -117,35 +120,55 @@ files:
     description: docker->podman wrapper. Installed to /usr/local/bin/docker (shadows the dead-socket base docker CLI).
 
 commands:
-  # INSTALL phase — create-time, once, as root (uid "0"). If the base already
-  # has a FUNCTIONAL container engine (a clean `docker info`), it EARLY-OUTS and
-  # leaves the base alone (do not shadow a working engine). Otherwise it installs
-  # podman + the rootless prerequisites and writes the storage/registry config +
-  # docker wrapper. The config + wrapper run whenever podman ends up present
-  # (installed by the kit OR pre-existing), not only when the kit ran the install.
-  # Idempotent and best-effort (a missing mirror or unsupported base exits 0 with
-  # a clear message rather than aborting provision).
+  # INSTALL phase — create-time, once, as root (uid "0"). Publishes the staged
+  # install script into /usr/local/lib/acq/oci-engine/ and executes that root-owned
+  # copy. If the base already has a FUNCTIONAL container engine (a clean
+  # `docker info`), it EARLY-OUTS and leaves the base alone (do not shadow a
+  # working engine). Otherwise it installs podman + the rootless prerequisites and
+  # writes the storage/registry config + docker wrapper. The config + wrapper run
+  # whenever podman ends up present (installed by the kit OR pre-existing), not
+  # only when the kit ran the install. Idempotent and best-effort (a missing mirror
+  # or unsupported base exits 0 with a clear message rather than aborting
+  # provision).
   - phase: install
     user: "0"
     description: Install + configure the rootless podman OCI engine (create-time, root).
     command:
       - sh
-      - /home/agent/oci-engine-install.sh
-  # STARTUP phase — every start, as root (uid "0"). GATED ON PODMAN: does nothing
-  # if podman is absent (install fell soft, or the base had its own engine and the
-  # kit early-outed) — no engine, no device grant (finding #3). Otherwise re-grants
-  # /dev/net/tun + /dev/fuse to the agent (/dev is a devtmpfs re-created each boot,
-  # so the create-time grant is lost on restart) AND re-evaluates the system
-  # storage driver so a transient /dev/fuse miss at create is not permanently
-  # pinned to vfs (finding #4). Cheap + idempotent; runs to completion (NOT
-  # background: true). Schema note: `user` is a numeric uid (^[0-9]+$); "0" is
-  # root, which the chown, /dev/net create, and /etc/containers write require.
+      - -c
+      - |
+        if mkdir -p /usr/local/lib/acq/oci-engine \
+          && chown root:root /usr/local/lib/acq /usr/local/lib/acq/oci-engine \
+          && chmod 0755 /usr/local/lib/acq /usr/local/lib/acq/oci-engine \
+          && install -m 0755 /home/agent/oci-engine-install.sh /usr/local/lib/acq/oci-engine/oci-engine-install.sh; then
+          exec sh /usr/local/lib/acq/oci-engine/oci-engine-install.sh
+        fi
+        echo "oci-engine: WARNING: could not publish trusted install script; OCI setup unavailable." >&2
+        exit 0
+  # STARTUP phase — every start, as root (uid "0"). Executes the root-owned copy
+  # installed under /usr/local/lib/acq/oci-engine/ during create, not an
+  # agent-writable staging file. GATED ON PODMAN: revokes any stale device grant
+  # and exits if podman is absent (install fell soft, or the base had its own
+  # engine and the kit early-outed) — no engine, no device grant (finding #3).
+  # Otherwise re-grants /dev/net/tun + /dev/fuse to the agent (/dev is a devtmpfs
+  # re-created each boot, so the create-time grant is lost on restart) AND
+  # re-evaluates the system storage driver so a transient /dev/fuse miss at create
+  # is not permanently pinned to vfs (finding #4). Cheap + idempotent; runs to
+  # completion (NOT background: true). Schema note: `user` is a numeric uid
+  # (^[0-9]+$); "0" is root, which the chown, /dev/net create, and
+  # /etc/containers write require.
   - phase: startup
     user: "0"
     description: If podman present, re-grant device nodes + re-evaluate the storage driver (every start, root).
     command:
       - sh
-      - /home/agent/oci-engine-grant-devs.sh
+      - -c
+      - |
+        if [ -f /usr/local/lib/acq/oci-engine/oci-engine-grant-devs.sh ]; then
+          exec sh /usr/local/lib/acq/oci-engine/oci-engine-grant-devs.sh
+        fi
+        echo "oci-engine: trusted startup script missing; skipping device grant + storage re-eval." >&2
+        exit 0
   # STARTUP phase — every start, as the AGENT user (uid "1000"). Reproduces the
   # reference adapter's rootless recovery path: run a real rootless layer-mount
   # self-test (podman build FROM scratch) and, if it fails, write a user-level
