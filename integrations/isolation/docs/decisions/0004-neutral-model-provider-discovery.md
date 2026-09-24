@@ -8,7 +8,7 @@ impact_level: "moderate"
 nist_controls: ["SC-7", "AC-4", "CM-7", "SI-10"]
 ---
 
-# ADR 0003 (isolation) — Neutral model-provider discovery: provider facts, a models orchestrator kit, and harness-owned rendering
+# ADR 0004 (isolation) — Neutral model-provider discovery: provider facts, a models orchestrator kit, and harness-owned rendering
 
 > Area-scoped ADR for `integrations/isolation/`. Extends the neutral `hybrid/v1`
 > kit spec (ADR 0001) and the network egress tiers (ADR 0002). It changes neither
