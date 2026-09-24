@@ -113,8 +113,8 @@ kits:
       (prime-agent is a TUI, not a web UI) — unlike openchamber/paseo. SKELETON
       only: the three scripts are placeholders; the real install/CA-bundle/
       kernel logic and the generated model catalog
-      (files/home/prime-agent-config/models.json) land in follow-up work tracked
-      in the patterns repo's prime-agent epic. Model-provider egress is the
+      (files/home/prime-agent-config/models.json) are intentionally deferred to
+      follow-up work for the prime-agent kit. Model-provider egress is the
       usai-provider kit's job, not this one.
 
   pi-coding-agent:
