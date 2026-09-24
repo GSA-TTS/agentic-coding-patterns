@@ -37,8 +37,10 @@ or no current user.
 
 **Causes and fixes:**
 
-- **Missing or expired host-side token.** From a host shell where you are logged
-  in to cloud.gov, refresh the acq secret:
+- **Missing or expired host-side token.** Cloud Foundry OAuth tokens are
+  short-lived. If `scripts/verify` reports `authenticated /v3/organizations ->
+  401` or `403`, refresh the acq secret from a host shell where you are logged in
+  to cloud.gov:
 
   ```bash
   cf oauth-token | acq secret set -g cloud-gov --host api.fr.cloud.gov --env CF_OAUTH_TOKEN
@@ -51,12 +53,17 @@ or no current user.
   cf oauth-token | acq secret set <sandbox-name> cloud-gov --host api.fr.cloud.gov --env CF_OAUTH_TOKEN
   ```
 
-- **Client-side token cache mismatch.** The kit writes only the injected
-  placeholder to `~/.cf/config.json`, never the real token. If the CF CLI needs
-  an interactive login before making requests, complete authentication from the
-  host, refresh the acq secret, and restart or recreate the sandbox so the
-  placeholder is written into CF CLI config. Do not paste the token into chat or
-  commit it to the workspace.
+- **Unexpected token value in the sandbox.** The startup script only accepts
+  recognized backend placeholders (`acq_placeholder_*` or `sbx-cs-*`) in
+  `CF_OAUTH_TOKEN`. If a raw `bearer ...` token, a JWT-looking value, or a value
+  with control characters appears in the sandbox, startup fails closed. Refresh
+  the acq secret from the host and recreate the sandbox. Do not paste the token
+  into chat or commit it to the workspace.
+- **CF CLI wants a local login.** The kit does not write the placeholder into
+  `~/.cf/config.json` because stock `cf` may parse cached tokens locally before
+  sending a request. Use direct Cloud Foundry API calls with the placeholder auth
+  header for authenticated probes unless a live-tested backend path for
+  authenticated `cf` commands is added later.
 
 ## A cloud.gov App Route Is Blocked
 
@@ -66,9 +73,11 @@ cloud.gov app route fails because egress is denied.
 **Causes and fixes:**
 
 - **Route outside cloud.gov.** The kit allow-lists `cloud.gov` and
-  `**.cloud.gov`. If your app uses a custom domain or an internal route outside
-  `cloud.gov`, add a separate project-specific network allow-list entry rather
-  than broadening this shared kit.
+  `*.cloud.gov` because Cloud Foundry app routes are assigned dynamically and a
+  reusable kit cannot know which `*.app.cloud.gov` hosts belong to the current
+  operator at static kit-definition time. If your app uses a custom domain or an
+  internal route outside `cloud.gov`, add a separate project-specific network
+  allow-list entry rather than broadening this shared kit.
 - **Wildcard not supported by the active backend.** Confirm the generated backend
   policy from `acq`; if needed, add the specific app host as a per-sandbox allow.
 
