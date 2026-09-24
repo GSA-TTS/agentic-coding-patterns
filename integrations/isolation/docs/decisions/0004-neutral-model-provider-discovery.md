@@ -58,17 +58,22 @@ change is required.
 
 ### Layer 1 — Provider kit self-registration (host-materialized, read-only)
 
-A provider-role kit ships a small, static JSON **facts file** inside its own
-(pinned) kit directory. At provision, `acq` reads that static file **on the
-host**, validates it host-side (see [Security model](#security-model)), and
-materializes it into a per-sandbox host directory that it mounts **read-only**
-into the guest at a well-known path:
+A provider-role kit ships a small, static JSON **facts file**, a **normalizer**
+entrypoint, and a **vendored fallback snapshot**, all inside its own (pinned)
+kit directory. At provision, `acq` reads those static artifacts **on the
+host**, validates the facts file host-side (see
+[Security model](#security-model)), and materializes all three into a
+per-sandbox host directory that it mounts **read-only** into the guest as a
+fixed per-provider layout at a well-known path:
 
 ```text
-/var/lib/acq/host/models/providers/<PROVIDER_ID>.json   (read-only mount)
+/var/lib/acq/host/models/providers/<PROVIDER_ID>/   (read-only mount)
+├── facts.json     # 6-field facts shape (v1), below
+├── normalizer     # provider's normalizer entrypoint (executable)
+└── snapshot.json  # provider's vendored fallback snapshot
 ```
 
-Facts file shape (v1):
+`facts.json` shape (v1):
 
 ```json
 {
@@ -101,14 +106,16 @@ before that variable is ever read. This check is a mechanical string comparison,
 runs host-side as part of facts validation, and prevents a kit from naming an
 unrelated credential (e.g. `GITHUB_TOKEN`).
 
-Each provider kit also ships, inside its own kit directory (never centrally):
+Each provider kit also ships, inside its own kit directory (never centrally),
+as siblings of `facts.json` in the materialized `<PROVIDER_ID>/` directory
+above:
 
-- its **normalizer** — code that maps the raw vendor API response to the neutral
+- `normalizer` — code that maps the raw vendor API response to the neutral
   catalog schema. The vendor's own author knows its API shape best, so no central
   kit accumulates per-vendor knowledge that rots; and
-- a **vendored fallback snapshot** — a small, committed, last-known-good model
-  list used when a live refresh fails, so a bad fetch degrades to *that
-  provider's* last-known-good list.
+- `snapshot.json` — a small, committed, last-known-good model list used when a
+  live refresh fails, so a bad fetch degrades to *that provider's*
+  last-known-good list.
 
 Keying the credential by provider (not by harness) means a second harness kit
 reaching the same vendor reuses the same secret-store service identity,
@@ -123,17 +130,20 @@ guarantees `zscaler-ca-certificate` runs before kits that need its CA trust
 Its `startup` phase:
 
 1. Globs the read-only provider-facts mount
-   `/var/lib/acq/host/models/providers/*.json` (Layer 1).
-2. For each discovered provider, invokes that provider's own normalizer through a
-   shared, vendored-into-this-kit bounded-fetch helper (per-provider timeout +
-   response-size cap), with one canonical implementation of that helper.
+   `/var/lib/acq/host/models/providers/*/facts.json` (Layer 1).
+2. For each discovered provider, invokes that provider's own normalizer —
+   `<PROVIDER_ID>/normalizer`, the sibling of the `facts.json` just read —
+   through a shared, vendored-into-this-kit bounded-fetch helper (per-provider
+   timeout + response-size cap), with one canonical implementation of that
+   helper.
 3. Validates the normalizer's **output** against the neutral catalog schema
    before accepting it — a structurally-valid-but-wrong response is still a
    routing hazard, so shape validation runs on every refresh, not only on error
    paths.
 4. On any failure (timeout, oversized, malformed, validation failure, or no
-   provider present) falls back to that provider's vendored snapshot, presented
-   on the same read-only mount.
+   provider present) falls back to that provider's vendored snapshot —
+   `<PROVIDER_ID>/snapshot.json`, the sibling of the `facts.json` just read —
+   presented on the same read-only mount.
 5. Aggregates every provider's neutral output into one **guest-local,
    per-sandbox** file, written read-write and never shared with any other
    sandbox: `/var/lib/acq/models/catalog.json`. The aggregate carries **only
@@ -185,7 +195,7 @@ same ordering convention), reads:
   **model metadata only** (id, context window, pricing, capabilities,
   provenance);
 - the Layer 1 read-only facts mount,
-  `/var/lib/acq/host/models/providers/<PROVIDER_ID>.json` — for
+  `/var/lib/acq/host/models/providers/<PROVIDER_ID>/facts.json` — for
   **routing/credential fields** (`host`, `baseUrl`, `keyEnv`) — never from the
   catalog, since the catalog is guest-writable and cannot be authoritative for
   where a credential is sent (see [Security model](#security-model)); and
