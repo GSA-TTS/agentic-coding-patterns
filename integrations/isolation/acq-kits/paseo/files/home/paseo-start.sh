@@ -3,10 +3,11 @@
 # daemon (which serves the API, the WebSocket, AND the bundled web UI on one port)
 # so it auto-restarts if it exits.
 #
-# SCOPE: this startup script manages the Paseo daemon only. It supervises a single
-# `paseo daemon start --foreground --listen 0.0.0.0:6767 --web-ui`. The daemon
-# runs under a respawn loop, so a crash, a self-update, or a wrapper-triggered
-# bounce (to apply a new worktrees.root) self-heals. Because this script runs as a
+# SCOPE: this startup script manages the Paseo daemon only. It persists the
+# daemon settings Paseo 0.9 reads from config.json, then supervises a single
+# `paseo daemon run`. The daemon runs under a respawn loop, so a crash, a
+# self-update, or a wrapper-triggered restart (to apply a new worktrees.root)
+# self-heals. Because this script runs as a
 # `startup` command — which fires on EVERY sandbox start, including a detached
 # `acq create` with nobody attached, and runs under the sandbox's tini keepalive
 # (PID 1), independent of any interactive session — the daemon + UI come up on
@@ -31,7 +32,7 @@
 #
 # Pins are provided via the environment, with an in-script fallback default kept
 # in sync with the kit spec's documented pin:
-#   PASEO_CLI_VERSION   — @getpaseo/cli version to install (default 0.7.0)
+#   PASEO_CLI_VERSION   — @getpaseo/cli version to install (default 0.9.1)
 #   PASEO_LISTEN        — daemon bind address (default 0.0.0.0:6767)
 #   PASEO_RESTART_DELAY — seconds to wait before respawning the daemon (default 5)
 
@@ -53,6 +54,8 @@ PASEO_PORT="$(printf '%s' "$PASEO_LISTEN" | sed -n 's/.*:\([0-9][0-9]*\)$/\1/p')
 # directory with the daemon so the web UI pre-lists them). Backend-agnostic; see
 # the file header and docs/decisions/prepopulate-projects-from-mounts.md.
 REGISTER_MOUNTS_SCRIPT="${HOME}/paseo-register-mounts.mjs"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/paseo"
+mkdir -p "$STATE_DIR" 2>/dev/null || true
 
 # npm global installs land in this prefix's bin, which is NOT on the startup
 # shell's PATH by default. Put both possible bins on PATH up front so a
@@ -75,7 +78,7 @@ case ":$PATH:" in *":$HOME/.npm-global/bin:"*) : ;; *) PATH="$HOME/.npm-global/b
 export PATH
 
 # --- Install the pinned Paseo CLI if it is missing or out of date. -----------
-_ver="${PASEO_CLI_VERSION:-0.7.0}"
+_ver="${PASEO_CLI_VERSION:-0.9.1}"
 _installed_ver=""
 if command -v paseo >/dev/null 2>&1; then
   _installed_ver="$(paseo --version 2>/dev/null | sed -n 's/^v//; s/.*\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p; q')"
@@ -142,15 +145,31 @@ command -v paseo >/dev/null 2>&1 || {
   exit 0   # never fail the sandbox over an optional UI
 }
 
+# --- Persist daemon configuration that Paseo 0.9 no longer accepts as flags. ---
+# Paseo 0.9 removed `paseo daemon start --listen/--web-ui/--foreground` and, in
+# managed `daemon start` mode, strips PASEO_* daemon-setting env vars before the
+# worker starts. Persist the settings the sandbox depends on so both `daemon run`
+# and any local status/config tooling agree on the expected shape.
+PASEO_HOME_DIR="${PASEO_HOME:-$HOME/.paseo}"
+mkdir -p "$PASEO_HOME_DIR" 2>/dev/null || true
+if ! paseo daemon config set --home "$PASEO_HOME_DIR" --string daemon.listen "$PASEO_LISTEN" >>"$STATE_DIR/paseo-config.log" 2>&1; then
+  echo "paseo: warning: could not persist daemon.listen=$PASEO_LISTEN; see $STATE_DIR/paseo-config.log" >&2
+fi
+if ! paseo daemon config set --home "$PASEO_HOME_DIR" features.webUi.enabled true >>"$STATE_DIR/paseo-config.log" 2>&1; then
+  echo "paseo: warning: could not persist features.webUi.enabled=true; see $STATE_DIR/paseo-config.log" >&2
+fi
+if ! paseo daemon config set --home "$PASEO_HOME_DIR" daemon.relay.enabled false >>"$STATE_DIR/paseo-config.log" 2>&1; then
+  echo "paseo: warning: could not persist daemon.relay.enabled=false; see $STATE_DIR/paseo-config.log" >&2
+fi
+
 # --- Supervise the Paseo daemon (idempotent). --------------------------------
 # The daemon runs UNSECURED (no PASEO_PASSWORD) — the sandbox is the security
-# boundary, and the published host port is loopback only. `--foreground` keeps it
-# in the foreground so the supervisor can see it exit and restart it (after a
-# crash, a self-update, or a wrapper-triggered bounce to apply a new
-# worktrees.root). `--web-ui` (redundant with PASEO_WEB_UI_ENABLED=true from the
-# kit env, set for belt-and-suspenders) serves the bundled browser UI on the same
-# port. No systemd — this script is launched in the background by the kit's
-# startup command, so the supervisor loop runs backgrounded here and lives for the
+# boundary, and the published host port is loopback only. `daemon run` is Paseo
+# 0.9's foreground/deployment launch path: it keeps daemon-setting env overrides
+# available and runs Paseo's own supervisor-entrypoint (IPC restart + crash
+# restart) in the foreground, so our outer loop can still see it exit and relaunch
+# it. No systemd — this script is launched in the background by the kit's startup
+# command, so the supervisor loop runs backgrounded here and lives for the
 # container's lifetime, held open by the sandbox's tini keepalive (PID 1)
 # regardless of whether anyone attaches.
 #
@@ -168,14 +187,18 @@ supervisor_running() { pgrep -u "$(id -u)" -f "supervisor:$1" >/dev/null 2>&1; }
 DAEMON_LOG="$HOME/.local/state/paseo/paseo-daemon.log"
 mkdir -p "$(dirname "$DAEMON_LOG")" 2>/dev/null || true
 
-# Start the daemon supervisor unless already running. `paseo daemon start
-# --foreground` blocks, so the supervisor can see it exit and relaunch it.
+# Start the daemon supervisor unless already running. `paseo daemon run` blocks,
+# so the supervisor can see it exit and relaunch it.
 # argv to the inner sh -c: $0=marker, $1=RESTART_DELAY, $2=PASEO_LISTEN.
 if ! supervisor_running paseo-daemon; then
   ( sh -c '
       while :; do
         echo "[supervisor] starting paseo daemon at $(date -u +%FT%TZ)"
-        paseo daemon start --foreground --listen "$2" --web-ui || true
+        # If a prior daemon died ungracefully, clear its stale PID lock before
+        # relaunching. Paseo treats a dead owner lock as stale, but clearing it
+        # here avoids repeated lock-acquire races in a tight respawn loop.
+        rm -f "${PASEO_HOME:-$HOME/.paseo}/paseo.pid"
+        PASEO_LISTEN="$2" PASEO_WEB_UI_ENABLED=true PASEO_RELAY_ENABLED=false paseo daemon run --home "${PASEO_HOME:-$HOME/.paseo}" || true
         echo "[supervisor] paseo daemon exited; restarting in ${1}s"
         sleep "$1"
       done

@@ -352,9 +352,16 @@ case "$wrapper_path" in
 esac
 [ -n "$(in_sbx 'test -x ~/.local/bin/opencode && echo yes')" ] \
   && ok "wrapper file is executable" \
-  || bad "~/.local/bin/opencode missing or not executable"
+  || bad "\$HOME/.local/bin/opencode missing or not executable"
 
 info "5. Paseo daemon + web UI (started by the startup supervisor, on its own)"
+removed_flags="$(in_sbx 'grep -Ev "^[[:space:]]*#" /home/agent/paseo-start.sh 2>/dev/null | grep -E "paseo daemon start|--listen|--web-ui|--foreground" || true')"
+if [ -n "$removed_flags" ]; then
+  bad "startup script still references removed Paseo 0.9 launch flags:"
+  printf '%s\n' "$removed_flags" | sed 's/^/    | /'
+else
+  ok "startup script uses Paseo 0.9-compatible daemon launch surface"
+fi
 if [ -n "$daemon_up" ]; then
   ok "daemon answers /api/health on 127.0.0.1:$PASEO_PORT (started by the startup supervisor)"
 else
@@ -365,7 +372,7 @@ fi
 if [ "$(in_sbx "curl -fsS http://127.0.0.1:$PASEO_PORT/ >/dev/null 2>&1 && echo yes")" = "yes" ]; then
   ok "bundled web UI is served on the same port ($PASEO_PORT)"
 elif [ -n "$daemon_up" ]; then
-  warn "daemon is up but the web UI root did not return 200 (PASEO_WEB_UI_ENABLED / --web-ui?)"
+  warn "daemon is up but the web UI root did not return 200 (PASEO_WEB_UI_ENABLED / features.webUi.enabled?)"
 else
   skip "web UI check (daemon not up)"
 fi
@@ -648,14 +655,14 @@ else
 fi
 
 # (b) daemon self-heal: if the daemon dies, supervisor:paseo-daemon must relaunch
-#     it. Kill ONLY the daemon tree (argv matches "paseo daemon start" but NOT the
+#     it. Kill ONLY the daemon tree (argv matches "paseo daemon run" but NOT the
 #     supervisor marker), assert the supervisor survives and the daemon comes back.
 if [ -z "$daemon_up" ]; then
   skip "self-heal guard: daemon was not up to kill"
 else
   sup_before="$(in_sbx 'pgrep -u "$(id -u)" -f "supervisor:paseo-daemon" | sort | tr "\n" " "')"
   in_sbx '
-    for pid in $(pgrep -u "$(id -u)" -f "paseo daemon start"); do
+    for pid in $(pgrep -u "$(id -u)" -f "paseo daemon run"); do
       if tr "\0" " " </proc/"$pid"/cmdline 2>/dev/null | grep -q "supervisor:paseo-daemon"; then
         continue
       fi
@@ -714,7 +721,7 @@ else
       [ -f "$CLIENT" ] || exit 0
       CLIENT_URL="file://$CLIENT" node --input-type=module -e "
         const { connectToDaemon } = await import(process.env.CLIENT_URL);
-        const c = await connectToDaemon({});
+        const c = await connectToDaemon({ target: { kind: \"instance\", home: process.env.PASEO_HOME || (process.env.HOME + \"/.paseo\") } });
         try {
           const r = await c.listProjects();
           for (const p of r.projects ?? []) {

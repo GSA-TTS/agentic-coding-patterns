@@ -27,15 +27,15 @@ entrypoint runs in the primary workspace on `acq run`).
 **Split the responsibility, and reconcile with a daemon bounce:**
 
 - **The startup script (`paseo-start.sh`) owns the daemon lifecycle.** It installs
-  the Paseo CLI on first boot and supervises
-  `paseo daemon start --foreground --listen 0.0.0.0:6767 --web-ui` in a respawn
-  loop marked `supervisor:paseo-daemon`. The daemon comes up immediately with
-  whatever `config.json` currently says (default root on first boot).
+  the Paseo CLI on first boot, persists the required daemon settings in
+  `config.json`, and supervises `paseo daemon run` in a respawn loop marked
+  `supervisor:paseo-daemon`. The daemon comes up immediately with whatever
+  `config.json` currently says (default root on first boot).
 - **The entrypoint pins the worktree root.** On `acq run` the thin wrapper
   (`~/.local/bin/opencode`) execs the generic shim (`~/paseo-agent-shim`), which
   runs in the primary-workspace cwd, computes `<PWD>/.paseo-worktrees`, and writes
-  it to `config.json`. **If the value changed**, it restarts the daemon so the new
-  root takes effect. (The pin/bounce lives in the shim; see
+  it to `config.json`. **If the value changed**, it restarts the daemon worker so
+  the new root takes effect. (The pin/restart lives in the shim; see
   `paseo-mixin-generic-wrapper.md` for the wrapper/shim split.)
 
 ### The bounce mechanism (why it's safe)
@@ -44,21 +44,21 @@ The process tree is:
 
 ```
 sh -c  (marker: supervisor:paseo-daemon)     ← the startup script's respawn loop
- └─ paseo daemon start --foreground          ← node CLI
+ └─ paseo daemon run                         ← node CLI
      └─ node supervisor-entrypoint.js        ← "Paseo Supervisor"; holds $PASEO_HOME/paseo.pid
          └─ node daemon-worker.js            ← the listener on :6767 (SIGTERM = graceful)
 ```
 
-The wrapper kills the PIDs whose argv matches `paseo daemon start` **but do NOT
-carry the `supervisor:paseo-daemon` marker** — i.e. the Paseo-owned tree, never
-our shell respawn loop. `kill` (SIGTERM) lets `daemon-worker` shut down
-gracefully, free `:6767`, and release the PID lock. Our shell loop then respawns
-`paseo daemon start`, which re-reads `config.json` and picks up the new
-`worktrees.root`.
+The wrapper first uses `paseo daemon restart`, which asks Paseo's own supervisor
+to restart the worker and re-read `config.json`. If that command cannot run, the
+fallback kills PIDs whose argv matches `paseo daemon run` **but do NOT carry the
+`supervisor:paseo-daemon` marker** — i.e. the Paseo-owned tree, never our shell
+respawn loop. `kill` (SIGTERM) lets `daemon-worker` shut down gracefully and free
+`:6767`. The fallback also clears `paseo.pid` before the shell loop respawns
+`paseo daemon run`, avoiding stale-lock races.
 
-The PID lock is stale-tolerant (`acquirePidLock` reclaims a dead owner's lock and
-treats a >5-min-old lock as stale), so even an ungraceful death does not deadlock
-the relaunch.
+The normal `paseo daemon restart` path keeps the outer supervisor and PID lock
+intact; the marker-scoped kill is only a recovery fallback.
 
 ## Alternatives considered
 
@@ -79,8 +79,8 @@ the relaunch.
   daemon bounce (idempotent; no bounce if unchanged).
 - Two independent "supervisors" exist conceptually — our shell respawn loop and
   Paseo's own `supervisor-entrypoint.js` — but they nest cleanly (ours respawns
-  the whole `paseo daemon start` tree; Paseo's manages the worker within one
-  start). The kill is marker-scoped so our loop is never the target.
+  the whole `paseo daemon run` tree; Paseo's manages the worker within one run).
+  The fallback kill is marker-scoped so our loop is never the target.
 
 ## Links
 

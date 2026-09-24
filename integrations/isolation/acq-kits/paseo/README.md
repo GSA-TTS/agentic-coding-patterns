@@ -131,8 +131,7 @@ This kit does the best achievable thing: it pins the one global root to a
 subdirectory of the **first mounted project directory**. When you run the
 `opencode` wrapper on the `acq run` path (whose working directory is that primary
 workspace), the kit shim writes `worktrees.root = <your-project>/.paseo-worktrees`
-into `config.json` and **restarts the daemon** so the change takes effect (Paseo
-reads `worktrees.root` only at daemon startup — there is no signal to reread it).
+into `config.json` and **restarts the daemon worker** so the change takes effect.
 Before you run it once, worktrees default to `$PASEO_HOME/worktrees`.
 
 To override the location, pre-set `worktrees.root` to an absolute path in
