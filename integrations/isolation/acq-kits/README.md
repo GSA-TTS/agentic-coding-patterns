@@ -52,6 +52,17 @@ vocabulary:
   backend maps these onto its native env mechanism (sbx `environment.variables`;
   msb `--env NAME=value`). **Secrets do NOT go here** — they flow through the
   backend credential/secret path (`acq secret …`), never the kit spec.
+- `serviceGateways` — kit-declared, `acq`-managed service gateways. v1 uses
+  kit-local Compose files only (`runtime.compose.files[]`) and a required
+  Compose service selector (`runtime.compose.service`), then exposes the
+  resolved gateway URL to the sandbox/agent via `expose.env` (for example,
+  `WEB_GATEWAY_URL: url`). Existing `files[]` and `commands[]` remain responsible
+  for client-side software/config inside the sandbox. The goal is not broader
+  sandbox egress or API keys in the agent; it is a narrow, policy-controlled
+  gateway endpoint. Local kit sources are allowed for development/private kits;
+  remote service-gateway kits must come from trusted kit sources. The schema
+  intentionally excludes host/guest IPs, DNS, VSOCK, Podman-machine, Kubernetes,
+  and backend-specific routing details.
 - `backend_shortcuts.<backend>` — a native primitive that replaces the
   declarative path for one backend (e.g. msb's `--trust-host-cas` for the
   Zscaler kit). Adapters check this first; if present, `caps`/`files`/`commands`
