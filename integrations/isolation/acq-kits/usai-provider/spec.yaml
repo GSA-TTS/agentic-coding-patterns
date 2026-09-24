@@ -23,6 +23,18 @@
 # injected USAI_API_KEY env var; acq supplies it at runtime via the active
 # backend's credential path (e.g. `acq secret set`). The real key never enters
 # the kit spec.
+#
+# Provider facts self-registration: the kit also writes a small, root-owned
+# facts file at /var/lib/acq/models/providers/usai.json (install-phase-like,
+# but see the startup command below for why it runs at startup, not install).
+# A future consumer that wants to discover which model providers are
+# configured in a sandbox — without hardcoding vendor names or maintaining a
+# central registry — can read every file under /var/lib/acq/models/providers/
+# instead. Each provider kit registers its own facts; no kit needs to know
+# about any other. See
+# integrations/isolation/docs/decisions/0004-neutral-model-provider-discovery.md
+# (this ADR is pending merge in a separate PR; the path will resolve once it
+# lands) for the full rationale.
 schemaVersion: "hybrid/v1"
 kind: mixin
 name: usai-provider
@@ -52,8 +64,76 @@ files:
   - path: /home/agent/usai-config/merge-global-config.mjs
     mode: "0755"
     source: files/home/usai-config/merge-global-config.mjs
+  # Vendored fallback snapshot of a handful of real USAi models in the neutral
+  # acq-neutral-model-catalog/v1 shape (see scripts/normalize-catalog.mjs,
+  # which regenerates it from integrations/providers/usai/catalog.json). Ships
+  # into every sandbox so a future provider-discovery consumer has SOMETHING
+  # to read even before any live sync has run, or if network egress to
+  # models.dev/USAi is unavailable when it looks. Mode "0644" matches the
+  # opencode.jsonc entry above (a static, non-executable payload).
+  - path: /home/agent/usai-config/model-catalog-snapshot.json
+    mode: "0644"
+    source: files/home/usai-config/model-catalog-snapshot.json
 
 commands:
+  # Self-register this provider's connection facts at a well-known,
+  # root-owned path so a future consumer (see the ADR cited in the header
+  # comment above) can discover every configured model provider in the
+  # sandbox by listing /var/lib/acq/models/providers/ — without hardcoding
+  # "usai" or any other vendor name, and without a central registry that
+  # every provider kit would otherwise need to know about and keep in sync.
+  # Placed BEFORE the merge-global-config command below (readability: facts
+  # registration is a prerequisite/sibling concern, not the main OpenCode
+  # wiring).
+  #
+  # /var/lib/acq/ is already a shared, root-owned, idempotent marker
+  # directory: acq's own msb backend adapter writes several markers there
+  # today with the identical `mkdir -p /var/lib/acq && ...` pattern this
+  # command uses (a kit-environment cache, the recorded agent name, an
+  # SSH-agent socket path, and multiple per-action "already done" touch
+  # markers). This kit's facts file follows that same established,
+  # conflict-free convention rather than introducing a new one.
+  #
+  # Runs as root (user "0"): /var/lib/acq/ must be root-owned and NOT
+  # agent-writable, since a future consumer treats this directory as a
+  # trusted source of truth about which providers are configured — the agent
+  # (uid 1000) must not be able to forge or alter another kit's facts file.
+  #
+  # Phase: startup (not install). hybrid/v1's `install` phase is create-time
+  # once; `startup` runs on every start. This kit has no install-phase step
+  # today and adding one solely for this file would introduce a second root
+  # hook for no benefit, so it rides the existing startup phase like the rest
+  # of this kit's lifecycle. The write is idempotent (the same static content
+  # every time), so replaying it on every start is safe.
+  #
+  # Write method: a direct heredoc write (mkdir -p && cat > ... <<'EOF' && ...
+  # && chmod), NOT a temp-file-then-rename. That safer pattern exists to avoid
+  # a reader observing a half-written file during a RACY refresh (e.g. two
+  # writers, or a reader polling while a value changes). This file is a
+  # static, one-shot registration of connection facts that never change after
+  # this kit is applied and that the agent (uid 1000) cannot write concurrently
+  # (root-owned, agent has no write access to /var/lib/acq/), so there is no
+  # concurrent writer and no racy partial-read window to protect against.
+  - phase: startup
+    user: "0"
+    description: Self-register USAi provider connection facts at /var/lib/acq/models/providers/usai.json
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        mkdir -p /var/lib/acq/models/providers
+        cat > /var/lib/acq/models/providers/usai.json <<'EOF'
+        {
+          "schemaVersion": "acq-provider-facts/v1",
+          "providerId": "usai",
+          "host": "api.gsa.usai.gov",
+          "baseUrl": "https://api.gsa.usai.gov/api/v1",
+          "modelsUrl": "https://api.gsa.usai.gov/api/v1/models",
+          "keyEnv": "USAI_API_KEY"
+        }
+        EOF
+        chmod 0644 /var/lib/acq/models/providers/usai.json
   # Merge the staged USAi config into OpenCode's GLOBAL config path, without
   # clobbering an existing global config. Runs at every start as the agent user
   # (uid 1000, which owns /home/agent). The files above are laid down before
