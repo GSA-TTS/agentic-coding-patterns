@@ -27,6 +27,17 @@ kits:
       the PLAYBOOK_SHA integrity gate. No backend shortcut. The GitHub token
       (while the playbook repo is private) is injected per-backend by acq.
 
+  cloud-gov:
+    backends: [sbx, msb]
+    parity: |
+      Both backends consume the neutral files, create-time install, startup auth
+      placeholder validation, and cloud.gov/docs allow-list. The shared wildcard
+      uses `*.cloud.gov`, which msb accepts directly as a suffix rule and sbx
+      accepts as a cloud.gov subdomain wildcard. Cloud Foundry authorization is
+      supplied through acq's custom secret binding for api.fr.cloud.gov, seeded
+      from a host-side `cf oauth-token`; the token is not stored in the kit or
+      exposed as a readable credential file.
+
   zscaler-ca-certificate:
     backends: [sbx, msb]
     parity: |
