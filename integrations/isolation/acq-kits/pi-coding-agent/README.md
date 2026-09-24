@@ -13,12 +13,11 @@ Python/IPython kernel**, so this is the simplest kit in the family.
 
 ## Sequencing note
 
-This kit ships **ahead of** the in-flight `prime-agent` kit
-(GSA-TTS/agentic-coding-patterns#368) by design: a completed consensus vote
-picked pi specifically to validate the unprivileged/agent-owned/startup-only
-install pattern on a materially simpler target before returning to
-prime-agent's heavier kernel-bootstrap complexity. prime-agent's own epic
-remains open, not abandoned.
+This kit ships **ahead of** the in-flight `prime-agent` kit by design: a
+completed consensus vote picked pi specifically to validate the
+unprivileged/agent-owned/startup-only install pattern on a materially simpler
+target before returning to prime-agent's heavier kernel-bootstrap complexity.
+prime-agent's own work remains open, not abandoned.
 
 ## Status
 

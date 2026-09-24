@@ -1,0 +1,459 @@
+#!/usr/bin/env bash
+# verify — host-side validation for the opendesign acq mixin kit.
+#
+# Default: offline checks only (schema, source paths, script syntax, and source
+# invariants). Live sandbox verification is opt-in with RUN_ACQ=1 and must be run
+# from a host that can create ACQ sandboxes.
+
+set -uo pipefail
+
+KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+REPO_ROOT="$(cd "$KIT_DIR/../../../.." && pwd)"
+SBX_NAME="opendesign-verify-$$"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/opendesign-verify.XXXXXX")"
+CREATE_LOG="$WORK/create.log"
+KEEP="${KEEP:-0}"
+RUN_ACQ="${RUN_ACQ:-0}"
+READY_TIMEOUT="${READY_TIMEOUT:-600}"
+POLL_INTERVAL="${POLL_INTERVAL:-5}"
+SENTINEL_SECRET="OPENDESIGN_VERIFY_SENTINEL_${SBX_NAME}"
+
+pass=0
+fail=0
+skip_count=0
+ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass+1)); }
+bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail+1)); }
+skip() { printf '  \033[33mSKIP\033[0m %s\n' "$1"; skip_count=$((skip_count+1)); }
+info() { printf '\n\033[1m%s\033[0m\n' "$1"; }
+
+cleanup() {
+  if [ "$KEEP" = "1" ]; then
+    printf '\nKEEP=1 set; leaving sandbox %s and %s in place.\n' "$SBX_NAME" "$WORK" >&2
+    return
+  fi
+  acq rm "$SBX_NAME" >/dev/null 2>&1 || true
+  rm -rf "$WORK" >/dev/null 2>&1 || true
+}
+
+interrupt() {
+  trap - INT TERM
+  cleanup
+  exit 130
+}
+trap cleanup EXIT
+trap interrupt INT TERM
+
+in_acq() {
+  acq exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true
+}
+
+info "0. Preconditions"
+[ -f "$KIT_DIR/spec.yaml" ] && ok "kit spec.yaml present" || { bad "spec.yaml missing"; exit 1; }
+
+info "1. Offline gates"
+VALIDATOR="$REPO_ROOT/integrations/isolation/acq-kits/validate-kits.py"
+validator_required=1
+[ "${ALLOW_PARTIAL_VERIFY:-0}" = "1" ] && validator_required=0
+if ! command -v python3 >/dev/null 2>&1; then
+  if [ "$validator_required" -eq 1 ]; then
+    bad "validate-kits.py not run (python3 not on PATH)"
+  else
+    skip "validate-kits.py not run (python3 not on PATH); ALLOW_PARTIAL_VERIFY=1 permits this skip"
+  fi
+elif [ ! -f "$VALIDATOR" ]; then
+  if [ "$validator_required" -eq 1 ]; then
+    bad "validate-kits.py not found at $VALIDATOR"
+  else
+    skip "validate-kits.py not found at $VALIDATOR"
+  fi
+elif ! python3 -c 'import jsonschema, yaml' >/dev/null 2>&1; then
+  if [ "$validator_required" -eq 1 ]; then
+    bad "validate-kits.py needs jsonschema + pyyaml"
+  else
+    skip "validate-kits.py needs jsonschema + pyyaml; ALLOW_PARTIAL_VERIFY=1 permits this skip"
+  fi
+else
+  if val_out="$(python3 "$VALIDATOR" --root "$REPO_ROOT" --strict 2>&1)"; then
+    ok "validate-kits.py --strict passes"
+  else
+    bad "validate-kits.py --strict failed"
+    printf '%s\n' "$val_out" | sed 's/^/    | /' >&2
+  fi
+fi
+
+for script in "$KIT_DIR/files/home/opendesign-install.sh" "$KIT_DIR/files/home/opendesign-start.sh"; do
+  if sh -n "$script"; then
+    ok "$(basename "$script") parses with sh -n"
+  else
+    bad "$(basename "$script") has shell syntax errors"
+  fi
+done
+
+RELAY="$KIT_DIR/files/home/opendesign-relay.mjs"
+if [ ! -f "$RELAY" ]; then
+  bad "opendesign-relay.mjs missing (required by the loopback-bind decision)"
+elif command -v node >/dev/null 2>&1; then
+  if node --check "$RELAY" >/dev/null 2>&1; then
+    ok "opendesign-relay.mjs parses with node --check"
+  else
+    bad "opendesign-relay.mjs has syntax errors"
+  fi
+  if node "$RELAY" --self-test >/dev/null 2>&1; then
+    ok "opendesign-relay.mjs peer and route helpers pass self-test"
+  else
+    bad "opendesign-relay.mjs peer and route helpers fail self-test"
+  fi
+else
+  skip "opendesign-relay.mjs not syntax-checked (node not on PATH)"
+  skip "opendesign-relay.mjs self-test not run (node not on PATH)"
+fi
+
+spec="$(cat "$KIT_DIR/spec.yaml")"
+install_src="$(cat "$KIT_DIR/files/home/opendesign-install.sh")"
+start_src="$(cat "$KIT_DIR/files/home/opendesign-start.sh")"
+relay_src="$(cat "$RELAY" 2>/dev/null || true)"
+case "$spec" in
+  *'OD_DISABLE_API_AUTH: "1"'*) ok "spec disables OpenDesign API auth intentionally" ;;
+  *) bad "spec does not set OD_DISABLE_API_AUTH=1" ;;
+esac
+case "$spec" in
+  *'guest: 7456'*) ok "spec publishes guest port 7456" ;;
+  *) bad "spec does not publish guest port 7456" ;;
+esac
+# The daemon must NOT bind 0.0.0.0: upstream requireLocalDaemonRequest gates
+# /api/diagnostics/export and /api/strategies/od-next/rollout on a loopback peer
+# address, so a guest-network peer gets 403. Reachability comes from the relay.
+# See docs/decisions/disable-api-auth-loopback-boundary.md.
+case "$spec" in
+  *'OD_BIND_HOST: "127.0.0.1"'*) ok "spec binds the daemon to guest loopback" ;;
+  *) bad "spec does not bind the daemon to guest loopback (peer-loopback-gated routes will 403)" ;;
+esac
+case "$spec" in
+  *'source: files/home/opendesign-relay.mjs'*) ok "spec installs the loopback publish relay" ;;
+  *) bad "spec does not install opendesign-relay.mjs" ;;
+esac
+case "$start_src" in
+  *'OD_BIND_HOST="${OPENDESIGN_DAEMON_BIND_HOST:-127.0.0.1}"'*) ok "startup forces the daemon bind to loopback unless the kit-specific override is set" ;;
+  *) bad "startup can inherit OD_BIND_HOST instead of forcing loopback" ;;
+esac
+case "$start_src" in
+  *'OPENDESIGN_PUBLISHED_PORT="${OPENDESIGN_PUBLISHED_PORT:-7456}"'*'OD_PORT="${OPENDESIGN_DAEMON_PORT:-17456}"'*) ok "startup separates published relay port 7456 from daemon port 17456" ;;
+  *) bad "startup does not separate relay and daemon ports" ;;
+esac
+case "$start_src" in
+  *'supervisor:opendesign-relay'*) ok "startup supervises the publish relay" ;;
+  *) bad "startup does not supervise the publish relay" ;;
+esac
+# A relay that rewrote or parsed traffic would break SSE run streams; keep it a
+# byte pipe that only forwards to loopback.
+case "$relay_src" in
+  *"TARGET_HOST = '127.0.0.1'"*) ok "relay forwards to loopback only" ;;
+  *) bad "relay does not forward to loopback only" ;;
+esac
+case "$relay_src" in
+  *'localAddress: TARGET_HOST'*) ok "relay originates upstream connections from loopback" ;;
+  *) bad "relay does not originate upstream connections from loopback" ;;
+esac
+case "$relay_src" in
+  *'entry.internal'*) ok "relay skips loopback interfaces so it cannot collide with the daemon" ;;
+  *) bad "relay does not skip loopback interfaces" ;;
+esac
+case "$relay_src" in
+  *'defaultIpv4Route'*'Object.entries(os.networkInterfaces())'*'name !== route.iface'*) ok "relay binds only the default-route guest interface" ;;
+  *) bad "relay can bind non-default guest interfaces" ;;
+esac
+case "$relay_src" in
+  *'OPENDESIGN_RELAY_ALLOWED_PEERS'*'defaultIpv4Route().gateway'*'allowedPeerAddresses'*) ok "relay restricts client peers to loopback/default gateway plus explicit overrides" ;;
+  *) bad "relay does not restrict client peers before forwarding" ;;
+esac
+# OpenDesign rewrites HOME/XDG_CONFIG_HOME for agent children (OD_SANDBOX_MODE),
+# so OpenCode needs an absolute config path or it silently falls back to its own
+# hosted gateway and every run fails. See docs/decisions/acq-owned-byok.md.
+case "$start_src" in
+  *'export OPENCODE_CONFIG='*) ok "startup names the OpenCode global config for sandbox-mode children" ;;
+  *) bad "startup does not export OPENCODE_CONFIG (OpenDesign runs will not reach USAi)" ;;
+esac
+case "$start_src" in
+  *'opencode/opencode.jsonc'*'OPENCODE_CONFIG="$candidate"'*) ok "startup resolves OPENCODE_CONFIG from the usai-provider config path" ;;
+  *) bad "startup does not resolve OPENCODE_CONFIG from the usai-provider config path" ;;
+esac
+case "$spec" in
+  *'/home/agent/.local/share/opendesign'*) ok "spec declares the OpenDesign persistent volume/data path" ;;
+  *) bad "spec does not declare the OpenDesign persistent volume/data path" ;;
+esac
+case "$spec" in
+  *'user: "0"'*'chown 1000:1000 /home/agent/.local/share/opendesign'*) ok "spec initializes persistent volume ownership as root before agent startup" ;;
+  *) bad "spec does not initialize persistent volume ownership before agent startup" ;;
+esac
+case "$install_src" in
+  *'npm_config_store_dir="$APP_HOME/pnpm-store"'*) ok "install script pins pnpm store to the OpenDesign volume" ;;
+  *) bad "install script does not pin pnpm store to the OpenDesign volume" ;;
+esac
+case "$install_src" in
+  *'node-v${OPENDESIGN_NODE_VERSION}-linux-${node_arch}.tar.gz'*|*'node-v${OPENDESIGN_NODE_VERSION}-linux-'*) ok "install script uses a pinned kit-managed Node archive" ;;
+  *) bad "install script does not use a kit-managed Node archive" ;;
+esac
+case "$install_src" in
+  *'sha256sum'*'node_sha'*) ok "install script verifies Node archive SHA-256" ;;
+  *) bad "install script does not verify Node archive SHA-256" ;;
+esac
+case "$install_src" in
+  *'git checkout --detach FETCH_HEAD'*'OPENDESIGN_COMMIT'*) ok "install script verifies pinned OpenDesign commit" ;;
+  *) bad "install script does not verify pinned OpenDesign commit" ;;
+esac
+case "$install_src" in
+  *'base64 -d >"$proxy_ca_tmp"'*'cat "$proxy_ca_tmp" >>"$ca_bundle"'*'ignoring invalid PROXY_CA_CERT_B64'*) ok "install script validates proxy CA before appending it" ;;
+  *) bad "install script can append invalid proxy CA data to NODE_EXTRA_CA_CERTS" ;;
+esac
+case "$start_src" in
+  *'refresh PATH before seeding config or launching the daemon'*'export PATH'*) ok "startup refreshes PATH after installing kit-managed Node" ;;
+  *) bad "startup does not refresh PATH after installing kit-managed Node" ;;
+esac
+case "$start_src" in
+  *"config.agentId = 'opencode'"*) ok "startup seeds OpenDesign default agent to opencode" ;;
+  *) bad "startup does not seed opencode as default agent" ;;
+esac
+case "$start_src" in
+  *agentModels*|*'model":'*|*"model':"*) bad "startup appears to seed a model, which v1 must not do" ;;
+  *) ok "startup does not seed a default model" ;;
+esac
+case "$start_src" in
+  *USAI_API_KEY*'media-config'*|*media-config*'USAI_API_KEY'*) bad "startup appears to copy USAI_API_KEY into OpenDesign media config" ;;
+  *) ok "startup does not copy USAi credentials into OpenDesign config" ;;
+esac
+
+if [ "$RUN_ACQ" != "1" ]; then
+  info "Live sandbox checks: SKIPPED"
+  echo "  Set RUN_ACQ=1 to create a real sandbox and verify OpenDesign end-to-end." >&2
+  info "Summary"
+  printf '  %d passed, %d failed, %d skipped\n' "$pass" "$fail" "$skip_count"
+  if [ "$fail" -eq 0 ] && [ "$skip_count" -eq 0 ]; then
+    printf '  \033[32mOffline gate passed.\033[0m\n'
+  elif [ "$fail" -eq 0 ]; then
+    printf '  \033[33mPartial offline gate passed; skipped checks were not required in this mode.\033[0m\n'
+  else
+    printf '  \033[31mOffline gate failed.\033[0m\n'
+  fi
+  exit "$([ "$fail" -eq 0 ] && echo 0 || echo 1)"
+fi
+
+info "2. Live sandbox create"
+if ! command -v acq >/dev/null 2>&1; then
+  echo "  RUN_ACQ=1 set but acq is not on PATH." >&2
+  exit 1
+fi
+
+echo "  creating $SBX_NAME via acq with extra kit $KIT_DIR..."
+# Live verification injects a synthetic value through the process environment so
+# the negative persistence check can search for a known non-secret sentinel. The
+# documented operational path remains `acq secret set-custom ... --env USAI_API_KEY`.
+if USAI_API_KEY="$SENTINEL_SECRET" ACQ_EXTRA_KITS="$KIT_DIR" acq create --name "$SBX_NAME" opencode "$WORK" >"$CREATE_LOG" 2>&1; then
+  ok "sandbox created via acq"
+else
+  bad "acq create failed"
+  sed 's/^/    | /' "$CREATE_LOG" >&2
+  exit 1
+fi
+
+info "3. Wait for OpenDesign daemon"
+start_time="$(date +%s)"
+deadline=$(( start_time + READY_TIMEOUT ))
+next_progress=$(( start_time + 30 ))
+startup_checked=0
+health=""
+while :; do
+  now="$(date +%s)"
+  if [ "$(in_acq 'curl -fsS http://127.0.0.1:17456/api/daemon/status >/dev/null 2>&1 && curl -fsS http://127.0.0.1:17456/ >/dev/null 2>&1 && echo yes')" = "yes" ]; then
+    health=yes
+    break
+  fi
+
+  if [ "$now" -ge "$next_progress" ]; then
+    elapsed=$(( now - start_time ))
+    printf '  still waiting after %ss; latest sandbox state:\n' "$elapsed"
+    in_acq 'stat -c "%U:%G %a %n" /home/agent/.local/share/opendesign /home/agent/.local/state/opendesign 2>/dev/null; ps -ef | grep -E "opendesign|node|pnpm|next|tsc|git|curl" | grep -v grep || true; tail -n 20 ~/.local/state/opendesign/opendesign-install.log 2>/dev/null || true; tail -n 20 ~/.local/state/opendesign/opendesign-daemon.log 2>/dev/null || true' | sed 's/^/    | /'
+    next_progress=$(( now + 30 ))
+  fi
+
+  if [ "$startup_checked" -eq 0 ] && [ $(( now - start_time )) -ge 60 ]; then
+    startup_checked=1
+    startup_state="$(in_acq 'test -s ~/.local/state/opendesign/opendesign-install.log || test -s ~/.local/state/opendesign/opendesign-daemon.log || ps -ef | grep -E "opendesign|node|pnpm|next|tsc|git|curl" | grep -v grep >/dev/null; rc=$?; test "$rc" -eq 0 && echo active || echo inactive')"
+    if [ "$startup_state" = "inactive" ]; then
+      bad "OpenDesign startup produced no logs and no active install/daemon process after 60s"
+      in_acq 'stat -c "%U:%G %a %n" /home/agent/.local/share/opendesign /home/agent/.local/state/opendesign 2>/dev/null; ls -l /home/agent/opendesign-start.sh /home/agent/opendesign-install.sh 2>/dev/null; ls -la ~/.local/state/opendesign ~/.local/share/opendesign 2>/dev/null' | sed 's/^/    | /'
+      break
+    fi
+  fi
+
+  [ "$now" -ge "$deadline" ] && break
+  sleep "$POLL_INTERVAL"
+done
+
+if [ -n "$health" ]; then
+  ok "OpenDesign answers /api/daemon/status and serves the UI inside the sandbox"
+else
+  bad "OpenDesign did not answer /api/daemon/status and serve the UI before timeout"
+  in_acq 'tail -n 80 ~/.local/state/opendesign/opendesign-install.log 2>/dev/null; tail -n 80 ~/.local/state/opendesign/opendesign-daemon.log 2>/dev/null' | sed 's/^/    | /'
+fi
+
+info "4. Live configuration checks"
+[ "$(in_acq 'command -v opencode >/dev/null 2>&1 && echo yes')" = "yes" ] && ok "opencode is on PATH" || bad "opencode is not on PATH"
+# Assert only the fields the kit actually seeds. `agentModels` is deliberately
+# excluded: the kit-must-not-seed-a-model invariant is proven offline against the
+# startup source ("startup does not seed a default model"), while the live file is
+# runtime state OpenDesign owns and rewrites. Merely opening the UI is enough for
+# OpenDesign to persist agentModels.opencode.model (observed: "default", written
+# by the app, not by a user), alongside orbit/projectLocations/privacyDecisionAt.
+# Failing on that conflates "the kit seeded a model" with "a model is configured"
+# and would report a defect for normal use.
+app_config_ok="$(in_acq 'node -p '\''const fs=require("fs"); const c=JSON.parse(fs.readFileSync((process.env.OD_DATA_DIR||"")+"/app-config.json","utf8")); const t=c.telemetry||{}; (c.agentId==="opencode" && c.onboardingCompleted===true && t.metrics===false && t.content===false) ? "yes" : "no"'\'' 2>/dev/null')"
+if [ "$app_config_ok" = "yes" ]; then
+  ok "OpenDesign app-config seeded opencode and disabled telemetry"
+else
+  bad "OpenDesign app-config was not seeded as expected"
+  in_acq 'cat "$OD_DATA_DIR/app-config.json" 2>/dev/null || echo "missing app-config.json"' | sed 's/^/    | /'
+fi
+# Report, without judging, whether a model ended up configured. On a freshly
+# created sandbox that nobody has driven yet this should be empty; anything else
+# is information for the operator, not a kit failure.
+seeded_models="$(in_acq 'node -p '\''const fs=require("fs"); const c=JSON.parse(fs.readFileSync((process.env.OD_DATA_DIR||"")+"/app-config.json","utf8")); JSON.stringify(c.agentModels||{})'\'' 2>/dev/null')"
+if [ -z "$seeded_models" ] || [ "$seeded_models" = "{}" ]; then
+  ok "no agent model is configured in app-config (kit seeded none)"
+else
+  skip "a model is configured in app-config: $seeded_models (runtime state, not kit-seeded; see the offline no-seed check)"
+fi
+[ "$(in_acq 'test "$OD_DISABLE_API_AUTH" = 1 && echo yes')" = "yes" ] && ok "OD_DISABLE_API_AUTH is set" || bad "OD_DISABLE_API_AUTH is not set"
+[ "$(in_acq 'test -n "$USAI_API_KEY" && grep -R -F -- "$USAI_API_KEY" "$OD_DATA_DIR" >/dev/null 2>&1; rc=$?; test "$rc" -eq 1 && echo yes')" = "yes" ] \
+  && ok "OD_DATA_DIR does not contain the injected USAI_API_KEY value" \
+  || bad "OD_DATA_DIR contains the injected USAI_API_KEY value or grep failed unexpectedly"
+
+# 4430 hex = 17456 (loopback-only daemon). 1D20 hex = 7456 (published relay).
+# Keeping these separate prevents ACQ from bypassing the relay and reaching a
+# same-port daemon directly.
+daemon_bind="$(in_acq 'awk "\$4 == \"0A\" && \$2 ~ /:4430$/ { print \$2 }" /proc/net/tcp | sort -u | tr "\n" " "')"
+relay_bind="$(in_acq 'awk "\$4 == \"0A\" && \$2 ~ /:1D20$/ { print \$2 }" /proc/net/tcp | sort -u | tr "\n" " "')"
+case "$daemon_bind" in
+  *0100007F:4430*) ok "a loopback daemon listener holds internal port 17456 in-guest" ;;
+  *) bad "no loopback daemon listener on internal port 17456 in-guest (saw: ${daemon_bind:-none})" ;;
+esac
+case "$daemon_bind $relay_bind" in
+  *00000000:4430*|*00000000:1D20*) bad "OpenDesign ports are bound to 0.0.0.0; peer-loopback-gated routes may 403 from the host" ;;
+  *) ok "OpenDesign ports are not bound to 0.0.0.0" ;;
+esac
+case "$relay_bind" in
+  *:1D20*) ok "publish relay holds guest port 7456 in-guest" ;;
+  *) bad "publish relay does not hold guest port 7456 in-guest (saw: ${relay_bind:-none})" ;;
+esac
+# Check the relay's own node process, not the supervisor wrapper: the node
+# process is what actually holds the published port.
+#
+# The bracketed first character is load-bearing. `acq exec` runs this check in a
+# shell whose own cmdline contains the pattern text, and `pgrep -f` matches
+# against every process's full cmdline — including that shell's. A plain
+# "opendesign-relay" pattern therefore reports "running" even when no relay
+# exists anywhere, which is a false PASS on exactly the failure this assertion
+# is here to catch. `[o]pendesign` does not match the literal text
+# "[o]pendesign" in the checking shell's cmdline, but does match the real
+# process's "opendesign-relay.mjs". Verified in both directions (relay absent /
+# relay present, bare and under its supervisor).
+if [ "$(in_acq 'pgrep -f "[o]pendesign-relay\.mjs" >/dev/null 2>&1 && echo yes')" = "yes" ]; then
+  ok "publish relay is running in-guest"
+else
+  bad "publish relay is not running in-guest"
+  in_acq 'tail -n 40 ~/.local/state/opendesign/opendesign-relay.log 2>/dev/null || echo "missing opendesign-relay.log"' | sed 's/^/    | /'
+fi
+
+# OpenDesign sandbox-mode rewrites HOME/XDG_CONFIG_HOME for agent children, so
+# without OPENCODE_CONFIG OpenCode reads an empty stub config and falls back to
+# its own hosted gateway, which this kit's egress policy blocks. Assert that the
+# named config is the usai-provider one AND that OpenCode resolves usai models
+# through it in the environment OpenDesign will actually launch.
+#
+# Resolving the daemon pid needs two guards, both found by running this against a
+# live sandbox rather than reasoning about it:
+#
+#  1. Anchor on argv[0] being node. The daemon's supervisor shell carries the
+#     same "apps/daemon/dist/cli.js" string later in its own cmdline, so an
+#     unanchored pattern can resolve to the supervisor's pid and read the wrong
+#     process's environ. The shell does inherit the exports, so that reads as a
+#     pass — a wrong-target read that happens to agree, which is worse than a
+#     failure because it hides the mistake.
+#  2. Select by OD_PORT rather than taking the first match. A host may have more
+#     than one daemon alive (a leftover, or a second sandbox), and "first pid
+#     wins" silently inspects whichever one sorts lowest. Matching internal daemon
+#     port 17456 makes the check say what it means.
+daemon_pid_cmd='for p in $(pgrep -f "^[^ ]*node .*apps/daemon/dist/cli\.js"); do [ -r "/proc/$p/environ" ] || continue; got=$(tr "\0" "\n" < "/proc/$p/environ" | sed -n "s/^OD_PORT=//p"); [ "$got" = "17456" ] || continue; echo "$p"; break; done'
+opencode_config="$(in_acq "pid=\$($daemon_pid_cmd); [ -n \"\$pid\" ] && tr '\\0' '\\n' < \"/proc/\$pid/environ\" | sed -n 's/^OPENCODE_CONFIG=//p'")"
+if [ -n "$opencode_config" ]; then
+  ok "daemon process carries OPENCODE_CONFIG=$opencode_config"
+else
+  bad "daemon process does not carry OPENCODE_CONFIG; OpenDesign runs will not reach USAi"
+fi
+if [ "$(in_acq 'grep -q "api.gsa.usai.gov" "${OPENCODE_CONFIG:-$HOME/.config/opencode/opencode.jsonc}" 2>/dev/null && echo yes')" = "yes" ]; then
+  ok "the named OpenCode config points at the USAi gateway"
+else
+  skip "named OpenCode config does not mention api.gsa.usai.gov (usai-provider may not be paired)"
+fi
+usai_models="$(in_acq 'OPENCODE_CONFIG="${OPENCODE_CONFIG:-$HOME/.config/opencode/opencode.jsonc}" HOME="$OD_DATA_DIR/sandbox/agent-home" XDG_CONFIG_HOME="$OD_DATA_DIR/sandbox/config" XDG_DATA_HOME="$OD_DATA_DIR/sandbox/config/data" XDG_CACHE_HOME="$OD_DATA_DIR/sandbox/cache" timeout 60 opencode models 2>/dev/null | grep -c "^usai/"')"
+if [ "${usai_models:-0}" -gt 0 ] 2>/dev/null; then
+  ok "OpenCode resolves $usai_models usai/* models under OpenDesign's sandbox-mode env"
+else
+  bad "OpenCode resolves no usai/* models under OpenDesign's sandbox-mode env (runs would fall back to the hosted gateway)"
+fi
+
+info "5. Host port published"
+ports_out="$(acq ports "$SBX_NAME" 2>/dev/null || true)"
+if printf '%s' "$ports_out" | grep -q 7456; then
+  ok "acq ports reports a mapping for guest 7456"
+else
+  bad "acq ports does not report guest 7456"
+fi
+printf '%s\n' "$ports_out" | sed 's/^/    | /'
+
+host_url="$(printf '%s\n' "$ports_out" | python3 -c 'import re, sys
+for line in sys.stdin:
+    match = re.search(r"sandbox\s+7456\s*->\s*host\s+(127\.0\.0\.1|localhost):(\d+)", line)
+    if match:
+        print(f"http://{match.group(1)}:{match.group(2)}")
+        break
+')"
+if [ -n "$host_url" ]; then
+  host_status_body="$WORK/daemon-status-host.json"
+  if curl -fsS "$host_url/" >/dev/null 2>&1 && curl -fsS "$host_url/api/daemon/status" -o "$host_status_body" >/dev/null 2>&1; then
+    ok "published host-loopback URL is reachable: $host_url"
+    sed 's/^/    | daemon-status: /' "$host_status_body" 2>/dev/null || true
+  else
+    bad "published host-loopback URL is not reachable: $host_url"
+  fi
+  # Regression gates for the loopback-peer bug: these are browser-visible routes
+  # guarded by requireLocalDaemonRequest. They returned 403 whenever the daemon
+  # observed a non-loopback peer through create-time port publishing.
+  rollout_body="$WORK/od-next-rollout.json"
+  rollout_code="$(curl -s -o "$rollout_body" -w '%{http_code}' --max-time 30 \
+    -H "Origin: $host_url" "$host_url/api/strategies/od-next/rollout" 2>/dev/null || true)"
+  if [ "$rollout_code" = "200" ]; then
+    ok "OD Next rollout route is reachable from the host browser path (HTTP 200)"
+  else
+    bad "OD Next rollout route returned HTTP ${rollout_code:-none} from the host"
+    sed 's/^/    | /' "$rollout_body" 2>/dev/null || true
+    in_acq 'tail -n 60 ~/.local/state/opendesign/opendesign-relay.log 2>/dev/null || true' | sed 's/^/    | relay: /'
+  fi
+
+  export_body="$WORK/diagnostics-export.body"
+  export_code="$(curl -s -o "$export_body" -w '%{http_code}' --max-time 120 \
+    -H "Origin: $host_url" "$host_url/api/diagnostics/export" 2>/dev/null || true)"
+  if [ "$export_code" = "200" ]; then
+    ok "diagnostics export is reachable from the host browser path (HTTP 200)"
+  else
+    bad "diagnostics export returned HTTP ${export_code:-none} from the host"
+    sed 's/^/    | /' "$export_body" 2>/dev/null || true
+    in_acq 'tail -n 60 ~/.local/state/opendesign/opendesign-relay.log 2>/dev/null || true' | sed 's/^/    | relay: /'
+  fi
+else
+  bad "could not parse host-loopback URL from acq ports output"
+fi
+
+info "Summary"
+printf '  %d passed, %d failed, %d skipped\n' "$pass" "$fail" "$skip_count"
+[ "$fail" -eq 0 ] && printf '  \033[32mAll required checks passed.\033[0m\n' || printf '  \033[31mSome checks failed.\033[0m\n'
+[ "$fail" -eq 0 ]

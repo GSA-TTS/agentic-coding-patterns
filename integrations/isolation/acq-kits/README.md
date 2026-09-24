@@ -24,6 +24,7 @@ not agent behavior. (Behavioral patterns live in `skills/`, `prompts/`, etc.)
 | [`git-ssh-sign/`](git-ssh-sign/) | Sign git commits and tags with the SSH key forwarded from the host agent (vendored from sbx-kits-contrib). |
 | [`openchamber/`](openchamber/) | Run OpenChamber, a browser UI for OpenCode, inside the sandbox alongside the terminal TUI. Opt-in (see its parity note). |
 | [`paseo/`](paseo/) | Self-host the [Paseo](https://github.com/getpaseo/paseo) daemon + browser web UI (for coding agents) inside the sandbox on one port. Opt-in; agent-generic wrapper, no shared TUI session. |
+| [`opendesign/`](opendesign/) | Run [OpenDesign](https://github.com/nexu-io/open-design) headlessly inside the sandbox as a browser design workspace, reusing the existing OpenCode CLI and ACQ-injected USAi credentials. Opt-in. |
 | [`prime-agent/`](prime-agent/) | Install [PrimeIntellect-ai/prime-agent](https://github.com/PrimeIntellect-ai/prime-agent), a terminal AI coding assistant with an embedded IPython tool. Opt-in; TUI, no ports. |
 | [`pi-coding-agent/`](pi-coding-agent/) | Install [earendil-works/pi](https://github.com/earendil-works/pi) (`@earendil-works/pi-coding-agent`), a plain terminal AI coding agent (read/write/edit/bash tools only). Opt-in; TUI, no ports. |
 

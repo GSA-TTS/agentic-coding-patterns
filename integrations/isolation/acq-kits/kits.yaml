@@ -80,6 +80,26 @@ kits:
       ONE port. The daemon runs unsecured (no PASEO_PASSWORD); the sandbox is the
       security boundary and the port is host loopback only.
 
+  opendesign:
+    backends: [sbx, msb]
+    parity: |
+      Opt-in headless browser design workspace for OpenDesign. Written entirely
+      in the neutral vocabulary with no backend shortcut or extras: the single
+      published container port (7456, serving the OpenDesign daemon/API + web UI)
+      is expressed with the neutral top-level `publishedPorts` list; the 10G
+      persistent OpenDesign data/source volume is expressed with the neutral
+      `volumes` list; and the never-exiting startup supervisor is marked with the
+      neutral `background: true` flag. acq's kit translation maps publishedPorts,
+      volumes, files, environment, and background startup to the active backend's
+      native primitives. The kit installs a pinned OpenDesign source checkout with
+      a kit-managed Node 24 runtime, runs the daemon unsecured
+      (OD_DISABLE_API_AUTH=1), seeds OpenDesign to use the existing `opencode`
+      CLI, and leaves model credentials to acq + the usai-provider kit. The
+      daemon binds guest loopback only and a kit-managed Node relay publishes it
+      on the guest network address, because OpenDesign gates some routes on a
+      loopback peer address; that relay is a plain byte forwarder with no
+      backend-specific assumptions.
+
   prime-agent:
     backends: [sbx, msb]
     parity: |
@@ -93,8 +113,8 @@ kits:
       (prime-agent is a TUI, not a web UI) — unlike openchamber/paseo. SKELETON
       only: the three scripts are placeholders; the real install/CA-bundle/
       kernel logic and the generated model catalog
-      (files/home/prime-agent-config/models.json) land in follow-up work tracked
-      in the patterns repo's prime-agent epic. Model-provider egress is the
+      (files/home/prime-agent-config/models.json) are intentionally deferred to
+      follow-up work for the prime-agent kit. Model-provider egress is the
       usai-provider kit's job, not this one.
 
   pi-coding-agent:
