@@ -17,8 +17,8 @@
 // to connect to.
 //
 // This relay resolves the conflict. The daemon binds 127.0.0.1 only. The relay
-// binds the guest network address(es) and forwards each connection to
-// 127.0.0.1 from localAddress 127.0.0.1, so the daemon always observes a
+// binds the default-route guest network interface and forwards each connection
+// to 127.0.0.1 from localAddress 127.0.0.1, so the daemon always observes a
 // loopback peer. It is a plain byte relay: no parsing, no header rewriting, so
 // websockets, SSE, and streaming responses pass through untouched.
 //
@@ -28,7 +28,9 @@
 // was already the reachable surface when the daemon bound 0.0.0.0; the host side
 // of the mapping remains loopback-only. The relay additionally accepts only
 // loopback and the default gateway peer by default, with an explicit
-// OPENDESIGN_RELAY_ALLOWED_PEERS override for backend-specific forwarders. See
+// OPENDESIGN_RELAY_ALLOWED_PEERS override for backend-specific forwarders. This
+// is defense-in-depth against accidental guest-network reachability, not a
+// boundary against code already running inside the sandbox. See
 // docs/decisions/disable-api-auth-loopback-boundary.md. The relay deliberately
 // does NOT rewrite the Host header: OpenDesign's own origin middleware already
 // accepts the loopback Host a browser sends to a published localhost port.
@@ -40,7 +42,9 @@ import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 
-const PORT = Number.parseInt(process.argv[2] ?? '', 10);
+const SELF_TEST = process.argv[2] === '--self-test';
+const LISTEN_PORT = Number.parseInt(SELF_TEST ? '1' : (process.argv[2] ?? ''), 10);
+const TARGET_PORT = Number.parseInt(SELF_TEST ? '1' : (process.argv[3] ?? process.argv[2] ?? ''), 10);
 const TARGET_HOST = '127.0.0.1';
 // How often to look for interfaces that appeared after startup. The relay may
 // win the race against sandbox network setup on a cold boot.
@@ -49,8 +53,9 @@ const RESCAN_INTERVAL_MS = Number.parseInt(
   10,
 );
 
-if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
-  console.error(`[relay] usage: opendesign-relay.mjs <port> (got ${JSON.stringify(process.argv[2])})`);
+if (!Number.isInteger(LISTEN_PORT) || LISTEN_PORT < 1 || LISTEN_PORT > 65535
+  || !Number.isInteger(TARGET_PORT) || TARGET_PORT < 1 || TARGET_PORT > 65535) {
+  console.error(`[relay] usage: opendesign-relay.mjs <listen-port> [target-port] (got ${JSON.stringify(process.argv.slice(2))})`);
   process.exit(2);
 }
 
@@ -58,14 +63,40 @@ const log = (...parts) => {
   console.log(`${new Date().toISOString()} [relay]`, ...parts);
 };
 
+function parseDefaultIpv4Route(routeTable) {
+  for (const line of routeTable.trim().split('\n').slice(1)) {
+    const fields = line.trim().split(/\s+/);
+    if (fields[1] !== '00000000' || !fields[2]) continue;
+    const hex = fields[2].match(/../g);
+    if (!hex) continue;
+    return {
+      iface: fields[0],
+      gateway: hex.reverse().map((part) => Number.parseInt(part, 16)).join('.'),
+    };
+  }
+  return { iface: '', gateway: '' };
+}
+
+function defaultIpv4Route() {
+  try {
+    return parseDefaultIpv4Route(fs.readFileSync('/proc/net/route', 'utf8'));
+  } catch {
+    // Non-Linux or unreadable route table: fail closed until the route is visible.
+  }
+  return { iface: '', gateway: '' };
+}
+
 /**
- * Publishable addresses: every non-internal IPv4/IPv6 address on the guest.
- * `internal` is Node's own flag for loopback, which the daemon already owns —
- * binding it here would collide with the daemon on the same port.
+ * Publishable addresses: non-internal IPv4/IPv6 addresses on the default-route
+ * guest interface only. `internal` is Node's own flag for loopback, which the
+ * daemon already owns; binding it here would collide with the daemon.
  */
 function publishableAddresses() {
+  const route = defaultIpv4Route();
+  if (!route.iface) return [];
   const found = [];
-  for (const entries of Object.values(os.networkInterfaces())) {
+  for (const [name, entries] of Object.entries(os.networkInterfaces())) {
+    if (name !== route.iface) continue;
     for (const entry of entries ?? []) {
       if (!entry || entry.internal) continue;
       if (entry.family !== 'IPv4' && entry.family !== 'IPv6') continue;
@@ -92,22 +123,6 @@ function normalizePeerAddress(address) {
   return normalized.startsWith('::ffff:') ? normalized.slice('::ffff:'.length) : normalized;
 }
 
-function defaultIpv4Gateway() {
-  try {
-    const routes = fs.readFileSync('/proc/net/route', 'utf8').trim().split('\n').slice(1);
-    for (const line of routes) {
-      const fields = line.trim().split(/\s+/);
-      if (fields[1] !== '00000000' || !fields[2]) continue;
-      const hex = fields[2].match(/../g);
-      if (!hex) continue;
-      return hex.reverse().map((part) => Number.parseInt(part, 16)).join('.');
-    }
-  } catch {
-    // Non-Linux or unreadable route table: fall back to loopback-only peers.
-  }
-  return '';
-}
-
 function allowedPeerAddresses() {
   const configured = (process.env.OPENDESIGN_RELAY_ALLOWED_PEERS ?? '')
     .split(',')
@@ -117,9 +132,25 @@ function allowedPeerAddresses() {
     '127.0.0.1',
     '::1',
     '0:0:0:0:0:0:0:1',
-    defaultIpv4Gateway(),
+    defaultIpv4Route().gateway,
     ...configured,
   ].filter(Boolean));
+}
+
+function assertEqual(actual, expected, label) {
+  if (actual !== expected) {
+    throw new Error(`${label}: expected ${expected}, got ${actual}`);
+  }
+}
+
+if (SELF_TEST) {
+  assertEqual(normalizePeerAddress('::ffff:127.0.0.1'), '127.0.0.1', 'IPv4-mapped loopback');
+  assertEqual(normalizePeerAddress('[::1]'), '::1', 'bracketed IPv6 loopback');
+  const route = parseDefaultIpv4Route('Iface\tDestination\tGateway\tFlags\neth0\t00000000\t0141A8C0\t0003\n');
+  assertEqual(route.iface, 'eth0', 'default route interface');
+  assertEqual(route.gateway, '192.168.65.1', 'default route gateway');
+  console.log('relay self-test passed');
+  process.exit(0);
 }
 
 function relayConnection(client) {
@@ -138,7 +169,7 @@ function relayConnection(client) {
   }
 
   const upstream = net.connect({
-    port: PORT,
+    port: TARGET_PORT,
     host: TARGET_HOST,
     localAddress: TARGET_HOST,
   });
@@ -164,34 +195,34 @@ function bind(address) {
       // Something already serves this address:port — most likely a previous
       // relay generation, or a daemon still bound to 0.0.0.0 from an older kit
       // version. Either way the port is reachable, which is the goal.
-      log(`address already in use, leaving it alone: ${address}:${PORT}`);
+      log(`address already in use, leaving it alone: ${address}:${LISTEN_PORT}`);
       permanentlyFailed.add(address);
       return;
     }
     if (code === 'EADDRNOTAVAIL' || code === 'EINVAL') {
       // The interface went away between scan and bind. A later rescan can
       // legitimately retry this one.
-      log(`address unavailable (will retry): ${address}:${PORT} (${code})`);
+      log(`address unavailable (will retry): ${address}:${LISTEN_PORT} (${code})`);
       return;
     }
-    log(`bind failed: ${address}:${PORT} (${code ?? err?.message})`);
+    log(`bind failed: ${address}:${LISTEN_PORT} (${code ?? err?.message})`);
     permanentlyFailed.add(address);
   });
-  server.listen(PORT, address, () => {
+  server.listen(LISTEN_PORT, address, () => {
     bound.add(address);
-    log(`forwarding ${address}:${PORT} -> ${TARGET_HOST}:${PORT}`);
+    log(`forwarding ${address}:${LISTEN_PORT} -> ${TARGET_HOST}:${TARGET_PORT}`);
   });
 }
 
 function scan() {
   const addresses = publishableAddresses();
   if (addresses.length === 0 && bound.size === 0) {
-    log('no non-loopback address yet; will rescan');
+    log('no default-route interface address yet; will rescan');
   }
   for (const address of addresses) bind(address);
 }
 
-log(`starting for port ${PORT}; daemon expected on ${TARGET_HOST}:${PORT}`);
+log(`starting for published port ${LISTEN_PORT}; daemon expected on ${TARGET_HOST}:${TARGET_PORT}`);
 scan();
 const rescan = setInterval(scan, RESCAN_INTERVAL_MS);
 rescan.unref?.();

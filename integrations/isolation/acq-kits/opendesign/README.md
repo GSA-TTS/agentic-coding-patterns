@@ -6,8 +6,9 @@ local-first design workspace that launches existing agent CLIs. This kit uses th
 existing sandbox `opencode`; it does not install OpenCode and does not own model
 credentials.
 
-A single OpenDesign daemon serves the API and browser UI on container port
-**7456**.
+OpenDesign is exposed on container port **7456**. Internally, the daemon listens
+on guest loopback port `17456`, and a small relay publishes it on guest port
+`7456` for ACQ port mapping.
 
 This kit is **opt-in** and is designed to compose with the default GSA kits,
 especially `usai-provider`.
@@ -54,9 +55,9 @@ especially `usai-provider`.
 - A kit-managed Node `24.21.0` runtime under the kit volume, verified by
   SHA-256.
 - pnpm `10.33.2` through Corepack.
-- OpenDesign daemon startup on `127.0.0.1:7456` with `--no-open`, plus a
-  supervised relay that publishes that loopback listener on the guest network
-  address (see [Security](#security)).
+- OpenDesign daemon startup on internal `127.0.0.1:17456` with `--no-open`,
+  plus a supervised relay that publishes it on guest port `7456` (see
+  [Security](#security)).
 - Root startup initialization that makes the root of the persistent OpenDesign
   volume writable by the `agent` user before the daemon supervisor runs.
 - OpenDesign state, source checkout, kit-managed Node runtime, Corepack state,
@@ -70,6 +71,13 @@ especially `usai-provider`.
 
 The kit deliberately does **not** seed a default model. OpenCode/OpenDesign use
 their existing configured defaults.
+
+This kit builds OpenDesign from source during first boot. That means it runs
+OpenDesign's pinned `pnpm install --frozen-lockfile`, package lifecycle scripts,
+bootstrap build, and Next.js production build inside the sandbox as the `agent`
+user. The source commit, Node archive, pnpm version, and lockfile are pinned, but
+this is still a larger first-boot build surface than sibling kits that install a
+single published artifact.
 
 ## Credential model
 
@@ -123,11 +131,11 @@ acq ports <sandbox>
 # OpenDesign UI: open http://localhost:<host-port-for-7456>
 ```
 
-Want a fixed host port instead of the ephemeral one?
-
-```bash
-acq ports <sandbox> --publish 7456:7456
-```
+The automatic create-time mapping is the supported host-browser path. Avoid
+adding an extra post-hoc fixed-port publish for this kit: depending on backend
+implementation, that may dial guest loopback port `7456` and bypass the relay
+split (`7456` -> `17456`) that keeps OpenDesign's peer-loopback-gated routes
+working.
 
 ## Security
 
@@ -142,10 +150,15 @@ OpenDesign daemon and the agents it launches.
 `acq` create-time port publishing on msb-style backends dials the sandbox guest
 network IP, not guest `127.0.0.1`, so something in the guest must listen there.
 The kit does that with a small supervised relay (`~/opendesign-relay.mjs`) that
-forwards the guest network address to the loopback daemon — rather than binding
-the daemon to `0.0.0.0`. The relay accepts loopback, the default gateway peer,
-and optional backend-specific `OPENDESIGN_RELAY_ALLOWED_PEERS` entries; other
-guest-network peers are denied before forwarding.
+listens on published guest port `7456` and forwards to the loopback daemon on
+internal port `17456` — rather than binding the daemon to `0.0.0.0`. The relay
+accepts loopback, the default gateway peer, and optional backend-specific
+`OPENDESIGN_RELAY_ALLOWED_PEERS` entries; other guest-network peers are denied
+before forwarding. That peer filter is defense-in-depth against accidental guest
+network reachability, not the primary security boundary: code running inside the
+sandbox is already trusted for this local development posture. Do not rely on the
+relay to contain a hostile in-sandbox process, especially on backends where the
+guest network is shared across sandboxes.
 
 That distinction matters functionally, not just cosmetically. OpenDesign gates
 several routes on the request **peer** address being loopback
@@ -161,8 +174,9 @@ in
 
 OpenDesign is installed from GitHub, Node.js, and npm. Behind an inspecting
 proxy, pair this kit with the `zscaler-ca-certificate` kit so Node/pnpm trust
-the inspection CA. The install script also appends `PROXY_CA_CERT_B64` and the
-system CA bundle to `NODE_EXTRA_CA_CERTS` when available.
+the inspection CA. The install script appends `PROXY_CA_CERT_B64` only when it
+can decode it successfully, then appends the system CA bundle to
+`NODE_EXTRA_CA_CERTS` when available.
 
 ## Backend support
 

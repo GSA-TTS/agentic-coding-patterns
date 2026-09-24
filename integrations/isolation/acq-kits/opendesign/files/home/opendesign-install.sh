@@ -94,7 +94,15 @@ node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || true)
 [ -n "${HTTP_PROXY:-${http_proxy:-}}" ] && export npm_config_proxy="${HTTP_PROXY:-$http_proxy}"
 ca_bundle="$STATE_HOME/ca-bundle.pem"
 : >"$ca_bundle"
-[ -n "${PROXY_CA_CERT_B64:-}" ] && printf %s "$PROXY_CA_CERT_B64" | base64 -d >>"$ca_bundle" 2>/dev/null || true
+if [ -n "${PROXY_CA_CERT_B64:-}" ]; then
+  proxy_ca_tmp="$STATE_HOME/proxy-ca.pem.tmp"
+  if printf %s "$PROXY_CA_CERT_B64" | base64 -d >"$proxy_ca_tmp" 2>/dev/null; then
+    cat "$proxy_ca_tmp" >>"$ca_bundle"
+  else
+    log "WARNING: ignoring invalid PROXY_CA_CERT_B64; could not decode proxy CA"
+  fi
+  rm -f "$proxy_ca_tmp"
+fi
 [ -f /etc/ssl/certs/ca-certificates.crt ] && cat /etc/ssl/certs/ca-certificates.crt >>"$ca_bundle"
 [ -s "$ca_bundle" ] && export NODE_EXTRA_CA_CERTS="$ca_bundle"
 

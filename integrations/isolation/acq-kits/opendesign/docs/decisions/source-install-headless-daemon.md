@@ -26,11 +26,11 @@ Install OpenDesign from the pinned upstream source tag
 the built daemon headlessly on guest loopback:
 
 ```bash
-node apps/daemon/dist/cli.js --host 127.0.0.1 --port 7456 --no-open
+node apps/daemon/dist/cli.js --host 127.0.0.1 --port 17456 --no-open
 ```
 
-A supervised relay publishes that loopback listener on the guest network address
-that ACQ/MSB create-time port publishing dials; see
+A supervised relay publishes that loopback listener on guest port `7456`, the
+port that ACQ/MSB create-time port publishing dials; see
 [`disable-api-auth-loopback-boundary.md`](disable-api-auth-loopback-boundary.md).
 
 The install runs during the startup phase, not create time. It is idempotent and
@@ -42,6 +42,11 @@ fail-soft: failures are logged but do not fail sandbox creation/startup.
 - The kit does not need nested Docker/Podman.
 - First boot can be slow because it downloads Node, installs dependencies, and
   builds OpenDesign.
+- Unlike sibling UI kits that install one published artifact, this source build
+  executes OpenDesign's pinned `pnpm install --frozen-lockfile`, package lifecycle
+  scripts, bootstrap build, and Next.js production build inside the sandbox. The
+  commit, Node archive, pnpm version, and lockfile are pinned, but reviewers
+  should treat this as a larger build-time supply-chain surface.
 - First boot needs enough memory for the Next.js production build. Direct
   exercise with a 1536 MiB Node heap reached the web build, compiled
   successfully, and failed during `Running TypeScript ...` with `JavaScript heap

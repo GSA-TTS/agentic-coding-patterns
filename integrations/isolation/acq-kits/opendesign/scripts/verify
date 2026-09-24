@@ -98,8 +98,14 @@ elif command -v node >/dev/null 2>&1; then
   else
     bad "opendesign-relay.mjs has syntax errors"
   fi
+  if node "$RELAY" --self-test >/dev/null 2>&1; then
+    ok "opendesign-relay.mjs peer and route helpers pass self-test"
+  else
+    bad "opendesign-relay.mjs peer and route helpers fail self-test"
+  fi
 else
   skip "opendesign-relay.mjs not syntax-checked (node not on PATH)"
+  skip "opendesign-relay.mjs self-test not run (node not on PATH)"
 fi
 
 spec="$(cat "$KIT_DIR/spec.yaml")"
@@ -131,6 +137,10 @@ case "$start_src" in
   *) bad "startup can inherit OD_BIND_HOST instead of forcing loopback" ;;
 esac
 case "$start_src" in
+  *'OPENDESIGN_PUBLISHED_PORT="${OPENDESIGN_PUBLISHED_PORT:-7456}"'*'OD_PORT="${OPENDESIGN_DAEMON_PORT:-17456}"'*) ok "startup separates published relay port 7456 from daemon port 17456" ;;
+  *) bad "startup does not separate relay and daemon ports" ;;
+esac
+case "$start_src" in
   *'supervisor:opendesign-relay'*) ok "startup supervises the publish relay" ;;
   *) bad "startup does not supervise the publish relay" ;;
 esac
@@ -149,7 +159,11 @@ case "$relay_src" in
   *) bad "relay does not skip loopback interfaces" ;;
 esac
 case "$relay_src" in
-  *'OPENDESIGN_RELAY_ALLOWED_PEERS'*'defaultIpv4Gateway'*'allowedPeerAddresses'*) ok "relay restricts client peers to loopback/default gateway plus explicit overrides" ;;
+  *'defaultIpv4Route'*'Object.entries(os.networkInterfaces())'*'name !== route.iface'*) ok "relay binds only the default-route guest interface" ;;
+  *) bad "relay can bind non-default guest interfaces" ;;
+esac
+case "$relay_src" in
+  *'OPENDESIGN_RELAY_ALLOWED_PEERS'*'defaultIpv4Route().gateway'*'allowedPeerAddresses'*) ok "relay restricts client peers to loopback/default gateway plus explicit overrides" ;;
   *) bad "relay does not restrict client peers before forwarding" ;;
 esac
 # OpenDesign rewrites HOME/XDG_CONFIG_HOME for agent children (OD_SANDBOX_MODE),
@@ -186,6 +200,10 @@ esac
 case "$install_src" in
   *'git checkout --detach FETCH_HEAD'*'OPENDESIGN_COMMIT'*) ok "install script verifies pinned OpenDesign commit" ;;
   *) bad "install script does not verify pinned OpenDesign commit" ;;
+esac
+case "$install_src" in
+  *'base64 -d >"$proxy_ca_tmp"'*'cat "$proxy_ca_tmp" >>"$ca_bundle"'*'ignoring invalid PROXY_CA_CERT_B64'*) ok "install script validates proxy CA before appending it" ;;
+  *) bad "install script can append invalid proxy CA data to NODE_EXTRA_CA_CERTS" ;;
 esac
 case "$start_src" in
   *'refresh PATH before seeding config or launching the daemon'*'export PATH'*) ok "startup refreshes PATH after installing kit-managed Node" ;;
@@ -245,7 +263,7 @@ startup_checked=0
 health=""
 while :; do
   now="$(date +%s)"
-  if [ "$(in_acq 'curl -fsS http://127.0.0.1:7456/api/daemon/status >/dev/null 2>&1 && curl -fsS http://127.0.0.1:7456/ >/dev/null 2>&1 && echo yes')" = "yes" ]; then
+  if [ "$(in_acq 'curl -fsS http://127.0.0.1:17456/api/daemon/status >/dev/null 2>&1 && curl -fsS http://127.0.0.1:17456/ >/dev/null 2>&1 && echo yes')" = "yes" ]; then
     health=yes
     break
   fi
@@ -309,17 +327,22 @@ fi
   && ok "OD_DATA_DIR does not contain the injected USAI_API_KEY value" \
   || bad "OD_DATA_DIR contains the injected USAI_API_KEY value or grep failed unexpectedly"
 
-# 1D20 hex = 7456. The daemon must hold ONLY 127.0.0.1:1D20 (0100007F), and the
-# relay must hold the guest-network address. A daemon on 00000000:1D20 means the
-# loopback-peer-gated routes will 403 for the host browser.
-daemon_bind="$(in_acq 'awk "\$4 == \"0A\" && \$2 ~ /:1D20$/ { print \$2 }" /proc/net/tcp | sort -u | tr "\n" " "')"
+# 4430 hex = 17456 (loopback-only daemon). 1D20 hex = 7456 (published relay).
+# Keeping these separate prevents ACQ from bypassing the relay and reaching a
+# same-port daemon directly.
+daemon_bind="$(in_acq 'awk "\$4 == \"0A\" && \$2 ~ /:4430$/ { print \$2 }" /proc/net/tcp | sort -u | tr "\n" " "')"
+relay_bind="$(in_acq 'awk "\$4 == \"0A\" && \$2 ~ /:1D20$/ { print \$2 }" /proc/net/tcp | sort -u | tr "\n" " "')"
 case "$daemon_bind" in
-  *0100007F:1D20*) ok "a loopback listener holds port 7456 in-guest" ;;
-  *) bad "no loopback listener on port 7456 in-guest (saw: ${daemon_bind:-none})" ;;
+  *0100007F:4430*) ok "a loopback daemon listener holds internal port 17456 in-guest" ;;
+  *) bad "no loopback daemon listener on internal port 17456 in-guest (saw: ${daemon_bind:-none})" ;;
 esac
-case "$daemon_bind" in
-  *00000000:1D20*) bad "port 7456 is bound to 0.0.0.0; peer-loopback-gated routes will 403 from the host" ;;
-  *) ok "port 7456 is not bound to 0.0.0.0" ;;
+case "$daemon_bind $relay_bind" in
+  *00000000:4430*|*00000000:1D20*) bad "OpenDesign ports are bound to 0.0.0.0; peer-loopback-gated routes may 403 from the host" ;;
+  *) ok "OpenDesign ports are not bound to 0.0.0.0" ;;
+esac
+case "$relay_bind" in
+  *:1D20*) ok "publish relay holds guest port 7456 in-guest" ;;
+  *) bad "publish relay does not hold guest port 7456 in-guest (saw: ${relay_bind:-none})" ;;
 esac
 # Check the relay's own node process, not the supervisor wrapper: the node
 # process is what actually holds the published port.
@@ -357,9 +380,9 @@ fi
 #     failure because it hides the mistake.
 #  2. Select by OD_PORT rather than taking the first match. A host may have more
 #     than one daemon alive (a leftover, or a second sandbox), and "first pid
-#     wins" silently inspects whichever one sorts lowest. Matching the port this
-#     verification actually targets makes the check say what it means.
-daemon_pid_cmd='for p in $(pgrep -f "^[^ ]*node .*apps/daemon/dist/cli\.js"); do [ -r "/proc/$p/environ" ] || continue; got=$(tr "\0" "\n" < "/proc/$p/environ" | sed -n "s/^OD_PORT=//p"); [ "$got" = "7456" ] || continue; echo "$p"; break; done'
+#     wins" silently inspects whichever one sorts lowest. Matching internal daemon
+#     port 17456 makes the check say what it means.
+daemon_pid_cmd='for p in $(pgrep -f "^[^ ]*node .*apps/daemon/dist/cli\.js"); do [ -r "/proc/$p/environ" ] || continue; got=$(tr "\0" "\n" < "/proc/$p/environ" | sed -n "s/^OD_PORT=//p"); [ "$got" = "17456" ] || continue; echo "$p"; break; done'
 opencode_config="$(in_acq "pid=\$($daemon_pid_cmd); [ -n \"\$pid\" ] && tr '\\0' '\\n' < \"/proc/\$pid/environ\" | sed -n 's/^OPENCODE_CONFIG=//p'")"
 if [ -n "$opencode_config" ]; then
   ok "daemon process carries OPENCODE_CONFIG=$opencode_config"

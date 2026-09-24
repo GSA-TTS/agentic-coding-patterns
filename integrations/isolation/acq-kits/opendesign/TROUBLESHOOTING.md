@@ -16,7 +16,7 @@ Check the port mapping and daemon health:
 
 ```bash
 acq ports <sandbox>
-acq exec <sandbox> -- sh -c 'curl -fsS http://127.0.0.1:7456/api/daemon/status && echo OK'
+acq exec <sandbox> -- sh -c 'curl -fsS http://127.0.0.1:17456/api/daemon/status && echo OK'
 ```
 
 - `/api/daemon/status` returns 200 and the port is mapped: open
@@ -139,25 +139,26 @@ acq exec <sandbox> -- sh -c '
 ## Host curl returns "Empty reply from server" / connection refused while guest curl works
 
 The publish relay is probably not running. The daemon binds guest `127.0.0.1`
-only (on purpose — see the 403 entry below), and `~/opendesign-relay.mjs` is what
-listens on the guest network address that msb/acq publishing actually dials.
+only on internal port `17456` (on purpose — see the 403 entry below), and
+`~/opendesign-relay.mjs` is what listens on published guest port `7456` that
+msb/acq publishing actually dials.
 
 ```bash
 acq exec <sandbox> -- sh -c 'tail -n 40 ~/.local/state/opendesign/opendesign-relay.log'
 acq exec <sandbox> -- sh -c 'pgrep -af "supervisor:opendesign-relay" || echo "relay supervisor not running"'
 ```
 
-Confirm both listeners. `1D20` hex = 7456:
+Confirm both listeners. `1D20` hex = 7456 and `4430` hex = 17456:
 
 ```bash
-acq exec <sandbox> -- sh -c 'grep -i ":1D20" /proc/net/tcp'
-# 0100007F:1D20 state 0A  -> daemon on 127.0.0.1:7456   (expected)
-# <guest-ip-hex>:1D20 0A  -> relay on the guest network (expected)
-# 00000000:1D20 state 0A  -> daemon on 0.0.0.0: WRONG, see the 403 entry below
+acq exec <sandbox> -- sh -c 'grep -Ei ":(1D20|4430)" /proc/net/tcp'
+# 0100007F:4430 state 0A  -> daemon on 127.0.0.1:17456   (expected)
+# <guest-ip-hex>:1D20 0A  -> relay on published guest port 7456 (expected)
+# 00000000:* state 0A     -> wrong; see the 403 entry below
 ```
 
-If the relay log shows `no non-loopback address yet`, the guest network came up
-late; the relay rescans every 10s and should recover on its own. If it shows
+If the relay log shows `no default-route interface yet`, the guest network came
+up late; the relay rescans every 10s and should recover on its own. If it shows
 `bind failed`, read the reported error code. If `~/opendesign-relay.mjs` is
 missing entirely, the sandbox was created with an older kit version — recreate
 it.
@@ -167,8 +168,9 @@ it.
 OpenDesign gates a subset of its API on the request **peer** address being
 loopback (`requireLocalDaemonRequest`, upstream
 `apps/daemon/src/http/local-daemon-request.ts`). If the daemon is bound to
-`0.0.0.0`, requests published from the host arrive with a guest-network peer
-address and these routes 403 while the rest of the UI works normally:
+`0.0.0.0`, or if the published path bypasses the relay, requests published from
+the host arrive with a guest-network peer address and these routes 403 while the
+rest of the UI works normally:
 
 ```text
 GET  /api/diagnostics/export                 <- Settings -> About -> Export diagnostics
@@ -176,13 +178,15 @@ POST /api/strategies/od-next/rollout         <- OD Next strategy switch (fails s
 POST /api/diagnostics/chat-scroll-forensics
 ```
 
-The current kit avoids this by binding the daemon to `127.0.0.1` and publishing
-it through the relay. If you see a 403 anyway, check which address holds port
-7456:
+The current kit avoids this by binding the daemon to `127.0.0.1:17456` and
+publishing it through the relay on guest port `7456`. If you see a 403 anyway,
+check which address holds both ports:
 
 ```bash
-acq exec <sandbox> -- sh -c 'grep -i ":1D20" /proc/net/tcp'
-# want 0100007F:1D20 (127.0.0.1) for the daemon, NOT 00000000:1D20 (0.0.0.0)
+acq exec <sandbox> -- sh -c 'grep -Ei ":(1D20|4430)" /proc/net/tcp'
+# want 0100007F:4430 (127.0.0.1:17456) for the daemon
+# want <guest-ip-hex>:1D20 for the relay on published guest port 7456
+# 00000000:* is wrong; a wildcard listener can bypass the relay path
 ```
 
 A daemon on `0.0.0.0` means the sandbox was created with an earlier kit version

@@ -13,7 +13,11 @@ STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}/opendesign"
 SOURCE_DIR="$APP_HOME/source"
 NODE_VERSION="${OPENDESIGN_NODE_VERSION:-24.21.0}"
 PNPM_VERSION="${OPENDESIGN_PNPM_VERSION:-10.33.2}"
-OD_PORT="${OD_PORT:-7456}"
+OPENDESIGN_PUBLISHED_PORT="${OPENDESIGN_PUBLISHED_PORT:-7456}"
+# Run the daemon on a different loopback-only port from the published relay. If
+# both use the same port, ACQ can still reach the daemon directly and bypass the
+# relay, which makes peer-loopback-gated routes return 403.
+OD_PORT="${OPENDESIGN_DAEMON_PORT:-17456}"
 # Loopback-only on purpose. OpenDesign gates several routes on the request PEER
 # being a loopback address, so the daemon must never see a guest-network peer.
 # Reachability for acq/msb port publishing is provided by opendesign-relay.mjs,
@@ -53,8 +57,8 @@ fi
 export PATH="$APP_HOME/pnpm-home:$HOME/.local/bin:$HOME/.npm-global/bin:$PATH"
 export COREPACK_HOME="$APP_HOME/corepack"
 export PNPM_HOME="$APP_HOME/pnpm-home"
-export OD_BIND_HOST OD_PORT OD_DATA_DIR
-export OD_WEB_PORT="${OD_WEB_PORT:-$OD_PORT}"
+export OD_BIND_HOST OD_PORT OD_DATA_DIR OPENDESIGN_PUBLISHED_PORT
+export OD_WEB_PORT="${OD_WEB_PORT:-$OPENDESIGN_PUBLISHED_PORT}"
 export OD_DISABLE_API_AUTH="${OD_DISABLE_API_AUTH:-1}"
 export OD_SANDBOX_MODE="${OD_SANDBOX_MODE:-1}"
 
@@ -171,11 +175,11 @@ if [ "$OD_BIND_HOST" = "127.0.0.1" ] || [ "$OD_BIND_HOST" = "localhost" ]; then
       sh -c '
         while :; do
           echo "[supervisor] starting OpenDesign relay at $(date -u +%FT%TZ)"
-          node "$3" "$1" || true
-          echo "[supervisor] OpenDesign relay exited; restarting in ${2}s"
-          sleep "$2"
+          node "$4" "$1" "$2" || true
+          echo "[supervisor] OpenDesign relay exited; restarting in ${3}s"
+          sleep "$3"
         done
-      ' "supervisor:opendesign-relay" "$OD_PORT" "$RESTART_DELAY" "$RELAY_SCRIPT"
+      ' "supervisor:opendesign-relay" "$OPENDESIGN_PUBLISHED_PORT" "$OD_PORT" "$RESTART_DELAY" "$RELAY_SCRIPT"
     ) >>"$RELAY_LOG" 2>&1 &
   fi
 fi

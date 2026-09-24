@@ -14,10 +14,11 @@
 #   - Kit-managed Node 24. The OpenCode sandbox base may carry another Node major,
 #     so this kit downloads a pinned Linux Node 24 archive into its persistent
 #     volume and verifies SHA-256 before use.
-#   - OpenDesign runs as a headless daemon bound to guest loopback:
-#     `od --host 127.0.0.1 --port 7456 --no-open`. A small kit-managed relay
-#     (opendesign-relay.mjs) binds the guest network address and forwards to that
-#     loopback listener, because msb/acq create-time port publishing dials the
+#   - OpenDesign runs as a headless daemon bound to guest loopback on internal
+#     port 17456: `od --host 127.0.0.1 --port 17456 --no-open`. A small
+#     kit-managed relay (opendesign-relay.mjs) binds the published guest network
+#     port 7456 and forwards to that loopback listener, because msb/acq
+#     create-time port publishing dials the
 #     guest network IP rather than guest 127.0.0.1. Binding the daemon itself to
 #     0.0.0.0 would make it observe a non-loopback PEER address for every request
 #     arriving from the host, and upstream's `requireLocalDaemonRequest` guard
@@ -114,7 +115,9 @@ environment:
   # address; see the DESIGN note above and the ADR for why the daemon itself
   # must not bind 0.0.0.0.
   OD_BIND_HOST: "127.0.0.1"
-  OD_PORT: "7456"
+  OPENDESIGN_PUBLISHED_PORT: "7456"
+  OPENDESIGN_DAEMON_PORT: "17456"
+  OD_PORT: "17456"
   OD_WEB_PORT: "7456"
   OD_DATA_DIR: "/home/agent/.local/share/opendesign/data"
   OD_DISABLE_API_AUTH: "1"
@@ -155,8 +158,8 @@ agentContext: |
   is the security boundary and the host port is loopback-only. Run this only on a
   trusted, single-user host and do not forward the mapped port.
 
-  **Networking.** The daemon binds guest `127.0.0.1` only; a supervised relay
-  (`~/opendesign-relay.mjs`) forwards the published guest-network port to it.
+  **Networking.** The daemon binds guest `127.0.0.1:17456` only; a supervised
+  relay (`~/opendesign-relay.mjs`) forwards published guest port `7456` to it.
   This is required because OpenDesign gates some routes on the request peer being
   loopback, and would otherwise return 403 for the browser (visibly: Settings ->
   About -> Export diagnostics). If a UI action returns 403, check the relay log

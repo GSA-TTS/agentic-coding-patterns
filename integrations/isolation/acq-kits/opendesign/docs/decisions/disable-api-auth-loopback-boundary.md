@@ -49,14 +49,14 @@ Run OpenDesign with:
 ```bash
 OD_DISABLE_API_AUTH=1
 OD_BIND_HOST=127.0.0.1
-OD_PORT=7456
+OD_PORT=17456
 ```
 
 The startup script forces the daemon bind through its own
 `OPENDESIGN_DAEMON_BIND_HOST` default instead of inheriting a backend-provided
 `OD_BIND_HOST`, because ordinary service defaults may be `0.0.0.0`.
 
-and publish that loopback listener on the guest network address with a small,
+and publish that loopback listener on guest port `7456` with a small,
 supervised, kit-managed TCP relay (`files/home/opendesign-relay.mjs`). The relay
 is a plain byte forwarder — no parsing and no header rewriting — so SSE run
 streams and websockets pass through unchanged, and the daemon always observes a
@@ -91,9 +91,17 @@ port must not be forwarded to a wider interface.
   a clear and diagnosable failure. `TROUBLESHOOTING.md` names it first for any
   403 or connection-refused symptom.
 - Exposure is narrower than the `0.0.0.0` draft: the guest network interface is
-  still the surface ACQ publishing reaches, but the relay accepts only loopback,
-  the default gateway peer, and optional `OPENDESIGN_RELAY_ALLOWED_PEERS` entries
-  for backend-specific forwarders.
+  still the surface ACQ publishing reaches, but the relay binds only the
+  default-route guest interface and accepts only loopback, the default gateway
+  peer, and optional `OPENDESIGN_RELAY_ALLOWED_PEERS` entries for
+  backend-specific forwarders.
+- The relay peer filter is defense-in-depth against accidental guest-network
+  reachability. It is not the primary trust boundary and does not constrain a
+  hostile process already running inside the sandbox: the agent can run code with
+  the sandbox user's authority, and in local ACQ environments may have enough
+  privilege to stop or replace the relay. On backends where the guest network is
+  shared across sandboxes, other guests are exactly the accidental-reachability
+  case this filter is meant to reduce, not a boundary against a compromised guest.
 - Anyone with access to the host loopback port, or to an explicitly allowed relay
   peer on the guest network, can drive OpenDesign and the agents it launches, so
   the kit must not be used on untrusted multi-user hosts or with forwarded public
