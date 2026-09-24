@@ -1,0 +1,13 @@
+#!/bin/sh
+# docker — thin wrapper that routes the docker CLI to the rootless podman engine.
+#
+# Dropped by the oci-engine kit into /usr/local/bin (ahead of /usr/bin on PATH),
+# SHADOWING the base image's bundled docker CLI, which talks to a dead socket in
+# this sandbox (no dockerd runs here). This wrapper forwards every argument to
+# podman, so `docker run …` and `docker compose …` route to the working engine.
+#
+# `docker compose` becomes `podman compose`, which dispatches through podman's
+# compose provider (podman-compose) — this is what makes docker-compose.yaml
+# files usable. Plain `podman` (NOT sudo): the engine runs ROOTLESS as the agent
+# user, so the agent invokes it directly. See ADR-0020.
+exec podman "$@"
