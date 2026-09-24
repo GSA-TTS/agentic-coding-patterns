@@ -14,7 +14,8 @@ nist_controls: ["SC-7", "AC-4", "CM-7", "SI-10"]
 > kit spec (ADR 0001) and the network egress tiers (ADR 0002). It changes neither
 > schema; the mechanism composes from already-shipped primitives
 > (`caps.network.allow` union, sequential kit startup) plus the
-> host-authoritative read-only config mount defined in quickstart ADR-0030.
+> host-authoritative read-only config mount defined in quickstart ADR-0030
+> (pending — GSA-TTS/agentic-coding-quickstart#504).
 
 ## Context and Problem Statement
 
@@ -89,7 +90,8 @@ a root-owned *guest* path is not a trust boundary against a prompt-injected
 agent. The read-only host mount is. `acq` reads only **static data** from the
 kit on the host; no provider-kit code runs on the host. See
 [Security model](#security-model) and quickstart ADR-0030
-(*Host-Authoritative Sandbox Configuration*), the mechanism of record.
+(*Host-Authoritative Sandbox Configuration*, pending —
+GSA-TTS/agentic-coding-quickstart#504), the mechanism of record.
 
 `keyEnv` names the environment variable that holds the vendor credential. A
 provider kit may only name a credential it declares itself: `acq` confirms
@@ -134,7 +136,11 @@ Its `startup` phase:
    on the same read-only mount.
 5. Aggregates every provider's neutral output into one **guest-local,
    per-sandbox** file, written read-write and never shared with any other
-   sandbox: `/var/lib/acq/models/catalog.json`.
+   sandbox: `/var/lib/acq/models/catalog.json`. The aggregate carries **only
+   model metadata** (id, context window, pricing, capabilities, provenance) —
+   it never carries routing or credential fields (`host`, `baseUrl`,
+   `modelsUrl`, `keyEnv`). Those fields remain in the Layer 1 read-only facts
+   file only; see [Security model](#security-model).
 6. Records provenance per provider (`"source": "live" | "snapshot"`, with a
    timestamp) in the aggregate, so a permanently degraded fallback is visible
    rather than indistinguishable from a fresh fetch.
@@ -150,13 +156,13 @@ There is no cross-sandbox catalog cache — a cache written by one sandbox and r
 by another would be a cross-sandbox poisoning channel (a compromised sandbox
 could poison the catalog a different sandbox routes against). The clean split is:
 the orchestrator's **inputs** (provider facts and normalizer code) are
-host-authoritative and read-only (Layer 1 + ADR-0030); its **output** (the
-catalog) is guest-local and trusted by no other sandbox.
+host-authoritative and read-only (Layer 1 + ADR-0030 (pending)); its
+**output** (the catalog) is guest-local and trusted by no other sandbox.
 
 The orchestrator's own code, and each provider's normalizer and vendored
-snapshot, run from the read-only mount (ADR-0030 Mechanism 2), so a sudo-capable
-agent cannot tamper the startup code between restarts and have `acq` re-run a
-tampered copy.
+snapshot, run from the read-only mount (ADR-0030 Mechanism 2, pending), so a
+sudo-capable agent cannot tamper the startup code between restarts and have
+`acq` re-run a tampered copy.
 
 > **Open ordering risk, not yet resolved by this ADR:** the catalog write
 > (Layer 2) and the harness's own render (Layer 3) are both ordinary in-guest
@@ -175,8 +181,14 @@ tampered copy.
 Each harness kit, at its own `startup` phase (after the orchestrator, per the
 same ordering convention), reads:
 
-- `/var/lib/acq/models/catalog.json` — Layer 2's neutral aggregate for this
-  sandbox; and
+- `/var/lib/acq/models/catalog.json` — Layer 2's neutral aggregate, for
+  **model metadata only** (id, context window, pricing, capabilities,
+  provenance);
+- the Layer 1 read-only facts mount,
+  `/var/lib/acq/host/models/providers/<PROVIDER_ID>.json` — for
+  **routing/credential fields** (`host`, `baseUrl`, `keyEnv`) — never from the
+  catalog, since the catalog is guest-writable and cannot be authoritative for
+  where a credential is sent (see [Security model](#security-model)); and
 - the config kit's cross-harness defaults (model-role priority, etc.).
 
 It then renders its **own** native config in its own format — `opencode.jsonc`,
@@ -210,6 +222,17 @@ ADR at that time, not by standing negotiation machinery.
   host-side execution is excluded).
 - **No cross-sandbox state.** The catalog is generated per-sandbox and kept
   guest-local; nothing one sandbox writes is read by another.
+- **Catalog carries no routing/credential authority.** The catalog
+  (`/var/lib/acq/models/catalog.json`) is guest-local and read-write, so a
+  sudo-capable in-guest agent can rewrite it. It therefore carries only model
+  metadata (id, context window, pricing, capabilities, provenance) and is never
+  read as authoritative for `host`, `baseUrl`, `modelsUrl`, or `keyEnv` — a
+  harness kit reads those fields only from the Layer 1 read-only facts mount.
+  Any field a sudo-capable agent could rewrite in the catalog must never
+  determine where a credential is sent; folding routing/credential fields into
+  the writable catalog would let a rewritten catalog entry pair one provider's
+  `keyEnv` with another provider's allowlisted host, bypassing the Layer 1
+  env-var-ownership and SSRF checks entirely within `caps.network.allow`.
 - **Env-var ownership.** A provider kit may only name a credential (`keyEnv`) it
   declares in its own `spec.yaml`; enforced host-side (Layer 1).
 - **SSRF containment.** `modelsUrl` must be `https://` and its host must equal
@@ -274,7 +297,11 @@ sequenceDiagram
   host↔guest read-only mount, not guest root-ownership.
 - One canonical per-vendor credential registration replaces the duplicate
   service-name registrations described in Context.
-- One shared config-merge/bounded-fetch library replaces the per-kit copies.
+- One shared bounded-fetch helper (timeout + response-size cap) replaces the
+  per-kit hand-copied fetch helper. Config-merge/rendering logic is not
+  centralized by this ADR — Layer 3 requires each harness kit to render its own
+  native config, so there is no shared config-merge library; the shared
+  artifacts are the fetch helper and the neutral-catalog contract only.
 - A third-party provider or harness kit integrates with no PR into a
   core-maintained file — there is no central-maintainer bottleneck.
 - New harness kits (e.g. `pi-coding-agent`) adopt this as a greenfield
@@ -288,8 +315,8 @@ sequenceDiagram
 - New moving parts: a per-sandbox host config directory + read-only mount, an
   orchestrator kit, and a versioned schema contract between N producers and M
   consumers. Mitigated by strict layering (each layer independently testable and
-  shippable), reuse of the existing host-state-dir conventions (ADR-0030), and
-  the versioned-not-negotiated schema.
+  shippable), reuse of the existing host-state-dir conventions (ADR-0030,
+  pending), and the versioned-not-negotiated schema.
 - Startup gains a conditional outbound refresh on the critical path, bounded by
   the per-provider timeout and total wall-clock budget; on failure it falls back
   to the vendored snapshot (a fast local read), so a slow or unreachable endpoint
@@ -306,7 +333,8 @@ sequenceDiagram
 
 - Requires no change to the `hybrid/v1` schema. The mechanism composes from the
   `caps.network.allow` union, sequential startup-phase ordering, and the
-  host-authoritative read-only config mount from quickstart ADR-0030.
+  host-authoritative read-only config mount from quickstart ADR-0030
+  (pending — GSA-TTS/agentic-coding-quickstart#504).
 
 ## Alternatives Considered
 
@@ -343,17 +371,19 @@ sequenceDiagram
 
 ## References
 
-- Quickstart ADR-0030 (*Host-Authoritative Sandbox Configuration*) — the general
-  principle and the per-sandbox host config dir + read-only mount +
-  trusted-startup-execution mechanism this ADR's Layers 1 and 2 build on.
+- Quickstart ADR-0030 (*Host-Authoritative Sandbox Configuration*, pending —
+  GSA-TTS/agentic-coding-quickstart#504) — the general principle and the
+  per-sandbox host config dir + read-only mount + trusted-startup-execution
+  mechanism this ADR's Layers 1 and 2 build on.
 - ADR 0001 (isolation) — neutral `hybrid/v1` acq-kits spec.
 - ADR 0002 (isolation) — neutral network egress tiers; the `caps.network.allow`
   union this ADR reuses for the SSRF host cross-check and as the trust boundary
   it does not widen.
 - `usai-provider` ADR 0003 (`acq-kits/usai-provider/docs/decisions/`) — the
   permission-hardening precedent this design's security conditions follow.
-- `goose-server` ADR 0004 — the harness-adapter open questions this ADR's Layer 3
-  boundary answers for the model-config slice.
+- `goose-server` ADR 0004 (pending — GSA-TTS/agentic-coding-patterns#415) — the
+  harness-adapter open questions this ADR's Layer 3 boundary answers for the
+  model-config slice.
 - Quickstart [issue #506](https://github.com/GSA-TTS/agentic-coding-quickstart/issues/506)
   tracking the startup-ordering race flagged above (`acq run` does not wait
   for an in-guest `startup`-phase config write to finish before attach,
