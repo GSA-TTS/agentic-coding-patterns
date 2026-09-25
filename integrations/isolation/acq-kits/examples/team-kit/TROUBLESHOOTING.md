@@ -6,19 +6,27 @@ apply on every backend unless marked otherwise.
 
 ## Kit content missing (`OPENCODE_CONFIG` empty, files absent)
 
-Almost always: `ACQ_EXTRA_KITS` was not exported in the shell you ran `acq`
-from, or points at the wrong path, so only the global kits applied. Check:
+Almost always: `ACQ_EXTRA_KITS` was not exported in the shell that *created*
+the sandbox, or pointed at the wrong path, so only the global kits applied.
+Check:
 
 ```bash
 acq exec <sandbox> -- printenv OPENCODE_CONFIG   # empty => the kit did not apply
 ```
 
-Fix the export (put it in your shell rc). On msb, re-running `acq run <sandbox>`
-re-applies the kits in place. On sbx, kits apply at creation only:
+Fix the export (put it in your shell rc), then recreate:
 
 ```bash
 acq rm <sandbox> && acq run opencode /path/to/project
 ```
+
+Re-running `acq run` alone is not enough. At creation `acq` records the
+sandbox's extra kits on the host, and on reattach a record that lists extras
+replaces the current shell's `ACQ_EXTRA_KITS`; a sandbox created with a wrong
+path keeps it. The same holds for a changed `git+https://…#ref=` pin. On sbx,
+a kit with startup commands also cannot be added to a live sandbox (sbx 0.38
+and later print a recreate notice). What re-running does pick up, on msb, is
+new content at an unchanged local path.
 
 ## Create fails: the backend rejects the kit / unsupported `schemaVersion`
 
@@ -38,17 +46,21 @@ be allowed at the org level.
 
 ## A team setting has the wrong value, or is missing
 
-`environment` is last-wins by name and `files[]` is last-wins by path across
-the whole stack. A kit listed *after* yours in `ACQ_EXTRA_KITS` (a personal
-kit) can shadow a team value silently. Check what the sandbox actually has and
-who sets it:
+A kit applied *after* yours (a personal kit) can shadow a team value
+silently: on msb `environment` is last-wins by name and `files[]` last-wins by
+path, and on sbx the equivalent is composed by sbx. Check what the sandbox
+actually has, then look for the same variable name or file path in the kits
+listed after yours:
 
 ```bash
 acq exec <sandbox> -- printenv OPENCODE_CONFIG
-acq kit list                                  # the kits acq applies, in order
+acq kit list    # the pinned kits plus THIS shell's ACQ_EXTRA_KITS
 ```
 
-Move the override, or document it as an allowed personal override.
+`acq kit list` shows neither `--kit` refs nor the extras recorded for an
+existing sandbox, so compare against the `ACQ_EXTRA_KITS` the sandbox was
+created with. Move the override, or document it as an allowed personal
+override.
 
 ## Files landed, but the env var and startup effects are missing (msb)
 
@@ -58,7 +70,8 @@ recorded, `commands[]` do not run. The create output names the file
 ("could not place kit file at ..."). The usual cause as of acq v3.1.0 is an
 **empty payload**: the adapter verifies each drop with `test -s`, so a
 zero-byte `.gitkeep` never counts as delivered. Give the file a comment line,
-then re-run `acq run <sandbox>` (msb re-applies kits) or recreate.
+then re-run `acq run` on the sandbox (msb re-applies kits from an unchanged
+local path) or recreate.
 
 ## A shipped file is present on sbx but missing on msb
 

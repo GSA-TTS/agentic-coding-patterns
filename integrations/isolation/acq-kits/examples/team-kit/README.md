@@ -78,7 +78,8 @@ applies the pinned built-in bundle plus, via `ACQ_EXTRA_KITS`, a generated
 intact, that every live value above landed, and that the composition rules from
 the pattern doc hold against the fixture: `environment` last-wins, `files[]`
 last-wins by path, `commands[]` append in order, `caps.network.allow` union.
-Extend its clearly marked **TEAM-SPECIFIC** section as your kit grows, one
+It has passed on msb 0.7.3 and sbx 0.45.1 (acq v3.1.0); select the backend
+with `ACQ_BACKEND`. Extend its clearly marked **TEAM-SPECIFIC** section as your kit grows, one
 assertion per mechanism you add.
 
 ## Backend parity

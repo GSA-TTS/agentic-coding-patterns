@@ -35,7 +35,8 @@ caps:
     allow:
       # REPLACE with your team's hosts (VCS, package mirrors, MCP servers), e.g.
       #   - git.example.gov       # team VCS over HTTPS (default port 443)
-      #   - mcp.example.com:443   # a team MCP server
+      #   - mcp.example.com:443   # a team MCP server (msb drops the :port and
+      #                           # allows the whole host)
       # The live value below is an IANA-reserved example domain: harmless, and
       # allowed by no global kit, so scripts/verify can prove this entry took
       # effect. Keep your replacement off the global list for the same reason.
@@ -72,7 +73,8 @@ files:
 
 # --- Commands ----------------------------------------------------------------
 # Commands APPEND across kits, in application order; `startup` re-runs at every
-# sandbox start as the agent user (uid 1000) unless a step sets user: "0".
+# sandbox start. ALWAYS set `user:` ("1000" for the agent user): an omitted
+# user runs as the backend's default exec user, which is root on msb.
 # Keep each step idempotent, and non-fatal where the feature is optional.
 # Write argv as a block list (one `- arg` per line, or one `- |` block scalar
 # for a script): as of acq v3.1.0 an inline `[a, b, c]` list parses as EMPTY

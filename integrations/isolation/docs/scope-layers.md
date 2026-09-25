@@ -41,27 +41,48 @@ export ACQ_EXTRA_KITS="/path/to/team-repo/acq-kits/team-kit /path/to/dotfiles/pe
 acq run opencode /path/to/project
 ```
 
-When kit content lands depends on the backend. On msb, `acq run` re-applies
-every kit to an existing sandbox (files refresh, `environment` is rebuilt,
-startup steps re-run), while egress and volumes are fixed at creation. On sbx,
-kits apply at creation only. When in doubt: `acq rm <name>` and recreate.
+At creation, `acq` records the sandbox's extra kits (`ACQ_EXTRA_KITS` and any
+`--kit` refs) on the host. When `acq run` reattaches to that sandbox and the
+record lists extras, the record replaces the current shell's
+`ACQ_EXTRA_KITS`. So a change to the extras set, or to a
+`git+https://…#ref=` pin, never reaches an existing sandbox: `acq rm <name>`
+and recreate. A local clone path is recorded as a path, so content changes in
+that clone are picked up wherever kits are re-applied.
+
+When kit content lands depends on the backend:
+
+- **msb.** `acq run` on an existing sandbox (and `acq start` / `acq restart`)
+  re-applies every recorded kit: files refresh, `environment` is rebuilt,
+  startup steps re-run. Egress and volumes are fixed at creation.
+- **sbx.** `acq run` on an existing sandbox adds only kits the sandbox has not
+  recorded yet, and skips a recorded extra even if its content changed. sbx
+  0.38 and later also refuse to add a kit with startup commands to a live
+  sandbox and print a recreate notice. Every team kit has startup commands in
+  practice, so on sbx adding or changing a kit means `acq rm <name>` and
+  recreate.
 
 ## How stacked kits compose, field by field
 
 Verified against `acq`'s kit-translate layer and both backend adapters at acq
 v3.1.0 (`main` as of 2026-09-24). On msb, `acq`'s adapter composes the kits
-itself; on sbx, `acq` translates each kit to a native sbx kit and sbx composes
-them. The observable rules are the same on both.
+itself, so the rules below are `acq`'s code. On sbx, `acq` translates each kit
+to a native sbx kit and **sbx** composes them; where a row says "sbx:
+composed natively", `acq` does not decide the outcome. The team-kit
+template's `scripts/verify` asserts the `environment`, `files[]`,
+`commands[]`, and `caps.network.allow` rows live against a competing kit. It
+passed on msb 0.7.3 and on sbx 0.45.1, so on sbx those four rows are observed
+behavior rather than `acq` code. Rows it does not exercise on sbx are marked
+"not verified".
 
 | Field | Rule | What it means when you stack |
 |-------|------|-------------------------------|
-| `caps.network.allow` | **union** | Every kit's hosts are allowed. Overlap with the global layer is harmless. Under org governance, org rules still win. |
-| `caps.network.tier` | **sandbox-wide, not per kit** | As of acq v3.1.0 the tier comes from `ACQ_NETWORK_TIER` (default `balanced`); a kit's `tier` field is not read when kits are applied. |
-| `files[]` | **last wins, by path** | A whole-file overlay. A later kit's file at the same in-guest path replaces the earlier one, silently and in full. Nothing merges. |
-| `commands[]` | **append, in kit order** | Each kit's commands run in spec order; kits run in application order. `install` runs once per sandbox, `startup` at every start. |
-| `environment` | **last wins, by name** | A later kit's value for the same `NAME` replaces the earlier one, silently. Single-valued variables such as `OPENCODE_CONFIG` therefore have exactly one owner in the stack. |
-| `volumes[]` | **union, last wins by path** | Two kits declaring the same mount path: the later kit's entry is used. |
-| `publishedPorts[]` | **union** | Two kits publishing the same guest port is an authoring conflict; nothing resolves it. |
+| `caps.network.allow` | **union** | Every kit's hosts are allowed. Overlap with the global layer is harmless. Under org governance, org rules still win. msb strips a `:port` suffix, so `host:443` allows the whole host there. |
+| `caps.network.tier` | **not per kit** | A kit's `tier` field is not read when kits are applied. msb: the tier is sandbox-wide, from `ACQ_NETWORK_TIER` (default `balanced`). sbx: `ACQ_NETWORK_TIER` is not read; egress posture is sbx's own policy. |
+| `files[]` | **msb: last wins, by path** | msb: a whole-file overlay. A later kit's file at the same in-guest `path` replaces the earlier one, silently and in full. Nothing merges. sbx: composed natively; `acq` copies each kit's whole `files/` tree, placement follows where a file sits in that tree, and `files[].path` is used only for its mode. `scripts/verify` observed last-wins by path on sbx too. |
+| `commands[]` | **append, in kit order** | Each kit's commands run in spec order; kits run in application order. `startup` re-runs at every start; on msb that means every re-apply (`acq run` on an existing sandbox, `acq start`, `acq restart`). `install` runs once per sandbox; on msb its once-marker is a hash of the argv alone, so identical install argv in two kits runs once and a changed argv runs again. |
+| `environment` | **msb: last wins, by name** | msb: in sessions, a later kit's value for the same `NAME` replaces the earlier one, silently. While kits are applied, each kit's own `commands[]` see only that kit's variables. sbx: each kit emits its variables and sbx merges them; `scripts/verify` observed last-wins by name there too. Either way, give single-valued variables such as `OPENCODE_CONFIG` exactly one owner in the stack. |
+| `volumes[]` | **msb: union, last wins by path** | msb: two kits declaring the same mount path, the later kit's entry is used. sbx: composed natively (not verified). |
+| `publishedPorts[]` | **msb: appended** | msb: every kit's ports are appended with no de-duplication. sbx: composed natively (not verified). Two kits publishing the same guest port is an authoring conflict either way. |
 | `agentContext` | **per kit; sbx only** | As of acq v3.1.0 the msb adapter does not surface it. Prefer the agent's own instructions mechanism (the team-kit template shows OpenCode's). |
 | `backend_shortcuts` / `backend_extras` | **per kit** | Never compose. A shortcut skips that kit's generic path on that backend. |
 
@@ -121,20 +142,23 @@ acq secret set -g <service> --host <host> --env <VAR>   # once per machine, host
 - **Binary files.** Kit file delivery is for text. Ship sources and generate
   at startup, or download in a guarded, non-fatal startup command.
 - **Anything the global layer already owns**: provider config, the playbook,
-  CA trust, commit signing, the `github` credential. Carry only the delta.
+  CA trust, commit signing. Carry only the delta.
+- **Credentials.** `hybrid/v1` has no credentials vocabulary; credentials are
+  host-side via `acq secret set`.
 
 ## Authoring gotchas
 
+- **Always set `user:` on every command.** Use `"1000"` for the agent user.
+  An omitted `user:` does not mean the agent user: `acq` passes no user to the
+  backend, so on msb the command runs as root.
 - **Startup commands re-run at every start.** Make them idempotent, and
   non-fatal where the feature is optional: guard on the tool or file
   existing, `exit 0` on the expected miss. One failing step can fail the
   create.
 - **List every shipped file in `files[]`** with its in-guest absolute path.
-  The sbx translation also copies the whole `files/home/` tree verbatim, but
+  The sbx translation also copies the whole `files/` tree verbatim, but
   msb materializes only the listed records: an unlisted file silently goes
   missing there.
-- **Never redeclare a credential the global layer declares** (`github`); the
-  create fails with a "defined in both" error.
 - **Rotate secrets without changing the placeholder.** Existing sandboxes
   captured the placeholder at creation; a new one breaks them until they are
   recreated. Re-run `acq secret set` for the same service.
@@ -143,7 +167,10 @@ acq secret set -g <service> --host <host> --env <VAR>   # once per machine, host
 - **`agentContext` or instructions, not both** for the same content, or the
   agent reads it twice.
 - **Do not put the team's version pin in prose.** Point `ACQ_EXTRA_KITS` at a
-  clone and let `git pull` or a detached checkout select the version.
+  clone and let `git pull` or a detached checkout select the version. A clone
+  path suits this: the sandbox records the path, so a changed checkout reaches
+  it wherever kits are re-applied (msb). A `git+https://…#ref=` pin is
+  recorded as the ref itself, so changing it needs `acq rm` and recreate.
 
 ## Known acq limitations (as of acq v3.1.0)
 
