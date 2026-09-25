@@ -1,0 +1,248 @@
+#!/usr/bin/env bash
+#
+# verify — host-side, end-to-end check for the team-kit TEMPLATE, and for any
+# copy of it. Backend-neutral: only `acq` verbs (kit validate, create, exec,
+# rm), so it runs the same on sbx and msb.
+#
+# It creates a throwaway sandbox through `acq`, which applies its pinned
+# built-in bundle (zscaler-ca-certificate, usai-provider,
+# agentic-coding-playbook, git-ssh-sign) and then, via ACQ_EXTRA_KITS, a
+# generated LOWER fixture kit followed by this kit. It then asserts:
+#   1. the global layer is intact (USAi merged into OpenCode's global config);
+#   2. every live extension-point value in spec.yaml landed;
+#   3. the composition rules in docs/scope-layers.md hold against the lower
+#      fixture: environment last-wins, files[] last-wins by path, commands[]
+#      append in order, caps.network.allow union.
+# Extend the TEAM-SPECIFIC section as your kit grows: one assertion per
+# mechanism the kit adds.
+#
+# The sandbox is named "<kit>-verify-<pid>" and removed at the end (and on
+# interrupt). Nothing here prints secret values.
+#
+# Usage (from anywhere):
+#   path/to/team-kit/scripts/verify
+#   KEEP=1 …/scripts/verify                 # keep the sandbox + work dir
+#   ACQ_DIR=/path/to/quickstart …/verify    # acq not on PATH: use this checkout
+#   SKIP_NETWORK=1 …/verify                 # skip the egress probes (offline host)
+#
+# set -e is omitted on purpose: accumulate pass/fail rather than abort.
+
+set -uo pipefail
+
+KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+KIT_NAME="$(basename "$KIT_DIR")"
+SBX_NAME="${KIT_NAME}-verify-$$"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/${KIT_NAME}-verify.XXXXXX")"
+WORKSPACE="$WORK/workspace"
+LOWER_KIT="$WORK/lower-kit"
+CREATE_LOG="$WORK/acq-create.log"
+KEEP="${KEEP:-0}"
+SKIP_NETWORK="${SKIP_NETWORK:-0}"
+
+# acq: on PATH, or from an agentic-coding-quickstart checkout named by ACQ_DIR.
+if [ -n "${ACQ_DIR:-}" ]; then ACQ="$ACQ_DIR/acq"; else ACQ="$(command -v acq || true)"; fi
+
+# Values this template ships (mirror spec.yaml; update both when you replace
+# one). The lower fixture sets the SAME keys to different values so the
+# assertions distinguish "landed" from "landed because nothing competed".
+TEAM_CONFIG=/home/agent/team-config/opencode.jsonc
+TEAM_CONVENTIONS=/home/agent/team-config/team-conventions.md
+TEAM_EGRESS_HOST=github.com
+LOWER_CONFIG=/home/agent/lower-fixture/opencode.jsonc
+LOWER_EGRESS_HOST=example.com
+
+pass=0
+fail=0
+skipped=0
+ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass+1)); }
+bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail+1)); }
+skip() { printf '  \033[2mSKIP\033[0m %s\n' "$1"; skipped=$((skipped+1)); }
+info() { printf '\n\033[1m%s\033[0m\n' "$1"; }
+
+cleanup() {
+  if [ "$KEEP" = "1" ]; then
+    printf '\nKEEP=1 set; leaving sandbox %s and %s in place.\n' "$SBX_NAME" "$WORK" >&2
+    return
+  fi
+  [ -n "$ACQ" ] && "$ACQ" rm "$SBX_NAME" </dev/null >/dev/null 2>&1 || true
+  rm -rf "$WORK" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+# On a signal, clean up and exit non-zero rather than falling through: the
+# probes below swallow errors, so a bare cleanup-on-INT would keep "testing"
+# a removed sandbox and print a cascade of misleading FAILs.
+trap 'cleanup; exit 130' INT TERM
+
+# Run a command in the sandbox; stderr dropped, failures collapse to empty
+# output. Pair every negative assertion with a positive one that would fail
+# loudly, or a broken exec passes it vacuously.
+in_sbx() { "$ACQ" exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true; }
+
+# HTTP status code seen from the sandbox for https://HOST/ ("000" = no
+# connection, i.e. egress denied; any other code means the host was reached).
+probe_host() { in_sbx "curl -sS -o /dev/null -m 20 -w '%{http_code}' 'https://$1/' 2>/dev/null"; }
+
+info "0. Preconditions"
+if [ -z "$ACQ" ] || [ ! -x "$ACQ" ]; then
+  echo "  acq not found. Put acq on PATH, or set ACQ_DIR to an agentic-coding-quickstart checkout." >&2
+  exit 1
+fi
+# `acq kit validate` exists only in an acq with the kit-translate layer (acq
+# v2.0.0+). Checked through acq itself: PATH usually holds a symlink into the
+# quickstart clone, so a path-relative file check would look in the wrong place.
+kit_usage="$("$ACQ" kit </dev/null 2>&1 || true)"
+case "$kit_usage" in
+  *validate*) ;;
+  *) echo "  $ACQ has no 'kit validate' verb — update the quickstart checkout (git pull)." >&2; exit 1 ;;
+esac
+"$ACQ" version 2>/dev/null | sed 's/^/  /'
+[ -f "$KIT_DIR/spec.yaml" ] && ok "kit spec.yaml present" || { bad "spec.yaml missing"; exit 1; }
+case "$WORK" in
+  *[[:space:]]*) bad "work dir path contains whitespace; ACQ_EXTRA_KITS is whitespace-separated (set TMPDIR)"; exit 1 ;;
+esac
+
+info "1. Kit validates (hybrid/v1)"
+if "$ACQ" kit validate "$KIT_DIR" >/dev/null 2>&1; then
+  ok "kit validates"
+else
+  bad "kit failed validation — run: $ACQ kit validate $KIT_DIR"
+fi
+
+info "2. Generate the lower fixture kit"
+# Sits BELOW the kit under test in ACQ_EXTRA_KITS and competes on every
+# composed field: same env NAME, same file path, a command that sets the
+# opposite value, and an egress host of its own.
+mkdir -p "$LOWER_KIT/files/home/team-config"
+printf 'lower-fixture: this content must be replaced by the kit under test\n' \
+  > "$LOWER_KIT/files/home/team-config/team-conventions.md"
+printf '# lower fixture\n' > "$LOWER_KIT/README.md"
+cat > "$LOWER_KIT/spec.yaml" <<EOF
+schemaVersion: "hybrid/v1"
+kind: mixin
+name: ${KIT_NAME}-verify-lower
+displayName: ${KIT_NAME} verify (lower fixture)
+description: >
+  Generated by scripts/verify. Applied just below the kit under test so the
+  composition rules (union / last-wins / append) can be asserted.
+caps:
+  network:
+    allow:
+      - ${LOWER_EGRESS_HOST}
+files:
+  - path: ${TEAM_CONVENTIONS}
+    mode: "0644"
+    source: files/home/team-config/team-conventions.md
+commands:
+  - phase: startup
+    user: "1000"
+    description: Set the value the kit under test must override (commands append in order)
+    command:
+      - git
+      - config
+      - --global
+      - push.autoSetupRemote
+      - "false"
+environment:
+  OPENCODE_CONFIG: ${LOWER_CONFIG}
+EOF
+if "$ACQ" kit validate "$LOWER_KIT" >/dev/null 2>&1; then
+  ok "lower fixture kit validates"
+else
+  bad "lower fixture kit failed validation"; exit 1
+fi
+
+info "3. Create a sandbox through acq (built-in bundle + lower fixture + this kit)"
+mkdir -p "$WORKSPACE" && git init -q "$WORKSPACE"
+echo "  creating $SBX_NAME (workspace $WORKSPACE)..."
+ACQ_EXTRA_KITS="$LOWER_KIT $KIT_DIR" ACQ_UPDATE_CHECK=0 \
+  "$ACQ" create opencode --name "$SBX_NAME" "$WORKSPACE" </dev/null >"$CREATE_LOG" 2>&1
+rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "sandbox created (kits via ACQ_EXTRA_KITS)"
+else
+  bad "acq create failed (exit $rc)"
+  sed 's/^/  | /' "$CREATE_LOG" >&2
+  exit 1
+fi
+# Startup steps can run for a while after create returns. Poll for the LAST
+# startup command's artifact — this kit's git key — rather than an env var:
+# environment is materialized by the backend and can be visible before any
+# startup command has run, so it fences nothing.
+printf '  waiting for startup steps to settle'
+for _ in $(seq 1 120); do
+  [ "$(in_sbx 'git config --global push.autoSetupRemote 2>/dev/null')" = "true" ] && break
+  printf '.'; sleep 1
+done
+printf '\n'
+
+info "4. Global layer intact"
+[ "$(in_sbx '{ [ -f "$HOME/.config/opencode/opencode.json" ] || [ -f "$HOME/.config/opencode/opencode.jsonc" ]; } && echo y')" = "y" ] \
+  && ok "USAi merged into OpenCode's global config" || bad "global OpenCode config missing (USAi merge did not run?)"
+eff="$("$ACQ" exec "$SBX_NAME" -- sh -c 'opencode debug config' </dev/null 2>"$WORK/debug-config.err")" \
+  || sed 's/^/    stderr| /' "$WORK/debug-config.err" >&2
+printf '%s' "$eff" | grep -q '"usai"' \
+  && ok "USAi provider present in the effective config" \
+  || bad "USAi provider missing from the effective config"
+
+info "5. Live values landed"
+cfg="$(in_sbx 'printf "%s" "${OPENCODE_CONFIG:-}"')"
+[ "$cfg" = "$TEAM_CONFIG" ] && ok "OPENCODE_CONFIG = $cfg" || bad "OPENCODE_CONFIG unexpected: '${cfg:-<unset>}'"
+# Probe the expected path, not $cfg: an unset variable would turn `test -f ""`
+# into a second, misleading FAIL.
+[ "$(in_sbx "test -f $TEAM_CONFIG && echo y")" = "y" ] \
+  && ok "team config file present" || bad "team config file missing"
+[ "$(in_sbx "test -f $TEAM_CONVENTIONS && echo y")" = "y" ] \
+  && ok "team conventions file present" || bad "team conventions file missing"
+printf '%s' "$eff" | grep -q 'team-conventions.md' \
+  && ok "team conventions registered in the effective config instructions" \
+  || bad "team-conventions.md missing from the effective config instructions"
+[ "$(in_sbx 'test -d "$HOME/.agents/skills" && echo y')" = "y" ] \
+  && ok "team skills directory present" || bad "team skills directory missing"
+[ "$(in_sbx 'git config --global push.autoSetupRemote 2>/dev/null')" = "true" ] \
+  && ok "startup command ran (push.autoSetupRemote = true)" || bad "startup command did not run"
+
+info "6. Composition rules (docs/scope-layers.md), against the lower fixture"
+# environment: last wins by name. The fixture set OPENCODE_CONFIG first.
+[ "$cfg" = "$TEAM_CONFIG" ] && [ "$cfg" != "$LOWER_CONFIG" ] \
+  && ok "environment: last wins (this kit's OPENCODE_CONFIG replaced the fixture's)" \
+  || bad "environment: fixture's OPENCODE_CONFIG survived ('${cfg:-<unset>}')"
+# files[]: last wins by path. Both kits drop team-conventions.md.
+guest_sum="$(in_sbx "cksum < $TEAM_CONVENTIONS")"
+kit_sum="$(cksum < "$KIT_DIR/files/home/team-config/team-conventions.md")"
+if [ -n "$guest_sum" ] && [ "$guest_sum" = "$kit_sum" ]; then
+  ok "files[]: last wins by path (this kit's team-conventions.md replaced the fixture's)"
+elif [ "$(in_sbx "grep -c lower-fixture $TEAM_CONVENTIONS")" != "0" ]; then
+  bad "files[]: the fixture's team-conventions.md survived"
+else
+  bad "files[]: team-conventions.md content matches neither kit"
+fi
+# commands[]: append in kit order. The fixture set push.autoSetupRemote=false
+# first; this kit's later command must have set it to true.
+[ "$(in_sbx 'git config --global push.autoSetupRemote 2>/dev/null')" = "true" ] \
+  && ok "commands[]: append in order (this kit's startup command ran after the fixture's)" \
+  || bad "commands[]: fixture's command ran last, or this kit's did not run"
+# caps.network.allow: union. Both hosts must be reachable (a code other than
+# 000 means the egress rule admitted the connection).
+if [ "$SKIP_NETWORK" = "1" ]; then
+  skip "caps.network.allow union (SKIP_NETWORK=1)"
+else
+  code_lower="$(probe_host "$LOWER_EGRESS_HOST")"
+  code_team="$(probe_host "$TEAM_EGRESS_HOST")"
+  { [ -n "$code_lower" ] && [ "$code_lower" != "000" ]; } \
+    && ok "caps.network.allow: fixture's host reachable ($LOWER_EGRESS_HOST -> $code_lower)" \
+    || bad "caps.network.allow: fixture's host NOT reachable ($LOWER_EGRESS_HOST -> ${code_lower:-none}); union broken, or the host is offline"
+  { [ -n "$code_team" ] && [ "$code_team" != "000" ]; } \
+    && ok "caps.network.allow: this kit's host reachable ($TEAM_EGRESS_HOST -> $code_team)" \
+    || bad "caps.network.allow: this kit's host NOT reachable ($TEAM_EGRESS_HOST -> ${code_team:-none})"
+fi
+
+info "7. TEAM-SPECIFIC checks (extend as your kit grows)"
+# One assertion per mechanism your kit adds: an env var, a shipped file, a
+# startup command's effect, an entry in the effective agent config, a skill...
+skip "no team-specific checks yet"
+
+info "Summary"
+printf '  %d passed, %d failed, %d skipped\n' "$pass" "$fail" "$skipped"
+[ "$fail" -eq 0 ] && printf '  \033[32mAll checks passed.\033[0m\n' || printf '  \033[31mSome checks failed — see notes above.\033[0m\n'
+
+[ "$fail" -eq 0 ]

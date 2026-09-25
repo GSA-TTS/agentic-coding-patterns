@@ -1,0 +1,8 @@
+# Team skills: one directory per skill (<skill-name>/SKILL.md), each file
+# listed in spec.yaml files[]. This placeholder only creates the directory in
+# the guest; remove it once a real skill directory is added.
+#
+# It is deliberately NOT empty: as of acq v3.1.0 the msb adapter verifies a
+# dropped file with `test -s`, so an empty payload never counts as delivered,
+# and a failed drop aborts the rest of that kit's apply (environment and
+# commands included).

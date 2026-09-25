@@ -1,0 +1,9 @@
+// Team OpenCode settings — loaded via OPENCODE_CONFIG (set in spec.yaml).
+// This is the TEAM tier: it overrides the global config (where the USAi
+// provider lives) for the keys it sets, and a repo's own opencode.jsonc still
+// wins over it. Prefer keys the global config does not set; do not redeclare
+// the provider.
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": ["/home/agent/team-config/team-conventions.md"]
+}

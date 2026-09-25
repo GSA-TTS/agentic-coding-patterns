@@ -1,0 +1,118 @@
+# spec.yaml — team-kit: a TEMPLATE for a team's own acq mixin kit (hybrid/v1).
+#
+# Not applied by acq. Copy this directory into a repo your team owns, rename
+# BOTH the directory and `name:` below, replace every value marked REPLACE,
+# and grow it. Pattern, composition rules, and gotchas:
+#   integrations/isolation/docs/scope-layers.md
+#
+# Every extension point ships ONE live, harmless value (commented YAML is never
+# schema-checked, so a template made of comments would rot silently). The
+# scripts/verify next to this file asserts each value landed and that the
+# composition rules hold when this kit is stacked on the global layer.
+#
+# Apply as an acq extra, after the global kits (later kits win on overlap):
+#   export ACQ_EXTRA_KITS="/path/to/your-team-repo/acq-kits/your-team"
+#   acq kit validate /path/to/your-team-kit
+schemaVersion: "hybrid/v1"
+kind: mixin
+# REPLACE name (kebab-case, equal to the directory name), displayName, and
+# description. Keep them on their own lines with no trailing comment: as of
+# acq v3.1.0 the kit parser keeps an inline `# comment` as part of a top-level
+# scalar's value, and `acq kit validate` then rejects the name.
+name: team-kit
+displayName: Team kit (template)
+description: >
+  Starting point for a team scope-layer kit: team conventions and agent
+  settings wired through the OpenCode config tier, plus one live value per
+  extension point (egress, files, startup command, environment) to replace.
+
+# --- Egress your team's tools need -------------------------------------------
+# Hosts beyond the global layer. Lists UNION across kits, so overlap is
+# harmless; under org governance, org rules win. Egress is fixed at sandbox
+# creation on every backend: recreate after changing it.
+caps:
+  network:
+    allow:
+      # REPLACE with your team's hosts (VCS, package mirrors, MCP servers), e.g.
+      #   - git.example.gov       # team VCS over HTTPS (default port 443)
+      #   - mcp.example.com:443   # a team MCP server
+      # The live value below is already allowed by the global layer, so it
+      # widens nothing; it exists so the schema and verify exercise the field.
+      - github.com
+
+# --- Files -------------------------------------------------------------------
+# List EVERY payload under files/ with its in-guest absolute path: msb
+# materializes only the listed records (sbx also copies files/home/ verbatim,
+# but an unlisted file silently goes missing on msb). Files are whole-file and
+# LAST WINS by path across kits, so never ship a file another layer or the
+# image owns (~/.bashrc, ~/.gitconfig) — see scope-layers.md.
+files:
+  - path: /home/agent/team-config/opencode.jsonc
+    mode: "0644"
+    source: files/home/team-config/opencode.jsonc
+    description: Team OpenCode settings (read via OPENCODE_CONFIG below)
+  - path: /home/agent/team-config/team-conventions.md
+    mode: "0644"
+    source: files/home/team-config/team-conventions.md
+    description: Team instructions (registered in opencode.jsonc `instructions`) — REPLACE the content
+  # Shared skills live under files/home/.agents/skills/<name>/. This placeholder
+  # only creates the directory; add one files[] record per skill file:
+  #   - path: /home/agent/.agents/skills/my-skill/SKILL.md
+  #     mode: "0644"
+  #     source: files/home/.agents/skills/my-skill/SKILL.md
+  # Never ship an EMPTY file: as of acq v3.1.0 msb verifies each drop with
+  # `test -s`, so an empty payload fails the drop, and a failed drop aborts the
+  # rest of this kit's apply (environment and commands included).
+  - path: /home/agent/.agents/skills/.gitkeep
+    mode: "0644"
+    source: files/home/.agents/skills/.gitkeep
+    description: Placeholder (non-empty) that creates the team skills directory
+
+# --- Commands ----------------------------------------------------------------
+# Commands APPEND across kits, in application order; `startup` re-runs at every
+# sandbox start as the agent user (uid 1000) unless a step sets user: "0".
+# Keep each step idempotent, and non-fatal where the feature is optional.
+# Write argv as a block list (one `- arg` per line, or one `- |` block scalar
+# for a script): as of acq v3.1.0 an inline `[a, b, c]` list parses as EMPTY
+# and `acq kit validate` still reports OK.
+#
+# Installs do not belong here: create-time installs run through the sandbox
+# proxy and a blip fails the whole create. Bake tools into the image (ACQ_IMAGE).
+commands:
+  # Live value: a harmless, idempotent git preference (first push of a new
+  # branch otherwise fails with "no upstream branch" in a disposable clone).
+  # Keep it or REPLACE it; verify asserts it ran AFTER a lower kit's command.
+  - phase: startup
+    user: "1000"
+    description: Auto-create the upstream on first push
+    command:
+      - git
+      - config
+      - --global
+      - push.autoSetupRemote
+      - "true"
+
+# --- Environment -------------------------------------------------------------
+# Non-secret plain strings only; secrets go through `acq secret set`, never a
+# kit. Values are LAST WINS by name across kits — a single-valued variable has
+# exactly one owner in the stack. OPENCODE_CONFIG gives the settings tier
+# global -> team -> repo: the global usai-provider kit merges into OpenCode's
+# GLOBAL config path and leaves this variable free for the team layer. Say in
+# your README which variables a personal kit may override.
+environment:
+  OPENCODE_CONFIG: /home/agent/team-config/opencode.jsonc
+
+# --- agentContext ------------------------------------------------------------
+# Markdown surfaced to the agent (sbx only, as of acq v3.1.0). This template
+# routes team instructions through OpenCode's `instructions` mechanism above
+# instead; do not use both for the same content or the agent reads it twice.
+# agentContext: |
+#   ## Your team
+#   One or two operational paragraphs.
+
+# No backend shortcuts or extras: the kit is declarative only, so behavior is
+# identical on every backend. Keep it that way; it is what makes the Backend
+# parity note in README.md true.
+backend_shortcuts:
+  sbx: {}
+  msb: {}
