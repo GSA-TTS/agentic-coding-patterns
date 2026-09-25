@@ -7,31 +7,39 @@ kit's own TROUBLESHOOTING.
 
 ## Kit content missing (`OPENCODE_TUI_CONFIG` empty, files absent)
 
-`ACQ_EXTRA_KITS` was not exported in the shell you ran `acq` from, or does not
-list your kit, so it never applied. Check:
+`ACQ_EXTRA_KITS` was not exported in the shell that *created* the sandbox, or
+did not list your kit, so it never applied. Check:
 
 ```bash
 acq exec <sandbox> -- printenv OPENCODE_TUI_CONFIG   # empty => the kit did not apply
 ```
 
-Fix the export (put it in your shell rc). On msb, re-running `acq run <sandbox>`
-re-applies the kits in place. On sbx, kits apply at creation only:
+Fix the export (put it in your shell rc), then recreate:
 
 ```bash
 acq rm <sandbox> && acq run opencode /path/to/project
 ```
 
+Re-running `acq run` alone is not enough. At creation `acq` records the
+sandbox's extra kits on the host, and on reattach a record that lists extras
+replaces the current shell's `ACQ_EXTRA_KITS`. On sbx, a kit with startup
+commands also cannot be added to a live sandbox (sbx 0.38 and later print a
+recreate notice).
+
 ## A team setting changed after you added your kit
 
 Your kit is last, and `environment` (by name) and `files[]` (by path) are
-last-wins, so a variable or file of yours with the same name or path as the
-team's replaces it silently. Compare what the sandbox has with what the team
-kit ships:
+last-wins (on msb by `acq`'s rules; on sbx as composed by sbx), so a variable
+or file of yours with the same name or path as the team's replaces it
+silently. Compare what the sandbox has with what the team kit ships:
 
 ```bash
 acq exec <sandbox> -- printenv OPENCODE_CONFIG
-acq kit list                                  # the kits acq applies, in order
+acq kit list    # the pinned kits plus THIS shell's ACQ_EXTRA_KITS
 ```
+
+`acq kit list` does not show what an existing sandbox was created with, so
+compare against the `ACQ_EXTRA_KITS` you used at creation.
 
 Rename your file or variable, or drop the override unless the team kit's
 README allows it.
@@ -62,7 +70,8 @@ rest of that kit's apply: files dropped before it stay, `environment` is not
 recorded, `commands[]` do not run. The create output names the file
 ("could not place kit file at ..."). The usual cause as of acq v3.1.0 is an
 **empty payload**: the adapter verifies each drop with `test -s`. Give the
-file a comment line, then re-run `acq run <sandbox>` (msb) or recreate.
+file a comment line, then re-run `acq run` on the sandbox (msb re-applies
+kits from an unchanged local path) or recreate.
 
 ## A startup command did nothing, and validate said OK
 

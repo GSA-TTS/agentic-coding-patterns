@@ -59,8 +59,9 @@ files:
 
 # --- Commands ----------------------------------------------------------------
 # Commands APPEND across kits, so yours run after the team's; `startup`
-# re-runs at every sandbox start as the agent user (uid 1000) unless a step
-# sets user: "0". Keep each step idempotent and non-fatal. Write argv as a
+# re-runs at every sandbox start. ALWAYS set `user:` ("1000" for the agent
+# user): an omitted user runs as the backend's default exec user, which is
+# root on msb. Keep each step idempotent and non-fatal. Write argv as a
 # block list (one `- arg` per line, or one `- |` block scalar for a script):
 # as of acq v3.1.0 an inline `[a, b, c]` list parses as EMPTY and
 # `acq kit validate` still reports OK.
