@@ -54,7 +54,7 @@ the team kit's README says a personal kit may.
 | `caps.network.allow` | `example.net` (an IANA-reserved example domain no other layer allows, so `scripts/verify` can observe it) | the hosts your own tools need, or nothing |
 | `files[]` | `.rc.d/50-example.sh` (one alias), `personal/tui.jsonc` (OpenCode TUI theme) | your drop-ins and personal config files (one `files[]` record per file) |
 | `commands[]` | wire `~/.rc.d/*.sh` into interactive bash; `git config --global alias.st status` | keep the first; replace the second with your own idempotent steps |
-| `environment` | `OPENCODE_TUI_CONFIG` → your `tui.jsonc` (this overrides a team `tui.jsonc`; keep it only if the team kit's README allows that) | more non-secret personal settings |
+| `environment` | `OPENCODE_TUI_CONFIG` → your `tui.jsonc` (this overrides a team `tui.jsonc`; keep it only if the team kit's README allows that, and `scripts/verify` skips its checks once you remove it) | more non-secret personal settings |
 
 ## What to put where
 
@@ -65,7 +65,8 @@ the team kit's README says a personal kit may.
 | Terminfo for your terminal | Ship the source (`infocmp -x`) and compile it in a startup step (`tic -x`); the commented example in `spec.yaml` shows how |
 | Git preferences | One startup step per key, or ship `files/home/personal/gitconfig` and register it once with `include.path` |
 | An OpenCode theme or keybinds | Edit `files/home/personal/tui.jsonc` |
-| Personal CLI tools | The image first: anything the team needs belongs there. For a tool only you want, and only if the image ships Nix, a guarded, non-fatal `nix profile install` startup step pinned to the image's nixpkgs rev (commented in `spec.yaml`). It is a startup step, not `phase: install`, so a failed download skips that tool instead of failing the create. |
+| Config for your own tools | One `files[]` record per file under `files/home/.config/<tool>/`. These are copies of your host config kept in sync by hand; expect sandbox-specific trims, because the sandbox runs the image's pinned version of the tool (see TROUBLESHOOTING). |
+| Personal CLI tools | The image first: anything the team needs belongs there. Git config that points at such a tool (`core.pager = delta`, say) goes in its own fragment, registered with `include.path` inside the install step only while `command -v` finds the tool; otherwise a skipped install leaves git broken. For a tool only you want, and only if the image ships Nix, a guarded, non-fatal `nix profile install` startup step pinned to the image's nixpkgs rev (commented in `spec.yaml`). It is a startup step, not `phase: install`, so a failed download skips that tool instead of failing the create. |
 | Extra egress | `caps.network.allow` (union across kits) |
 
 ## What it does not carry, on purpose

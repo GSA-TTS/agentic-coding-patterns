@@ -176,11 +176,17 @@ printf '%s' "$eff" | grep -q "$TEAM_CONVENTIONS" \
   || bad "team startup command did not run, or this kit overrode it"
 
 info "5. Live values landed"
-tui="$(in_sbx 'printf "%s" "${OPENCODE_TUI_CONFIG:-}"')"
-[ "$tui" = "$PERSONAL_TUI" ] && ok "OPENCODE_TUI_CONFIG = $tui" \
-  || bad "OPENCODE_TUI_CONFIG unexpected: '${tui:-<unset>}'"
-[ "$(in_sbx "test -s $PERSONAL_TUI && echo y")" = "y" ] \
-  && ok "TUI config file present" || bad "TUI config file missing"
+# The TUI override is optional: drop it from spec.yaml when your team's README
+# does not allow a personal OPENCODE_TUI_CONFIG, and these checks skip.
+if grep -Eq '^[[:space:]]+OPENCODE_TUI_CONFIG:' "$KIT_DIR/spec.yaml"; then
+  tui="$(in_sbx 'printf "%s" "${OPENCODE_TUI_CONFIG:-}"')"
+  [ "$tui" = "$PERSONAL_TUI" ] && ok "OPENCODE_TUI_CONFIG = $tui" \
+    || bad "OPENCODE_TUI_CONFIG unexpected: '${tui:-<unset>}'"
+  [ "$(in_sbx "test -s $PERSONAL_TUI && echo y")" = "y" ] \
+    && ok "TUI config file present" || bad "TUI config file missing"
+else
+  skip "OPENCODE_TUI_CONFIG override (not in spec.yaml)"
+fi
 [ "$(in_sbx "test -s $PERSONAL_DROPIN && echo y")" = "y" ] \
   && ok "shell drop-in present" || bad "shell drop-in missing"
 [ "$(in_sbx "git config --global $PERSONAL_GIT_KEY 2>/dev/null")" = "$PERSONAL_GIT_VALUE" ] \

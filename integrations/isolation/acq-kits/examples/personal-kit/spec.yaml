@@ -107,7 +107,9 @@ commands:
   #          || echo "could not wire ~/.rc.d into ~/.zshrc" >&2
   #        exit 0
   # Live value: one git preference. REPLACE with yours: one step per key, or
-  # ship files/home/personal/gitconfig and register it once in a `sh -c` step:
+  # ship files/home/personal/gitconfig and register it once in a `sh -c` step
+  # (include.path is multi-valued: a plain `git config include.path` errors
+  # once two values exist, so check with --get-all and add with --add):
   #   git config --global --get-all include.path | grep -qxF /home/agent/personal/gitconfig \
   #     || git config --global --add include.path /home/agent/personal/gitconfig
   - phase: startup
@@ -140,7 +142,11 @@ commands:
   # install fails the whole create). Pin to the image's
   # NIXPKGS_REV so installs hit the binary cache; allow cache.nixos.org and
   # codeload.github.com above. Each tool is non-fatal, and drop-ins must
-  # guard on the binary existing. Team-wide tools belong in the image.
+  # guard on the binary existing. So must git config that names the tool:
+  # ship it as its own fragment (e.g. files/home/personal/gitconfig-delta)
+  # and register its include.path in this step only while the tool is
+  # present, or a skipped install leaves git pointing at a missing pager.
+  # Team-wide tools belong in the image.
   #  - phase: startup
   #    user: "1000"
   #    description: Install personal CLI tools (nix)
@@ -156,6 +162,10 @@ commands:
   #          nix profile install "github:NixOS/nixpkgs/${rev}#${tool}" \
   #            || echo "nix install of ${tool} failed; skipping" >&2
   #        done
+  #        if command -v delta >/dev/null 2>&1; then
+  #          git config --global --get-all include.path | grep -qxF /home/agent/personal/gitconfig-delta \
+  #            || git config --global --add include.path /home/agent/personal/gitconfig-delta
+  #        fi
   #        exit 0
 
 # --- Environment -------------------------------------------------------------
