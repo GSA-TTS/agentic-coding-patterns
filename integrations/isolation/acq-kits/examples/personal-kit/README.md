@@ -90,7 +90,9 @@ then this kit. It asserts that the global and team layers are intact under your
 kit, that every live value above landed, that the drop-in is sourced by
 interactive bash and not by scripted bash, and that both kits' variables,
 files, and egress hosts coexist. When you point `TEAM_KIT` at your team's kit,
-update the `TEAM_*` values at the top of the script to what it ships. Extend
+also set the `TEAM_*` variables (`TEAM_CONFIG`, `TEAM_CONVENTIONS`,
+`TEAM_GIT_KEY`, `TEAM_GIT_VALUE`, `TEAM_EGRESS_HOST`) to what it ships, and
+`UNLISTED_EGRESS_HOST` if your team kit allows `example.com`. Extend
 its clearly marked **PERSONAL** section as your kit grows, one assertion per
 mechanism you add.
 
