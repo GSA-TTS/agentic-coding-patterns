@@ -5,13 +5,16 @@ your own entries. Every command is an `acq` command, so the entries apply on
 every backend unless marked otherwise. For team-layer problems, see the team
 kit's own TROUBLESHOOTING.
 
-## Kit content missing (`OPENCODE_TUI_CONFIG` empty, files absent)
+## Kit content missing (drop-ins and personal files absent)
 
 `ACQ_EXTRA_KITS` was not exported in the shell that *created* the sandbox, or
-did not list your kit, so it never applied. Check:
+did not list your kit, so it never applied. Probe something only your kit
+ships. An environment variable is not a reliable probe here: a team kit may
+set the same one (`OPENCODE_TUI_CONFIG`, for example), so it can be non-empty
+without your kit.
 
 ```bash
-acq exec <sandbox> -- printenv OPENCODE_TUI_CONFIG   # empty => the kit did not apply
+acq exec <sandbox> -- sh -c 'ls ~/.rc.d; git config --global alias.st'   # both empty => the kit did not apply
 ```
 
 Fix the export (put it in your shell rc), then recreate:
@@ -80,6 +83,14 @@ kits from an unchanged local path) or recreate.
 As of acq v3.1.0 an inline flow-style argv (`command: [git, config, ...]`)
 parses as an empty argv and `acq kit validate` does not report it. Write the
 argv as a block list, one `- arg` per line, or a single `- |` block scalar.
+
+## A tool warns about config keys that work on the host
+
+The sandbox runs the tool version from the image's pin, not the host's, so a
+config file copied from your dotfiles can carry keys that version does not
+know yet (or no longer knows). The tool then warns on every run. Trim the
+sandbox copy to what the pinned version accepts, and note in the file that it
+is a sandbox-specific copy of your host config.
 
 ## Inspecting startup state
 
