@@ -107,6 +107,16 @@ class TestExamplesContainer:
         (_kits_dir(repo) / "examples" / "README.md").write_text("# templates\n")
         assert _load_main()(["--root", str(repo)]) == 0
 
+    def test_templates_are_validated_when_no_kit_dirs_exist(self, repo, capsys):
+        # The "no kits found" short-circuit must not skip a templates-only tree.
+        shutil.rmtree(_kits_dir(repo) / "kit-a")
+        (_kits_dir(repo) / "kits.yaml").write_text("schemaVersion: acq-kits-registry/v1\nkits: {}\n")
+        _write_kit(_kits_dir(repo) / "examples" / "tpl-bad", "schemaVersion: hybrid/v1\nkind: mixin\nname: tpl-bad\n")
+        assert _load_main()(["--root", str(repo)]) == 1
+        captured = capsys.readouterr()
+        assert "OK  examples/tpl-a" in captured.out
+        assert "examples/tpl-bad: schema:" in captured.err
+
     def test_absent_examples_dir_is_fine(self, repo):
         shutil.rmtree(_kits_dir(repo) / "examples")
         assert _load_main()(["--root", str(repo)]) == 0

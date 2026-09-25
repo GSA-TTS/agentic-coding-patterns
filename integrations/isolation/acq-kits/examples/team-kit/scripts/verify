@@ -97,8 +97,12 @@ case "$kit_usage" in
 esac
 "$ACQ" version 2>/dev/null | sed 's/^/  /'
 [ -f "$KIT_DIR/spec.yaml" ] && ok "kit spec.yaml present" || { bad "spec.yaml missing"; exit 1; }
+# Both paths go into ACQ_EXTRA_KITS, which is whitespace-separated.
 case "$WORK" in
   *[[:space:]]*) bad "work dir path contains whitespace; ACQ_EXTRA_KITS is whitespace-separated (set TMPDIR)"; exit 1 ;;
+esac
+case "$KIT_DIR" in
+  *[[:space:]]*) bad "kit path contains whitespace; ACQ_EXTRA_KITS is whitespace-separated (move the kit)"; exit 1 ;;
 esac
 
 info "1. Kit validates (hybrid/v1)"
@@ -211,7 +215,9 @@ guest_sum="$(in_sbx "cksum < $TEAM_CONVENTIONS")"
 kit_sum="$(cksum < "$KIT_DIR/files/home/team-config/team-conventions.md")"
 if [ -n "$guest_sum" ] && [ "$guest_sum" = "$kit_sum" ]; then
   ok "files[]: last wins by path (this kit's team-conventions.md replaced the fixture's)"
-elif [ "$(in_sbx "grep -c lower-fixture $TEAM_CONVENTIONS")" != "0" ]; then
+elif [ -z "$guest_sum" ]; then
+  bad "files[]: team-conventions.md missing from the guest (neither kit's drop landed)"
+elif [ "$(in_sbx "grep -c lower-fixture $TEAM_CONVENTIONS")" = "1" ]; then
   bad "files[]: the fixture's team-conventions.md survived"
 else
   bad "files[]: team-conventions.md content matches neither kit"

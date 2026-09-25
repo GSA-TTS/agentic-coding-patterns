@@ -338,7 +338,11 @@ def main(argv: list[str] | None = None) -> int:
         if kits_dir.exists()
         else []
     )
-    if not kit_dirs:
+    # Templates (examples/<name>/) are discovered here so a tree holding only
+    # templates is still validated below rather than short-circuited as empty.
+    templates_dir = kits_dir / TEMPLATES_DIR
+    template_dirs = sorted(d for d in templates_dir.iterdir() if d.is_dir()) if templates_dir.is_dir() else []
+    if not kit_dirs and not template_dirs:
         print(f"No kits found under {kits_dir}")
         return 0
 
@@ -363,11 +367,9 @@ def main(argv: list[str] | None = None) -> int:
         except (yaml.YAMLError, OSError):
             pass
 
-    # Templates (examples/<name>/): the same per-kit checks, reported under an
-    # `examples/` prefix, but never part of the registry cross-check below —
-    # they are not kits acq applies.
-    templates_dir = kits_dir / TEMPLATES_DIR
-    template_dirs = sorted(d for d in templates_dir.iterdir() if d.is_dir()) if templates_dir.is_dir() else []
+    # Templates: the same per-kit checks, reported under an `examples/` prefix,
+    # but never part of the registry cross-check below — they are not kits acq
+    # applies.
     for tpl_dir in template_dirs:
         errs, warns = validate_kit(tpl_dir, schema)
         all_warnings.extend(f"{TEMPLATES_DIR}/{w}" for w in warns)
