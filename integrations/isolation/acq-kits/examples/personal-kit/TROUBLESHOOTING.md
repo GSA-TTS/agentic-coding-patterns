@@ -65,8 +65,10 @@ does not read `~/.bashrc`; give `~/.zshrc` its own loop.
 A drop-in that runs `exec zsh` replaced a shell it should not have. Keep that
 line in a `99-` drop-in, keep the loop's interactive guard
 (`case $- in *i*) ... esac`) so `bash -lc` scripts never reach it, and guard
-the `exec` on a terminal (`[ -t 0 ]`): `bash -ic` is interactive but has no
-terminal when run from a script.
+the `exec` on `BASH_EXECUTION_STRING` being empty: `bash -ic '...'` is
+interactive, with or without a terminal, and bash sets that variable whenever
+it runs a command string. The example in `files/home/.rc.d/50-example.sh`
+carries all the guards.
 
 ## Files landed, but the env var and startup effects are missing (msb)
 

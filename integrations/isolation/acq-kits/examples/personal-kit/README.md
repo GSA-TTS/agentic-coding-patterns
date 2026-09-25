@@ -61,7 +61,7 @@ the team kit's README says a personal kit may.
 | You want | Do this |
 |----------|---------|
 | Aliases, prompt, shell functions | A `files/home/.rc.d/NN-name.sh` drop-in plus its `files[]` record. Interactive shells source them in lexical order; scripted `bash -lc` runs never do. Keep them POSIX. |
-| zsh as your working shell | An `exec zsh` line in a `99-` drop-in, so it sorts last, guarded on a terminal (`[ -t 0 ]`) so a scripted `bash -ic` is not swallowed, plus a startup step that gives `~/.zshrc` its own `~/.rc.d` loop (append-if-absent, like the bash one) |
+| zsh as your working shell | An `exec zsh` line in a `99-` drop-in, so it sorts last, guarded so it never swallows a `bash -ic '...'` command string (`BASH_EXECUTION_STRING`) and never re-fires in a `bash` you start from zsh (see `files/home/.rc.d/50-example.sh`), plus a startup step that gives `~/.zshrc` its own `~/.rc.d` loop (append-if-absent, like the bash one) |
 | Terminfo for your terminal | Ship the source (`infocmp -x`) and compile it in a startup step (`tic -x`); the commented example in `spec.yaml` shows how |
 | Git preferences | One startup step per key, or ship `files/home/personal/gitconfig` and register it once with `include.path` |
 | An OpenCode theme or keybinds | Edit `files/home/personal/tui.jsonc` |
