@@ -71,11 +71,10 @@ commands:
   # clobber the image's), and skips when any layer already wired a ~/.rc.d
   # loop. The case guard keeps drop-ins out of scripted `bash -lc` runs, so a
   # drop-in that execs another shell can never swallow one. If a lower layer
-  # already wired an UNGUARDED loop, this step still skips; on images whose
-  # ~/.bashrc has no early return for non-interactive shells (the default
-  # image), verify's guard check then fails, and the fix belongs in that
-  # layer. The step is non-fatal: if ~/.bashrc cannot be written it warns and
-  # the create goes on without drop-ins.
+  # already wired an UNGUARDED loop, this step still skips; verify's guard
+  # check then fails, and the fix belongs in that layer. The step is
+  # non-fatal: if ~/.bashrc cannot be written it warns and the create goes on
+  # without drop-ins.
   - phase: startup
     user: "1000"
     description: Source ~/.rc.d drop-ins from interactive bash
