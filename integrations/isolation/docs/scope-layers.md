@@ -38,6 +38,10 @@ path or a `git+https://…#ref=<sha>&dir=<path>` ref:
 ```bash
 # in your shell rc
 export ACQ_EXTRA_KITS="/path/to/team-repo/acq-kits/team-kit /path/to/dotfiles/personal-kit"
+```
+
+```bash
+# then, as usual
 acq run opencode /path/to/project
 ```
 

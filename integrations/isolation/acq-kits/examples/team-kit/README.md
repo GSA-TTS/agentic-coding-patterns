@@ -24,10 +24,14 @@ repo      the repo's AGENTS.md / .opencode/                                     
    `files/home/team-config/team-conventions.md` for your team. Each extension
    point ships one live, harmless value so the schema and `scripts/verify`
    exercise it; leave a value in place only if you actually want it.
-3. Apply it after the global kits. Put this in your shell rc:
+3. Apply it after the global kits. Put the export in your shell rc, then
+   start sandboxes as usual:
 
    ```bash
-   export ACQ_EXTRA_KITS="/path/to/your-team-repo/acq-kits/your-team"
+   export ACQ_EXTRA_KITS="/path/to/your-team-repo/acq-kits/your-team"   # shell rc
+   ```
+
+   ```bash
    acq run opencode /path/to/project
    ```
 
