@@ -1,0 +1,149 @@
+# spec.yaml — personal-kit: a TEMPLATE for your own acq mixin kit (hybrid/v1).
+#
+# Not applied by acq. Copy this directory into a repo you own (a dotfiles repo
+# is ideal), rename BOTH the directory and `name:` below, replace every value
+# marked REPLACE, and grow it. Pattern, composition rules, and gotchas:
+#   integrations/isolation/docs/scope-layers.md
+#
+# Every extension point ships ONE live, harmless value (commented YAML is never
+# schema-checked, so a template made of comments would rot silently). The
+# scripts/verify next to this file asserts each value landed and that the
+# team layer below it survives.
+#
+# Apply it LAST, after your team's kit (later kits win on overlap):
+#   export ACQ_EXTRA_KITS="/path/to/team-repo/acq-kits/team-kit /path/to/dotfiles/personal-kit"
+#   acq kit validate /path/to/dotfiles/personal-kit
+schemaVersion: "hybrid/v1"
+kind: mixin
+# REPLACE name (kebab-case, equal to the directory name), displayName, and
+# description. Keep them on their own lines with no trailing comment: as of
+# acq v3.1.0 the kit parser keeps an inline `# comment` as part of a top-level
+# scalar's value, and `acq kit validate` then rejects the name.
+name: personal-kit
+displayName: Personal kit (template)
+description: >
+  Starting point for a personal scope-layer kit: shell drop-ins, git
+  preferences, and a TUI theme, plus one live value per extension point
+  (egress, files, startup commands, environment) to replace.
+
+# --- Egress your personal tools need -----------------------------------------
+# Hosts beyond the global and team layers. Lists UNION across kits; under org
+# governance, org rules win. Egress is fixed at sandbox creation on every
+# backend: recreate after changing it.
+caps:
+  network:
+    allow:
+      # REPLACE with the hosts your own tools need, or delete the block. The
+      # live value is an IANA-reserved example domain: harmless, and allowed
+      # by no global kit, so scripts/verify can prove this entry took effect.
+      - example.net
+
+# --- Files -------------------------------------------------------------------
+# List EVERY payload under files/ with its in-guest absolute path: msb
+# materializes only the listed records. Files are whole-file and LAST WINS by
+# path, so never ship ~/.bashrc, ~/.zshrc, or ~/.gitconfig: the image and the
+# layers below own them. Ship drop-ins and includes instead. Text only: ship
+# sources and generate binaries at startup (see the terminfo example below).
+files:
+  # Shell drop-ins: files/home/.rc.d/NN-name.sh, sourced in lexical order by
+  # interactive shells (the startup command below wires the loop). Add one
+  # files[] record per drop-in.
+  - path: /home/agent/.rc.d/50-example.sh
+    mode: "0644"
+    source: files/home/.rc.d/50-example.sh
+    description: Example shell drop-in (sourced by interactive shells) — REPLACE the content
+  - path: /home/agent/personal/tui.jsonc
+    mode: "0644"
+    source: files/home/personal/tui.jsonc
+    description: Personal OpenCode TUI settings (read via OPENCODE_TUI_CONFIG below)
+
+# --- Commands ----------------------------------------------------------------
+# Commands APPEND across kits, so yours run after the team's; `startup`
+# re-runs at every sandbox start as the agent user (uid 1000) unless a step
+# sets user: "0". Keep each step idempotent and non-fatal. Write argv as a
+# block list (one `- arg` per line, or one `- |` block scalar for a script):
+# as of acq v3.1.0 an inline `[a, b, c]` list parses as EMPTY and
+# `acq kit validate` still reports OK.
+commands:
+  # Keep this one: it makes interactive bash source ~/.rc.d/*.sh. It appends
+  # one line to ~/.bashrc instead of shipping the file (whole-file overlays
+  # clobber the image's), and skips when any layer already wired a ~/.rc.d
+  # loop. The case guard keeps drop-ins out of scripted `bash -lc` runs, so a
+  # drop-in that execs another shell can never swallow one.
+  - phase: startup
+    user: "1000"
+    description: Source ~/.rc.d drop-ins from interactive bash
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        grep -qs '\.rc\.d/' "$HOME/.bashrc" && exit 0
+        printf '%s\n' '# ~/.rc.d drop-ins (personal kit, interactive shells only)' \
+          'case $- in *i*) for f in "$HOME"/.rc.d/*.sh; do [ -r "$f" ] && . "$f"; done ;; esac' \
+          >> "$HOME/.bashrc"
+  # Live value: one git preference. REPLACE with yours: one step per key, or
+  # ship files/home/personal/gitconfig and register it once in a `sh -c` step:
+  #   git config --global --get-all include.path | grep -qxF /home/agent/personal/gitconfig \
+  #     || git config --global --add include.path /home/agent/personal/gitconfig
+  - phase: startup
+    user: "1000"
+    description: Git alias (git st)
+    command:
+      - git
+      - config
+      - --global
+      - alias.st
+      - status
+  # Terminfo for your terminal (kitty, ghostty, ...): ship the SOURCE, from
+  # `infocmp -x xterm-ghostty > files/home/.terminfo-src/xterm-ghostty.ti`,
+  # list it in files[], and compile it here. tic writes ~/.terminfo.
+  #  - phase: startup
+  #    user: "1000"
+  #    description: Compile terminfo
+  #    command:
+  #      - sh
+  #      - -c
+  #      - |
+  #        infocmp xterm-ghostty >/dev/null 2>&1 && exit 0
+  #        tic -x "$HOME/.terminfo-src/xterm-ghostty.ti" || echo "tic failed; skipping" >&2
+  #        exit 0
+  #
+  # Personal CLI tools, only if your image ships Nix (the devenv image under
+  # integrations/isolation/images/devenv/ does). Pin to the image's
+  # NIXPKGS_REV so installs hit the binary cache; allow cache.nixos.org and
+  # codeload.github.com above. Each tool is non-fatal, and drop-ins must
+  # guard on the binary existing. Team-wide tools belong in the image.
+  #  - phase: startup
+  #    user: "1000"
+  #    description: Install personal CLI tools (nix)
+  #    command:
+  #      - sh
+  #      - -c
+  #      - |
+  #        . /etc/profile.d/nix.sh 2>/dev/null || true
+  #        command -v nix >/dev/null 2>&1 || exit 0
+  #        rev=<the image's NIXPKGS_REV>
+  #        for tool in starship eza; do
+  #          command -v "$tool" >/dev/null 2>&1 && continue
+  #          nix profile install "github:NixOS/nixpkgs/${rev}#${tool}" \
+  #            || echo "nix install of ${tool} failed; skipping" >&2
+  #        done
+  #        exit 0
+
+# --- Environment -------------------------------------------------------------
+# Non-secret plain strings only; secrets go through `acq secret set`, never a
+# kit. LAST WINS by name, and yours is the last kit, so a variable here
+# silently shadows the team's. Override a team variable only if the team kit's
+# README says a personal kit may. OPENCODE_TUI_CONFIG is personal by nature:
+# it holds TUI settings (theme, keybinds) and is separate from OPENCODE_CONFIG,
+# which the team layer owns.
+environment:
+  OPENCODE_TUI_CONFIG: /home/agent/personal/tui.jsonc
+
+# No backend shortcuts or extras: the kit is declarative only, so behavior is
+# identical on every backend. Keep it that way; it is what makes the Backend
+# parity note in README.md true.
+backend_shortcuts:
+  sbx: {}
+  msb: {}

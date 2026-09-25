@@ -1,0 +1,9 @@
+{
+  // Personal OpenCode TUI settings, loaded via OPENCODE_TUI_CONFIG. Theme and
+  // keybinds live here, not in opencode.jsonc: OpenCode strips them from
+  // opencode.jsonc on load.
+  "$schema": "https://opencode.ai/tui.json",
+
+  // REPLACE with your theme; "system" follows the terminal's own palette.
+  "theme": "system"
+}

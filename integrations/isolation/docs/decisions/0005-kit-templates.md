@@ -77,7 +77,10 @@ Adopt **templates (option 1)** and **placement (B)**.
   template via `ACQ_EXTRA_KITS`, and asserts the per-field rules the pattern
   doc states: `environment` last-wins, `files[]` last-wins by path,
   `commands[]` append in order, `caps.network.allow` union. It uses only `acq`
-  verbs, so it is identical on every backend.
+  verbs, so it is identical on every backend. The personal-kit template's
+  verify instead stacks it on a team kit and asserts the three-layer stack
+  (global and team layers intact, both kits' values coexisting); the per-field
+  rules are proven once, by the team template.
 - **Placement (B).** `acq-kits/examples/` is a *container of templates*, not a
   kit. `validate-kits.py` skips it in the kit walk, validates each
   `examples/<name>/` with the same per-kit checks (schema, `files[].source`
@@ -128,7 +131,8 @@ Adopt **templates (option 1)** and **placement (B)**.
 ## Links
 
 - Pattern doc: [`../scope-layers.md`](../scope-layers.md).
-- Template: [`../../acq-kits/examples/team-kit/`](../../acq-kits/examples/team-kit/).
+- Templates: [`../../acq-kits/examples/team-kit/`](../../acq-kits/examples/team-kit/),
+  [`../../acq-kits/examples/personal-kit/`](../../acq-kits/examples/personal-kit/).
 - Validator: [`../../acq-kits/validate-kits.py`](../../acq-kits/validate-kits.py)
   (`TEMPLATES_DIR`).
 - ADR 0001 (isolation): the neutral `hybrid/v1` acq-kits area this extends.
