@@ -1,0 +1,13 @@
+# Team skills: one directory per skill (<skill-name>/SKILL.md), each file
+# listed in spec.yaml files[]. This placeholder stands in for them. Once a real
+# skill is added, delete this file AND its files[] record in spec.yaml.
+#
+# Name team skills so they cannot collide with the global playbook kit's: it
+# symlinks its own skills into this same directory at every start
+# (`ln -sfn`), so a same-named team directory shadows one of them and collects
+# a stray nested symlink. See README.md "Writing a skill".
+#
+# It is deliberately NOT empty: as of acq v3.1.0 the msb adapter verifies a
+# dropped file with `test -s`, so an empty payload never counts as delivered,
+# and a failed drop aborts the rest of that kit's apply (environment and
+# commands included).

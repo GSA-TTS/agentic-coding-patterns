@@ -13,6 +13,12 @@ JSON Schema cannot express on its own:
     rather than only failing the schema's additionalProperties rule)
   - a README.md exists (parity note lives there)
 
+`acq-kits/examples/` is a CONTAINER of copy-and-rename kit templates, not a
+kit (see integrations/isolation/docs/decisions/0005-kit-templates.md). Each
+`examples/<name>/` gets the same per-kit checks above, but templates are not
+applied by acq, so they are exempt from — and must stay out of — the kits.yaml
+registry cross-check.
+
 It also emits WARN-level advisories (non-fatal by default) for likely re-home
 regressions the schema can't catch:
 
@@ -40,6 +46,11 @@ import jsonschema
 import yaml
 
 KNOWN_BACKENDS = {"sbx", "msb", "ppp"}
+
+# Subdirectory of acq-kits/ that holds copy-and-rename TEMPLATES rather than
+# kits. Its children are validated like kits but never registered in kits.yaml
+# (isolation ADR 0005).
+TEMPLATES_DIR = "examples"
 
 # Env var NAME must be a POSIX-portable identifier. Env values reach the guest
 # environment and possibly a shell; the schema enforces this via patternProperties,
@@ -316,8 +327,26 @@ def main(argv: list[str] | None = None) -> int:
     schema = json.loads(schema_path.read_text())
     jsonschema.Draft202012Validator.check_schema(schema)
 
-    kit_dirs = sorted(d for d in kits_dir.iterdir() if d.is_dir()) if kits_dir.exists() else []
-    if not kit_dirs:
+    # Skip the templates container (handled below) and tool droppings such as
+    # __pycache__ (written next to this file when the test suite imports it).
+    kit_dirs = (
+        sorted(
+            d
+            for d in kits_dir.iterdir()
+            if d.is_dir() and d.name != TEMPLATES_DIR and not d.name.startswith(("_", "."))
+        )
+        if kits_dir.exists()
+        else []
+    )
+    # Templates (examples/<name>/) are discovered here so a tree holding only
+    # templates is still validated below rather than short-circuited as empty.
+    templates_dir = kits_dir / TEMPLATES_DIR
+    template_dirs = (
+        sorted(d for d in templates_dir.iterdir() if d.is_dir() and not d.name.startswith(("_", ".")))
+        if templates_dir.is_dir()
+        else []
+    )
+    if not kit_dirs and not template_dirs:
         print(f"No kits found under {kits_dir}")
         return 0
 
@@ -341,6 +370,17 @@ def main(argv: list[str] | None = None) -> int:
                 kit_names.append(spec["name"])
         except (yaml.YAMLError, OSError):
             pass
+
+    # Templates: the same per-kit checks, reported under an `examples/` prefix,
+    # but never part of the registry cross-check below — they are not kits acq
+    # applies.
+    for tpl_dir in template_dirs:
+        errs, warns = validate_kit(tpl_dir, schema)
+        all_warnings.extend(f"{TEMPLATES_DIR}/{w}" for w in warns)
+        if errs:
+            all_errors.extend(f"{TEMPLATES_DIR}/{e}" for e in errs)
+        else:
+            print(f"  OK  {TEMPLATES_DIR}/{tpl_dir.name}")
 
     # Registry cross-check: kits.yaml must list exactly the kits present.
     registry_path = kits_dir / "kits.yaml"
@@ -378,7 +418,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     suffix = f" ({len(all_warnings)} warning(s))" if all_warnings else ""
-    print(f"\nAll {len(kit_dirs)} acq-kits valid.{suffix}")
+    tpl_suffix = f" + {len(template_dirs)} template(s)" if template_dirs else ""
+    print(f"\nAll {len(kit_dirs)} acq-kits{tpl_suffix} valid.{suffix}")
     return 0
 
 

@@ -34,6 +34,20 @@ a `TROUBLESHOOTING.md`, and `docs/decisions/` records.
 The [`kits.yaml`](kits.yaml) registry is the human-readable parity summary
 (kit → supported backends + parity prose).
 
+## Templates
+
+Copy-and-rename starting points under [`examples/`](examples/). They are **not
+kits `acq` applies**: `hybrid/v1` has no parameters, so a template carries one
+live, harmless value per extension point for you to replace, plus a
+`scripts/verify` that asserts how the kit composes with the global layer. CI
+validates them like kits (schema, `files[]` sources, env names, README) but
+they are exempt from — and must stay out of — the `kits.yaml` registry. See
+[`../docs/decisions/0005-kit-templates.md`](../docs/decisions/0005-kit-templates.md).
+
+| Template | Purpose |
+|----------|---------|
+| [`examples/team-kit/`](examples/team-kit/) | A team's scope-layer mixin: conventions and agent settings through the OpenCode config tier, applied via `ACQ_EXTRA_KITS` after the global kits. Pattern and composition rules: [`../docs/scope-layers.md`](../docs/scope-layers.md). |
+
 ## What is a hybrid/v1 kit?
 
 A kit is a directory with a `spec.yaml` (`schemaVersion: "hybrid/v1"`). A
