@@ -176,8 +176,9 @@ acq kit validate /path/to/your-kit      # static: spec shape, files[] sources, e
 /path/to/your-kit/scripts/verify        # live: throwaway sandbox through acq, asserts the composition
 ```
 
-This repo's own gate, `acq-kits/validate-kits.py`, additionally checks the
-JSON Schema; run it on a copy of a template if you want that check too. Record
+Inside this repo, `acq-kits/validate-kits.py` additionally checks every kit
+and template against the JSON Schema. It validates this repo's layout, not a
+standalone kit directory, so in your own repo `acq kit validate` is the gate. Record
 your team's non-obvious choices as ADRs next to the kit (`docs/decisions/`):
 future teammates inherit the *why*, not just the YAML.
 
@@ -189,8 +190,7 @@ future teammates inherit the *why*, not just the YAML.
   `scripts/verify` asserts, together with the composition rules in the table
   above. A personal-kit template follows the same shape; the team template's
   README says what differs.
-- The reference implementation is login.gov Team Data's team kit
-  (`acq-kits/team-data/` in their `data-warehouse-ag` repository), in
+- The reference implementation is login.gov Team Data's team kit, in
   production since June 2026, with a personal-kit example beside it. The
   gotchas above are the ones that team hit; this doc is the generalization.
 

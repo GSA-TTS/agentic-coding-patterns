@@ -36,9 +36,10 @@ caps:
       # REPLACE with your team's hosts (VCS, package mirrors, MCP servers), e.g.
       #   - git.example.gov       # team VCS over HTTPS (default port 443)
       #   - mcp.example.com:443   # a team MCP server
-      # The live value below is already allowed by the global layer, so it
-      # widens nothing; it exists so the schema and verify exercise the field.
-      - github.com
+      # The live value below is an IANA-reserved example domain: harmless, and
+      # allowed by no global kit, so scripts/verify can prove this entry took
+      # effect. Keep your replacement off the global list for the same reason.
+      - example.org
 
 # --- Files -------------------------------------------------------------------
 # List EVERY payload under files/ with its in-guest absolute path: msb
@@ -56,7 +57,8 @@ files:
     source: files/home/team-config/team-conventions.md
     description: Team instructions (registered in opencode.jsonc `instructions`) — REPLACE the content
   # Shared skills live under files/home/.agents/skills/<name>/. This placeholder
-  # only creates the directory; add one files[] record per skill file:
+  # stands in for them; add one files[] record per skill file, and when you
+  # delete the placeholder, delete this record with it:
   #   - path: /home/agent/.agents/skills/my-skill/SKILL.md
   #     mode: "0644"
   #     source: files/home/.agents/skills/my-skill/SKILL.md

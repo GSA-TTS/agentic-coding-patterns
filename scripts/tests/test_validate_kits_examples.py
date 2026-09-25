@@ -107,6 +107,12 @@ class TestExamplesContainer:
         (_kits_dir(repo) / "examples" / "README.md").write_text("# templates\n")
         assert _load_main()(["--root", str(repo)]) == 0
 
+    @pytest.mark.parametrize("name", ["__pycache__", ".pytest_cache"])
+    def test_tool_droppings_under_examples_are_ignored(self, repo, capsys, name):
+        (_kits_dir(repo) / "examples" / name).mkdir()
+        assert _load_main()(["--root", str(repo)]) == 0
+        assert name not in capsys.readouterr().err
+
     def test_templates_are_validated_when_no_kit_dirs_exist(self, repo, capsys):
         # The "no kits found" short-circuit must not skip a templates-only tree.
         shutil.rmtree(_kits_dir(repo) / "kit-a")

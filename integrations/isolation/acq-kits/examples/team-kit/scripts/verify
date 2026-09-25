@@ -10,7 +10,9 @@
 # generated LOWER fixture kit followed by this kit. It then asserts:
 #   1. the global layer is intact (USAi merged into OpenCode's global config);
 #   2. every live extension-point value in spec.yaml landed;
-#   3. the composition rules in docs/scope-layers.md hold against the lower
+#   3. the lower fixture itself was applied (its own env var, file, and
+#      startup command landed), so the next checks are not vacuous;
+#   4. the composition rules in docs/scope-layers.md hold against the lower
 #      fixture: environment last-wins, files[] last-wins by path, commands[]
 #      append in order, caps.network.allow union.
 # Extend the TEAM-SPECIFIC section as your kit grows: one assertion per
@@ -47,9 +49,13 @@ if [ -n "${ACQ_DIR:-}" ]; then ACQ="$ACQ_DIR/acq"; else ACQ="$(command -v acq ||
 # assertions distinguish "landed" from "landed because nothing competed".
 TEAM_CONFIG=/home/agent/team-config/opencode.jsonc
 TEAM_CONVENTIONS=/home/agent/team-config/team-conventions.md
-TEAM_EGRESS_HOST=github.com
+TEAM_EGRESS_HOST=example.org
 LOWER_CONFIG=/home/agent/lower-fixture/opencode.jsonc
+LOWER_MARKER_FILE=/home/agent/lower-fixture/applied
+LOWER_MARKER_CMD=/home/agent/lower-fixture/startup-ran
 LOWER_EGRESS_HOST=example.com
+# Allowed by no kit: the egress probe's negative control.
+UNLISTED_EGRESS_HOST=example.net
 
 pass=0
 fail=0
@@ -68,10 +74,10 @@ cleanup() {
   rm -rf "$WORK" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
-# On a signal, clean up and exit non-zero rather than falling through: the
-# probes below swallow errors, so a bare cleanup-on-INT would keep "testing"
+# On a signal, exit non-zero (the EXIT trap then cleans up) rather than falling
+# through: the probes below swallow errors, so continuing would keep "testing"
 # a removed sandbox and print a cascade of misleading FAILs.
-trap 'cleanup; exit 130' INT TERM
+trap 'exit 130' INT TERM
 
 # Run a command in the sandbox; stderr dropped, failures collapse to empty
 # output. Pair every negative assertion with a positive one that would fail
@@ -79,7 +85,8 @@ trap 'cleanup; exit 130' INT TERM
 in_sbx() { "$ACQ" exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true; }
 
 # HTTP status code seen from the sandbox for https://HOST/ ("000" = no
-# connection, i.e. egress denied; any other code means the host was reached).
+# connection). A backend may instead answer a denied host with its own status
+# page, so "admitted" is judged against the unlisted control host, not "000".
 probe_host() { in_sbx "curl -sS -o /dev/null -m 20 -w '%{http_code}' 'https://$1/' 2>/dev/null"; }
 
 info "0. Preconditions"
@@ -115,10 +122,14 @@ fi
 info "2. Generate the lower fixture kit"
 # Sits BELOW the kit under test in ACQ_EXTRA_KITS and competes on every
 # composed field: same env NAME, same file path, a command that sets the
-# opposite value, and an egress host of its own.
-mkdir -p "$LOWER_KIT/files/home/team-config"
+# opposite value, and an egress host of its own. It also leaves its own
+# uncontested marks (env var, file, startup artifact) so section 6 can prove
+# the fixture was applied at all; otherwise a skipped fixture would make every
+# "last wins" check pass trivially.
+mkdir -p "$LOWER_KIT/files/home/team-config" "$LOWER_KIT/files/home/lower-fixture"
 printf 'lower-fixture: this content must be replaced by the kit under test\n' \
   > "$LOWER_KIT/files/home/team-config/team-conventions.md"
+printf 'lower-fixture: applied\n' > "$LOWER_KIT/files/home/lower-fixture/applied"
 printf '# lower fixture\n' > "$LOWER_KIT/README.md"
 cat > "$LOWER_KIT/spec.yaml" <<EOF
 schemaVersion: "hybrid/v1"
@@ -136,18 +147,20 @@ files:
   - path: ${TEAM_CONVENTIONS}
     mode: "0644"
     source: files/home/team-config/team-conventions.md
+  - path: ${LOWER_MARKER_FILE}
+    mode: "0644"
+    source: files/home/lower-fixture/applied
 commands:
   - phase: startup
     user: "1000"
-    description: Set the value the kit under test must override (commands append in order)
+    description: Set the value the kit under test must override, and record that it ran
     command:
-      - git
-      - config
-      - --global
-      - push.autoSetupRemote
-      - "false"
+      - sh
+      - -c
+      - git config --global push.autoSetupRemote false && touch ${LOWER_MARKER_CMD}
 environment:
   OPENCODE_CONFIG: ${LOWER_CONFIG}
+  LOWER_FIXTURE_APPLIED: "1"
 EOF
 if "$ACQ" kit validate "$LOWER_KIT" >/dev/null 2>&1; then
   ok "lower fixture kit validates"
@@ -200,12 +213,24 @@ cfg="$(in_sbx 'printf "%s" "${OPENCODE_CONFIG:-}"')"
 printf '%s' "$eff" | grep -q 'team-conventions.md' \
   && ok "team conventions registered in the effective config instructions" \
   || bad "team-conventions.md missing from the effective config instructions"
-[ "$(in_sbx 'test -d "$HOME/.agents/skills" && echo y')" = "y" ] \
-  && ok "team skills directory present" || bad "team skills directory missing"
+# The file, not the directory: the global playbook kit creates
+# ~/.agents/skills itself, so a directory check would pass without this kit.
+[ "$(in_sbx 'test -s "$HOME/.agents/skills/.gitkeep" && echo y')" = "y" ] \
+  && ok "team skills placeholder present" || bad "team skills placeholder missing"
 [ "$(in_sbx 'git config --global push.autoSetupRemote 2>/dev/null')" = "true" ] \
   && ok "startup command ran (push.autoSetupRemote = true)" || bad "startup command did not run"
 
-info "6. Composition rules (docs/scope-layers.md), against the lower fixture"
+info "6. Lower fixture applied"
+# Without these, the composition checks below could pass with the fixture
+# silently skipped (e.g. a failed drop aborting its apply on msb).
+[ "$(in_sbx 'printf "%s" "${LOWER_FIXTURE_APPLIED:-}"')" = "1" ] \
+  && ok "fixture environment applied (LOWER_FIXTURE_APPLIED=1)" || bad "fixture environment not applied"
+[ "$(in_sbx "test -s $LOWER_MARKER_FILE && echo y")" = "y" ] \
+  && ok "fixture files[] applied" || bad "fixture files[] not applied"
+[ "$(in_sbx "test -f $LOWER_MARKER_CMD && echo y")" = "y" ] \
+  && ok "fixture startup command ran" || bad "fixture startup command did not run"
+
+info "7. Composition rules (docs/scope-layers.md), against the lower fixture"
 # environment: last wins by name. The fixture set OPENCODE_CONFIG first.
 [ "$cfg" = "$TEAM_CONFIG" ] && [ "$cfg" != "$LOWER_CONFIG" ] \
   && ok "environment: last wins (this kit's OPENCODE_CONFIG replaced the fixture's)" \
@@ -227,22 +252,29 @@ fi
 [ "$(in_sbx 'git config --global push.autoSetupRemote 2>/dev/null')" = "true" ] \
   && ok "commands[]: append in order (this kit's startup command ran after the fixture's)" \
   || bad "commands[]: fixture's command ran last, or this kit's did not run"
-# caps.network.allow: union. Both hosts must be reachable (a code other than
-# 000 means the egress rule admitted the connection).
+# caps.network.allow: union. A host listed by no kit must be denied (the
+# negative control); each kit's host must get a different answer. The kit's
+# host must be one the global layer does not already allow, or this proves
+# nothing about the kit's own entry.
 if [ "$SKIP_NETWORK" = "1" ]; then
   skip "caps.network.allow union (SKIP_NETWORK=1)"
 else
-  code_lower="$(probe_host "$LOWER_EGRESS_HOST")"
-  code_team="$(probe_host "$TEAM_EGRESS_HOST")"
-  { [ -n "$code_lower" ] && [ "$code_lower" != "000" ]; } \
-    && ok "caps.network.allow: fixture's host reachable ($LOWER_EGRESS_HOST -> $code_lower)" \
-    || bad "caps.network.allow: fixture's host NOT reachable ($LOWER_EGRESS_HOST -> ${code_lower:-none}); union broken, or the host is offline"
-  { [ -n "$code_team" ] && [ "$code_team" != "000" ]; } \
-    && ok "caps.network.allow: this kit's host reachable ($TEAM_EGRESS_HOST -> $code_team)" \
-    || bad "caps.network.allow: this kit's host NOT reachable ($TEAM_EGRESS_HOST -> ${code_team:-none})"
+  code_denied="$(probe_host "$UNLISTED_EGRESS_HOST")"
+  if [ -z "$code_denied" ] || [ "$code_denied" = "200" ]; then
+    bad "caps.network.allow: unlisted control host was admitted ($UNLISTED_EGRESS_HOST -> ${code_denied:-none}); the network tier allows everything, so the union cannot be observed"
+  else
+    ok "caps.network.allow: unlisted control host denied ($UNLISTED_EGRESS_HOST -> $code_denied)"
+    for side in fixture kit; do
+      if [ "$side" = fixture ]; then host="$LOWER_EGRESS_HOST"; else host="$TEAM_EGRESS_HOST"; fi
+      code="$(probe_host "$host")"
+      { [ -n "$code" ] && [ "$code" != "$code_denied" ]; } \
+        && ok "caps.network.allow: $side's host admitted ($host -> $code)" \
+        || bad "caps.network.allow: $side's host denied ($host -> ${code:-none}, same as the unlisted control); union broken, or the host is offline"
+    done
+  fi
 fi
 
-info "7. TEAM-SPECIFIC checks (extend as your kit grows)"
+info "8. TEAM-SPECIFIC checks (extend as your kit grows)"
 # One assertion per mechanism your kit adds: an env var, a shipped file, a
 # startup command's effect, an entry in the effective agent config, a skill...
 skip "no team-specific checks yet"

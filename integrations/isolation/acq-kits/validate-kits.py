@@ -341,7 +341,11 @@ def main(argv: list[str] | None = None) -> int:
     # Templates (examples/<name>/) are discovered here so a tree holding only
     # templates is still validated below rather than short-circuited as empty.
     templates_dir = kits_dir / TEMPLATES_DIR
-    template_dirs = sorted(d for d in templates_dir.iterdir() if d.is_dir()) if templates_dir.is_dir() else []
+    template_dirs = (
+        sorted(d for d in templates_dir.iterdir() if d.is_dir() and not d.name.startswith(("_", ".")))
+        if templates_dir.is_dir()
+        else []
+    )
     if not kit_dirs and not template_dirs:
         print(f"No kits found under {kits_dir}")
         return 0

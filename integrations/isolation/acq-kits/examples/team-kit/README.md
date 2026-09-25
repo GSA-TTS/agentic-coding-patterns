@@ -47,8 +47,8 @@ in this README which of your settings a personal kit may override.
 
 | Extension point | Live value | Replace with |
 |-----------------|------------|--------------|
-| `caps.network.allow` | `github.com` (already allowed by the global layer, so it widens nothing) | your team's VCS, package-mirror, and MCP hosts |
-| `files[]` | `team-config/opencode.jsonc`, `team-config/team-conventions.md`, an empty `.agents/skills/` | your conventions, settings, and skills (one `files[]` record per file) |
+| `caps.network.allow` | `example.org` (an IANA-reserved example domain the global layer does not allow, so `scripts/verify` can observe it) | your team's VCS, package-mirror, and MCP hosts |
+| `files[]` | `team-config/opencode.jsonc`, `team-config/team-conventions.md`, a non-empty `.agents/skills/.gitkeep` placeholder (msb rejects empty files) | your conventions, settings, and skills (one `files[]` record per file) |
 | `commands[]` | `git config --global push.autoSetupRemote true` at startup | your idempotent per-sandbox setup steps |
 | `environment` | `OPENCODE_CONFIG` → the team `opencode.jsonc` | more non-secret settings; never a credential |
 
