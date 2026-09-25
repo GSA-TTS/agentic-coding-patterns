@@ -155,7 +155,7 @@ username your VCS expects for token auth.
 
 | Need | Mechanism |
 |------|-----------|
-| Aliases, prompt, shell functions | `files/home/.rc.d/NN-name.sh` drop-ins. Neither the image nor the global layer sources `~/.rc.d`, so one kit must wire the loop: the team kit if it does (the reference implementation's does), otherwise the personal kit. Either way, an append-if-absent startup step adds `case $- in *i*) for f in "$HOME"/.rc.d/*.sh; do [ -r "$f" ] && . "$f"; done ;; esac` to `~/.bashrc`, skipped when a line there already sources `~/.rc.d`. Only one layer should wire it, or drop-ins run twice. |
+| Aliases, prompt, shell functions | `files/home/.rc.d/NN-name.sh` drop-ins. Neither the image nor the global layer sources `~/.rc.d`, so one kit must wire the loop: the team kit if it does (the reference implementation's does), otherwise the personal kit. Either way, an append-if-absent startup step adds `case $- in *i*) for f in "$HOME"/.rc.d/*.sh; do [ -r "$f" ] && . "$f"; done ;; esac` to `~/.bashrc`, skipped when a line there already sources `~/.rc.d`. Only one layer should wire it, or drop-ins run twice. The personal-kit template does this, and skips when a lower layer already has. |
 | Your working shell | An `exec zsh` line in a `99-` drop-in, so it sorts last. The loop's interactive guard (`case $- in *i*)`) is required, or the drop-in hijacks scripted `bash -lc` runs. zsh does not read `~/.bashrc`: give `~/.zshrc` its own loop with a second append-if-absent step. |
 | Terminfo for your terminal | Ship the *source* (`infocmp -x`) and compile it in a startup step (`tic -x`) |
 | Git preferences | One startup command per key, or ship a file and add it with `include.path` |
@@ -288,8 +288,13 @@ future teammates inherit the *why*, not just the YAML.
   copy-and-rename starting point for the team layer. Every extension point
   carries one live, harmless value that the schema checks and its
   `scripts/verify` asserts, together with the composition rules in the table
-  above. A personal-kit template follows the same shape; the team template's
-  README says what differs.
+  above.
+- [`../acq-kits/examples/personal-kit/`](../acq-kits/examples/personal-kit/)
+  is the same for the personal layer: shell drop-ins with the `~/.rc.d` loop
+  wired, a git preference, and an OpenCode TUI theme through
+  `OPENCODE_TUI_CONFIG`. Its `scripts/verify` stacks it on a team kit (the
+  team-kit template by default) and asserts the three-layer stack: the global
+  and team layers survive under it, and both kits' values coexist.
 - The reference implementation is login.gov Team Data's team kit, in
   production since June 2026, with a personal-kit example beside it. The
   gotchas above are the ones that team hit; this doc is the generalization.
