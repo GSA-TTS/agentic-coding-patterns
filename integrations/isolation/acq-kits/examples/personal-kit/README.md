@@ -24,10 +24,14 @@ repo      the repo's AGENTS.md / .opencode/                                     
    `files/`. Each extension point ships one live, harmless value so the schema
    and `scripts/verify` exercise it; leave a value in place only if you
    actually want it.
-3. Apply it last, after your team's kit. Put this in your shell rc:
+3. Apply it last, after your team's kit. Put the export in your shell rc,
+   then start sandboxes as usual:
 
    ```bash
-   export ACQ_EXTRA_KITS="/path/to/team-repo/acq-kits/team-kit /path/to/dotfiles/personal-kit"
+   export ACQ_EXTRA_KITS="/path/to/team-repo/acq-kits/team-kit /path/to/dotfiles/personal-kit"   # shell rc
+   ```
+
+   ```bash
    acq run opencode /path/to/project
    ```
 
@@ -50,18 +54,18 @@ the team kit's README says a personal kit may.
 | `caps.network.allow` | `example.net` (an IANA-reserved example domain no other layer allows, so `scripts/verify` can observe it) | the hosts your own tools need, or nothing |
 | `files[]` | `.rc.d/50-example.sh` (one alias), `personal/tui.jsonc` (OpenCode TUI theme) | your drop-ins and personal config files (one `files[]` record per file) |
 | `commands[]` | wire `~/.rc.d/*.sh` into interactive bash; `git config --global alias.st status` | keep the first; replace the second with your own idempotent steps |
-| `environment` | `OPENCODE_TUI_CONFIG` → your `tui.jsonc` | more non-secret personal settings |
+| `environment` | `OPENCODE_TUI_CONFIG` → your `tui.jsonc` (this overrides a team `tui.jsonc`; keep it only if the team kit's README allows that) | more non-secret personal settings |
 
 ## What to put where
 
 | You want | Do this |
 |----------|---------|
 | Aliases, prompt, shell functions | A `files/home/.rc.d/NN-name.sh` drop-in plus its `files[]` record. Interactive shells source them in lexical order; scripted `bash -lc` runs never do. Keep them POSIX. |
-| zsh as your working shell | An `exec zsh` line in a `99-` drop-in, so it sorts last, plus a startup step that gives `~/.zshrc` its own `~/.rc.d` loop (append-if-absent, like the bash one) |
+| zsh as your working shell | An `exec zsh` line in a `99-` drop-in, so it sorts last, guarded on a terminal (`[ -t 0 ]`) so a scripted `bash -ic` is not swallowed, plus a startup step that gives `~/.zshrc` its own `~/.rc.d` loop (append-if-absent, like the bash one) |
 | Terminfo for your terminal | Ship the source (`infocmp -x`) and compile it in a startup step (`tic -x`); the commented example in `spec.yaml` shows how |
 | Git preferences | One startup step per key, or ship `files/home/personal/gitconfig` and register it once with `include.path` |
 | An OpenCode theme or keybinds | Edit `files/home/personal/tui.jsonc` |
-| Personal CLI tools | A guarded, non-fatal `nix profile install` startup step pinned to the image's nixpkgs rev (commented in `spec.yaml`); only if your image ships Nix |
+| Personal CLI tools | The image first: anything the team needs belongs there. For a tool only you want, and only if the image ships Nix, a guarded, non-fatal `nix profile install` startup step pinned to the image's nixpkgs rev (commented in `spec.yaml`). It is a startup step, not `phase: install`, so a failed download skips that tool instead of failing the create. |
 | Extra egress | `caps.network.allow` (union across kits) |
 
 ## What it does not carry, on purpose
@@ -88,11 +92,13 @@ It validates both kits, then creates a throwaway sandbox through `acq`, which
 applies the pinned built-in bundle plus, via `ACQ_EXTRA_KITS`, the team kit and
 then this kit. It asserts that the global and team layers are intact under your
 kit, that every live value above landed, that the drop-in is sourced by
-interactive bash and not by scripted bash, and that both kits' variables,
-files, and egress hosts coexist. When you point `TEAM_KIT` at your team's kit,
-also set the `TEAM_*` variables (`TEAM_CONFIG`, `TEAM_CONVENTIONS`,
-`TEAM_GIT_KEY`, `TEAM_GIT_VALUE`, `TEAM_EGRESS_HOST`) to what it ships, and
-`UNLISTED_EGRESS_HOST` if your team kit allows `example.com`. Extend
+interactive bash, that the `~/.rc.d` loop is inert in a non-interactive shell,
+and that both kits' variables, files, and egress hosts coexist. When you point
+`TEAM_KIT` at your team's kit, also set the `TEAM_*` variables
+(`TEAM_CONFIG`, `TEAM_CONVENTIONS`, `TEAM_GIT_KEY`, `TEAM_GIT_VALUE`,
+`TEAM_EGRESS_HOST`) to what it ships, and `UNLISTED_EGRESS_HOST` if your team
+kit allows `example.com`. Each egress host must answer at `/` with a code
+other than the backend's deny response (000 on msb, 403 on sbx). Extend
 its clearly marked **PERSONAL** section as your kit grows, one assertion per
 mechanism you add.
 

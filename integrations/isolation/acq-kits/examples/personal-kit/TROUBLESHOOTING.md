@@ -60,8 +60,10 @@ does not read `~/.bashrc`; give `~/.zshrc` its own loop.
 ## A scripted command hangs or runs in the wrong shell
 
 A drop-in that runs `exec zsh` replaced a shell it should not have. Keep that
-line in a `99-` drop-in and keep the interactive guard
-(`case $- in *i*) ... esac`) so `bash -lc` scripts never reach it.
+line in a `99-` drop-in, keep the loop's interactive guard
+(`case $- in *i*) ... esac`) so `bash -lc` scripts never reach it, and guard
+the `exec` on a terminal (`[ -t 0 ]`): `bash -ic` is interactive but has no
+terminal when run from a script.
 
 ## Files landed, but the env var and startup effects are missing (msb)
 

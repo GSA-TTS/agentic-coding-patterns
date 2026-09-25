@@ -73,8 +73,9 @@ commands:
   # drop-in that execs another shell can never swallow one. If a lower layer
   # already wired an UNGUARDED loop, this step still skips; on images whose
   # ~/.bashrc has no early return for non-interactive shells (the default
-  # image), verify's scripted `bash -lc` check then fails, and the fix belongs
-  # in that layer.
+  # image), verify's guard check then fails, and the fix belongs in that
+  # layer. The step is non-fatal: if ~/.bashrc cannot be written it warns and
+  # the create goes on without drop-ins.
   - phase: startup
     user: "1000"
     description: Source ~/.rc.d drop-ins from interactive bash
@@ -82,11 +83,12 @@ commands:
       - sh
       - -c
       - |
-        set -eu
         grep -qs '\.rc\.d/' "$HOME/.bashrc" && exit 0
         printf '%s\n' '# ~/.rc.d drop-ins (personal kit, interactive shells only)' \
           'case $- in *i*) for f in "$HOME"/.rc.d/*.sh; do [ -r "$f" ] && . "$f"; done ;; esac' \
-          >> "$HOME/.bashrc"
+          >> "$HOME/.bashrc" \
+          || echo "could not wire ~/.rc.d into ~/.bashrc; drop-ins will not load" >&2
+        exit 0
   # zsh as your working shell: zsh does not read ~/.bashrc, so give ~/.zshrc
   # its own loop. No `$-` guard is needed (zsh reads .zshrc only in interactive
   # shells). `(N)` is zsh's null-glob qualifier: without it an empty ~/.rc.d
@@ -99,11 +101,12 @@ commands:
   #      - sh
   #      - -c
   #      - |
-  #        set -eu
   #        grep -qs '\.rc\.d/' "$HOME/.zshrc" && exit 0
   #        printf '%s\n' '# ~/.rc.d drop-ins (personal kit)' \
   #          'for f in "$HOME"/.rc.d/*.sh(N); do . "$f"; done' \
-  #          >> "$HOME/.zshrc"
+  #          >> "$HOME/.zshrc" \
+  #          || echo "could not wire ~/.rc.d into ~/.zshrc" >&2
+  #        exit 0
   # Live value: one git preference. REPLACE with yours: one step per key, or
   # ship files/home/personal/gitconfig and register it once in a `sh -c` step:
   #   git config --global --get-all include.path | grep -qxF /home/agent/personal/gitconfig \
@@ -132,7 +135,10 @@ commands:
   #        exit 0
   #
   # Personal CLI tools, only if your image ships Nix (the devenv image under
-  # integrations/isolation/images/devenv/ does). Pin to the image's
+  # integrations/isolation/images/devenv/ does). This is the one exception to
+  # "tools belong in the image": a tool only you want, installed in a STARTUP
+  # step that skips on failure, never `phase: install` (a failed create-time
+  # install fails the whole create). Pin to the image's
   # NIXPKGS_REV so installs hit the binary cache; allow cache.nixos.org and
   # codeload.github.com above. Each tool is non-fatal, and drop-ins must
   # guard on the binary existing. Team-wide tools belong in the image.
@@ -157,9 +163,11 @@ commands:
 # Non-secret plain strings only; secrets go through `acq secret set`, never a
 # kit. LAST WINS by name, and yours is the last kit, so a variable here
 # silently shadows the team's. Override a team variable only if the team kit's
-# README says a personal kit may. OPENCODE_TUI_CONFIG is personal by nature:
-# it holds TUI settings (theme, keybinds) and is separate from OPENCODE_CONFIG,
-# which the team layer owns.
+# README says a personal kit may. OPENCODE_TUI_CONFIG holds TUI settings
+# (theme, keybinds) and is separate from OPENCODE_CONFIG, which the team layer
+# owns. It is usually personal, but a team kit may ship its own tui.jsonc
+# through it: then this line replaces the team's, so keep it only if the team
+# kit's README says a personal kit may override it.
 environment:
   OPENCODE_TUI_CONFIG: /home/agent/personal/tui.jsonc
 
