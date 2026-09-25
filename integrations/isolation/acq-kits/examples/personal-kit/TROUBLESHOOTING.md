@@ -26,7 +26,7 @@ replaces the current shell's `ACQ_EXTRA_KITS`. On sbx, a kit with startup
 commands also cannot be added to a live sandbox (sbx 0.38 and later print a
 recreate notice).
 
-## A team setting changed after you added your kit
+## A team setting has the wrong value (your kit shadows it)
 
 Your kit is last, and `environment` (by name) and `files[]` (by path) are
 last-wins (on msb by `acq`'s rules; on sbx as composed by sbx), so a variable

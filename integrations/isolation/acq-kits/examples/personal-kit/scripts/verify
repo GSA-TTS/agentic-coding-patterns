@@ -20,12 +20,14 @@
 # Extend the PERSONAL section as your kit grows: one assertion per mechanism.
 #
 # The team kit defaults to the team-kit template next to this one. Point
-# TEAM_KIT at your team's real kit, and update the TEAM_* values below to what
-# it ships.
+# TEAM_KIT at your team's real kit and set the TEAM_* variables to what it
+# ships (each defaults to the team-kit template's value). If your team kit
+# allows example.com, set UNLISTED_EGRESS_HOST to a host neither kit allows.
 #
 # Usage (from anywhere):
 #   path/to/personal-kit/scripts/verify
 #   TEAM_KIT=/path/to/team-kit …/verify     # stack on your team's kit
+#   TEAM_CONFIG=… TEAM_EGRESS_HOST=… …/verify   # that kit's values (see below)
 #   KEEP=1 …/verify                         # keep the sandbox + work dir
 #   ACQ_DIR=/path/to/quickstart …/verify    # acq not on PATH: use this checkout
 #   SKIP_NETWORK=1 …/verify                 # skip the egress probes (offline host)
@@ -54,14 +56,15 @@ PERSONAL_ALIAS=gst
 PERSONAL_GIT_KEY=alias.st
 PERSONAL_GIT_VALUE=status
 PERSONAL_EGRESS_HOST=example.net
-# Values the team kit ships (the team-kit template's, by default).
-TEAM_CONFIG=/home/agent/team-config/opencode.jsonc
-TEAM_CONVENTIONS=team-conventions.md
-TEAM_GIT_KEY=push.autoSetupRemote
-TEAM_GIT_VALUE=true
-TEAM_EGRESS_HOST=example.org
+# Values the team kit ships; override them for your team's kit. Defaults are
+# the team-kit template's.
+TEAM_CONFIG="${TEAM_CONFIG:-/home/agent/team-config/opencode.jsonc}"
+TEAM_CONVENTIONS="${TEAM_CONVENTIONS:-team-conventions.md}"
+TEAM_GIT_KEY="${TEAM_GIT_KEY:-push.autoSetupRemote}"
+TEAM_GIT_VALUE="${TEAM_GIT_VALUE:-true}"
+TEAM_EGRESS_HOST="${TEAM_EGRESS_HOST:-example.org}"
 # Allowed by neither kit: the egress probe's negative control.
-UNLISTED_EGRESS_HOST=example.com
+UNLISTED_EGRESS_HOST="${UNLISTED_EGRESS_HOST:-example.com}"
 
 pass=0
 fail=0
