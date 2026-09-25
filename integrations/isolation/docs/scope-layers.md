@@ -196,7 +196,10 @@ username your VCS expects for token auth.
   missing there.
 - **Rotate secrets without changing the placeholder.** Existing sandboxes
   captured the placeholder at creation; a new one breaks them until they are
-  recreated. Re-run `acq secret set` for the same service.
+  recreated. On msb, re-run `acq secret set` for the same service. On sbx,
+  `acq` refuses to overwrite an existing secret and prints an `sbx secret rm`
+  hint: remove it and set it again with the same placeholder (the team-kit
+  template's TROUBLESHOOTING has the entry).
 - **One owner per single-valued env var.** Decide in the team kit's README
   which variables a personal kit may override.
 - **No broad `allow` permission rule in the team config.** OpenCode evaluates

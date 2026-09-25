@@ -122,14 +122,15 @@ verified on sbx.
 
 Existing sandboxes captured the secret's *placeholder* at creation; the proxy
 swaps in the real value in transit. A rotation must keep the same placeholder.
-Re-run the same command for the same service:
+On msb, re-run the same command for the same service:
 
 ```bash
 acq secret set -g <service> --host <host> --env <VAR>
 ```
 
-If your backend refuses to overwrite an existing custom secret, remove it and
-re-create it with the same placeholder rather than accepting a new one.
+On sbx, `acq` refuses to overwrite an existing secret and prints the
+`sbx secret rm` command to run first. Remove it, then re-create it with the
+same placeholder rather than accepting a new one.
 
 ## Inspecting startup state
 

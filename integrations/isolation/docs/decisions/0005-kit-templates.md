@@ -106,8 +106,10 @@ Adopt **templates (option 1)** and **placement (B)**.
 
 - Other teams bootstrap a team layer from a validated skeleton instead of
   re-learning the failure modes.
-- The composition table is checked against `acq`'s code and asserted live by
-  `scripts/verify`, so the doc and the behavior cannot drift apart unnoticed.
+- The composition table is checked against `acq`'s code where `acq` composes
+  the kits (msb) and asserted live by `scripts/verify` on both backends, so
+  the doc and the behavior cannot drift apart unnoticed. Rows sbx composes
+  natively and `scripts/verify` does not exercise are marked unverified.
 - The validator change is small and additive: existing kits and the registry
   cross-check are unaffected; the `examples/` container is opt-in by presence.
 
