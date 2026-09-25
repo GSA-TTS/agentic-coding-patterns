@@ -118,17 +118,41 @@ acq secret set -g <service> --host <host> --env <VAR>   # once per machine, host
 |------|-----------|
 | Egress for team hosts (VCS, package mirrors, MCP servers) | `caps.network.allow` (union) |
 | Conventions the agent must follow across the team's repos | A markdown file under `files/`, registered in the agent's instructions path (OpenCode: an `instructions` entry in a team config file) |
-| Team agent settings that override the global defaults | Ship a config file and point the agent's config env var at it (OpenCode: `OPENCODE_CONFIG` in `environment`), giving the tier global → team → repo |
-| Shared skills | Directories under `files/home/.agents/skills/<name>/`, each file listed in `files[]` |
+| Team agent settings that override the global defaults | Ship a config file and point the agent's config env var at it (OpenCode: `OPENCODE_CONFIG` in `environment`), giving the tier global → team → repo. Never pin `model` / `small_model` there, and never add a broad `allow` permission rule (see the gotchas). |
+| Team TUI settings (OpenCode theme, keybinds) | A separate `tui.jsonc`, with `OPENCODE_TUI_CONFIG` pointing at it: OpenCode drops `theme` / `keybinds` / `tui` from `opencode.json(c)` on load. The variable is single-valued, so say in the team README whether a personal kit may override it. |
+| Read-only use of a team CLI (for example the VCS CLI) | Permission rules in the team config: deny the whole CLI, then allow-list read verbs *after* it, and allow its `api` subcommand for GET only. Unknown and write subcommands stay denied. The team-kit template's `opencode.jsonc` sketches the shape. |
+| Shared skills | Directories under `files/home/.agents/skills/<name>/`, each file listed in `files[]`, named so they cannot collide with the playbook's skills (see the gotchas) |
 | Small per-sandbox setup that must *run* | `commands[]` with `phase: startup`, idempotent (for example `git config --global` keys) |
-| A team VCS token | **Not in the kit.** `acq secret set -g <service> --host <vcs-host> --env <TOKEN_VAR>` |
+| A team VCS token | **Not in the kit.** `acq secret set -g <service> --host <vcs-host> --env <TOKEN_VAR>`, plus HTTPS routing for git (below) |
+
+#### Git to a non-GitHub team VCS
+
+Route git over HTTPS and let the proxy supply the token. SSH remotes do not
+work through msb's egress (see the known limitations), and a team checkout
+usually carries one: `--clone` inherits the host's `git@host:` origin, and
+some tools (flake inputs, for example) use the `ssh://git@host/` form. One
+idempotent startup step (`user: "1000"`) rewrites both forms and adds a
+credential helper that reads the proxy-injected variable:
+
+```bash
+git config --global url."https://git.example.gov/".insteadOf "git@git.example.gov:"
+git config --global url."https://git.example.gov".insteadOf "ssh://git@git.example.gov"
+git config --global credential."https://git.example.gov".helper \
+  '!f() { echo username=oauth2; echo "password=${TEAM_VCS_TOKEN:-}"; }; f'
+```
+
+The two `url.` keys differ by the trailing slash on purpose: `git config`
+replaces a single-valued key, so one key cannot carry both rewrites. The
+helper only ever sees the placeholder in `TEAM_VCS_TOKEN`; the proxy swaps in
+the real value in transit, for the host the secret is scoped to. Use the
+username your VCS expects for token auth.
 
 ### Personal kit
 
 | Need | Mechanism |
 |------|-----------|
-| Aliases, prompt, shell functions | `files/home/.rc.d/NN-name.sh` drop-ins sourced by interactive shells (the team kit or image wires the loop) |
-| Your working shell | An `exec zsh` line in a `99-` drop-in, so it sorts last |
+| Aliases, prompt, shell functions | `files/home/.rc.d/NN-name.sh` drop-ins. Neither the image nor the global layer sources `~/.rc.d`, so the personal kit owns the loop: an append-if-absent startup step adds `case $- in *i*) for f in "$HOME"/.rc.d/*.sh; do [ -r "$f" ] && . "$f"; done ;; esac` to `~/.bashrc`, skipped when a line there already sources `~/.rc.d`. Only one layer should wire it, or drop-ins run twice. |
+| Your working shell | An `exec zsh` line in a `99-` drop-in, so it sorts last. The loop's interactive guard (`case $- in *i*)`) is required, or the drop-in hijacks scripted `bash -lc` runs. zsh does not read `~/.bashrc`: give `~/.zshrc` its own loop with a second append-if-absent step. |
 | Terminfo for your terminal | Ship the *source* (`infocmp -x`) and compile it in a startup step (`tic -x`) |
 | Git preferences | One startup command per key, or ship a file and add it with `include.path` |
 | Overriding a team setting | `environment` (last wins) or a later file at the same path (last wins) — deliberately, and only for settings the team marks as personal |
@@ -153,8 +177,19 @@ acq secret set -g <service> --host <host> --env <VAR>   # once per machine, host
   backend, so on msb the command runs as root.
 - **Startup commands re-run at every start.** Make them idempotent, and
   non-fatal where the feature is optional: guard on the tool or file
-  existing, `exit 0` on the expected miss. One failing step can fail the
-  create.
+  existing (`command -v tool >/dev/null 2>&1 || exit 0`), so a stock image
+  without the tool skips the step. One failing step can fail the create.
+- **Guard `.` on the file existing** in a `sh -c` script. `.` is a POSIX
+  special builtin: when the file is missing, dash exits the whole script, and
+  `|| true` does not catch it. Write `[ -r f ] && . f`.
+- **Do not assume the working directory.** Startup commands do not run in
+  the workspace. `acq` exports `ACQ_WORKSPACE` (the primary workspace's mount
+  root) and, under `--clone` only, `ACQ_CLONE=1` into the guest on both
+  backends. A step that writes into the repo must require `ACQ_CLONE=1`, so it
+  never touches a host checkout mounted in passthrough mode, and should list
+  what it adds in `.git/info/exclude` so it cannot be committed.
+- **`environment` values are verbatim.** No `~` expansion: write
+  `/home/agent/...`.
 - **List every shipped file in `files[]`** with its in-guest absolute path.
   The sbx translation also copies the whole `files/` tree verbatim, but
   msb materializes only the listed records: an unlisted file silently goes
@@ -164,6 +199,26 @@ acq secret set -g <service> --host <host> --env <VAR>   # once per machine, host
   recreated. Re-run `acq secret set` for the same service.
 - **One owner per single-valued env var.** Decide in the team kit's README
   which variables a personal kit may override.
+- **No broad `allow` permission rule in the team config.** OpenCode evaluates
+  the last matching rule, and a rule the team tier adds lands after the global
+  kit's rules, so a team `allow` can silently defeat the global ask/deny
+  gates. Add narrow rules, and prefer `deny`.
+- **Do not pin `model` or `small_model` in the team config.** The global
+  provider kit updates its defaults as the provider's model catalog changes; a
+  team pin overrides that and can outlive the model it names.
+- **TUI settings need their own file.** OpenCode drops top-level `theme`,
+  `keybinds`, and `tui` from `opencode.json(c)` on load, so they vanish from a
+  team `opencode.jsonc` without an error. Ship a `tui.jsonc` and set
+  `OPENCODE_TUI_CONFIG`.
+- **Name team skills so they cannot collide with the playbook's.** The global
+  playbook kit symlinks its skills into the same `~/.agents/skills` directory
+  at every start (`ln -sfn`). A team skill with the same name as a playbook
+  skill (`code-review`, say) shadows it and collects a stray nested symlink.
+  Prefix team skills (`team-code-review`).
+- **Never print the environment in an agent session.** `env` or `printenv`
+  puts secret placeholders into the transcript, which the agent replays to the
+  model endpoint on every request. On msb that request then fails (see the
+  known limitations).
 - **`agentContext` or instructions, not both** for the same content, or the
   agent reads it twice.
 - **Do not put the team's version pin in prose.** Point `ACQ_EXTRA_KITS` at a
@@ -195,6 +250,17 @@ run; they may be fixed.
   the cause is printed at create time as "could not place kit file".
 - **`environment` values must be single-line scalars.** A block scalar is
   rejected by `acq kit validate`, so this one at least fails loudly.
+- **msb egress admits no SSH to allowed hosts.** A host in
+  `caps.network.allow` is reachable over HTTPS, but an SSH connection to it on
+  port 22 times out, so SSH git remotes hang. HTTPS is the supported git path;
+  see "Git to a non-GitHub team VCS" above. sbx has carried SSH to allowed
+  hosts, but not as a documented contract.
+- **A placeholder in a transcript breaks the session on msb.** msb swaps a
+  secret's real value in at its proxy only for the host the secret is scoped
+  to. When a transcript contains another secret's placeholder (from `env` or
+  `printenv`), the request to the model endpoint carries it, the proxy fails
+  closed and drops the connection, and every later request in that session
+  fails the same way. Not verified on sbx.
 
 ## Validating and verifying
 

@@ -3,6 +3,32 @@
 // provider lives) for the keys it sets, and a repo's own opencode.jsonc still
 // wins over it. Prefer keys the global config does not set; do not redeclare
 // the provider.
+//
+// Deliberately NOT set here:
+//   - model / small_model. The global provider kit owns them and updates its
+//     defaults as the provider's model catalog changes; a team pin overrides
+//     that and can outlive the model it names.
+//   - Any broad "allow" permission rule. OpenCode evaluates the LAST matching
+//     rule, and rules this tier adds come after the global kit's, so an allow
+//     here can silently defeat the global ask/deny gates.
+//   - theme / keybinds / tui. OpenCode drops those top-level keys from
+//     opencode.json(c) on load. TUI settings go in their own tui.jsonc, with
+//     OPENCODE_TUI_CONFIG pointing at it.
+//
+// Gating a team CLI (for example a VCS CLI the agent should only read with):
+// deny the whole CLI first, then allow-list the read verbs AFTER it, so any
+// write or unknown subcommand stays denied (fail-closed). For an `api`
+// subcommand, allow GET only: deny the flags that turn a request into a write
+// (--method/-X, --field/-F, --input) and graphql. Sketch, not a full list:
+//   "permission": { "bash": {
+//     "vcs *": "deny",
+//     "vcs * list*": "allow",
+//     "vcs * view*": "allow",
+//     "vcs api *": "allow",
+//     "vcs api graphql*": "deny",
+//     "vcs api * --method*": "deny",
+//     "vcs api * -X*": "deny"
+//   } }
 {
   "$schema": "https://opencode.ai/config.json",
   "instructions": ["/home/agent/team-config/team-conventions.md"]

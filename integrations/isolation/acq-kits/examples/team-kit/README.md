@@ -65,6 +65,32 @@ The OpenCode wiring gives the settings tier global → team → repo: the global
 - **Whole shared files** (`~/.bashrc`, `~/.gitconfig`) or **binary files**.
 - **Anything the global layer already owns.**
 
+## Writing a skill
+
+A skill is a directory under `files/home/.agents/skills/<name>/` holding a
+`SKILL.md` with two frontmatter fields, `name` and `description`, followed by
+the procedure. The agent picks a skill by matching its description to the
+request.
+
+- **Pick a name the global playbook kit does not use.** The playbook symlinks
+  its own skills into the same directory at every start, so a same-named team
+  skill collides with one of them (use `team-code-review`, not
+  `code-review`).
+- **Put the trigger phrases in the description**, worded the way a teammate
+  would ask, plus one sentence on what the skill produces.
+- **Write only the delta:** team conventions, sandbox constraints, the output
+  contract. Generic advice on how to do the task is padding.
+- **Say what the agent must never do on its own** (post, approve, push). The
+  team `opencode.jsonc` can gate the commands; the skill is where the agent
+  learns the rule.
+- **Keep it small.** Every session loads the description, so keep it under
+  1024 characters; keep the body under 500 lines and move reference material
+  into sibling files the body points to.
+- **Register every file** in the skill directory as a `files[]` record.
+- **Check that the description wins.** Several playbook skills cover nearby
+  tasks. In a sandbox, ask for the task three ways, one without naming the
+  skill, and confirm yours loads. Repeat when the playbook pin changes.
+
 ## Verifying
 
 ```bash

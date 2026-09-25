@@ -85,6 +85,39 @@ As of acq v3.1.0 an inline flow-style argv (`command: [git, config, ...]`)
 parses as an empty argv and `acq kit validate` does not report it. Write the
 argv as a block list, one `- arg` per line, or a single `- |` block scalar.
 
+## git push/fetch hangs on an SSH remote (msb)
+
+The remote is `git@host:…` or `ssh://git@host/…`. As of acq v3.1.0, msb egress
+admits HTTPS to a host in `caps.network.allow` but not SSH on port 22, so the
+connection times out; adding `host:22` to the allow list does not help. A
+`--clone` workspace inherits the host checkout's SSH origin, so this is the
+default case for a team VCS. Check what git will actually contact:
+
+```bash
+acq exec <sandbox> -- git -C /path/in/guest/to/repo ls-remote --get-url origin
+```
+
+Fix: add the startup step from `docs/scope-layers.md` ("Git to a non-GitHub
+team VCS") that rewrites both SSH forms to HTTPS with `url.<https>.insteadOf`
+and feeds git the proxy-injected token through a credential helper. Keep the
+host in `caps.network.allow` and the token host-side (`acq secret set`).
+
+## OpenCode: `The socket connection was closed unexpectedly` (msb)
+
+Every request in one session fails the same way, on any model, and reopening
+the sandbox does not help, while `curl` to the model endpoint from the same
+sandbox succeeds. The session transcript contains a secret **placeholder**,
+usually captured by a command that printed the environment (`env`,
+`printenv`). msb gives the guest placeholders and swaps in real values at its
+proxy, but only for the host each secret is scoped to. OpenCode replays the
+whole transcript to the model endpoint, so the proxy sees a placeholder bound
+for a different host, fails closed, and drops the connection with no HTTP
+status. The transcript is stored, so every retry rebuilds the same request.
+
+Fix: start a new session; the affected one cannot be sent as-is. Prevent it by
+keeping "never print the environment" in the team conventions file. Not
+verified on sbx.
+
 ## Rotating a team token breaks existing sandboxes
 
 Existing sandboxes captured the secret's *placeholder* at creation; the proxy
