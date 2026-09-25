@@ -26,6 +26,8 @@
 # allows example.com, set UNLISTED_EGRESS_HOST to a host neither kit allows.
 # Each kit's egress host must answer at / with a code other than the
 # backend's deny response (000 on msb, 403 on sbx), or it reads as denied.
+# The personal host must also be one the team kit does NOT allow; otherwise
+# the check passes on the team's entry and proves nothing about yours.
 #
 # Usage (from anywhere):
 #   path/to/personal-kit/scripts/verify
@@ -147,7 +149,9 @@ else
 fi
 # Startup steps can run for a while after create returns. Poll for the LAST
 # startup command's artifact, this kit's git key: commands append in kit
-# order, so once it is set every earlier step has run.
+# order, so once it is set every earlier step has run. If you add or
+# uncomment a step AFTER it in spec.yaml (the terminfo or Nix examples), poll
+# for that step's artifact instead, or its checks may run before it finishes.
 printf '  waiting for startup steps to settle'
 settled=0
 for _ in $(seq 1 120); do
@@ -195,16 +199,21 @@ fi
 # The drop-in must be live in an interactive shell, and the ~/.rc.d loop must
 # be inert in a non-interactive one: that guard is what keeps an `exec zsh`
 # drop-in from swallowing scripted `bash -lc` runs. The guard is checked by
-# running the loop line itself in a non-interactive bash, because `bash -lc`
-# alone never reaches the loop on images whose ~/.bashrc returns early for
-# non-interactive shells.
+# running this kit's own loop line (the one after its marker comment) in a
+# non-interactive bash, because `bash -lc` alone never reaches the loop on
+# images whose ~/.bashrc returns early for non-interactive shells. A loop
+# another layer wired may span several lines, so it is reported as skipped
+# rather than guessed at.
 [ "$(in_sbx "bash -ic 'alias $PERSONAL_ALIAS >/dev/null 2>&1 && echo y' 2>/dev/null")" = "y" ] \
   && ok "drop-in sourced by interactive bash (alias $PERSONAL_ALIAS)" \
   || bad "drop-in not sourced by interactive bash (is the ~/.rc.d loop in ~/.bashrc?)"
-guard="$(in_sbx "loop=\$(grep -F '/.rc.d/' \"\$HOME/.bashrc\"); [ -n \"\$loop\" ] || { echo none; exit 0; }; bash -c \"\$loop
+guard="$(in_sbx "loop=\$(grep -A1 -F '# ~/.rc.d drop-ins (personal kit' \"\$HOME/.bashrc\" | sed -n 2p)
+if [ -z \"\$loop\" ]; then grep -Eqs '\\.rc\\.d\"?/\\*\\.sh' \"\$HOME/.bashrc\" && echo other || echo none; exit 0; fi
+bash -c \"\$loop
 alias $PERSONAL_ALIAS >/dev/null 2>&1 && echo y || echo n\"")"
 case "$guard" in
   n) ok "the ~/.rc.d loop is guarded (inert in a non-interactive shell)" ;;
+  other) skip "the ~/.rc.d loop was wired by another layer; its guard is that layer's to check" ;;
   none) bad "no ~/.rc.d loop in ~/.bashrc" ;;
   *) bad "the ~/.rc.d loop runs in non-interactive shells (unguarded; fix the layer that wired it) or the probe failed ('${guard:-<empty>}')" ;;
 esac

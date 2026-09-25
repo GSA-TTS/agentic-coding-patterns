@@ -68,13 +68,15 @@ files:
 commands:
   # Keep this one: it makes interactive bash source ~/.rc.d/*.sh. It appends
   # one line to ~/.bashrc instead of shipping the file (whole-file overlays
-  # clobber the image's), and skips when any layer already wired a ~/.rc.d
-  # loop. The case guard keeps drop-ins out of scripted `bash -lc` runs, so a
-  # drop-in that execs another shell can never swallow one. If a lower layer
-  # already wired an UNGUARDED loop, this step still skips; verify's guard
-  # check then fails, and the fix belongs in that layer. The step is
-  # non-fatal: if ~/.bashrc cannot be written it warns and the create goes on
-  # without drop-ins.
+  # clobber the image's), and skips when any layer already wired a loop over
+  # ~/.rc.d/*.sh (matched on the glob, so a PATH entry or a comment naming
+  # ~/.rc.d does not count). The case guard keeps drop-ins out of scripted
+  # `bash -lc` runs, so a drop-in that execs another shell can never swallow
+  # one. If a lower layer wired the loop, its guard is that layer's to get
+  # right; verify reports that it skipped the check. A newline is added first
+  # when ~/.bashrc does not end with one, so the appended lines never join its
+  # last line. The step is non-fatal: if ~/.bashrc cannot be written it warns
+  # and the create goes on without drop-ins.
   - phase: startup
     user: "1000"
     description: Source ~/.rc.d drop-ins from interactive bash
@@ -82,7 +84,9 @@ commands:
       - sh
       - -c
       - |
-        grep -qs '\.rc\.d/' "$HOME/.bashrc" && exit 0
+        grep -Eqs '\.rc\.d"?/\*\.sh' "$HOME/.bashrc" && exit 0
+        [ -s "$HOME/.bashrc" ] && [ -n "$(tail -c1 "$HOME/.bashrc")" ] \
+          && printf '\n' >> "$HOME/.bashrc"
         printf '%s\n' '# ~/.rc.d drop-ins (personal kit, interactive shells only)' \
           'case $- in *i*) for f in "$HOME"/.rc.d/*.sh; do [ -r "$f" ] && . "$f"; done ;; esac' \
           >> "$HOME/.bashrc" \
@@ -92,7 +96,7 @@ commands:
   # its own loop. No `$-` guard is needed (zsh reads .zshrc only in interactive
   # shells). `(N)` is zsh's null-glob qualifier: without it an empty ~/.rc.d
   # aborts with "no matches found". zsh sourcing the 99- `exec zsh` drop-in is
-  # safe, because that line guards on ZSH_VERSION.
+  # safe, because that line guards on ZSH_VERSION and RC_D_ZSH_HANDOFF.
   #  - phase: startup
   #    user: "1000"
   #    description: Source ~/.rc.d drop-ins from zsh
@@ -100,7 +104,9 @@ commands:
   #      - sh
   #      - -c
   #      - |
-  #        grep -qs '\.rc\.d/' "$HOME/.zshrc" && exit 0
+  #        grep -Eqs '\.rc\.d"?/\*\.sh' "$HOME/.zshrc" && exit 0
+  #        [ -s "$HOME/.zshrc" ] && [ -n "$(tail -c1 "$HOME/.zshrc")" ] \
+  #          && printf '\n' >> "$HOME/.zshrc"
   #        printf '%s\n' '# ~/.rc.d drop-ins (personal kit)' \
   #          'for f in "$HOME"/.rc.d/*.sh(N); do . "$f"; done' \
   #          >> "$HOME/.zshrc" \
@@ -157,7 +163,7 @@ commands:
   #        [ -r /etc/profile.d/nix.sh ] && . /etc/profile.d/nix.sh
   #        command -v nix >/dev/null 2>&1 || exit 0
   #        rev=<the image's NIXPKGS_REV>
-  #        for tool in starship eza; do
+  #        for tool in starship eza delta; do
   #          command -v "$tool" >/dev/null 2>&1 && continue
   #          nix profile install "github:NixOS/nixpkgs/${rev}#${tool}" \
   #            || echo "nix install of ${tool} failed; skipping" >&2

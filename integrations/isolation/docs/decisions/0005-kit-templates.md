@@ -101,7 +101,11 @@ Adopt **templates (option 1)** and **placement (B)**.
   coupling, agent-specific config beyond a single OpenCode example of the
   config-tier mechanism (`OPENCODE_CONFIG` pointing at a team file), any
   workaround specific to its repos, and any internal URL. The reference
-  implementation is named, not linked.
+  implementation is named, not linked. One deliberate exception to the Nix
+  exclusion: the personal-kit template carries a *commented* Nix tool-install
+  step, tied to this repo's devenv image and its `NIXPKGS_REV`, as the single
+  sanctioned case of a personal tool installed at startup rather than baked
+  into the image. It is not live config and no team coupling comes with it.
 
 ## Consequences
 
