@@ -19,4 +19,7 @@ alias gst='git status'
 # a 99- file: exec replaces the shell, so anything sorting after it never
 # runs in bash. zsh does not read ~/.bashrc, so give it its own ~/.rc.d loop
 # with an append-if-absent startup step like the bash one in spec.yaml.
-# case $- in *i*) [ -z "${ZSH_VERSION:-}" ] && command -v zsh >/dev/null 2>&1 && exec zsh ;; esac
+# `bash -ic` counts as interactive too, so also require a terminal: without
+# `[ -t 0 ]`, a scripted `acq exec ... bash -ic '...'` would exec zsh and
+# never run its command.
+# case $- in *i*) [ -t 0 ] && [ -z "${ZSH_VERSION:-}" ] && command -v zsh >/dev/null 2>&1 && exec zsh ;; esac

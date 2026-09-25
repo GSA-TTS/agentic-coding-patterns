@@ -11,10 +11,11 @@
 #   1. the global layer is intact (USAi merged into OpenCode's global config);
 #   2. the team layer is intact under this kit (its env var, conventions,
 #      startup command, and egress host all survive);
-#   3. every live extension-point value in spec.yaml landed, and the shell
-#      drop-in is sourced by interactive bash but not by scripted bash;
-#   4. the layers compose: environment and files[] from both kits coexist,
-#      and caps.network.allow is the union of both kits' hosts.
+#   3. every live extension-point value in spec.yaml landed (so both kits'
+#      environment and files[] coexist), the shell drop-in is sourced by
+#      interactive bash, and the ~/.rc.d loop is guarded against
+#      non-interactive shells;
+#   4. caps.network.allow is the union of both kits' hosts.
 # The per-field rules themselves (last wins, append order) are asserted by
 # the team-kit template's verify against a competing fixture.
 # Extend the PERSONAL section as your kit grows: one assertion per mechanism.
@@ -23,6 +24,8 @@
 # TEAM_KIT at your team's real kit and set the TEAM_* variables to what it
 # ships (each defaults to the team-kit template's value). If your team kit
 # allows example.com, set UNLISTED_EGRESS_HOST to a host neither kit allows.
+# Each kit's egress host must answer at / with a code other than the
+# backend's deny response (000 on msb, 403 on sbx), or it reads as denied.
 #
 # Usage (from anywhere):
 #   path/to/personal-kit/scripts/verify
@@ -146,11 +149,13 @@ fi
 # startup command's artifact, this kit's git key: commands append in kit
 # order, so once it is set every earlier step has run.
 printf '  waiting for startup steps to settle'
+settled=0
 for _ in $(seq 1 120); do
-  [ "$(in_sbx "git config --global $PERSONAL_GIT_KEY 2>/dev/null")" = "$PERSONAL_GIT_VALUE" ] && break
+  [ "$(in_sbx "git config --global $PERSONAL_GIT_KEY 2>/dev/null")" = "$PERSONAL_GIT_VALUE" ] && { settled=1; break; }
   printf '.'; sleep 1
 done
 printf '\n'
+[ "$settled" = 1 ] || echo "  note: $PERSONAL_GIT_KEY never became '$PERSONAL_GIT_VALUE' within 120s; later checks may run before startup finished. If you replaced that step, update PERSONAL_GIT_KEY/PERSONAL_GIT_VALUE." >&2
 
 info "3. Global layer intact"
 eff="$("$ACQ" exec "$SBX_NAME" -- sh -c 'opencode debug config' </dev/null 2>"$WORK/debug-config.err")" \
@@ -181,24 +186,26 @@ tui="$(in_sbx 'printf "%s" "${OPENCODE_TUI_CONFIG:-}"')"
 [ "$(in_sbx "git config --global $PERSONAL_GIT_KEY 2>/dev/null")" = "$PERSONAL_GIT_VALUE" ] \
   && ok "startup command ran ($PERSONAL_GIT_KEY = $PERSONAL_GIT_VALUE)" \
   || bad "startup command did not run"
-# The drop-in must be live in an interactive shell and absent from a scripted
-# one: the second half is what keeps an `exec zsh` drop-in from swallowing
-# `acq exec ... bash -lc` runs.
+# The drop-in must be live in an interactive shell, and the ~/.rc.d loop must
+# be inert in a non-interactive one: that guard is what keeps an `exec zsh`
+# drop-in from swallowing scripted `bash -lc` runs. The guard is checked by
+# running the loop line itself in a non-interactive bash, because `bash -lc`
+# alone never reaches the loop on images whose ~/.bashrc returns early for
+# non-interactive shells.
 [ "$(in_sbx "bash -ic 'alias $PERSONAL_ALIAS >/dev/null 2>&1 && echo y' 2>/dev/null")" = "y" ] \
   && ok "drop-in sourced by interactive bash (alias $PERSONAL_ALIAS)" \
   || bad "drop-in not sourced by interactive bash (is the ~/.rc.d loop in ~/.bashrc?)"
-[ "$(in_sbx "bash -lc 'alias $PERSONAL_ALIAS >/dev/null 2>&1 && echo y || echo n' 2>/dev/null")" = "n" ] \
-  && ok "drop-in not sourced by scripted bash -lc" \
-  || bad "drop-in sourced by scripted bash -lc (or the probe failed)"
+guard="$(in_sbx "loop=\$(grep -F '/.rc.d/' \"\$HOME/.bashrc\"); [ -n \"\$loop\" ] || { echo none; exit 0; }; bash -c \"\$loop
+alias $PERSONAL_ALIAS >/dev/null 2>&1 && echo y || echo n\"")"
+case "$guard" in
+  n) ok "the ~/.rc.d loop is guarded (inert in a non-interactive shell)" ;;
+  none) bad "no ~/.rc.d loop in ~/.bashrc" ;;
+  *) bad "the ~/.rc.d loop runs in non-interactive shells (unguarded; fix the layer that wired it) or the probe failed ('${guard:-<empty>}')" ;;
+esac
 
-info "6. Layers compose (docs/scope-layers.md)"
-# environment and files[]: distinct names and paths from both kits coexist.
-{ [ "$cfg" = "$TEAM_CONFIG" ] && [ "$tui" = "$PERSONAL_TUI" ]; } \
-  && ok "environment: team and personal variables coexist" \
-  || bad "environment: a layer's variable is missing (OPENCODE_CONFIG='${cfg:-<unset>}', OPENCODE_TUI_CONFIG='${tui:-<unset>}')"
-[ "$(in_sbx "test -s $TEAM_CONFIG && test -s $PERSONAL_TUI && echo y")" = "y" ] \
-  && ok "files[]: team and personal files coexist" \
-  || bad "files[]: a layer's file is missing"
+info "6. Egress union (docs/scope-layers.md)"
+# environment and files[] coexistence is already covered: sections 4 and 5
+# assert both kits' variables and files.
 # caps.network.allow: union. A host listed by neither kit must be denied (the
 # negative control); each kit's host must get a different answer.
 if [ "$SKIP_NETWORK" = "1" ]; then
@@ -214,7 +221,7 @@ else
       code="$(probe_host "$host")"
       { [ -n "$code" ] && [ "$code" != "$code_denied" ]; } \
         && ok "caps.network.allow: $side host admitted ($host -> $code)" \
-        || bad "caps.network.allow: $side host denied ($host -> ${code:-none}, same as the unlisted control); union broken, or the host is offline"
+        || bad "caps.network.allow: $side host denied ($host -> ${code:-none}, same as the unlisted control): the union is broken, the host is offline, or its / answers with the backend's deny code (pick another host)"
     done
   fi
 fi
