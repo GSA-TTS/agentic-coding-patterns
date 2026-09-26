@@ -68,9 +68,9 @@ files:
 commands:
   # Keep this one: it makes interactive bash source ~/.rc.d/*.sh. It appends
   # one line to ~/.bashrc instead of shipping the file (whole-file overlays
-  # clobber the image's), and skips when any layer already wired a loop over
-  # ~/.rc.d/*.sh (matched on the glob, so a PATH entry or a comment naming
-  # ~/.rc.d does not count). The case guard keeps drop-ins out of scripted
+  # clobber the image's), and skips when any non-comment line in ~/.bashrc
+  # already names ~/.rc.d (another layer's loop, however it is spelled).
+  # verify finds THIS loop by the marker comment below; keep that text. The case guard keeps drop-ins out of scripted
   # `bash -lc` runs, so a drop-in that execs another shell can never swallow
   # one. If a lower layer wired the loop, its guard is that layer's to get
   # right; verify reports that it skipped the check. A newline is added first
@@ -84,7 +84,7 @@ commands:
       - sh
       - -c
       - |
-        grep -Eqs '\.rc\.d"?/\*\.sh' "$HOME/.bashrc" && exit 0
+        grep -Eqs '^[^#]*\.rc\.d' "$HOME/.bashrc" && exit 0
         [ -s "$HOME/.bashrc" ] && [ -n "$(tail -c1 "$HOME/.bashrc")" ] \
           && printf '\n' >> "$HOME/.bashrc"
         printf '%s\n' '# ~/.rc.d drop-ins (personal kit, interactive shells only)' \
@@ -104,7 +104,7 @@ commands:
   #      - sh
   #      - -c
   #      - |
-  #        grep -Eqs '\.rc\.d"?/\*\.sh' "$HOME/.zshrc" && exit 0
+  #        grep -Eqs '^[^#]*\.rc\.d' "$HOME/.zshrc" && exit 0
   #        [ -s "$HOME/.zshrc" ] && [ -n "$(tail -c1 "$HOME/.zshrc")" ] \
   #          && printf '\n' >> "$HOME/.zshrc"
   #        printf '%s\n' '# ~/.rc.d drop-ins (personal kit)' \
@@ -146,8 +146,10 @@ commands:
   # "tools belong in the image": a tool only you want, installed in a STARTUP
   # step that skips on failure, never `phase: install` (a failed create-time
   # install fails the whole create). Pin to the image's
-  # NIXPKGS_REV so installs hit the binary cache; allow cache.nixos.org and
-  # codeload.github.com above. Each tool is non-fatal, and drop-ins must
+  # NIXPKGS_REV so installs hit the binary cache: copy the commit from that
+  # Dockerfile's ARG (it is not set inside the sandbox). Allow cache.nixos.org
+  # and codeload.github.com above; api.github.com, which the github: fetch
+  # also uses, is already allowed by the global playbook kit. Each tool is non-fatal, and drop-ins must
   # guard on the binary existing. So must git config that names the tool:
   # ship it as its own fragment (e.g. files/home/personal/gitconfig-delta)
   # and register its include.path in this step only while the tool is
@@ -162,7 +164,7 @@ commands:
   #      - |
   #        [ -r /etc/profile.d/nix.sh ] && . /etc/profile.d/nix.sh
   #        command -v nix >/dev/null 2>&1 || exit 0
-  #        rev=<the image's NIXPKGS_REV>
+  #        rev='REPLACE-with-the-image-NIXPKGS_REV-commit'
   #        for tool in starship eza delta; do
   #          command -v "$tool" >/dev/null 2>&1 && continue
   #          nix profile install "github:NixOS/nixpkgs/${rev}#${tool}" \

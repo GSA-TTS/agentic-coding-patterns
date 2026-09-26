@@ -14,7 +14,7 @@ set the same one (`OPENCODE_TUI_CONFIG`, for example), so it can be non-empty
 without your kit.
 
 ```bash
-acq exec <sandbox> -- sh -c 'ls ~/.rc.d; git config --global alias.st'   # both empty => the kit did not apply
+acq exec <sandbox> -- sh -c 'ls ~/.rc.d/50-example.sh; git config --global alias.st'   # both missing => the kit did not apply
 ```
 
 Fix the export (put it in your shell rc), then recreate:
