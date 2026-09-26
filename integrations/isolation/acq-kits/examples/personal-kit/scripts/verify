@@ -61,13 +61,14 @@ PERSONAL_ALIAS=gst
 PERSONAL_GIT_KEY=alias.st
 PERSONAL_GIT_VALUE=status
 PERSONAL_EGRESS_HOST=example.net
-# Values the team kit ships; override them for your team's kit. Defaults are
+# Values the team kit ships; override them for your team's kit, or set one to
+# empty to skip its check when the team kit has no such thing. Defaults are
 # the team-kit template's.
-TEAM_CONFIG="${TEAM_CONFIG:-/home/agent/team-config/opencode.jsonc}"
-TEAM_CONVENTIONS="${TEAM_CONVENTIONS:-team-conventions.md}"
-TEAM_GIT_KEY="${TEAM_GIT_KEY:-push.autoSetupRemote}"
-TEAM_GIT_VALUE="${TEAM_GIT_VALUE:-true}"
-TEAM_EGRESS_HOST="${TEAM_EGRESS_HOST:-example.org}"
+TEAM_CONFIG="${TEAM_CONFIG-/home/agent/team-config/opencode.jsonc}"
+TEAM_CONVENTIONS="${TEAM_CONVENTIONS-team-conventions.md}"
+TEAM_GIT_KEY="${TEAM_GIT_KEY-push.autoSetupRemote}"
+TEAM_GIT_VALUE="${TEAM_GIT_VALUE-true}"
+TEAM_EGRESS_HOST="${TEAM_EGRESS_HOST-example.org}"
 # Allowed by neither kit: the egress probe's negative control.
 UNLISTED_EGRESS_HOST="${UNLISTED_EGRESS_HOST:-example.com}"
 
@@ -169,15 +170,21 @@ printf '%s' "$eff" | grep -q '"usai"' \
   || bad "USAi provider missing from the effective config"
 
 info "4. Team layer intact under this kit"
-cfg="$(in_sbx 'printf "%s" "${OPENCODE_CONFIG:-}"')"
-[ "$cfg" = "$TEAM_CONFIG" ] && ok "team OPENCODE_CONFIG survives ($cfg)" \
-  || bad "team OPENCODE_CONFIG unexpected: '${cfg:-<unset>}' (shadowed by this kit, or the team kit did not apply)"
-printf '%s' "$eff" | grep -q "$TEAM_CONVENTIONS" \
-  && ok "team conventions still in the effective config instructions" \
-  || bad "$TEAM_CONVENTIONS missing from the effective config instructions"
-[ "$(in_sbx "git config --global $TEAM_GIT_KEY 2>/dev/null")" = "$TEAM_GIT_VALUE" ] \
-  && ok "team startup command ran ($TEAM_GIT_KEY = $TEAM_GIT_VALUE)" \
-  || bad "team startup command did not run, or this kit overrode it"
+if [ -n "$TEAM_CONFIG" ]; then
+  cfg="$(in_sbx 'printf "%s" "${OPENCODE_CONFIG:-}"')"
+  [ "$cfg" = "$TEAM_CONFIG" ] && ok "team OPENCODE_CONFIG survives ($cfg)" \
+    || bad "team OPENCODE_CONFIG unexpected: '${cfg:-<unset>}' (shadowed by this kit, or the team kit did not apply)"
+else skip "team OPENCODE_CONFIG (TEAM_CONFIG empty)"; fi
+if [ -n "$TEAM_CONVENTIONS" ]; then
+  printf '%s' "$eff" | grep -qF "$TEAM_CONVENTIONS" \
+    && ok "team conventions still in the effective config instructions" \
+    || bad "$TEAM_CONVENTIONS missing from the effective config instructions"
+else skip "team conventions (TEAM_CONVENTIONS empty)"; fi
+if [ -n "$TEAM_GIT_KEY" ]; then
+  [ "$(in_sbx "git config --global $TEAM_GIT_KEY 2>/dev/null")" = "$TEAM_GIT_VALUE" ] \
+    && ok "team startup command ran ($TEAM_GIT_KEY = $TEAM_GIT_VALUE)" \
+    || bad "team startup command did not run, or this kit overrode it"
+else skip "team startup command (TEAM_GIT_KEY empty)"; fi
 
 info "5. Live values landed"
 # The TUI override is optional: drop it from spec.yaml when your team's README
@@ -193,8 +200,8 @@ else
 fi
 [ "$(in_sbx "test -s $PERSONAL_DROPIN && echo y")" = "y" ] \
   && ok "shell drop-in present" || bad "shell drop-in missing"
-[ "$(in_sbx "git config --global $PERSONAL_GIT_KEY 2>/dev/null")" = "$PERSONAL_GIT_VALUE" ] \
-  && ok "startup command ran ($PERSONAL_GIT_KEY = $PERSONAL_GIT_VALUE)" \
+# The settle poll above already probed this kit's git key.
+[ "$settled" = 1 ] && ok "startup command ran ($PERSONAL_GIT_KEY = $PERSONAL_GIT_VALUE)" \
   || bad "startup command did not run"
 # The drop-in must be live in an interactive shell, and the ~/.rc.d loop must
 # be inert in a non-interactive one: that guard is what keeps an `exec zsh`
@@ -204,11 +211,12 @@ fi
 # images whose ~/.bashrc returns early for non-interactive shells. A loop
 # another layer wired may span several lines, so it is reported as skipped
 # rather than guessed at.
-[ "$(in_sbx "bash -ic 'alias $PERSONAL_ALIAS >/dev/null 2>&1 && echo y' 2>/dev/null")" = "y" ] \
+# Last line only: ~/.bashrc or a drop-in may print its own output first.
+[ "$(in_sbx "bash -ic 'alias $PERSONAL_ALIAS >/dev/null 2>&1 && echo y' 2>/dev/null" | tail -n1)" = "y" ] \
   && ok "drop-in sourced by interactive bash (alias $PERSONAL_ALIAS)" \
   || bad "drop-in not sourced by interactive bash (is the ~/.rc.d loop in ~/.bashrc?)"
 guard="$(in_sbx "loop=\$(grep -A1 -F '# ~/.rc.d drop-ins (personal kit' \"\$HOME/.bashrc\" | sed -n 2p)
-if [ -z \"\$loop\" ]; then grep -Eqs '\\.rc\\.d\"?/\\*\\.sh' \"\$HOME/.bashrc\" && echo other || echo none; exit 0; fi
+if [ -z \"\$loop\" ]; then grep -Eqs '^[^#]*\\.rc\\.d' \"\$HOME/.bashrc\" && echo other || echo none; exit 0; fi
 bash -c \"\$loop
 alias $PERSONAL_ALIAS >/dev/null 2>&1 && echo y || echo n\"")"
 case "$guard" in
@@ -227,12 +235,24 @@ if [ "$SKIP_NETWORK" = "1" ]; then
   skip "caps.network.allow union (SKIP_NETWORK=1)"
 else
   code_denied="$(probe_host "$UNLISTED_EGRESS_HOST")"
-  if [ -z "$code_denied" ] || [ "$code_denied" = "200" ]; then
-    bad "caps.network.allow: unlisted control host was admitted ($UNLISTED_EGRESS_HOST -> ${code_denied:-none}); the network tier allows everything, so the union cannot be observed"
-  else
-    ok "caps.network.allow: unlisted control host denied ($UNLISTED_EGRESS_HOST -> $code_denied)"
+  # The backends' deny answers: 000 (no connection, msb) or 403 (proxy, sbx).
+  case "$code_denied" in
+    000|403) ok "caps.network.allow: unlisted control host denied ($UNLISTED_EGRESS_HOST -> $code_denied)" ;;
+    "") bad "caps.network.allow: probe of the unlisted control host failed (no answer from acq exec)" ;;
+    *) bad "caps.network.allow: unlisted control host answered $code_denied, not a deny code (000/403): something admits it, so the union cannot be observed" ;;
+  esac
+  if [ "$code_denied" = 000 ] || [ "$code_denied" = 403 ]; then
     for side in team personal; do
-      if [ "$side" = team ]; then host="$TEAM_EGRESS_HOST"; else host="$PERSONAL_EGRESS_HOST"; fi
+      if [ "$side" = team ]; then
+        host="$TEAM_EGRESS_HOST"
+        [ -n "$host" ] || { skip "caps.network.allow: team host (TEAM_EGRESS_HOST empty)"; continue; }
+      else
+        host="$PERSONAL_EGRESS_HOST"
+        grep -qF -- "- $host" "$KIT_DIR/spec.yaml" \
+          || { skip "caps.network.allow: personal host ($host not in spec.yaml)"; continue; }
+        grep -qF -- "- $host" "$TEAM_KIT/spec.yaml" \
+          && { skip "caps.network.allow: personal host ($host is also in the team kit, so this proves nothing)"; continue; }
+      fi
       code="$(probe_host "$host")"
       { [ -n "$code" ] && [ "$code" != "$code_denied" ]; } \
         && ok "caps.network.allow: $side host admitted ($host -> $code)" \
