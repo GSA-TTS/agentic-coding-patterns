@@ -1,0 +1,273 @@
+#!/usr/bin/env bash
+#
+# verify — host-side, end-to-end check for the personal-kit TEMPLATE, and for
+# any copy of it. Backend-neutral: only `acq` verbs (kit validate, create,
+# exec, rm), so it runs the same on sbx and msb.
+#
+# It proves the three-layer stack. It creates a throwaway sandbox through
+# `acq`, which applies its pinned built-in bundle (zscaler-ca-certificate,
+# usai-provider, agentic-coding-playbook, git-ssh-sign) and then, via
+# ACQ_EXTRA_KITS, the TEAM kit followed by this kit. It then asserts:
+#   1. the global layer is intact (USAi merged into OpenCode's global config);
+#   2. the team layer is intact under this kit (its env var, conventions,
+#      startup command, and egress host all survive);
+#   3. every live extension-point value in spec.yaml landed (so both kits'
+#      environment and files[] coexist), the shell drop-in is sourced by
+#      interactive bash, and the ~/.rc.d loop is guarded against
+#      non-interactive shells;
+#   4. caps.network.allow is the union of both kits' hosts.
+# The per-field rules themselves (last wins, append order) are asserted by
+# the team-kit template's verify against a competing fixture.
+# Extend the PERSONAL section as your kit grows: one assertion per mechanism.
+#
+# The team kit defaults to the team-kit template next to this one. Point
+# TEAM_KIT at your team's real kit and set the TEAM_* variables to what it
+# ships (each defaults to the team-kit template's value). If your team kit
+# allows example.com, set UNLISTED_EGRESS_HOST to a host neither kit allows.
+# Each kit's egress host must answer at / with a code other than the
+# backend's deny response (000 on msb, 403 on sbx), or it reads as denied.
+# The personal host must also be one the team kit does NOT allow; otherwise
+# the check passes on the team's entry and proves nothing about yours.
+#
+# Usage (from anywhere):
+#   path/to/personal-kit/scripts/verify
+#   TEAM_KIT=/path/to/team-kit …/verify     # stack on your team's kit
+#   TEAM_CONFIG=… TEAM_EGRESS_HOST=… …/verify   # that kit's values (see below)
+#   KEEP=1 …/verify                         # keep the sandbox + work dir
+#   ACQ_DIR=/path/to/quickstart …/verify    # acq not on PATH: use this checkout
+#   SKIP_NETWORK=1 …/verify                 # skip the egress probes (offline host)
+#
+# set -e is omitted on purpose: accumulate pass/fail rather than abort.
+
+set -uo pipefail
+
+KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+KIT_NAME="$(basename "$KIT_DIR")"
+TEAM_KIT="${TEAM_KIT:-$(dirname "$KIT_DIR")/team-kit}"
+SBX_NAME="${KIT_NAME}-verify-$$"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/${KIT_NAME}-verify.XXXXXX")"
+WORKSPACE="$WORK/workspace"
+CREATE_LOG="$WORK/acq-create.log"
+KEEP="${KEEP:-0}"
+SKIP_NETWORK="${SKIP_NETWORK:-0}"
+
+# acq: on PATH, or from an agentic-coding-quickstart checkout named by ACQ_DIR.
+if [ -n "${ACQ_DIR:-}" ]; then ACQ="$ACQ_DIR/acq"; else ACQ="$(command -v acq || true)"; fi
+
+# Values this kit ships (mirror spec.yaml; update both when you replace one).
+PERSONAL_TUI=/home/agent/personal/tui.jsonc
+PERSONAL_DROPIN=/home/agent/.rc.d/50-example.sh
+PERSONAL_ALIAS=gst
+PERSONAL_GIT_KEY=alias.st
+PERSONAL_GIT_VALUE=status
+PERSONAL_EGRESS_HOST=example.net
+# Values the team kit ships; override them for your team's kit, or set one to
+# empty to skip its check when the team kit has no such thing. Defaults are
+# the team-kit template's.
+TEAM_CONFIG="${TEAM_CONFIG-/home/agent/team-config/opencode.jsonc}"
+TEAM_CONVENTIONS="${TEAM_CONVENTIONS-team-conventions.md}"
+TEAM_GIT_KEY="${TEAM_GIT_KEY-push.autoSetupRemote}"
+TEAM_GIT_VALUE="${TEAM_GIT_VALUE-true}"
+TEAM_EGRESS_HOST="${TEAM_EGRESS_HOST-example.org}"
+# Allowed by neither kit: the egress probe's negative control.
+UNLISTED_EGRESS_HOST="${UNLISTED_EGRESS_HOST:-example.com}"
+
+pass=0
+fail=0
+skipped=0
+ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass+1)); }
+bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail+1)); }
+skip() { printf '  \033[2mSKIP\033[0m %s\n' "$1"; skipped=$((skipped+1)); }
+info() { printf '\n\033[1m%s\033[0m\n' "$1"; }
+
+cleanup() {
+  if [ "$KEEP" = "1" ]; then
+    printf '\nKEEP=1 set; leaving sandbox %s and %s in place.\n' "$SBX_NAME" "$WORK" >&2
+    return
+  fi
+  [ -n "$ACQ" ] && "$ACQ" rm "$SBX_NAME" </dev/null >/dev/null 2>&1 || true
+  rm -rf "$WORK" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+# On a signal, exit non-zero (the EXIT trap then cleans up) rather than falling
+# through: the probes below swallow errors, so continuing would keep "testing"
+# a removed sandbox and print a cascade of misleading FAILs.
+trap 'exit 130' INT TERM
+
+# Run a command in the sandbox; stderr dropped, failures collapse to empty
+# output. Pair every negative assertion with a positive one that would fail
+# loudly, or a broken exec passes it vacuously.
+in_sbx() { "$ACQ" exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true; }
+
+# HTTP status code seen from the sandbox for https://HOST/ ("000" = no
+# connection). A backend may instead answer a denied host with its own status
+# page, so "admitted" is judged against the unlisted control host, not "000".
+probe_host() { in_sbx "curl -sS -o /dev/null -m 20 -w '%{http_code}' 'https://$1/' 2>/dev/null"; }
+
+info "0. Preconditions"
+if [ -z "$ACQ" ] || [ ! -x "$ACQ" ]; then
+  echo "  acq not found. Put acq on PATH, or set ACQ_DIR to an agentic-coding-quickstart checkout." >&2
+  exit 1
+fi
+# `acq kit validate` exists only in an acq with the kit-translate layer (acq
+# v2.0.0+). Checked through acq itself: PATH usually holds a symlink into the
+# quickstart clone, so a path-relative file check would look in the wrong place.
+kit_usage="$("$ACQ" kit </dev/null 2>&1 || true)"
+case "$kit_usage" in
+  *validate*) ;;
+  *) echo "  $ACQ has no 'kit validate' verb — update the quickstart checkout (git pull)." >&2; exit 1 ;;
+esac
+"$ACQ" version 2>/dev/null | sed 's/^/  /'
+[ -f "$KIT_DIR/spec.yaml" ] && ok "kit spec.yaml present" || { bad "spec.yaml missing"; exit 1; }
+[ -f "$TEAM_KIT/spec.yaml" ] && ok "team kit found ($TEAM_KIT)" \
+  || { bad "team kit not found at $TEAM_KIT (set TEAM_KIT)"; exit 1; }
+# Both kit paths go into ACQ_EXTRA_KITS, which is whitespace-separated.
+case "$TEAM_KIT$KIT_DIR" in
+  *[[:space:]]*) bad "a kit path contains whitespace; ACQ_EXTRA_KITS is whitespace-separated (move the kit)"; exit 1 ;;
+esac
+
+info "1. Kits validate (hybrid/v1)"
+for k in "$TEAM_KIT" "$KIT_DIR"; do
+  if "$ACQ" kit validate "$k" >/dev/null 2>&1; then
+    ok "$(basename "$k") validates"
+  else
+    bad "$(basename "$k") failed validation — run: $ACQ kit validate $k"
+  fi
+done
+
+info "2. Create a sandbox through acq (built-in bundle + team kit + this kit)"
+mkdir -p "$WORKSPACE" && git init -q "$WORKSPACE"
+echo "  creating $SBX_NAME (workspace $WORKSPACE)..."
+ACQ_EXTRA_KITS="$TEAM_KIT $KIT_DIR" ACQ_UPDATE_CHECK=0 \
+  "$ACQ" create opencode --name "$SBX_NAME" "$WORKSPACE" </dev/null >"$CREATE_LOG" 2>&1
+rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "sandbox created (kits via ACQ_EXTRA_KITS)"
+else
+  bad "acq create failed (exit $rc)"
+  sed 's/^/  | /' "$CREATE_LOG" >&2
+  exit 1
+fi
+# Startup steps can run for a while after create returns. Poll for the LAST
+# startup command's artifact, this kit's git key: commands append in kit
+# order, so once it is set every earlier step has run. If you add or
+# uncomment a step AFTER it in spec.yaml (the terminfo or Nix examples), poll
+# for that step's artifact instead, or its checks may run before it finishes.
+printf '  waiting for startup steps to settle'
+settled=0
+for _ in $(seq 1 120); do
+  [ "$(in_sbx "git config --global $PERSONAL_GIT_KEY 2>/dev/null")" = "$PERSONAL_GIT_VALUE" ] && { settled=1; break; }
+  printf '.'; sleep 1
+done
+printf '\n'
+[ "$settled" = 1 ] || echo "  note: $PERSONAL_GIT_KEY never became '$PERSONAL_GIT_VALUE' within 120s; later checks may run before startup finished. If you replaced that step, update PERSONAL_GIT_KEY/PERSONAL_GIT_VALUE." >&2
+
+info "3. Global layer intact"
+eff="$("$ACQ" exec "$SBX_NAME" -- sh -c 'opencode debug config' </dev/null 2>"$WORK/debug-config.err")" \
+  || sed 's/^/    stderr| /' "$WORK/debug-config.err" >&2
+printf '%s' "$eff" | grep -q '"usai"' \
+  && ok "USAi provider present in the effective config" \
+  || bad "USAi provider missing from the effective config"
+
+info "4. Team layer intact under this kit"
+if [ -n "$TEAM_CONFIG" ]; then
+  cfg="$(in_sbx 'printf "%s" "${OPENCODE_CONFIG:-}"')"
+  [ "$cfg" = "$TEAM_CONFIG" ] && ok "team OPENCODE_CONFIG survives ($cfg)" \
+    || bad "team OPENCODE_CONFIG unexpected: '${cfg:-<unset>}' (shadowed by this kit, or the team kit did not apply)"
+else skip "team OPENCODE_CONFIG (TEAM_CONFIG empty)"; fi
+if [ -n "$TEAM_CONVENTIONS" ]; then
+  printf '%s' "$eff" | grep -qF "$TEAM_CONVENTIONS" \
+    && ok "team conventions still in the effective config instructions" \
+    || bad "$TEAM_CONVENTIONS missing from the effective config instructions"
+else skip "team conventions (TEAM_CONVENTIONS empty)"; fi
+if [ -n "$TEAM_GIT_KEY" ]; then
+  [ "$(in_sbx "git config --global $TEAM_GIT_KEY 2>/dev/null")" = "$TEAM_GIT_VALUE" ] \
+    && ok "team startup command ran ($TEAM_GIT_KEY = $TEAM_GIT_VALUE)" \
+    || bad "team startup command did not run, or this kit overrode it"
+else skip "team startup command (TEAM_GIT_KEY empty)"; fi
+
+info "5. Live values landed"
+# The TUI override is optional: drop it from spec.yaml when your team's README
+# does not allow a personal OPENCODE_TUI_CONFIG, and these checks skip.
+if grep -Eq '^[[:space:]]+OPENCODE_TUI_CONFIG:' "$KIT_DIR/spec.yaml"; then
+  tui="$(in_sbx 'printf "%s" "${OPENCODE_TUI_CONFIG:-}"')"
+  [ "$tui" = "$PERSONAL_TUI" ] && ok "OPENCODE_TUI_CONFIG = $tui" \
+    || bad "OPENCODE_TUI_CONFIG unexpected: '${tui:-<unset>}'"
+  [ "$(in_sbx "test -s $PERSONAL_TUI && echo y")" = "y" ] \
+    && ok "TUI config file present" || bad "TUI config file missing"
+else
+  skip "OPENCODE_TUI_CONFIG override (not in spec.yaml)"
+fi
+[ "$(in_sbx "test -s $PERSONAL_DROPIN && echo y")" = "y" ] \
+  && ok "shell drop-in present" || bad "shell drop-in missing"
+# The settle poll above already probed this kit's git key.
+[ "$settled" = 1 ] && ok "startup command ran ($PERSONAL_GIT_KEY = $PERSONAL_GIT_VALUE)" \
+  || bad "startup command did not run"
+# The drop-in must be live in an interactive shell, and the ~/.rc.d loop must
+# be inert in a non-interactive one: that guard is what keeps an `exec zsh`
+# drop-in from swallowing scripted `bash -lc` runs. The guard is checked by
+# running this kit's own loop line (the one after its marker comment) in a
+# non-interactive bash, because `bash -lc` alone never reaches the loop on
+# images whose ~/.bashrc returns early for non-interactive shells. A loop
+# another layer wired may span several lines, so it is reported as skipped
+# rather than guessed at.
+# Last line only: ~/.bashrc or a drop-in may print its own output first.
+[ "$(in_sbx "bash -ic 'alias $PERSONAL_ALIAS >/dev/null 2>&1 && echo y' 2>/dev/null" | tail -n1)" = "y" ] \
+  && ok "drop-in sourced by interactive bash (alias $PERSONAL_ALIAS)" \
+  || bad "drop-in not sourced by interactive bash (is the ~/.rc.d loop in ~/.bashrc?)"
+guard="$(in_sbx "loop=\$(grep -A1 -F '# ~/.rc.d drop-ins (personal kit' \"\$HOME/.bashrc\" | sed -n 2p)
+if [ -z \"\$loop\" ]; then grep -Eqs '^[^#]*\\.rc\\.d' \"\$HOME/.bashrc\" && echo other || echo none; exit 0; fi
+bash -c \"\$loop
+alias $PERSONAL_ALIAS >/dev/null 2>&1 && echo y || echo n\"")"
+case "$guard" in
+  n) ok "the ~/.rc.d loop is guarded (inert in a non-interactive shell)" ;;
+  other) skip "the ~/.rc.d loop was wired by another layer; its guard is that layer's to check" ;;
+  none) bad "no ~/.rc.d loop in ~/.bashrc" ;;
+  *) bad "the ~/.rc.d loop runs in non-interactive shells (unguarded; fix the layer that wired it) or the probe failed ('${guard:-<empty>}')" ;;
+esac
+
+info "6. Egress union (docs/scope-layers.md)"
+# environment and files[] coexistence is already covered: sections 4 and 5
+# assert both kits' variables and files.
+# caps.network.allow: union. A host listed by neither kit must be denied (the
+# negative control); each kit's host must get a different answer.
+if [ "$SKIP_NETWORK" = "1" ]; then
+  skip "caps.network.allow union (SKIP_NETWORK=1)"
+else
+  code_denied="$(probe_host "$UNLISTED_EGRESS_HOST")"
+  # The backends' deny answers: 000 (no connection, msb) or 403 (proxy, sbx).
+  case "$code_denied" in
+    000|403) ok "caps.network.allow: unlisted control host denied ($UNLISTED_EGRESS_HOST -> $code_denied)" ;;
+    "") bad "caps.network.allow: probe of the unlisted control host failed (no answer from acq exec)" ;;
+    *) bad "caps.network.allow: unlisted control host answered $code_denied, not a deny code (000/403): something admits it, so the union cannot be observed" ;;
+  esac
+  if [ "$code_denied" = 000 ] || [ "$code_denied" = 403 ]; then
+    for side in team personal; do
+      if [ "$side" = team ]; then
+        host="$TEAM_EGRESS_HOST"
+        [ -n "$host" ] || { skip "caps.network.allow: team host (TEAM_EGRESS_HOST empty)"; continue; }
+      else
+        host="$PERSONAL_EGRESS_HOST"
+        grep -qF -- "- $host" "$KIT_DIR/spec.yaml" \
+          || { skip "caps.network.allow: personal host ($host not in spec.yaml)"; continue; }
+        grep -qF -- "- $host" "$TEAM_KIT/spec.yaml" \
+          && { skip "caps.network.allow: personal host ($host is also in the team kit, so this proves nothing)"; continue; }
+      fi
+      code="$(probe_host "$host")"
+      { [ -n "$code" ] && [ "$code" != "$code_denied" ]; } \
+        && ok "caps.network.allow: $side host admitted ($host -> $code)" \
+        || bad "caps.network.allow: $side host denied ($host -> ${code:-none}, same as the unlisted control): the union is broken, the host is offline, or its / answers with the backend's deny code (pick another host)"
+    done
+  fi
+fi
+
+info "7. PERSONAL checks (extend as your kit grows)"
+# One assertion per mechanism your kit adds: a drop-in's alias or function, a
+# compiled terminfo entry, an installed tool, an included gitconfig...
+skip "no personal checks yet"
+
+info "Summary"
+printf '  %d passed, %d failed, %d skipped\n' "$pass" "$fail" "$skipped"
+[ "$fail" -eq 0 ] && printf '  \033[32mAll checks passed.\033[0m\n' || printf '  \033[31mSome checks failed — see notes above.\033[0m\n'
+
+[ "$fail" -eq 0 ]

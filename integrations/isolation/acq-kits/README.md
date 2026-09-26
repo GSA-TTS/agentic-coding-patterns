@@ -47,6 +47,7 @@ they are exempt from — and must stay out of — the `kits.yaml` registry. See
 | Template | Purpose |
 |----------|---------|
 | [`examples/team-kit/`](examples/team-kit/) | A team's scope-layer mixin: conventions and agent settings through the OpenCode config tier, applied via `ACQ_EXTRA_KITS` after the global kits. Pattern and composition rules: [`../docs/scope-layers.md`](../docs/scope-layers.md). |
+| [`examples/personal-kit/`](examples/personal-kit/) | A person's own mixin, stacked last: shell drop-ins, git preferences, and an OpenCode TUI theme. Its verify proves the global, team, and personal stack. |
 
 ## What is a hybrid/v1 kit?
 
