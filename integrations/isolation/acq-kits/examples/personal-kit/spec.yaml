@@ -70,13 +70,14 @@ commands:
   # one line to ~/.bashrc instead of shipping the file (whole-file overlays
   # clobber the image's), and skips when any non-comment line in ~/.bashrc
   # already names ~/.rc.d (another layer's loop, however it is spelled).
-  # verify finds THIS loop by the marker comment below; keep that text. The case guard keeps drop-ins out of scripted
-  # `bash -lc` runs, so a drop-in that execs another shell can never swallow
-  # one. If a lower layer wired the loop, its guard is that layer's to get
-  # right; verify reports that it skipped the check. A newline is added first
-  # when ~/.bashrc does not end with one, so the appended lines never join its
-  # last line. The step is non-fatal: if ~/.bashrc cannot be written it warns
-  # and the create goes on without drop-ins.
+  # verify finds THIS loop by the marker comment below; keep that text. The
+  # case guard keeps drop-ins out of scripted `bash -lc` runs, so a drop-in
+  # that execs another shell can never swallow one. If a lower layer wired the
+  # loop, its guard is that layer's to get right; verify reports that it
+  # skipped the check. A newline is added first when ~/.bashrc does not end
+  # with one, so the appended lines never join its last line. The step is
+  # non-fatal: if ~/.bashrc cannot be written it warns and the create goes on
+  # without drop-ins.
   - phase: startup
     user: "1000"
     description: Source ~/.rc.d drop-ins from interactive bash
@@ -145,16 +146,16 @@ commands:
   # integrations/isolation/images/devenv/ does). This is the one exception to
   # "tools belong in the image": a tool only you want, installed in a STARTUP
   # step that skips on failure, never `phase: install` (a failed create-time
-  # install fails the whole create). Pin to the image's
-  # NIXPKGS_REV so installs hit the binary cache: copy the commit from that
-  # Dockerfile's ARG (it is not set inside the sandbox). Allow cache.nixos.org
-  # and codeload.github.com above; api.github.com, which the github: fetch
-  # also uses, is already allowed by the global playbook kit. Each tool is non-fatal, and drop-ins must
-  # guard on the binary existing. So must git config that names the tool:
-  # ship it as its own fragment (e.g. files/home/personal/gitconfig-delta)
-  # and register its include.path in this step only while the tool is
-  # present, or a skipped install leaves git pointing at a missing pager.
-  # Team-wide tools belong in the image.
+  # install fails the whole create). Pin to the image's NIXPKGS_REV so
+  # installs hit the binary cache: copy the commit from that Dockerfile's ARG
+  # (it is not set inside the sandbox). Allow cache.nixos.org and
+  # codeload.github.com above; api.github.com, which the github: fetch also
+  # uses, is already allowed by the global playbook kit. Each tool is
+  # non-fatal, and drop-ins must guard on the binary existing. So must git
+  # config that names the tool: ship it as its own fragment (e.g.
+  # files/home/personal/gitconfig-delta) and register its include.path in this
+  # step only while the tool is present, or a skipped install leaves git
+  # pointing at a missing pager. Team-wide tools belong in the image.
   #  - phase: startup
   #    user: "1000"
   #    description: Install personal CLI tools (nix)

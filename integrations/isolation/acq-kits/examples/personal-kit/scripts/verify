@@ -33,6 +33,7 @@
 #   path/to/personal-kit/scripts/verify
 #   TEAM_KIT=/path/to/team-kit …/verify     # stack on your team's kit
 #   TEAM_CONFIG=… TEAM_EGRESS_HOST=… …/verify   # that kit's values (see below)
+#   PERSONAL_EGRESS_HOST=… …/verify         # your own egress host, once replaced
 #   KEEP=1 …/verify                         # keep the sandbox + work dir
 #   ACQ_DIR=/path/to/quickstart …/verify    # acq not on PATH: use this checkout
 #   SKIP_NETWORK=1 …/verify                 # skip the egress probes (offline host)
@@ -60,7 +61,7 @@ PERSONAL_DROPIN=/home/agent/.rc.d/50-example.sh
 PERSONAL_ALIAS=gst
 PERSONAL_GIT_KEY=alias.st
 PERSONAL_GIT_VALUE=status
-PERSONAL_EGRESS_HOST=example.net
+PERSONAL_EGRESS_HOST="${PERSONAL_EGRESS_HOST-example.net}"
 # Values the team kit ships; override them for your team's kit, or set one to
 # empty to skip its check when the team kit has no such thing. Defaults are
 # the team-kit template's.
@@ -100,8 +101,8 @@ trap 'exit 130' INT TERM
 in_sbx() { "$ACQ" exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true; }
 
 # HTTP status code seen from the sandbox for https://HOST/ ("000" = no
-# connection). A backend may instead answer a denied host with its own status
-# page, so "admitted" is judged against the unlisted control host, not "000".
+# connection). msb denies with 000, sbx's proxy with its own 403 page; the
+# unlisted control host confirms one of those is the deny answer.
 probe_host() { in_sbx "curl -sS -o /dev/null -m 20 -w '%{http_code}' 'https://$1/' 2>/dev/null"; }
 
 info "0. Preconditions"
@@ -248,15 +249,17 @@ else
         [ -n "$host" ] || { skip "caps.network.allow: team host (TEAM_EGRESS_HOST empty)"; continue; }
       else
         host="$PERSONAL_EGRESS_HOST"
+        [ -n "$host" ] || { skip "caps.network.allow: personal host (PERSONAL_EGRESS_HOST empty)"; continue; }
         grep -qF -- "- $host" "$KIT_DIR/spec.yaml" \
           || { skip "caps.network.allow: personal host ($host not in spec.yaml)"; continue; }
         grep -qF -- "- $host" "$TEAM_KIT/spec.yaml" \
           && { skip "caps.network.allow: personal host ($host is also in the team kit, so this proves nothing)"; continue; }
       fi
       code="$(probe_host "$host")"
-      { [ -n "$code" ] && [ "$code" != "$code_denied" ]; } \
-        && ok "caps.network.allow: $side host admitted ($host -> $code)" \
-        || bad "caps.network.allow: $side host denied ($host -> ${code:-none}, same as the unlisted control): the union is broken, the host is offline, or its / answers with the backend's deny code (pick another host)"
+      case "$code" in
+        000|403|"") bad "caps.network.allow: $side host denied ($host -> ${code:-none}): the union is broken, the host is offline, or its / answers with a deny code (pick another host)" ;;
+        *) ok "caps.network.allow: $side host admitted ($host -> $code)" ;;
+      esac
     done
   fi
 fi

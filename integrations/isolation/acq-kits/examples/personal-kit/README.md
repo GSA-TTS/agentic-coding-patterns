@@ -93,7 +93,8 @@ It validates both kits, then creates a throwaway sandbox through `acq`, which
 applies the pinned built-in bundle plus, via `ACQ_EXTRA_KITS`, the team kit and
 then this kit. It asserts that the global and team layers are intact under your
 kit, that every live value above landed, that the drop-in is sourced by
-interactive bash, that the `~/.rc.d` loop is inert in a non-interactive shell,
+interactive bash, that this kit's `~/.rc.d` loop is inert in a non-interactive
+shell (skipped when another layer wired the loop),
 and that both kits' variables, files, and egress hosts coexist. When you point
 `TEAM_KIT` at your team's kit, also set the `TEAM_*` variables
 (`TEAM_CONFIG`, `TEAM_CONVENTIONS`, `TEAM_GIT_KEY`, `TEAM_GIT_VALUE`,
