@@ -52,6 +52,12 @@ KNOWN_BACKENDS = {"sbx", "msb", "ppp"}
 # (isolation ADR 0005).
 TEMPLATES_DIR = "examples"
 
+
+def _is_tool_dropping(name: str) -> bool:
+    """Directories tools leave behind (__pycache__, .pytest_cache), never kits."""
+    return name == "__pycache__" or name.startswith(".")
+
+
 # Env var NAME must be a POSIX-portable identifier. Env values reach the guest
 # environment and possibly a shell; the schema enforces this via patternProperties,
 # but we ALSO check it here so a bad name is reported with a clear message at the
@@ -331,9 +337,7 @@ def main(argv: list[str] | None = None) -> int:
     # __pycache__ (written next to this file when the test suite imports it).
     kit_dirs = (
         sorted(
-            d
-            for d in kits_dir.iterdir()
-            if d.is_dir() and d.name != TEMPLATES_DIR and not d.name.startswith(("_", "."))
+            d for d in kits_dir.iterdir() if d.is_dir() and d.name != TEMPLATES_DIR and not _is_tool_dropping(d.name)
         )
         if kits_dir.exists()
         else []
@@ -342,7 +346,7 @@ def main(argv: list[str] | None = None) -> int:
     # templates is still validated below rather than short-circuited as empty.
     templates_dir = kits_dir / TEMPLATES_DIR
     template_dirs = (
-        sorted(d for d in templates_dir.iterdir() if d.is_dir() and not d.name.startswith(("_", ".")))
+        sorted(d for d in templates_dir.iterdir() if d.is_dir() and not _is_tool_dropping(d.name))
         if templates_dir.is_dir()
         else []
     )

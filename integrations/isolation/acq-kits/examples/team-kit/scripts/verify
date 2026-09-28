@@ -181,16 +181,19 @@ else
   sed 's/^/  | /' "$CREATE_LOG" >&2
   exit 1
 fi
-# Startup steps can run for a while after create returns. Poll for the LAST
-# startup command's artifact — this kit's git key — rather than an env var:
-# environment is materialized by the backend and can be visible before any
-# startup command has run, so it fences nothing.
+# Startup steps can run for a while after create returns. Poll for the
+# fixture's startup marker AND this kit's git key (the LAST startup command),
+# rather than an env var: environment is materialized by the backend and can
+# be visible before any startup command has run, so it fences nothing. If you
+# replace this kit's git step, poll for your last step's artifact instead.
 printf '  waiting for startup steps to settle'
+settled=0
 for _ in $(seq 1 120); do
-  [ "$(in_sbx 'git config --global push.autoSetupRemote 2>/dev/null')" = "true" ] && break
+  [ "$(in_sbx "test -f $LOWER_MARKER_CMD && git config --global push.autoSetupRemote 2>/dev/null")" = "true" ] && { settled=1; break; }
   printf '.'; sleep 1
 done
 printf '\n'
+[ "$settled" = 1 ] || echo "  note: startup did not settle within 120s; later checks may run before it finished. If you replaced the git step, update this poll." >&2
 
 info "4. Global layer intact"
 [ "$(in_sbx '{ [ -f "$HOME/.config/opencode/opencode.json" ] || [ -f "$HOME/.config/opencode/opencode.jsonc" ]; } && echo y')" = "y" ] \
@@ -202,10 +205,8 @@ printf '%s' "$eff" | grep -q '"usai"' \
   || bad "USAi provider missing from the effective config"
 
 info "5. Live values landed"
-cfg="$(in_sbx 'printf "%s" "${OPENCODE_CONFIG:-}"')"
-[ "$cfg" = "$TEAM_CONFIG" ] && ok "OPENCODE_CONFIG = $cfg" || bad "OPENCODE_CONFIG unexpected: '${cfg:-<unset>}'"
-# Probe the expected path, not $cfg: an unset variable would turn `test -f ""`
-# into a second, misleading FAIL.
+# OPENCODE_CONFIG and the startup command are asserted once, in section 7,
+# where the fixture's competing values make the check meaningful.
 [ "$(in_sbx "test -f $TEAM_CONFIG && echo y")" = "y" ] \
   && ok "team config file present" || bad "team config file missing"
 [ "$(in_sbx "test -f $TEAM_CONVENTIONS && echo y")" = "y" ] \
@@ -215,10 +216,14 @@ printf '%s' "$eff" | grep -q 'team-conventions.md' \
   || bad "team-conventions.md missing from the effective config instructions"
 # The file, not the directory: the global playbook kit creates
 # ~/.agents/skills itself, so a directory check would pass without this kit.
-[ "$(in_sbx 'test -s "$HOME/.agents/skills/.gitkeep" && echo y')" = "y" ] \
-  && ok "team skills placeholder present" || bad "team skills placeholder missing"
-[ "$(in_sbx 'git config --global push.autoSetupRemote 2>/dev/null')" = "true" ] \
-  && ok "startup command ran (push.autoSetupRemote = true)" || bad "startup command did not run"
+# Once you replace the placeholder with real skills, this skips; add a check
+# per skill in the TEAM-SPECIFIC section.
+if grep -qF 'files/home/.agents/skills/.gitkeep' "$KIT_DIR/spec.yaml"; then
+  [ "$(in_sbx 'test -s "$HOME/.agents/skills/.gitkeep" && echo y')" = "y" ] \
+    && ok "team skills placeholder present" || bad "team skills placeholder missing"
+else
+  skip "team skills placeholder (removed from spec.yaml)"
+fi
 
 info "6. Lower fixture applied"
 # Without these, the composition checks below could pass with the fixture
@@ -232,7 +237,8 @@ info "6. Lower fixture applied"
 
 info "7. Composition rules (docs/scope-layers.md), against the lower fixture"
 # environment: last wins by name. The fixture set OPENCODE_CONFIG first.
-[ "$cfg" = "$TEAM_CONFIG" ] && [ "$cfg" != "$LOWER_CONFIG" ] \
+cfg="$(in_sbx 'printf "%s" "${OPENCODE_CONFIG:-}"')"
+[ "$cfg" = "$TEAM_CONFIG" ] \
   && ok "environment: last wins (this kit's OPENCODE_CONFIG replaced the fixture's)" \
   || bad "environment: fixture's OPENCODE_CONFIG survived ('${cfg:-<unset>}')"
 # files[]: last wins by path. Both kits drop team-conventions.md.
@@ -256,7 +262,8 @@ fi
 # or 403 (proxy, sbx). A host listed by no kit must get one of those (the
 # negative control); each kit's host must get neither. The kit's host must be
 # one the global layer does not already allow, or this proves nothing about
-# the kit's own entry.
+# the kit's own entry, and it must answer at / with neither code (a host that
+# answers 403 to an anonymous request reads as denied; pick another).
 if [ "$SKIP_NETWORK" = "1" ]; then
   skip "caps.network.allow union (SKIP_NETWORK=1)"
 else

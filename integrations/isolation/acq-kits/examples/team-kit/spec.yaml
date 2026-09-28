@@ -33,10 +33,13 @@ description: >
 caps:
   network:
     allow:
-      # REPLACE with your team's hosts (VCS, package mirrors, MCP servers), e.g.
-      #   - git.example.gov       # team VCS over HTTPS (default port 443)
-      #   - mcp.example.com:443   # a team MCP server (msb drops the :port and
-      #                           # allows the whole host)
+      # REPLACE with your team's hosts (VCS, package mirrors, MCP servers).
+      # Keep each comment on its own line, never after the host: as of acq
+      # v3.1.0 an inline comment can end up in the value. For example:
+      #   # team VCS over HTTPS (default port 443)
+      #   - git.example.gov
+      #   # a team MCP server (msb drops the :port and allows the whole host)
+      #   - mcp.example.com:443
       # The live value below is an IANA-reserved example domain: harmless, and
       # allowed by no global kit, so scripts/verify can prove this entry took
       # effect. Keep your replacement off the global list for the same reason.
@@ -118,9 +121,6 @@ environment:
 #   ## Your team
 #   One or two operational paragraphs.
 
-# No backend shortcuts or extras: the kit is declarative only, so behavior is
-# identical on every backend. Keep it that way; it is what makes the Backend
-# parity note in README.md true.
-backend_shortcuts:
-  sbx: {}
-  msb: {}
+# No backend_shortcuts or backend_extras: the kit is declarative only, so
+# behavior is identical on every backend. Keep it that way; it is what makes
+# the Backend parity note in README.md true.

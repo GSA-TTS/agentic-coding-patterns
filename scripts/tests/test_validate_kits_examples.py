@@ -113,6 +113,15 @@ class TestExamplesContainer:
         assert _load_main()(["--root", str(repo)]) == 0
         assert name not in capsys.readouterr().err
 
+    def test_underscore_prefixed_dirs_are_still_validated(self, repo, capsys):
+        # Only tool droppings are skipped; a `_wip` kit or template is not.
+        (_kits_dir(repo) / "_wip-kit").mkdir()
+        (_kits_dir(repo) / "examples" / "_wip-tpl").mkdir()
+        assert _load_main()(["--root", str(repo)]) == 1
+        err = capsys.readouterr().err
+        assert "_wip-kit: missing spec.yaml" in err
+        assert "examples/_wip-tpl: missing spec.yaml" in err
+
     def test_templates_are_validated_when_no_kit_dirs_exist(self, repo, capsys):
         # The "no kits found" short-circuit must not skip a templates-only tree.
         shutil.rmtree(_kits_dir(repo) / "kit-a")
