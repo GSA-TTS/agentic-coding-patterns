@@ -230,8 +230,8 @@ esac
 info "6. Egress union (docs/scope-layers.md)"
 # environment and files[] coexistence is already covered: sections 4 and 5
 # assert both kits' variables and files.
-# caps.network.allow: union. A host listed by neither kit must be denied (the
-# negative control); each kit's host must get a different answer.
+# caps.network.allow: union. A host listed by neither kit must get a deny
+# code, 000 or 403 (the negative control); each kit's host must get neither.
 if [ "$SKIP_NETWORK" = "1" ]; then
   skip "caps.network.allow union (SKIP_NETWORK=1)"
 else
