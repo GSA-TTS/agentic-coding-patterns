@@ -189,9 +189,6 @@ commands:
 environment:
   OPENCODE_TUI_CONFIG: /home/agent/personal/tui.jsonc
 
-# No backend shortcuts or extras: the kit is declarative only, so behavior is
-# identical on every backend. Keep it that way; it is what makes the Backend
-# parity note in README.md true.
-backend_shortcuts:
-  sbx: {}
-  msb: {}
+# No backend_shortcuts or backend_extras: the kit is declarative only, so
+# behavior is identical on every backend. Keep it that way; it is what makes
+# the Backend parity note in README.md true.
