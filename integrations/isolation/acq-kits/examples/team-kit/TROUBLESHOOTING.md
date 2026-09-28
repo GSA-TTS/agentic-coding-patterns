@@ -76,7 +76,7 @@ local path) or recreate.
 ## A shipped file is present on sbx but missing on msb
 
 The file is under `files/` but has no `files[]` record in `spec.yaml`. The sbx
-translation copies the whole `files/home/` tree verbatim; msb materializes only
+translation copies the whole `files/` tree verbatim; msb materializes only
 the listed records. Add the record with the in-guest absolute path.
 
 ## A startup command did nothing, and validate said OK
