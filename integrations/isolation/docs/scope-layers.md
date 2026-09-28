@@ -86,7 +86,7 @@ behavior rather than `acq` code. Rows it does not exercise on sbx are marked
 | `commands[]` | **append, in kit order** | Each kit's commands run in spec order; kits run in application order. `startup` re-runs at every start; on msb that means every re-apply (`acq run` on an existing sandbox, `acq start`, `acq restart`). `install` runs once per sandbox; on msb its once-marker is a hash of the argv alone, so identical install argv in two kits runs once and a changed argv runs again. |
 | `environment` | **msb: last wins, by name** | msb: in sessions, a later kit's value for the same `NAME` replaces the earlier one, silently. While kits are applied, each kit's own `commands[]` see only that kit's variables. sbx: each kit emits its variables and sbx merges them; `scripts/verify` observed last-wins by name there too. Either way, give single-valued variables such as `OPENCODE_CONFIG` exactly one owner in the stack. |
 | `volumes[]` | **msb: union, last wins by path** | msb: two kits declaring the same mount path, the later kit's entry is used. sbx: composed natively (not verified). |
-| `publishedPorts[]` | **msb: appended** | msb: every kit's ports are appended with no de-duplication. sbx: composed natively (not verified). Two kits publishing the same guest port is an authoring conflict either way. |
+| `publishedPorts[]` | **msb: appended** | msb: every kit's ports are appended with no de-duplication. sbx: composed natively (not verified). Two kits publishing the same guest port is an authoring conflict either way. Across sandboxes, see the known limitations: on msb a port without `host:` claims the same host port in every sandbox. |
 | `agentContext` | **per kit; sbx only** | As of acq v3.1.0 the msb adapter does not surface it. Prefer the agent's own instructions mechanism (the team-kit template shows OpenCode's). |
 | `backend_shortcuts` / `backend_extras` | **per kit** | Never compose. A shortcut skips that kit's generic path on that backend. |
 
@@ -129,14 +129,14 @@ acq secret set -g <service> --host <host> --env <VAR>   # once per machine, host
 | Small per-sandbox setup that must *run* | `commands[]` with `phase: startup`, idempotent (for example `git config --global` keys) |
 | A team VCS token | **Not in the kit.** `acq secret set -g <service> --host <vcs-host> --env <TOKEN_VAR>`, plus HTTPS routing for git (below) |
 
-#### Git to a non-GitHub team VCS
+#### Git over HTTPS (team VCS and GitHub)
 
 Route git over HTTPS and let the proxy supply the token. SSH remotes do not
 work through msb's egress (see the known limitations), and a team checkout
 usually carries one: `--clone` inherits the host's `git@host:` origin, and
 some tools (flake inputs, for example) use the `ssh://git@host/` form. One
 idempotent startup step (`user: "1000"`) rewrites both forms and adds a
-credential helper that reads the proxy-injected variable:
+credential helper that reads the proxy-injected variable. For a team VCS:
 
 ```bash
 git config --global url."https://git.example.gov/".insteadOf "git@git.example.gov:"
@@ -151,6 +151,23 @@ helper only ever sees the placeholder in `TEAM_VCS_TOKEN`; the proxy swaps in
 the real value in transit, for the host the secret is scoped to. Use the
 username your VCS expects for token auth.
 
+GitHub needs the same routing. As of acq v3.1.0 acq binds the GitHub token
+(`acq secret set -g github`) to `github.com` for HTTPS git on msb, but no
+global kit rewrites GitHub's SSH remotes or registers a helper, so an
+SSH origin fails in an msb guest. The same step covers it:
+
+```bash
+git config --global url."https://github.com/".insteadOf "git@github.com:"
+git config --global url."https://github.com".insteadOf "ssh://git@github.com"
+git config --global credential."https://github.com".helper \
+  '!f() { echo username=x-access-token; echo "password=${GITHUB_TOKEN:-}"; }; f'
+```
+
+GitHub routing is the same for every team, so it belongs in the global layer
+(the kit or `acq` itself that binds the GitHub token) rather than in each team
+kit. Until it is there, a team kit carries it, and should drop it once the
+global layer does.
+
 ### Personal kit
 
 | Need | Mechanism |
@@ -160,6 +177,7 @@ username your VCS expects for token auth.
 | Terminfo for your terminal | Ship the *source* (`infocmp -x`) and compile it in a startup step (`tic -x`) |
 | Git preferences | One startup command per key, or ship a file and add it with `include.path` |
 | Overriding a team setting | `environment` (last wins) or a later file at the same path (last wins) — deliberately, and only for settings the team marks as personal |
+| Your own agent instructions (OpenCode) | A file under `files/`, added through `OPENCODE_CONFIG_CONTENT` in `environment`, for example `{"instructions":["/home/agent/personal/instructions.md"]}`. Do not append to the global rules file: the playbook kit symlinks `~/.config/opencode/AGENTS.md` and `~/.claude/CLAUDE.md` into its managed checkout, so an append edits that checkout. In a local test on OpenCode 1.18, the `instructions` lists combine in order (global, then team through `OPENCODE_CONFIG`, then this one); OpenCode's docs do not say how lists merge. Put nothing else in it: inline config loads after the repo's own config, so any other key overrides the repo. The variable is single-valued (last kit wins), and daemon-launched agents do not see it on msb (see the known limitations). |
 | Extra egress for your tools | `caps.network.allow` (union) |
 
 ### Neither
@@ -191,7 +209,14 @@ username your VCS expects for token auth.
   root) and, under `--clone` only, `ACQ_CLONE=1` into the guest on both
   backends. A step that writes into the repo must require `ACQ_CLONE=1`, so it
   never touches a host checkout mounted in passthrough mode, and should list
-  what it adds in `.git/info/exclude` so it cannot be committed.
+  what it adds in `.git/info/exclude` so it cannot be committed. That guard
+  covers only the primary: acq clones nothing else. Other writable repos in
+  a multi-repo sandbox are either host checkouts (never write) or disposable
+  clones the user made on the host (safe), and from inside the guest they
+  look alike. Have the host mark a clone when it makes one, for example
+  `git -C <clone> config sandbox.disposable true`, and write only to the
+  `--clone` primary and to writable repos carrying that mark. Never write to
+  an unmarked repo.
 - **`environment` values are verbatim.** No `~` expansion: write
   `/home/agent/...`.
 - **List every shipped file in `files[]`** with its in-guest absolute path.
@@ -259,15 +284,31 @@ run; they may be fixed.
   rejected by `acq kit validate`, so this one at least fails loudly.
 - **msb egress admits no SSH to allowed hosts.** A host in
   `caps.network.allow` is reachable over HTTPS, but an SSH connection to it on
-  port 22 times out, so SSH git remotes hang. HTTPS is the supported git path;
-  see "Git to a non-GitHub team VCS" above. sbx has carried SSH to allowed
-  hosts, but not as a documented contract.
+  port 22 times out or is refused outright, so SSH git remotes hang or fail at
+  once. HTTPS is the supported git path; see "Git over HTTPS" above. sbx has
+  carried SSH to allowed hosts, but not as a documented contract.
 - **A placeholder in a transcript breaks the session on msb.** msb swaps a
   secret's real value in at its proxy only for the host the secret is scoped
   to. When a transcript contains another secret's placeholder (from `env` or
   `printenv`), the request to the model endpoint carries it, the proxy fails
   closed and drops the connection, and every later request in that session
   fails the same way. Not verified on sbx.
+- **A daemon one kit starts sees only that kit's `environment` on msb.** Each
+  kit's `commands[]` run with that kit's variables only, and a background
+  daemon a startup command launches keeps that environment for its lifetime.
+  Other kits' variables, including the team kit's `OPENCODE_CONFIG`, never
+  reach it, while proxy-bound secrets do. An agent that such a daemon starts
+  (a web UI serving agent sessions, for example) therefore runs without the
+  team tier: no team instructions, no team permission rules, and no error.
+  Interactive sessions are unaffected; they get the merged environment.
+  There is no supported fix in the kit layer yet.
+- **A published port without `host:` collides across msb sandboxes.** msb
+  maps the guest port to the same host port when `host:` is omitted, so two
+  sandboxes running the same kit both claim it. The first one started owns
+  it; the second starts without an error, and its port is unreachable. Work
+  around it per sandbox with `acq ports <sandbox> --publish HOST:GUEST`,
+  which is not persisted: re-run it after every stop and start. sbx maps a
+  published port to an ephemeral host port, so it does not collide.
 
 ## Validating and verifying
 

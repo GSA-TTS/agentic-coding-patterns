@@ -85,20 +85,22 @@ As of acq v3.1.0 an inline flow-style argv (`command: [git, config, ...]`)
 parses as an empty argv and `acq kit validate` does not report it. Write the
 argv as a block list, one `- arg` per line, or a single `- |` block scalar.
 
-## git push/fetch hangs on an SSH remote (msb)
+## git push/fetch hangs or is refused on an SSH remote (msb)
 
 The remote is `git@host:…` or `ssh://git@host/…`. As of acq v3.1.0, msb egress
 admits HTTPS to a host in `caps.network.allow` but not SSH on port 22, so the
-connection times out; adding `host:22` to the allow list does not help. A
+connection times out or fails at once with "Connection refused" (github.com
+answers that way); adding `host:22` to the allow list does not help. A
 `--clone` workspace inherits the host checkout's SSH origin, so this is the
-default case for a team VCS. Check what git will actually contact:
+default case for a team VCS and for GitHub. Check what git will actually
+contact:
 
 ```bash
 acq exec <sandbox> -- git -C /path/in/guest/to/repo ls-remote --get-url origin
 ```
 
-Fix: add the startup step from `docs/scope-layers.md` ("Git to a non-GitHub
-team VCS") that rewrites both SSH forms to HTTPS with `url.<https>.insteadOf`
+Fix: add the startup step from `docs/scope-layers.md` ("Git over HTTPS")
+that rewrites both SSH forms to HTTPS with `url.<https>.insteadOf`
 and feeds git the proxy-injected token through a credential helper. Keep the
 host in `caps.network.allow` and the token host-side (`acq secret set`).
 

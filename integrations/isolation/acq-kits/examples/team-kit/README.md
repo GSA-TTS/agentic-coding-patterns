@@ -60,6 +60,12 @@ The OpenCode wiring gives the settings tier global → team → repo: the global
 `usai-provider` kit merges into OpenCode's global config path and leaves
 `OPENCODE_CONFIG` free for this layer. The rest of the kit is agent-agnostic.
 
+On msb, as of acq v3.1.0, the team tier does not reach agents that another
+kit's background daemon starts (a web UI serving agent sessions, for
+example): such a daemon sees only its own kit's `environment`, so
+`OPENCODE_CONFIG` is unset there. Interactive sessions are unaffected. See
+the known limitations in the pattern doc.
+
 ## What it does not carry, on purpose
 
 - **Tools and toolchains.** Bake them into the image and point `ACQ_IMAGE` at
