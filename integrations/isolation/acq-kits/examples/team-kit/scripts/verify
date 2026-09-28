@@ -85,8 +85,8 @@ trap 'exit 130' INT TERM
 in_sbx() { "$ACQ" exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true; }
 
 # HTTP status code seen from the sandbox for https://HOST/ ("000" = no
-# connection). A backend may instead answer a denied host with its own status
-# page, so "admitted" is judged against the unlisted control host, not "000".
+# connection). msb denies with 000, sbx's proxy with its own 403 page; the
+# unlisted control host confirms one of those is the deny answer.
 probe_host() { in_sbx "curl -sS -o /dev/null -m 20 -w '%{http_code}' 'https://$1/' 2>/dev/null"; }
 
 info "0. Preconditions"
@@ -252,24 +252,28 @@ fi
 [ "$(in_sbx 'git config --global push.autoSetupRemote 2>/dev/null')" = "true" ] \
   && ok "commands[]: append in order (this kit's startup command ran after the fixture's)" \
   || bad "commands[]: fixture's command ran last, or this kit's did not run"
-# caps.network.allow: union. A host listed by no kit must be denied (the
-# negative control); each kit's host must get a different answer. The kit's
-# host must be one the global layer does not already allow, or this proves
-# nothing about the kit's own entry.
+# caps.network.allow: union. The backends deny with 000 (no connection, msb)
+# or 403 (proxy, sbx). A host listed by no kit must get one of those (the
+# negative control); each kit's host must get neither. The kit's host must be
+# one the global layer does not already allow, or this proves nothing about
+# the kit's own entry.
 if [ "$SKIP_NETWORK" = "1" ]; then
   skip "caps.network.allow union (SKIP_NETWORK=1)"
 else
   code_denied="$(probe_host "$UNLISTED_EGRESS_HOST")"
-  if [ -z "$code_denied" ] || [ "$code_denied" = "200" ]; then
-    bad "caps.network.allow: unlisted control host was admitted ($UNLISTED_EGRESS_HOST -> ${code_denied:-none}); the network tier allows everything, so the union cannot be observed"
-  else
-    ok "caps.network.allow: unlisted control host denied ($UNLISTED_EGRESS_HOST -> $code_denied)"
+  case "$code_denied" in
+    000|403) ok "caps.network.allow: unlisted control host denied ($UNLISTED_EGRESS_HOST -> $code_denied)" ;;
+    "") bad "caps.network.allow: probe of the unlisted control host failed (no answer from acq exec)" ;;
+    *) bad "caps.network.allow: unlisted control host answered $code_denied, not a deny code (000/403): something admits it, so the union cannot be observed" ;;
+  esac
+  if [ "$code_denied" = 000 ] || [ "$code_denied" = 403 ]; then
     for side in fixture kit; do
       if [ "$side" = fixture ]; then host="$LOWER_EGRESS_HOST"; else host="$TEAM_EGRESS_HOST"; fi
       code="$(probe_host "$host")"
-      { [ -n "$code" ] && [ "$code" != "$code_denied" ]; } \
-        && ok "caps.network.allow: $side's host admitted ($host -> $code)" \
-        || bad "caps.network.allow: $side's host denied ($host -> ${code:-none}, same as the unlisted control); union broken, or the host is offline"
+      case "$code" in
+        000|403|"") bad "caps.network.allow: $side's host denied ($host -> ${code:-none}); union broken, or the host is offline" ;;
+        *) ok "caps.network.allow: $side's host admitted ($host -> $code)" ;;
+      esac
     done
   fi
 fi
