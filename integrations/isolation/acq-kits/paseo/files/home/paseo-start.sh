@@ -32,7 +32,7 @@
 #
 # Pins are provided via the environment, with an in-script fallback default kept
 # in sync with the kit spec's documented pin:
-#   PASEO_CLI_VERSION   — @getpaseo/cli version to install (default 0.9.1)
+#   PASEO_CLI_VERSION   — @getpaseo/cli version to install (default 0.10.2)
 #   PASEO_LISTEN        — daemon bind address (default 0.0.0.0:6767)
 #   PASEO_RESTART_DELAY — seconds to wait before respawning the daemon (default 5)
 
@@ -78,7 +78,7 @@ case ":$PATH:" in *":$HOME/.npm-global/bin:"*) : ;; *) PATH="$HOME/.npm-global/b
 export PATH
 
 # --- Install the pinned Paseo CLI if it is missing or out of date. -----------
-_ver="${PASEO_CLI_VERSION:-0.9.1}"
+_ver="${PASEO_CLI_VERSION:-0.10.2}"
 _installed_ver=""
 if command -v paseo >/dev/null 2>&1; then
   _installed_ver="$(paseo --version 2>/dev/null | sed -n 's/^v//; s/.*\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p; q')"
