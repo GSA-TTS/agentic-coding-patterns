@@ -135,7 +135,8 @@ test("read tool allows example files (ordered last so they win)", () => {
 test("ordinary, sandbox-contained operations are allowed (not gated)", () => {
   for (const cmd of [
     "rm -rf build",
-    "rm -rf /",
+    "rm -rf ./dist",
+    "rm -rf node_modules",
     "npm install",
     "npm install left-pad",
     "uv pip install requests",
@@ -188,6 +189,68 @@ test("outbound/new-destination edges are gated (ask)", () => {
     assert.equal(resolveBash(bash, cmd), "ask", `${cmd} should ask`)
   }
 })
+
+test("PR-merge actions are gated (ask) — a different risk class from PR creation", () => {
+  for (const cmd of [
+    "gh pr merge 42",
+    "gh pr merge 42 --squash",
+    "gh pr merge --auto 42",
+    "gh api /repos/o/r/pulls/42/merge --method PUT",
+    "gh api repos/o/r/pulls/42/merge -X PUT",
+    "gh api graphql -F query=@merge.gql --field pullRequestId=abc",
+  ]) {
+    assert.equal(resolveBash(bash, cmd), "ask", `${cmd} should ask`)
+  }
+})
+
+test("rm outside the workspace (absolute, home-relative, or `..`-climbing) is gated (ask)", () => {
+  for (const cmd of [
+    "rm -rf /",
+    "rm -rf /tmp/x",
+    "rm -rf /Users/alice/other-project",
+    "rm -rf ~",
+    "rm -rf ~/other-project",
+    "rm -rf $HOME/other-project",
+    "rm -rf ../sibling-dir",
+    "rm -rf ../../etc",
+    "rm ./../escape.txt",
+  ]) {
+    assert.equal(resolveBash(bash, cmd), "ask", `${cmd} should ask`)
+  }
+})
+
+test("rm inside the workspace (relative, non-climbing) stays allowed", () => {
+  for (const cmd of ["rm -rf build", "rm -rf ./dist", "rm -rf node_modules", "rm file.txt", "rm -f ./tmp.log"]) {
+    assert.equal(resolveBash(bash, cmd), "allow", `${cmd} should be allowed`)
+  }
+})
+
+// NOT ASSERTED — documented, disclosed known-bypass forms for the rm gate
+// (see docs/decisions/0003-relax-permissions-for-sandbox.md, "Why the `rm`
+// gate is defense-in-depth, not AC-6 enforcement"). These are NOT test
+// failures: the gate is a glob match on a bash command STRING, not a
+// filesystem-level restriction, so all of the following resolve to "allow"
+// today and are expected to. Listed here (not asserted) so the limitation is
+// machine-visible in the same file as the gate itself, not only in prose a
+// reader might skip. A 7-role review panel was unanimous that presenting the
+// gate as enforcing rather than advisory would be a compliance overclaim —
+// do not "fix" these by trying to glob-match your way to completeness; that
+// is provably not achievable for a string-pattern permission map (shell
+// indirection, subshells, non-`rm` deletion primitives, and symlinks all
+// route around any glob). The sandbox's mount scope (not this gate) is the
+// structural control; branch protection (not the merge gate) is the
+// structural control for merges.
+//   - "cd .. && rm -rf sibling"            (glob matches the string, not cwd)
+//   - "sh -c 'rm -rf ~/x'"                 (subshell/wrapper indirection)
+//   - "find .. -delete"                    (non-`rm` deletion primitive)
+//   - "xargs rm -rf < paths.txt"           (non-`rm`-literal invocation)
+//   - "rm -rf \"$(echo ~)\"/x"             (variable/command-substitution indirection)
+// Also disclosed: both this gate and the `gh pr merge` gate above provide
+// NO protection under `opencode --auto` / `opencode run --auto`, which
+// auto-approves any request that is not an explicit `deny` — see
+// https://opencode.ai/docs/permissions/ ("Auto mode"). This is a property of
+// OpenCode's own permission engine, not testable via resolveBash (which
+// models the declarative rule set only, not the `--auto` runtime override).
 
 test("data-bearing curl/wget forms are gated (defense-in-depth)", () => {
   for (const cmd of [

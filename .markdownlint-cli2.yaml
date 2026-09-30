@@ -42,23 +42,19 @@ config:
   # MD060 - Table column style spacing (disabled — manual formatting OK)
   MD060: false
 
-# Scan these files
+# Scan these files. This is the SINGLE source of truth for file selection:
+# both the pre-commit hook and CI invoke markdownlint-cli2 with no glob
+# arguments, so neither can select a different set.
 globs:
-  - "AGENTS.md"
-  - "CONTEXT-GUIDE.md"
-  - "CONTRIBUTING.md"
-  - "README.md"
-  - "docs/**/*.md"
-  - "skills/**/SKILL.md"
-  - "prompts/**/SKILL.md"
-  - "agents/**/AGENTS.md"
-  - "workflows/**/SKILL.md"
-  - "lessons-learned/**/SKILL.md"
+  - "**/*.md"
 
 # Ignore files
 ignores:
   - "node_modules"
+  - ".github/linters/node_modules"
   - "deleteme"
+  - "templates"
+  - "CHANGELOG.md"
   - "**/fixtures/**"
 
 # Support YAML frontmatter
