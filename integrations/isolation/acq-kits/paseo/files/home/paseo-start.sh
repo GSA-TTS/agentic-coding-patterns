@@ -188,7 +188,7 @@ if ! paseo daemon config set --home "$PASEO_HOME_DIR" daemon.relay.enabled false
   echo "paseo: error: could not persist daemon.relay.enabled=false; see $STATE_DIR/paseo-config.log" >&2
   config_ok=""
 fi
-if ! PASEO_HOME_DIR="$PASEO_HOME_DIR" PASEO_EXPECTED_LISTEN="$PASEO_LISTEN" node -e 'const fs = require("fs"); const path = require("path"); const config = JSON.parse(fs.readFileSync(path.join(process.env.PASEO_HOME_DIR, "config.json"), "utf8")); if (config?.daemon?.listen !== process.env.PASEO_EXPECTED_LISTEN || config?.features?.webUi?.enabled !== true || config?.daemon?.relay?.enabled !== false) process.exit(1);' >>"$STATE_DIR/paseo-config.log" 2>&1; then
+if ! node "$HOME/paseo-assert-daemon-config.mjs" --paseo-home "$PASEO_HOME_DIR" --listen "$PASEO_LISTEN" >>"$STATE_DIR/paseo-config.log" 2>&1; then
   echo "paseo: error: config.json does not contain required daemon settings; not starting unverified daemon" >&2
   config_ok=""
 fi

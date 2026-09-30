@@ -173,15 +173,25 @@ fi
 
 # --- Offline check of the mount registrar helper (no sandbox needed). ----------
 info "1c. mount registrar helper parses (offline)"
+ASSERTCFG="$KIT_DIR/files/home/paseo-assert-daemon-config.mjs"
 REGMOUNTS="$KIT_DIR/files/home/paseo-register-mounts.mjs"
 if ! command -v node >/dev/null 2>&1; then
-  skip "node not on PATH — cannot exercise paseo-register-mounts.mjs"
-elif [ ! -f "$REGMOUNTS" ]; then
-  bad "paseo-register-mounts.mjs missing at $REGMOUNTS"
-elif node --check "$REGMOUNTS" >/dev/null 2>&1; then
-  ok "paseo-register-mounts.mjs parses (node --check)"
+  skip "node not on PATH — cannot exercise paseo-register-mounts.mjs or paseo-assert-daemon-config.mjs"
 else
-  bad "paseo-register-mounts.mjs failed node --check"
+  if [ ! -f "$ASSERTCFG" ]; then
+    bad "paseo-assert-daemon-config.mjs missing at $ASSERTCFG"
+  elif node --check "$ASSERTCFG" >/dev/null 2>&1; then
+    ok "paseo-assert-daemon-config.mjs parses (node --check)"
+  else
+    bad "paseo-assert-daemon-config.mjs failed node --check"
+  fi
+  if [ ! -f "$REGMOUNTS" ]; then
+    bad "paseo-register-mounts.mjs missing at $REGMOUNTS"
+  elif node --check "$REGMOUNTS" >/dev/null 2>&1; then
+    ok "paseo-register-mounts.mjs parses (node --check)"
+  else
+    bad "paseo-register-mounts.mjs failed node --check"
+  fi
 fi
 
 # --- Select the live driver. -------------------------------------------------
@@ -369,7 +379,7 @@ else
   in_sbx 'tail -n 20 ~/.local/state/paseo/paseo-daemon.log' | sed 's/^/    | /'
 fi
 
-config_assert="$(in_sbx "PASEO_EXPECTED_LISTEN='0.0.0.0:$PASEO_PORT' node -e 'const fs = require(\"fs\"); const path = require(\"path\"); const config = JSON.parse(fs.readFileSync(path.join(process.env.PASEO_HOME || (process.env.HOME + \"/.paseo\"), \"config.json\"), \"utf8\")); const failures = []; if (config?.daemon?.listen !== process.env.PASEO_EXPECTED_LISTEN) failures.push(\"daemon.listen=\" + JSON.stringify(config?.daemon?.listen)); if (config?.features?.webUi?.enabled !== true) failures.push(\"features.webUi.enabled=\" + JSON.stringify(config?.features?.webUi?.enabled)); if (config?.daemon?.relay?.enabled !== false) failures.push(\"daemon.relay.enabled=\" + JSON.stringify(config?.daemon?.relay?.enabled)); if (failures.length) { console.log(failures.join(\", \")); process.exit(1); } console.log(\"ok\");' 2>&1")"
+config_assert="$(in_sbx "node /home/agent/paseo-assert-daemon-config.mjs --paseo-home \"\${PASEO_HOME:-\$HOME/.paseo}\" --listen '0.0.0.0:$PASEO_PORT' 2>&1 && echo ok")"
 if [ "$config_assert" = "ok" ]; then
   ok "config.json persists required daemon settings (listen, web UI, relay disabled)"
 else

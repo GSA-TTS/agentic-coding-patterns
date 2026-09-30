@@ -152,6 +152,10 @@ files:
     mode: "0755"
     source: files/home/paseo-set-worktrees-root.mjs
     description: Idempotently merge worktrees.root into $PASEO_HOME/config.json (used by the shim)
+  - path: /home/agent/paseo-assert-daemon-config.mjs
+    mode: "0755"
+    source: files/home/paseo-assert-daemon-config.mjs
+    description: Assert required Paseo daemon settings are persisted before daemon launch
   - path: /home/agent/paseo-register-mounts.mjs
     mode: "0755"
     source: files/home/paseo-register-mounts.mjs
