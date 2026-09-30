@@ -54,11 +54,13 @@ to restart the worker and re-read `config.json`. If that command cannot run, the
 fallback kills PIDs whose argv matches `paseo daemon run` **but do NOT carry the
 `supervisor:paseo-daemon` marker** — i.e. the Paseo-owned tree, never our shell
 respawn loop. `kill` (SIGTERM) lets `daemon-worker` shut down gracefully and free
-`:6767`. The fallback also clears `paseo.pid` before the shell loop respawns
-`paseo daemon run`, avoiding stale-lock races.
+`:6767`. The fallback clears `paseo.pid` only after it actually kills a daemon
+process, so it does not delete a live worker's lock during ordinary respawn.
 
 The normal `paseo daemon restart` path keeps the outer supervisor and PID lock
-intact; the marker-scoped kill is only a recovery fallback.
+intact; the marker-scoped kill is only a recovery fallback. Both startup config
+writes and wrapper worktree-root writes use the same coarse config lock before
+modifying `$PASEO_HOME/config.json`.
 
 ## Alternatives considered
 

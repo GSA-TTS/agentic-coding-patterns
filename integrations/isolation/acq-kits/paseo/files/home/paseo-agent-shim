@@ -132,14 +132,17 @@ if [ -n "$worktrees_changed" ]; then
     :
   else
     echo "paseo: daemon restart command failed; falling back to supervisor respawn" >&2
+    killed_daemon=""
     for _pid in $(pgrep -u "$(id -u)" -f "paseo daemon run" 2>/dev/null); do
       # Skip the supervisor loop (its cmdline carries the marker).
       if tr '\0' ' ' < "/proc/$_pid/cmdline" 2>/dev/null | grep -q "supervisor:paseo-daemon"; then
         continue
       fi
-      kill "$_pid" 2>/dev/null || true
+      if kill "$_pid" 2>/dev/null; then
+        killed_daemon=yes
+      fi
     done
-    rm -f "$PASEO_HOME_DIR/paseo.pid" 2>/dev/null || true
+    [ -n "$killed_daemon" ] && rm -f "$PASEO_HOME_DIR/paseo.pid" 2>/dev/null || true
   fi
   # Wait for the daemon to return on the new root (bounded).
   _i=0

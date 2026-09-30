@@ -368,6 +368,13 @@ else
   bad "daemon did not answer /api/health on :$PASEO_PORT (see the daemon log)"
   in_sbx 'tail -n 20 ~/.local/state/paseo/paseo-daemon.log' | sed 's/^/    | /'
 fi
+
+config_assert="$(in_sbx "PASEO_EXPECTED_LISTEN='0.0.0.0:$PASEO_PORT' node -e 'const fs = require(\"fs\"); const path = require(\"path\"); const config = JSON.parse(fs.readFileSync(path.join(process.env.PASEO_HOME || (process.env.HOME + \"/.paseo\"), \"config.json\"), \"utf8\")); const failures = []; if (config?.daemon?.listen !== process.env.PASEO_EXPECTED_LISTEN) failures.push(\"daemon.listen=\" + JSON.stringify(config?.daemon?.listen)); if (config?.features?.webUi?.enabled !== true) failures.push(\"features.webUi.enabled=\" + JSON.stringify(config?.features?.webUi?.enabled)); if (config?.daemon?.relay?.enabled !== false) failures.push(\"daemon.relay.enabled=\" + JSON.stringify(config?.daemon?.relay?.enabled)); if (failures.length) { console.log(failures.join(\", \")); process.exit(1); } console.log(\"ok\");' 2>&1")"
+if [ "$config_assert" = "ok" ]; then
+  ok "config.json persists required daemon settings (listen, web UI, relay disabled)"
+else
+  bad "config.json missing required daemon settings: ${config_assert:-no output}"
+fi
 # The bundled web UI is served on the same origin: the root should return HTML.
 if [ "$(in_sbx "curl -fsS http://127.0.0.1:$PASEO_PORT/ >/dev/null 2>&1 && echo yes")" = "yes" ]; then
   ok "bundled web UI is served on the same port ($PASEO_PORT)"

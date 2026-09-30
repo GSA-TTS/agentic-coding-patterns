@@ -34,7 +34,10 @@ Before launching it, persist the settings the sandbox depends on into
 
 Keep the matching environment variables on the `daemon run` invocation as a
 belt-and-suspenders deployment override, but treat persisted config as the
-source of truth for Paseo 0.9 managed/config tooling.
+source of truth for Paseo 0.9 managed/config tooling. Startup takes the shared
+`$PASEO_HOME/.config-json.lock`, writes the settings, and reads them back before
+launching the daemon; if the required settings cannot be verified, it does not
+start an unauthenticated daemon with unknown relay/listen defaults.
 
 When the entrypoint shim changes `worktrees.root`, prefer the supported
 `paseo daemon restart` command so Paseo restarts the worker and re-reads

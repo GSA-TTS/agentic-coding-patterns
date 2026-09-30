@@ -152,14 +152,49 @@ command -v paseo >/dev/null 2>&1 || {
 # and any local status/config tooling agree on the expected shape.
 PASEO_HOME_DIR="${PASEO_HOME:-$HOME/.paseo}"
 mkdir -p "$PASEO_HOME_DIR" 2>/dev/null || true
+CONFIG_LOCK_DIR="$PASEO_HOME_DIR/.config-json.lock"
+_have_config_lock=""
+cleanup_config_lock() {
+  [ "$_have_config_lock" = yes ] && rmdir "$CONFIG_LOCK_DIR" 2>/dev/null || true
+}
+trap cleanup_config_lock EXIT HUP INT TERM
+acquire_config_lock() {
+  _deadline=$(( $(date +%s) + 30 ))
+  while ! mkdir "$CONFIG_LOCK_DIR" 2>/dev/null; do
+    [ "$(date +%s)" -ge "$_deadline" ] && return 1
+    sleep 1
+  done
+  _have_config_lock=yes
+}
+release_config_lock() {
+  cleanup_config_lock
+  _have_config_lock=""
+}
+
+config_ok=yes
+if ! acquire_config_lock; then
+  echo "paseo: error: could not lock $PASEO_HOME_DIR/config.json; not starting unverified daemon" >&2
+  exit 0
+fi
 if ! paseo daemon config set --home "$PASEO_HOME_DIR" --string daemon.listen "$PASEO_LISTEN" >>"$STATE_DIR/paseo-config.log" 2>&1; then
-  echo "paseo: warning: could not persist daemon.listen=$PASEO_LISTEN; see $STATE_DIR/paseo-config.log" >&2
+  echo "paseo: error: could not persist daemon.listen=$PASEO_LISTEN; see $STATE_DIR/paseo-config.log" >&2
+  config_ok=""
 fi
 if ! paseo daemon config set --home "$PASEO_HOME_DIR" features.webUi.enabled true >>"$STATE_DIR/paseo-config.log" 2>&1; then
-  echo "paseo: warning: could not persist features.webUi.enabled=true; see $STATE_DIR/paseo-config.log" >&2
+  echo "paseo: error: could not persist features.webUi.enabled=true; see $STATE_DIR/paseo-config.log" >&2
+  config_ok=""
 fi
 if ! paseo daemon config set --home "$PASEO_HOME_DIR" daemon.relay.enabled false >>"$STATE_DIR/paseo-config.log" 2>&1; then
-  echo "paseo: warning: could not persist daemon.relay.enabled=false; see $STATE_DIR/paseo-config.log" >&2
+  echo "paseo: error: could not persist daemon.relay.enabled=false; see $STATE_DIR/paseo-config.log" >&2
+  config_ok=""
+fi
+if ! PASEO_HOME_DIR="$PASEO_HOME_DIR" PASEO_EXPECTED_LISTEN="$PASEO_LISTEN" node -e 'const fs = require("fs"); const path = require("path"); const config = JSON.parse(fs.readFileSync(path.join(process.env.PASEO_HOME_DIR, "config.json"), "utf8")); if (config?.daemon?.listen !== process.env.PASEO_EXPECTED_LISTEN || config?.features?.webUi?.enabled !== true || config?.daemon?.relay?.enabled !== false) process.exit(1);' >>"$STATE_DIR/paseo-config.log" 2>&1; then
+  echo "paseo: error: config.json does not contain required daemon settings; not starting unverified daemon" >&2
+  config_ok=""
+fi
+release_config_lock
+if [ -z "$config_ok" ]; then
+  exit 0
 fi
 
 # --- Supervise the Paseo daemon (idempotent). --------------------------------
@@ -194,10 +229,9 @@ if ! supervisor_running paseo-daemon; then
   ( sh -c '
       while :; do
         echo "[supervisor] starting paseo daemon at $(date -u +%FT%TZ)"
-        # If a prior daemon died ungracefully, clear its stale PID lock before
-        # relaunching. Paseo treats a dead owner lock as stale, but clearing it
-        # here avoids repeated lock-acquire races in a tight respawn loop.
-        rm -f "${PASEO_HOME:-$HOME/.paseo}/paseo.pid"
+        # Let Paseo own its PID lock. It already reclaims dead-owner/stale locks,
+        # and deleting the lock here could remove a live worker lock during
+        # restart races.
         PASEO_LISTEN="$2" PASEO_WEB_UI_ENABLED=true PASEO_RELAY_ENABLED=false paseo daemon run --home "${PASEO_HOME:-$HOME/.paseo}" || true
         echo "[supervisor] paseo daemon exited; restarting in ${1}s"
         sleep "$1"
