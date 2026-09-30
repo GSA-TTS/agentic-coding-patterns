@@ -93,6 +93,71 @@
       "models": {
         // BEGIN GENERATED USAI MODELS
         // Anthropic Models
+        "claude_4_5_haiku": {
+          "name": "Claude 4.5 Haiku",
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "cost": {
+            "input": 1,
+            "output": 5,
+            "cache_read": 0.1,
+            "cache_write": 1.25
+          }
+        },
+        "claude_4_5_sonnet": {
+          "name": "Claude 4.5 Sonnet",
+          "limit": {
+            "context": 200000,
+            "output": 64000
+          },
+          "cost": {
+            "input": 3,
+            "output": 15,
+            "cache_read": 0.3,
+            "cache_write": 3.75
+          }
+        },
+        "claude_4_6_sonnet": {
+          "name": "Claude 4.6 Sonnet",
+          "limit": {
+            "context": 1000000,
+            "output": 128000
+          },
+          "cost": {
+            "input": 3.3,
+            "output": 16.5,
+            "cache_read": 0.33,
+            "cache_write": 4.125
+          }
+        },
+        "claude_4_7_opus": {
+          "name": "Claude 4.7 Opus",
+          "limit": {
+            "context": 1000000,
+            "output": 128000
+          },
+          "cost": {
+            "input": 5,
+            "output": 25,
+            "cache_read": 0.5,
+            "cache_write": 6.25
+          }
+        },
+        "claude_4_8_opus": {
+          "name": "Claude 4.8 Opus",
+          "limit": {
+            "context": 1000000,
+            "output": 128000
+          },
+          "cost": {
+            "input": 5,
+            "output": 25,
+            "cache_read": 0.5,
+            "cache_write": 6.25
+          }
+        },
         "claude-opus-5": {
           "name": "Claude Opus 5",
           "limit": {
@@ -119,75 +184,22 @@
             "cache_write": 2.5
           }
         },
-        "claude_4_8_opus": {
-          "name": "Claude 4.8 Opus",
-          "limit": {
-            "context": 1000000,
-            "output": 128000
-          },
-          "cost": {
-            "input": 5,
-            "output": 25,
-            "cache_read": 0.5,
-            "cache_write": 6.25
-          }
-        },
-        "claude_4_7_opus": {
-          "name": "Claude 4.7 Opus",
-          "limit": {
-            "context": 1000000,
-            "output": 128000
-          },
-          "cost": {
-            "input": 5,
-            "output": 25,
-            "cache_read": 0.5,
-            "cache_write": 6.25
-          }
-        },
-        "claude_4_5_sonnet": {
-          "name": "Claude 4.5 Sonnet",
-          "limit": {
-            "context": 200000,
-            "output": 64000
-          },
-          "cost": {
-            "input": 3,
-            "output": 15,
-            "cache_read": 0.3,
-            "cache_write": 3.75
-          }
-        },
-        "claude_4_5_haiku": {
-          "name": "Claude 4.5 Haiku",
-          "limit": {
-            "context": 200000,
-            "output": 64000
-          },
-          "cost": {
-            "input": 1,
-            "output": 5,
-            "cache_read": 0.1,
-            "cache_write": 1.25
-          }
-        },
 
         // OpenAI Models
-        "gpt_5_5_default_v2": {
-          "name": "GPT 5.5",
+        "gpt_5_2_default_v2": {
+          "name": "GPT 5.2 Default V2",
           "limit": {
-            "context": 1050000,
+            "context": 400000,
             "output": 128000
           },
           "cost": {
-            "input": 5,
-            "output": 30,
-            "cache_read": 0.5,
-            "context_over_200k": {"input":10,"output":45,"cache_read":1}
+            "input": 1.75,
+            "output": 14,
+            "cache_read": 0.125
           }
         },
         "gpt_5_4_default_v2": {
-          "name": "GPT 5.4",
+          "name": "GPT 5.4 Default V2",
           "limit": {
             "context": 1050000,
             "output": 128000
@@ -199,33 +211,63 @@
             "context_over_200k": {"input":5,"output":22.5,"cache_read":0.5}
           }
         },
-        "gpt_5_2_default_v2": {
-          "name": "GPT 5.2",
+        "gpt_5_5_default_v2": {
+          "name": "GPT 5.5 Default V2",
           "limit": {
-            "context": 400000,
+            "context": 1050000,
             "output": 128000
           },
           "cost": {
-            "input": 1.75,
-            "output": 14,
-            "cache_read": 0.125
+            "input": 5,
+            "output": 30,
+            "cache_read": 0.5,
+            "context_over_200k": {"input":10,"output":45,"cache_read":1}
+          }
+        },
+        "gpt-5.6-luna": {
+          "name": "GPT 5.6 Luna",
+          "limit": {
+            "context": 1050000,
+            "output": 128000
+          },
+          "cost": {
+            "input": 0.2,
+            "output": 1.2,
+            "cache_read": 0.02,
+            "cache_write": 0.25,
+            "context_over_200k": {"input":0.4,"output":1.8,"cache_read":0.04,"cache_write":0.5}
+          }
+        },
+        "gpt-5.6-sol-latest-guardrails-defaultv2": {
+          "name": "GPT 5.6 Sol Latest Guardrails Defaultv2",
+          "limit": {
+            "context": 1050000,
+            "output": 128000
+          },
+          "cost": {
+            "input": 4,
+            "output": 20,
+            "cache_read": 0.5,
+            "cache_write": 6.25,
+            "context_over_200k": {"input":10,"output":45,"cache_read":1,"cache_write":12.5}
+          }
+        },
+        "gpt-5.6-terra": {
+          "name": "GPT 5.6 Terra",
+          "limit": {
+            "context": 1050000,
+            "output": 128000
+          },
+          "cost": {
+            "input": 2,
+            "output": 12,
+            "cache_read": 0.2,
+            "cache_write": 2.5,
+            "context_over_200k": {"input":4,"output":18,"cache_read":0.4,"cache_write":5}
           }
         },
 
         // Google Models
-        "gemini-2.5-pro": {
-          "name": "Gemini 2.5 Pro",
-          "limit": {
-            "context": 1048576,
-            "output": 65536
-          },
-          "cost": {
-            "input": 1.25,
-            "output": 10,
-            "cache_read": 0.125,
-            "context_over_200k": {"input":2.5,"output":15,"cache_read":0.25}
-          }
-        },
         "gemini-2.5-flash": {
           "name": "Gemini 2.5 Flash",
           "limit": {
@@ -235,8 +277,7 @@
           "cost": {
             "input": 0.3,
             "output": 2.5,
-            "cache_read": 0.075,
-            "cache_write": 0.383
+            "cache_read": 0.03
           }
         },
         "gemini-2.5-flash-lite": {
@@ -251,6 +292,31 @@
             "cache_read": 0.01
           }
         },
+        "gemini-2.5-pro": {
+          "name": "Gemini 2.5 Pro",
+          "limit": {
+            "context": 1048576,
+            "output": 65536
+          },
+          "cost": {
+            "input": 1.25,
+            "output": 10,
+            "cache_read": 0.125,
+            "context_over_200k": {"input":2.5,"output":15,"cache_read":0.25}
+          }
+        },
+        "gemini-3-7-flash": {
+          "name": "Gemini 3.7 Flash",
+          "limit": {
+            "context": 1048576,
+            "output": 65536
+          },
+          "cost": {
+            "input": 0.75,
+            "output": 3.75,
+            "cache_read": 0.075
+          }
+        },
         "gemini-3.5-flash": {
           "name": "Gemini 3.5 Flash",
           "limit": {
@@ -263,16 +329,16 @@
             "cache_read": 0.15
           }
         },
-        "gemini-3-7-flash": {
-          "name": "Gemini 3.7 Flash",
+        "gemini-3.8-flash": {
+          "name": "Gemini 3.8 Flash",
           "limit": {
-            "context": 1000000,
+            "context": 1048576,
             "output": 65536
           },
           "cost": {
-            "input": 1.875,
-            "output": 9.375,
-            "cache_read": 0.1875
+            "input": 0.75,
+            "output": 3.75,
+            "cache_read": 0.075
           }
         },
 
@@ -281,11 +347,24 @@
           "name": "Llama 4 Maverick",
           "limit": {
             "context": 1000000,
-            "output": 16384
+            "output": 8192
           },
           "cost": {
             "input": 0.24,
             "output": 0.97
+          }
+        },
+
+        // Cohere Models
+        "cohere_english_v3": {
+          "name": "Cohere English v3",
+          "limit": {
+            "context": 128000,
+            "output": 4000
+          },
+          "cost": {
+            "input": 0.0375,
+            "output": 0.15
           }
         }
         // END GENERATED USAI MODELS
@@ -295,14 +374,14 @@
   // ===========================================================================
   // MODEL SELECTION
   // ===========================================================================
-  "model": "usai/claude-opus-5",
+  "model": "usai/claude-sonnet-5",
   "small_model": "usai/claude_4_5_haiku",
   // ===========================================================================
   // AGENT CONFIGURATION
   // ===========================================================================
   "agent": {
     "compaction": {
-      "model": "usai/gpt_5_5_default_v2",
+      "model": "usai/gpt-5.6-terra",
       "temperature": 0
     },
     "summary": {
@@ -459,6 +538,19 @@
       // (it POSTs workspace contents to GitHub). Gated for the same reason.
       "gh pr create*": "ask",
       "gh api*": "ask",
+      // Merging a PR is a DIFFERENT risk class from creating one: it is a
+      // team-visible, often-irreversible action against a shared branch,
+      // not a "new destination for my own workspace" exfil concern like the
+      // rest of this block. Gated on its own merits, not folded into the
+      // "gh api*" rule above so the ask prompt names the actual action.
+      // Covers both the CLI form and the REST-API form (some tooling calls
+      // the merge endpoint directly via `gh api`, which the broad
+      // `gh api*` rule above already catches, but the explicit form is
+      // listed too so it stays correct if that broad rule is ever
+      // narrowed).
+      "gh pr merge*": "ask",
+      "gh api*/pulls/*/merge*": "ask",
+      "gh api*/merge*": "ask",
       "scp": "ask",
       "scp *": "ask",
       "sftp": "ask",
@@ -473,6 +565,33 @@
       "netcat *": "ask",
       "telnet": "ask",
       "telnet *": "ask",
+
+      // `rm` is otherwise deliberately allowed by this kit's own default-allow
+      // posture (see the header comment: "blast radius is one ephemeral
+      // container; rm -rf in a throwaway box is a self-own, not a breach").
+      // This one exception targets a DIFFERENT hazard than the sandbox
+      // boundary covers: an absolute path or a `..`-climbing relative path
+      // can, if the sandbox mounts anything outside the workspace root (a
+      // shared cache dir, a bind-mounted secret, a host path on a backend
+      // that mounts more than the workspace), delete something the operator
+      // did not intend to touch and the sandbox boundary does not protect —
+      // the concern is scope, not destructiveness. A bare `rm somefile` or
+      // `rm -rf ./build` inside the workspace still needs no prompt; only a
+      // path that is absolute, home-relative, or leaves the current
+      // directory is gated. Matching happens on the LITERAL command string
+      // OpenCode receives, before the shell expands anything — so `$HOME`
+      // here matches only a command that spells it out literally (e.g.
+      // `rm -rf $HOME/x`); a command that already contains the expanded
+      // absolute path (e.g. `rm -rf /Users/alice/x`) is caught by the
+      // `rm -rf /*` rule instead, not this one — the two rules are
+      // complementary, not redundant.
+      "rm *../*": "ask",
+      "rm *..": "ask",
+      "rm * /*": "ask",
+      "rm -* /*": "ask",
+      "rm -rf /*": "ask",
+      "rm -rf ~*": "ask",
+      "rm -rf $HOME*": "ask",
 
       // DATA-bearing curl/wget forms — gated as DEFENSE-IN-DEPTH, not a firewall.
       // A glob cannot reliably catch every exfil form (flag order, data smuggled

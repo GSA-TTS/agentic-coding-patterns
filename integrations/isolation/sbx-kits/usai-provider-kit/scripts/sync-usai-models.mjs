@@ -76,14 +76,6 @@ function normalizeText(value) {
   return String(value ?? "").toLowerCase()
 }
 
-function extractParts(text) {
-  return normalizeText(text)
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
-}
-
 function parseVersion(text) {
   const normalized = normalizeText(text)
   const match = normalized.match(/(\d+)(?:[._-](\d+))?(?:[._-](\d+))?/)
@@ -115,13 +107,8 @@ function parseModel(rawModel) {
   const name = rawModel.name || rawModel.display_name || id
   const ownedBy = normalizeText(rawModel.owned_by || "")
   const haystack = `${id} ${name}`
-  const parts = extractParts(haystack)
   const version = parseVersion(haystack)
   const isEmbedding = /embedding|embed/.test(haystack)
-  const isPreview = /preview|beta|experimental/.test(haystack)
-  const isMini = /mini/.test(haystack)
-  const isNano = /nano/.test(haystack)
-  const isFlashLite = /flash lite|flash-lite/.test(haystack)
   const isChat = !isEmbedding
 
   // Determine vendor from owned_by or model ID
@@ -143,13 +130,8 @@ function parseModel(rawModel) {
     name,
     vendor,
     raw: rawModel,
-    parts,
     version,
     isEmbedding,
-    isPreview,
-    isMini,
-    isNano,
-    isFlashLite,
     isChat,
     contextWindow: rawModel.context_window || rawModel.contextWindow || rawModel.context || null,
     maxOutputTokens: rawModel.max_output_tokens || rawModel.maxOutputTokens || rawModel.output || null,
@@ -617,57 +599,45 @@ function enrichModelsFromCatalog(models, catalog) {
   })
 }
 
-function familyScore(model, family) {
-  if (family === "opus") {
-    if (model.parts.includes("opus")) return 1000
-    if (model.parts.includes("sonnet")) return 500
-    return 0
-  }
-
-  if (family === "gpt") {
-    return model.parts.includes("gpt") ? 1000 : 0
-  }
-
-  if (family === "small") {
-    if (model.parts.includes("haiku")) return 1000
-    if (model.isMini) return 750
-    if (model.isNano) return 700
-    if (model.isFlashLite) return 650
-    if (model.parts.includes("flash")) return 600
-    return 0
-  }
-
-  return 0
+// -----------------------------------------------------------------------------
+// Default-role selection: explicit priority list, not fuzzy scoring.
+// -----------------------------------------------------------------------------
+// This mirrors OpenCode's OWN upstream default-model-selection precedent
+// (packages/opencode/src/provider/provider.ts's `sort()`/`priority` array): a
+// short, hand-curated, ORDERED list of substring/id candidates, checked in
+// order against whatever the live payload actually contains — never a
+// classifier that scores every model and tiebreaks arbitrarily. We moved off
+// the previous fuzzy scorer (familyScore/compareForRole/selectDefault) because
+// it scored persona-suffixed releases (e.g. "gpt-5.6-terra" vs "gpt-5.6-luna")
+// identically and picked one via an arbitrary string tiebreak. Update this
+// list BY HAND when a new release should become a role's default; if NONE of
+// a role's candidates are present in the live payload, `selectByPriority`
+// falls back to the CURRENT template value for that role rather than a fresh
+// guess — stability over reactivity, so an unrecognized/renamed model can
+// never silently downgrade a working default.
+const ROLE_PRIORITY = {
+  model: ["claude-sonnet-5", "claude_4_5_sonnet", "claude-opus-5", "claude_4_5_opus"],
+  small_model: ["claude_4_5_haiku", "claude-3-5-haiku"],
+  compaction: ["gpt-5.6-terra", "gpt_5_5_default_v2", "gpt-5.4-latest-guardrails-defaultv2"],
 }
 
-function compareForRole(left, right, family) {
-  const familyDelta = familyScore(left, family) - familyScore(right, family)
-  if (familyDelta !== 0) {
-    return familyDelta
+/**
+ * Select a role's default model id by walking ROLE_PRIORITY in order and
+ * taking the first candidate actually present in the live payload. Falls
+ * back to `currentValue` (the value already in the template) when none of
+ * the candidates are present, rather than guessing — see the ROLE_PRIORITY
+ * comment block above for the rationale.
+ * @param {Array} models - parsed models from the live USAi payload
+ * @param {string[]} priorityList - ordered candidate ids for this role
+ * @param {string} currentValue - the template's existing value for this role
+ * @returns {string} the `usai/<id>` value to write, or currentValue unchanged
+ */
+function selectByPriority(models, priorityList, currentValue) {
+  for (const candidate of priorityList) {
+    const match = models.find((m) => m.id === candidate)
+    if (match) return `usai/${match.id}`
   }
-
-  const versionDelta = compareVersions(left.version, right.version)
-  if (versionDelta !== 0) {
-    return versionDelta
-  }
-
-  const sizePenaltyLeft = Number(left.isMini) + Number(left.isNano) + Number(left.isFlashLite)
-  const sizePenaltyRight = Number(right.isMini) + Number(right.isNano) + Number(right.isFlashLite)
-  if (sizePenaltyLeft !== sizePenaltyRight) {
-    return sizePenaltyRight - sizePenaltyLeft
-  }
-
-  if (left.isPreview !== right.isPreview) {
-    return Number(right.isPreview) - Number(left.isPreview)
-  }
-
-  return right.id.localeCompare(left.id)
-}
-
-function selectDefault(models, family, fallbackId) {
-  const ranked = [...models].sort((a, b) => compareForRole(b, a, family))
-  const selected = ranked.find((model) => familyScore(model, family) > 0)
-  return selected ? `usai/${selected.id}` : fallbackId
+  return currentValue
 }
 
 /**
@@ -766,12 +736,45 @@ function replaceJsonString(text, key, value) {
   return text.replace(pattern, `$1${value}$3`)
 }
 
+/**
+ * Read the CURRENT value of a top-level `"key": "usai/..."` string from the
+ * template, before replaceJsonString overwrites it. Used as the
+ * stability-over-reactivity fallback for selectByPriority — see the
+ * ROLE_PRIORITY comment block above.
+ * @param {string} text - template text
+ * @param {string} key - JSON key (e.g. "model", "small_model")
+ * @returns {string} the current value, unquoted
+ */
+function getCurrentJsonString(text, key) {
+  const pattern = new RegExp(`"${key}"\\s*:\\s*"([^"]+)"`)
+  const match = text.match(pattern)
+  if (!match) {
+    throw new Error(`Could not find JSON string for key: ${key}`)
+  }
+  return match[1]
+}
+
 function replaceCompactionModel(text, value) {
   const pattern = /("compaction"\s*:\s*\{[\s\S]*?"model"\s*:\s*")([^"]+)(")/
   if (!pattern.test(text)) {
     throw new Error("Could not find compaction model in template")
   }
   return text.replace(pattern, `$1${value}$3`)
+}
+
+/**
+ * Read the CURRENT compaction model value, before replaceCompactionModel
+ * overwrites it. See getCurrentJsonString above for why this is needed.
+ * @param {string} text - template text
+ * @returns {string} the current compaction model value, unquoted
+ */
+function getCurrentCompactionModel(text) {
+  const pattern = /"compaction"\s*:\s*\{[\s\S]*?"model"\s*:\s*"([^"]+)"/
+  const match = text.match(pattern)
+  if (!match) {
+    throw new Error("Could not find compaction model in template")
+  }
+  return match[1]
 }
 
 export function updateTemplate(templateText, payload, modelsDevCatalog = {}) {
@@ -798,19 +801,26 @@ export function updateTemplate(templateText, payload, modelsDevCatalog = {}) {
   const updatedBlock = renderModelBlock(models, eol)
   let updatedTemplate = replaceBetween(templateText, GENERATED_START, GENERATED_END, updatedBlock, eol)
 
+  // Read each role's CURRENT value before we overwrite it, so
+  // selectByPriority can fall back to "what was already there" rather than a
+  // fresh hardcoded guess when none of ROLE_PRIORITY's candidates are present.
+  const currentModel = getCurrentJsonString(updatedTemplate, "model")
+  const currentSmallModel = getCurrentJsonString(updatedTemplate, "small_model")
+  const currentCompactionModel = getCurrentCompactionModel(updatedTemplate)
+
   updatedTemplate = replaceJsonString(
     updatedTemplate,
     "model",
-    selectDefault(models, "opus", "usai/claude_4_5_opus"),
+    selectByPriority(models, ROLE_PRIORITY.model, currentModel),
   )
   updatedTemplate = replaceJsonString(
     updatedTemplate,
     "small_model",
-    selectDefault(models, "small", "usai/claude_4_5_haiku"),
+    selectByPriority(models, ROLE_PRIORITY.small_model, currentSmallModel),
   )
   updatedTemplate = replaceCompactionModel(
     updatedTemplate,
-    selectDefault(models, "gpt", "usai/gpt-5.4-latest-guardrails-defaultv2"),
+    selectByPriority(models, ROLE_PRIORITY.compaction, currentCompactionModel),
   )
 
   return {
