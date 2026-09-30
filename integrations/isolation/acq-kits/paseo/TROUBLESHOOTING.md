@@ -127,6 +127,13 @@ scripts/paseo-verify-identity <sandbox>
 If the listener's `PPID` is **not** 1, do not `kill -9` blindly — it may have
 siblings under a supervisor. Investigate the parent first.
 
+> **`paseo daemon restart` will not fix this.** Elsewhere in this guide that is
+> the right way to bounce the daemon, but here the stale component is the
+> **host-side forwarder**, not the guest daemon. Restarting the daemon alone was
+> observed to change nothing: the daemon PID changed while the host listener kept
+> the port and kept serving the old backend. The sequence above is required —
+> kill the forwarder, then restart the **sandbox** so it can bind a new one.
+
 Success is the two ids **agreeing with each other**, never matching a remembered
 value: the id changes whenever the VM is recreated.
 
