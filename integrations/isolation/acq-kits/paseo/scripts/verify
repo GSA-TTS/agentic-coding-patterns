@@ -73,6 +73,7 @@ RUN_SBX="${RUN_SBX:-0}"
 SBX_KIT_DIR="${SBX_KIT_DIR:-}"
 # Container port the daemon binds (API + WS + web UI). Keep in sync with spec.
 PASEO_PORT="${PASEO_PORT:-6767}"
+REMOVED_DAEMON_LAUNCH_PATTERN='paseo[[:space:]]+daemon[[:space:]]+start|paseo[[:space:]]+daemon[[:space:]]+(start|run)[^#]*--(listen|web-ui|foreground)'
 # How long to wait for the background startup, which on FIRST boot also installs
 # the Paseo CLI (npm). Override with READY_TIMEOUT.
 READY_TIMEOUT="${READY_TIMEOUT:-120}"
@@ -173,15 +174,40 @@ fi
 
 # --- Offline check of the mount registrar helper (no sandbox needed). ----------
 info "1c. mount registrar helper parses (offline)"
+ASSERTCFG="$KIT_DIR/files/home/paseo-assert-daemon-config.mjs"
 REGMOUNTS="$KIT_DIR/files/home/paseo-register-mounts.mjs"
 if ! command -v node >/dev/null 2>&1; then
-  skip "node not on PATH — cannot exercise paseo-register-mounts.mjs"
-elif [ ! -f "$REGMOUNTS" ]; then
-  bad "paseo-register-mounts.mjs missing at $REGMOUNTS"
-elif node --check "$REGMOUNTS" >/dev/null 2>&1; then
-  ok "paseo-register-mounts.mjs parses (node --check)"
+  skip "node not on PATH — cannot exercise paseo-register-mounts.mjs or paseo-assert-daemon-config.mjs"
 else
-  bad "paseo-register-mounts.mjs failed node --check"
+  if [ ! -f "$ASSERTCFG" ]; then
+    bad "paseo-assert-daemon-config.mjs missing at $ASSERTCFG"
+  elif node --check "$ASSERTCFG" >/dev/null 2>&1; then
+    ok "paseo-assert-daemon-config.mjs parses (node --check)"
+  else
+    bad "paseo-assert-daemon-config.mjs failed node --check"
+  fi
+  if [ ! -f "$REGMOUNTS" ]; then
+    bad "paseo-register-mounts.mjs missing at $REGMOUNTS"
+  elif node --check "$REGMOUNTS" >/dev/null 2>&1; then
+    ok "paseo-register-mounts.mjs parses (node --check)"
+  else
+    bad "paseo-register-mounts.mjs failed node --check"
+  fi
+fi
+
+# --- Offline check of the daemon launch surface (no sandbox needed). ----------
+info "1d. startup daemon launch surface is 0.9-compatible (offline)"
+STARTUP_SCRIPT="$KIT_DIR/files/home/paseo-start.sh"
+if [ ! -f "$STARTUP_SCRIPT" ]; then
+  bad "paseo-start.sh missing at $STARTUP_SCRIPT"
+else
+  removed_flags="$(grep -Ev '^[[:space:]]*#' "$STARTUP_SCRIPT" 2>/dev/null | grep -E "$REMOVED_DAEMON_LAUNCH_PATTERN" || true)"
+  if [ -n "$removed_flags" ]; then
+    bad "startup script still references removed Paseo 0.9 daemon launch flags:"
+    printf '%s\n' "$removed_flags" | sed 's/^/    | /'
+  else
+    ok "startup script uses Paseo 0.9-compatible daemon launch surface"
+  fi
 fi
 
 # --- Select the live driver. -------------------------------------------------
@@ -352,20 +378,34 @@ case "$wrapper_path" in
 esac
 [ -n "$(in_sbx 'test -x ~/.local/bin/opencode && echo yes')" ] \
   && ok "wrapper file is executable" \
-  || bad "~/.local/bin/opencode missing or not executable"
+  || bad "\$HOME/.local/bin/opencode missing or not executable"
 
 info "5. Paseo daemon + web UI (started by the startup supervisor, on its own)"
+removed_flags="$(in_sbx "grep -Ev '^[[:space:]]*#' /home/agent/paseo-start.sh 2>/dev/null | grep -E '$REMOVED_DAEMON_LAUNCH_PATTERN' || true")"
+if [ -n "$removed_flags" ]; then
+  bad "startup script still references removed Paseo 0.9 launch flags:"
+  printf '%s\n' "$removed_flags" | sed 's/^/    | /'
+else
+  ok "startup script uses Paseo 0.9-compatible daemon launch surface"
+fi
 if [ -n "$daemon_up" ]; then
   ok "daemon answers /api/health on 127.0.0.1:$PASEO_PORT (started by the startup supervisor)"
 else
   bad "daemon did not answer /api/health on :$PASEO_PORT (see the daemon log)"
   in_sbx 'tail -n 20 ~/.local/state/paseo/paseo-daemon.log' | sed 's/^/    | /'
 fi
+
+config_assert="$(in_sbx "node /home/agent/paseo-assert-daemon-config.mjs --paseo-home \"\${PASEO_HOME:-\$HOME/.paseo}\" --listen '0.0.0.0:$PASEO_PORT' 2>&1 && echo ok")"
+if [ "$config_assert" = "ok" ]; then
+  ok "config.json persists required daemon settings (listen, web UI, relay disabled)"
+else
+  bad "config.json missing required daemon settings: ${config_assert:-no output}"
+fi
 # The bundled web UI is served on the same origin: the root should return HTML.
 if [ "$(in_sbx "curl -fsS http://127.0.0.1:$PASEO_PORT/ >/dev/null 2>&1 && echo yes")" = "yes" ]; then
   ok "bundled web UI is served on the same port ($PASEO_PORT)"
 elif [ -n "$daemon_up" ]; then
-  warn "daemon is up but the web UI root did not return 200 (PASEO_WEB_UI_ENABLED / --web-ui?)"
+  warn "daemon is up but the web UI root did not return 200 (PASEO_WEB_UI_ENABLED / features.webUi.enabled?)"
 else
   skip "web UI check (daemon not up)"
 fi
@@ -648,14 +688,14 @@ else
 fi
 
 # (b) daemon self-heal: if the daemon dies, supervisor:paseo-daemon must relaunch
-#     it. Kill ONLY the daemon tree (argv matches "paseo daemon start" but NOT the
+#     it. Kill ONLY the daemon tree (argv matches "paseo daemon run" but NOT the
 #     supervisor marker), assert the supervisor survives and the daemon comes back.
 if [ -z "$daemon_up" ]; then
   skip "self-heal guard: daemon was not up to kill"
 else
   sup_before="$(in_sbx 'pgrep -u "$(id -u)" -f "supervisor:paseo-daemon" | sort | tr "\n" " "')"
   in_sbx '
-    for pid in $(pgrep -u "$(id -u)" -f "paseo daemon start"); do
+    for pid in $(pgrep -u "$(id -u)" -f "paseo daemon run"); do
       if tr "\0" " " </proc/"$pid"/cmdline 2>/dev/null | grep -q "supervisor:paseo-daemon"; then
         continue
       fi
@@ -714,7 +754,7 @@ else
       [ -f "$CLIENT" ] || exit 0
       CLIENT_URL="file://$CLIENT" node --input-type=module -e "
         const { connectToDaemon } = await import(process.env.CLIENT_URL);
-        const c = await connectToDaemon({});
+        const c = await connectToDaemon({ target: { kind: \"instance\", home: process.env.PASEO_HOME || (process.env.HOME + \"/.paseo\") } });
         try {
           const r = await c.listProjects();
           for (const p of r.projects ?? []) {
