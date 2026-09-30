@@ -73,6 +73,7 @@ RUN_SBX="${RUN_SBX:-0}"
 SBX_KIT_DIR="${SBX_KIT_DIR:-}"
 # Container port the daemon binds (API + WS + web UI). Keep in sync with spec.
 PASEO_PORT="${PASEO_PORT:-6767}"
+REMOVED_DAEMON_LAUNCH_PATTERN='paseo[[:space:]]+daemon[[:space:]]+start|paseo[[:space:]]+daemon[[:space:]]+(start|run)[^#]*--(listen|web-ui|foreground)'
 # How long to wait for the background startup, which on FIRST boot also installs
 # the Paseo CLI (npm). Override with READY_TIMEOUT.
 READY_TIMEOUT="${READY_TIMEOUT:-120}"
@@ -191,6 +192,21 @@ else
     ok "paseo-register-mounts.mjs parses (node --check)"
   else
     bad "paseo-register-mounts.mjs failed node --check"
+  fi
+fi
+
+# --- Offline check of the daemon launch surface (no sandbox needed). ----------
+info "1d. startup daemon launch surface is 0.9-compatible (offline)"
+STARTUP_SCRIPT="$KIT_DIR/files/home/paseo-start.sh"
+if [ ! -f "$STARTUP_SCRIPT" ]; then
+  bad "paseo-start.sh missing at $STARTUP_SCRIPT"
+else
+  removed_flags="$(grep -Ev '^[[:space:]]*#' "$STARTUP_SCRIPT" 2>/dev/null | grep -E "$REMOVED_DAEMON_LAUNCH_PATTERN" || true)"
+  if [ -n "$removed_flags" ]; then
+    bad "startup script still references removed Paseo 0.9 daemon launch flags:"
+    printf '%s\n' "$removed_flags" | sed 's/^/    | /'
+  else
+    ok "startup script uses Paseo 0.9-compatible daemon launch surface"
   fi
 fi
 
@@ -365,7 +381,7 @@ esac
   || bad "\$HOME/.local/bin/opencode missing or not executable"
 
 info "5. Paseo daemon + web UI (started by the startup supervisor, on its own)"
-removed_flags="$(in_sbx 'grep -Ev "^[[:space:]]*#" /home/agent/paseo-start.sh 2>/dev/null | grep -E "paseo daemon start|--listen|--web-ui|--foreground" || true')"
+removed_flags="$(in_sbx "grep -Ev '^[[:space:]]*#' /home/agent/paseo-start.sh 2>/dev/null | grep -E '$REMOVED_DAEMON_LAUNCH_PATTERN' || true")"
 if [ -n "$removed_flags" ]; then
   bad "startup script still references removed Paseo 0.9 launch flags:"
   printf '%s\n' "$removed_flags" | sed 's/^/    | /'
