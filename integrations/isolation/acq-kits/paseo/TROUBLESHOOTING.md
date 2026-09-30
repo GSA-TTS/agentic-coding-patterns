@@ -30,7 +30,133 @@ acq exec <sandbox> -- sh -c 'curl -fsS http://127.0.0.1:6767/api/health && echo 
   acq exec <sandbox> -- sh -c 'tail -n 40 ~/.local/state/paseo/paseo-install.log'
   ```
 
+## The published port reaches a DIFFERENT daemon than `acq exec` (stale host forwarder)
+
+**Symptom.** Everything looks healthy in isolation, yet the browser behaves as if
+it is talking to a different machine — agents and workspaces you created via the
+CLI are absent from the UI (or vice versa), and **provider calls from browser
+sessions fail with a rejected credential**, e.g.:
+
+```text
+{"detail":"Authentication failed"}
+```
+
+Note that `Authentication failed` is **not** `Not authenticated`: a non-empty
+credential *was* sent and rejected. That distinction is the tell — the header was
+populated, but with an unsubstituted value.
+
+**Why a wrong-daemon route breaks auth specifically.** Under acq/msb, injected
+secrets can be **placeholders** that the sandbox's TLS-interception layer
+substitutes on the wire. A request that reaches a daemon *outside* that path
+still carries the placeholder, so the provider receives a well-formed but invalid
+credential. The auth error is therefore a *symptom of misrouting*, not a bad key —
+chasing the key wastes the most time on this failure.
+
+**Diagnosis — compare the two identities.** A Paseo daemon has a stable id in
+`~/.paseo/server-id`. Ask the host-published port what it is, then ask the guest
+directly. They must match:
+
+```bash
+scripts/paseo-verify-identity <sandbox>
+```
+
+That check fails loudly on a mismatch and prints the remediation. To do it by
+hand, the guest side is:
+
+```bash
+acq exec <sandbox> -- sh -lc 'cat ~/.paseo/server-id; cat ~/.paseo/paseo.pid'
+```
+
+and the host side is a `hello` frame over the published port's `/ws`, reading
+`serverId` from the `server_info` reply.
+
+**Cause — a host forwarder that outlived the sandbox it was created for.** The
+create-time `-p HOST:GUEST` publish runs a host-side `msb` process. That process
+can **survive `acq stop` *and* `acq rm`** and keep holding the host port. The
+replacement sandbox's forwarder then cannot bind, while `acq ports` still reports
+the mapping as configured — so every restart appears to succeed and changes
+nothing. Two independent tells:
+
+- **Age.** The listener is *older than the sandbox it serves*. Compare its
+  `ELAPSED` against guest uptime:
+
+  ```bash
+  ps -ww -o pid,ppid,lstart,etime,command -p <listener-pid>
+  acq exec <sandbox> -- sh -c 'cut -d. -f1 /proc/uptime'
+  ```
+
+- **Build.** The listener's binary path may belong to a **different `msb`
+  installation** than the one `acq` drives (this tap ships a pinned
+  `microsandbox-acq` plus keg-only versioned formulas, and upstream's
+  `microsandbox` owns the same `bin/msb`). A forwarder from another build is
+  invisible to the active one, which is exactly why the lifecycle commands cannot
+  release it:
+
+  ```bash
+  lsof -nP -iTCP:<host-port> -sTCP:LISTEN     # note the PID
+  ps -ww -o command= -p <listener-pid>        # -ww: do not truncate the path
+  command -v msb                              # compare installation prefixes
+  ```
+
+  Do not rely on a truncated `ps` line — the version segment is often exactly
+  what gets cut off.
+
+> A `PPID` of `1` is **normal** here: launchd adopts the forwarder. It is not by
+> itself evidence of a leak. Age and build are the discriminating signals.
+
+**How you get one.** Switching the host's `msb` version is the known trigger:
+replacing the active binary does not stop forwarders from the outgoing build, and
+because upstream's `microsandbox` and the pinned `microsandbox-acq` both own
+`bin/msb`, a swap leaves a forwarder no surviving binary will reap. If you have
+upgraded, downgraded, or pinned `msb` while a sandbox had a published port, this
+is the failure to check for first.
+
+**Fix.** Kill the stale forwarder by PID, confirm the port is genuinely free,
+then restart so the sandbox can bind its own:
+
+```bash
+kill <listener-pid>
+lsof -nP -iTCP:<host-port> -sTCP:LISTEN     # must print NOTHING before continuing
+# only if it survived SIGTERM:
+kill -9 <listener-pid>
+
+acq stop <sandbox> && acq start <sandbox>
+scripts/paseo-verify-identity <sandbox>
+```
+
+If the listener's `PPID` is **not** 1, do not `kill -9` blindly — it may have
+siblings under a supervisor. Investigate the parent first.
+
+Success is the two ids **agreeing with each other**, never matching a remembered
+value: the id changes whenever the VM is recreated.
+
+**Then clear stale browser state.** The daemon registry lives in the browser and
+pins a `serverId`. Once that id no longer exists anywhere it does not self-heal:
+use DevTools ▸ **Application** ▸ **Storage** ▸ **Clear site data**, or delete the
+`@paseo:daemon-registry` and `@paseo:replica-cache` keys. As noted below, "Empty
+Cache and Hard Reload" does **not** clear Local Storage.
+
+**Confirming the fix took.** The daemon logs the provenance of each WebSocket
+client. Host-originated clients appear as `"peer":"external"`; in-guest CLI
+clients as `"peer":"loopback"`. If the count of `external` clients is zero after
+you have opened the UI, host traffic is still landing somewhere else:
+
+```bash
+acq exec <sandbox> -- sh -c 'grep -c "\"peer\":\"external\"" ~/.paseo/daemon.log'
+```
+
+> This reads the daemon's **own** log (`~/.paseo/daemon.log`), not the supervisor's
+> captured stdout (`~/.local/state/paseo/paseo-daemon.log`) that the other sections
+> here tail. They carry the same stream, but the former does not depend on this
+> kit's redirect, so it is the safer one to assert on.
+
 ## Host curl returns "Empty reply from server" (guest curl works)
+
+> **First rule out a just-restarted daemon.** For a few seconds after a restart
+> the daemon accepts the TCP connection but answers nothing, producing exactly
+> this `rc=52`. Retry for ~30s before treating it as a fault;
+> `scripts/paseo-verify-identity` and `scripts/verify` both build in that grace.
+> The cause below applies only when it persists.
 
 **Symptom.** `acq ports <sandbox>` shows container `6767` mapped to a host port,
 and the daemon answers from *inside* the sandbox:
@@ -106,15 +232,32 @@ registers itself; you do **not** need to add a host or enable the relay.
 
 **Fixes, in order of preference.**
 
-1. **Open the UI via `localhost`, not `127.0.0.1`.** The client's built-in local
-   daemon key and the injected hint's endpoint both resolve to `localhost:<port>`
-   (the client normalizes `127.0.0.1`/`::1`/`0.0.0.0` → `localhost`), so a
-   `localhost` address bar gives the cleanest first attach:
+1. **Prefer `localhost` — but only if `localhost` resolves to the address family
+   the forwarder actually bound.** The client's built-in local daemon key and the
+   injected hint's endpoint both resolve to `localhost:<port>` (the client
+   normalizes `127.0.0.1`/`::1`/`0.0.0.0` → `localhost`), so a `localhost` address
+   bar usually gives the cleanest first attach:
 
    ```bash
    acq ports <sandbox>        # host port for 6767
-   # open http://localhost:<host-port-for-6767>   (localhost, not 127.0.0.1)
+   # open http://localhost:<host-port-for-6767>
    ```
+
+   > **Check the address family before trusting this.** The host forwarder binds
+   > **IPv4** (`127.0.0.1`). If your resolver returns `::1` *first* for
+   > `localhost`, a `localhost` URL connects to an address nothing is listening
+   > on and **hangs** instead of failing fast — which looks like a daemon fault
+   > but is a name-resolution mismatch. Compare the two:
+   >
+   > ```bash
+   > lsof -nP -iTCP:<host-port> -sTCP:LISTEN     # TYPE column: IPv4 or IPv6
+   > node -e 'require("dns").lookup("localhost",{all:true,verbatim:true},(e,a)=>console.log(a))'
+   > ```
+   >
+   > If the first resolved address is `::1` and the listener is IPv4, use the
+   > `127.0.0.1` literal in the address bar and make sure any stored
+   > daemon-registry entry uses the IPv4 endpoint too. `scripts/paseo-verify-identity`
+   > checks this pairing for you.
 
 2. **Clear stale client-side host state.** The host registry lives in the
    **browser**, not the daemon — a stale entry from an earlier session (a

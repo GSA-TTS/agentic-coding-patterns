@@ -220,6 +220,12 @@ RUN_ACQ=1 ./scripts/verify
 
 # Keep the sandbox afterward to inspect it:
 KEEP=1 RUN_ACQ=1 ./scripts/verify
+
+# Identity gate (read-only): assert the host-published port and `acq exec` reach
+# the SAME daemon. Run this when the UI looks healthy but behaves like a
+# different machine — missing agents/workspaces, or provider calls failing with
+# "Authentication failed".
+./scripts/paseo-verify-identity <sandbox>
 ```
 
 Validate and drive the kit through `acq`, which translates the neutral
@@ -239,6 +245,7 @@ paseo/
 ├── README.md                       # this file
 ├── TROUBLESHOOTING.md              # failure modes and fixes
 ├── scripts/verify                  # host-side live check
+├── scripts/paseo-verify-identity   # host-side identity gate: published port vs `acq exec`
 └── docs/decisions/                 # design records (ADRs)
 ```
 
@@ -248,5 +255,6 @@ Rationale and the decisions behind this kit's structure live in
 [`docs/decisions/`](docs/decisions/) — notably why one daemon serves everything
 on a single port, why worktrees can only be pinned to the first project dir (and
 why that needs a daemon restart), why the startup script owns the daemon while
-the entrypoint pins worktrees, why the install runs at startup, and why the
-entrypoint is split into a thin agent-named wrapper over a generic kit shim.
+the entrypoint pins worktrees, why the install runs at startup, why the
+entrypoint is split into a thin agent-named wrapper over a generic kit shim, and
+why readiness is gated on daemon *identity* and not just reachability.
