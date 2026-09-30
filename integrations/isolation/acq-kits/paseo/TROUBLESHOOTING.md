@@ -250,21 +250,36 @@ registers itself; you do **not** need to add a host or enable the relay.
    # open http://localhost:<host-port-for-6767>
    ```
 
-   > **Check the address family before trusting this.** The host forwarder binds
-   > **IPv4** (`127.0.0.1`). If your resolver returns `::1` *first* for
-   > `localhost`, a `localhost` URL connects to an address nothing is listening
-   > on and **hangs** instead of failing fast — which looks like a daemon fault
-   > but is a name-resolution mismatch. Compare the two:
+   > **`localhost` is a name, and a name can select a different listener.** The
+   > host forwarder binds **IPv4** (`127.0.0.1`), but `localhost` commonly resolves
+   > to `::1` *first*. That is usually harmless — browsers implement Happy Eyeballs
+   > ([RFC 8305](https://www.rfc-editor.org/rfc/rfc8305)), racing both families and
+   > reaching the IPv4 listener anyway, and an unbound loopback port answers with an
+   > immediate `ECONNREFUSED` rather than stalling.
+   >
+   > It stops being harmless when **something else is listening on `[::1]:<port>`**.
+   > The two binds do not conflict — an IPv4-only forwarder on `*:<port>` and an
+   > unrelated IPv6 listener on `[::1]:<port>` coexist happily — so a `localhost`
+   > URL can silently reach the *other* process while the IPv4 literal reaches the
+   > daemon you meant. That is the same wrong-daemon failure this section exists to
+   > catch, arriving by name resolution instead of by a stale forwarder. Check what
+   > is actually bound, on both families:
    >
    > ```bash
-   > lsof -nP -iTCP:<host-port> -sTCP:LISTEN     # TYPE column: IPv4 or IPv6
+   > lsof -nP -iTCP:<host-port> -sTCP:LISTEN     # expect ONE row; TYPE = IPv4
    > node -e 'require("dns").lookup("localhost",{all:true,verbatim:true},(e,a)=>console.log(a))'
    > ```
    >
-   > If the first resolved address is `::1` and the listener is IPv4, use the
-   > `127.0.0.1` literal in the address bar and make sure any stored
-   > daemon-registry entry uses the IPv4 endpoint too. `scripts/paseo-verify-identity`
-   > checks this pairing for you.
+   > If `lsof` shows more than one listener on that port, prefer the `127.0.0.1`
+   > literal in the address bar — it pins the family and removes resolution from the
+   > path — and make sure any stored daemon-registry entry uses the IPv4 endpoint
+   > too. `scripts/paseo-verify-identity` reports this pairing for you.
+   >
+   > Two narrower cases worth knowing, since the diagnostic commands in this guide
+   > use `curl`: a client that does **not** fall back between families (`curl -6`,
+   > `ipv6Only` sockets, some older libraries) will get `ECONNREFUSED` against an
+   > IPv4-only listener, and a **hang** rather than a refusal means packets are being
+   > silently dropped — a host firewall rule, not a name-resolution mismatch.
 
 2. **Clear stale client-side host state.** The host registry lives in the
    **browser**, not the daemon — a stale entry from an earlier session (a

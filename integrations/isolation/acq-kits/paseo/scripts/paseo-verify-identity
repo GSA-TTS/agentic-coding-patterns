@@ -96,6 +96,11 @@ if [ -n "$LSOF_OUT" ]; then printf '%s\n' "$LSOF_OUT"; else echo "(no listener)"
 
 LISTEN_PID="$(printf '%s\n' "$LSOF_OUT"  | awk 'NR>1 {print $2; exit}')"
 LISTEN_TYPE="$(printf '%s\n' "$LSOF_OUT" | awk 'NR>1 {print $5; exit}')"
+# How MANY processes hold this port. More than one means the families are split
+# (e.g. an IPv4 forwarder on *:PORT plus an unrelated [::1]:PORT listener), which
+# lets a client connecting BY NAME reach whichever the resolver returns first.
+LISTEN_COUNT="$(printf '%s\n' "$LSOF_OUT" | awk 'NR>1 && NF {n++} END {print n+0}')"
+LISTEN_FAMILIES="$(printf '%s\n' "$LSOF_OUT" | awk 'NR>1 && NF {print $5}' | sort -u | tr '\n' ' ')"
 
 is_num() { case "${1:-}" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac; }
 
@@ -159,19 +164,30 @@ else
   note "acq start $SBX"
 fi
 
-# ------------------------------------------- 2. loopback name resolution (order)
+# --------------------------------------- 2. loopback name resolution and family
 
 info "2. Loopback Name Resolution"
-# Only the FIRST address matters: that is what a client connecting by name gets.
-# `::1` merely being present is harmless and must not warn.
+# What a client connecting BY NAME gets is decided by resolution order AND by how
+# many listeners are bound. MEASURED on an IPv4-only listener: ::1-first is benign
+# on its own — an unbound loopback port answers ECONNREFUSED immediately (it does
+# NOT stall), and browsers race both families per RFC 8305 and reach IPv4 anyway.
+# The real hazard is a SECOND listener on the other family: the binds do not
+# conflict, so the name can silently select the wrong process. So: report the
+# pairing, escalate on listener COUNT.
 LOCALHOST_ADDRS="$(node -e 'require("dns").lookup("localhost",{all:true,verbatim:true},(e,a)=>{if(e){console.log("ERR "+e.message);return}console.log(a.map(x=>x.address).join(" "))})' 2>/dev/null)"
 LOCALHOST_FIRST="${LOCALHOST_ADDRS%% *}"
 echo "localhost resolves to: ${LOCALHOST_ADDRS:-<unresolved>}  (first: ${LOCALHOST_FIRST:-?})"
-echo "listener family:       ${LISTEN_TYPE:-<none>}"
-if [ "${LOCALHOST_FIRST:-}" = "::1" ] && [ "${LISTEN_TYPE:-}" = "IPv4" ]; then
-  warn "'localhost' resolves to ::1 FIRST but the listener is IPv4-only — requests"
-  note "to http://localhost:$HOST_PORT may hang rather than fail fast. Use the IPv4"
-  note "literal in the address bar and in any stored daemon-registry entry."
+echo "listeners on $HOST_PORT:   ${LISTEN_COUNT:-0}  (families: ${LISTEN_FAMILIES:-<none>})"
+if [ "${LISTEN_COUNT:-0}" -gt 1 ]; then
+  warn "MORE THAN ONE process is listening on $HOST_PORT, across families."
+  note "A 'localhost' URL selects whichever family the resolver returns first, so it"
+  note "can reach a DIFFERENT daemon than the IPv4 literal does. Use http://127.0.0.1:$HOST_PORT"
+  note "to pin the family, and check the lsof rows above for the unexpected listener."
+elif [ "${LOCALHOST_FIRST:-}" = "::1" ] && [ "${LISTEN_TYPE:-}" = "IPv4" ]; then
+  ok "single IPv4 listener; 'localhost' resolves ::1 first but that is benign here"
+  note "Browsers race both families (RFC 8305) and reach IPv4; an unbound loopback"
+  note "port refuses immediately rather than stalling. Prefer http://127.0.0.1:$HOST_PORT"
+  note "anyway: it pins the family, so no second listener can ever shadow it."
 else
   ok "name resolution and listener family are compatible"
 fi

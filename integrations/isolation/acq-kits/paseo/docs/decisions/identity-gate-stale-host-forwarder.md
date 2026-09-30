@@ -106,19 +106,26 @@ Design constraints, each learned from a concrete failure:
   accepts TCP but answers nothing (`rc=52` "Empty reply from server"). Without a
   retry window the gate reports a false transport fault — the same boot race
   `scripts/verify` guards with `POST_INSTALL_GRACE`.
-- **Warn only on the *first* resolved address.** `localhost` returning `::1`
-  somewhere in its list is harmless; `::1` returning *first* against an
-  IPv4-only listener is not, because the client then connects to an address
-  nothing is listening on and **hangs**. Keying the check on mere presence fires
-  on healthy systems.
+- **Report the loopback family pairing, but do not claim it is fatal.** The
+  forwarder binds IPv4 while `localhost` commonly resolves `::1` first. Measured
+  on the affected host, that pairing alone is **benign**: an unbound loopback port
+  answers `ECONNREFUSED` immediately (not a stall), and browsers — the client this
+  kit documents — implement Happy Eyeballs (RFC 8305), race both families, and
+  reach the IPv4 listener anyway. What is *not* benign is a **second listener on
+  `[::1]:<port>`**: the two binds do not conflict, so a `localhost` URL can
+  silently reach the other process. The check therefore reports the pairing as a
+  note and directs attention to how many listeners are bound, which is the
+  discriminating fact.
 - **Read full argv (`ps -ww`).** The installation-prefix comparison depends on
   the binary path, and the version segment is exactly what a truncated `ps` line
   drops.
 
 **Also corrected: the standing "open via `localhost`, not `127.0.0.1`" advice**
-in `TROUBLESHOOTING.md`. That guidance predates the IPv4-only observation and is
-wrong when the resolver returns `::1` first — it converts a working setup into a
-hang. It is now conditional on checking the listener's address family.
+in `TROUBLESHOOTING.md`. Preferring a *name* over a literal leaves family
+selection to the resolver, which is fine until something else is bound on the
+other family — then the name can select a different daemon, which is precisely the
+failure this gate exists to catch. The advice is now conditional, and the guidance
+explains what to check rather than asserting a specific failure mode.
 
 ## Consequences
 
@@ -158,9 +165,8 @@ Predicate tables (post-fix):
 
 - Orphan age: observed healthy (age 1001s vs uptime 1000s) → PASS; the real
   orphan (7 days vs 1 day) → FAIL; slack boundary 1120 → PASS, 1121 → FAIL.
-- Loopback ordering: observed `127.0.0.1 ::1` + IPv4 → no warning (correctly
-  silent on a healthy host); `::1 127.0.0.1` + IPv4 → warns; `::1` + IPv6 → no
-  warning.
+- Loopback ordering: observed `127.0.0.1 ::1` + IPv4 → silent; `::1 127.0.0.1` +
+  IPv4 → note; `::1` + IPv6 → silent.
 - Build compare: the two observed real paths (`microsandbox-acq/0.6.18` vs
   `microsandbox/0.7.2`) → warns; same prefix → PASS; non-Cellar path → PASS (no
   false warning when no prefix is extractable).
@@ -170,6 +176,45 @@ Predicate tables (post-fix):
 
 A fourth defect was found and fixed in the standalone precursor: `mktemp -t`
 without an explicit `XXXXXX` template fails on macOS ("too few X's").
+
+### Correction: the `::1`-first "hang" claim was wrong
+
+An earlier revision of this record, of `TROUBLESHOOTING.md`, and of the gate's own
+warning text asserted that `::1` resolving first against an IPv4-only listener makes
+a client **hang instead of failing fast**. That was an inference, not an
+observation, and direct measurement against the real IPv4-only listener falsifies
+it:
+
+| Client / condition | Result |
+|---|---|
+| connect to `::1` literal | `ECONNREFUSED` in 9ms — fails fast |
+| `curl -6 localhost` (no family fallback) | `ECONNREFUSED` in 0ms — fails fast |
+| `curl localhost` (fallback allowed) | connected, `remote_ip=127.0.0.1` |
+| Happy-Eyeballs client (browsers; Node ≥20 default) | connected, `remote_ip=127.0.0.1` in 9ms |
+| no-fallback client (`autoSelectFamily: false`) | `ECONNREFUSED` in 1ms |
+
+An unbound **loopback** port answers with an immediate RST, so the outcome is a
+refusal, never a stall. Producing an actual hang required manufacturing silent
+packet loss (`ip6tables -I OUTPUT -d ::1 --dport <port> -j DROP` → 6s timeout),
+which is a firewall condition, not a name-resolution one. And browsers — the client
+this kit documents — race both families per RFC 8305 and reach IPv4 regardless.
+
+The original evidence never showed a hang: all three host probes (`localhost`,
+`127.0.0.1`, ipv4-mapped) **succeeded** and returned the same wrong server-id. They
+reached the stale forwarder; none of them stalled.
+
+**The advice to prefer the IPv4 literal survives on a stronger, demonstrated
+reason.** A second listener on the other family coexists with the forwarder, and
+then the name selects between them:
+
+```text
+bind [::1]:<port> while the IPv4 forwarder holds *:<port>   → both bind, no conflict
+  curl localhost:<port>   → reached the IPv6 listener  (the wrong process)
+  curl 127.0.0.1:<port>   → reached the real daemon
+```
+
+That is the same wrong-daemon class this gate exists to catch, reachable by name
+resolution instead of by a stale forwarder, and reproducible on demand.
 
 **End-to-end confirmation of the underlying fix** (separate from the gate):
 after killing the stale forwarder, `"peer":"external"` client counts went from
