@@ -225,7 +225,12 @@ async function main() {
 
   let client;
   try {
-    client = await connectToDaemon({});
+    client = await connectToDaemon({
+      target: {
+        kind: "instance",
+        home: process.env.PASEO_HOME || `${process.env.HOME}/.paseo`,
+      },
+    });
   } catch (err) {
     log(`could not connect to the Paseo daemon: ${err.message}`);
     return; // fail-open (daemon may still be coming up on a very early boot)
