@@ -22,9 +22,9 @@ def _fake_acq(tmp_path: Path) -> Path:
     acq.write_text(
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
-        "printf '%s\\n' \"$*\" >> \"${ACQ_LOG:?}\"\n"
-        "for arg in \"$@\"; do\n"
-        "  if [[ \"$arg\" == \"exec\" ]]; then cat > \"${ACQ_STDIN:?}\"; break; fi\n"
+        'printf \'%s\\n\' "$*" >> "${ACQ_LOG:?}"\n'
+        'for arg in "$@"; do\n'
+        '  if [[ "$arg" == "exec" ]]; then cat > "${ACQ_STDIN:?}"; break; fi\n'
         "done\n",
         encoding="utf-8",
     )
@@ -149,13 +149,13 @@ def _fake_npm(tmp_path: Path) -> Path:
     npm.write_text(
         "#!/usr/bin/env sh\n"
         "set -u\n"
-        "if [ \"${1:-}\" = \"root\" ] && [ \"${2:-}\" = \"-g\" ]; then\n"
+        'if [ "${1:-}" = "root" ] && [ "${2:-}" = "-g" ]; then\n'
         "  printf '%s\\n' \"${NPM_ROOT:?}\"\n"
         "  exit 0\n"
         "fi\n"
-        "printf '%s\\n' \"$*\" >> \"${NPM_LOG:?}\"\n"
-        "mkdir -p \"${NPM_ROOT:?}/agor-live/dist/executor\"\n"
-        "printf 'console.log(\\\"executor\\\")\\n' > \"${NPM_ROOT:?}/agor-live/dist/executor/cli.js\"\n",
+        'printf \'%s\\n\' "$*" >> "${NPM_LOG:?}"\n'
+        'mkdir -p "${NPM_ROOT:?}/agor-live/dist/executor"\n'
+        'printf \'console.log(\\"executor\\")\\n\' > "${NPM_ROOT:?}/agor-live/dist/executor/cli.js"\n',
         encoding="utf-8",
     )
     npm.chmod(0o755)
