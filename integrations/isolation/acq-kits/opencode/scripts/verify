@@ -1,0 +1,181 @@
+#!/usr/bin/env bash
+#
+# verify — host-side validation for the opencode acq mixin kit.
+#
+# Two layers:
+#
+#   1. OFFLINE GATE (always runs): the backend-agnostic validator
+#      integrations/isolation/acq-kits/validate-kits.py (schema + files[].source
+#      + registry + the `agent:` block). Needs python3 with jsonschema + pyyaml;
+#      if those aren't importable this check reports SKIP (with the fix), not a
+#      false FAIL. Also offline: an INTEGRITY NEGATIVE test — runs the real
+#      install script against a deliberately-wrong pinned hash and asserts it
+#      refuses to install anything (see docs/decisions/fail-closed-on-integrity.md)
+#      rather than falling back to any unpinned path.
+#
+#   2. LIVE END-TO-END (opt-in, RUN_ACQ=1): create a real sandbox with the kit
+#      applied and assert the pinned opencode binary is present, on PATH, and
+#      reports the pinned version.
+#
+# Run on a host where `acq` is installed and logged in, for the live check.
+#
+# Usage (from anywhere):
+#   path/to/opencode/scripts/verify              # offline gate only (default)
+#   RUN_ACQ=1 path/to/.../scripts/verify         # live, via acq
+#   KEEP=1 RUN_ACQ=1 path/to/.../scripts/verify  # keep the sandbox to inspect
+
+set -uo pipefail
+
+KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+# Repo root (…/agentic-coding-patterns) for the backend-agnostic validator.
+REPO_ROOT="$(cd "$KIT_DIR/../../../.." && pwd)"
+INSTALL_SCRIPT="$KIT_DIR/files/home/opencode-install.sh"
+SBX_NAME="opencode-verify-$$"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/opencode-verify.XXXXXX")"
+CREATE_LOG="$WORK/create.log"
+KEEP="${KEEP:-0}"
+RUN_ACQ="${RUN_ACQ:-0}"
+READY_TIMEOUT="${READY_TIMEOUT:-60}"
+POLL_INTERVAL="${POLL_INTERVAL:-2}"
+
+pass=0
+fail=0
+ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass+1)); }
+bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail+1)); }
+skip() { printf '  \033[33mSKIP\033[0m %s\n' "$1"; }
+info() { printf '\n\033[1m%s\033[0m\n' "$1"; }
+
+cleanup() {
+  if [ "$KEEP" = "1" ]; then
+    printf '\nKEEP=1 set; leaving sandbox %s and %s in place.\n' "$SBX_NAME" "$WORK" >&2
+    return
+  fi
+  acq rm "$SBX_NAME" >/dev/null 2>&1 || true
+  rm -rf "$WORK" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT INT TERM
+
+info "0. Preconditions"
+[ -f "$KIT_DIR/spec.yaml" ] && ok "kit spec.yaml present" || { bad "spec.yaml missing"; exit 1; }
+[ -x "$INSTALL_SCRIPT" ] || [ -f "$INSTALL_SCRIPT" ] && ok "install script present" || { bad "opencode-install.sh missing"; exit 1; }
+
+info "1. Offline schema + registry validation"
+if command -v python3 >/dev/null 2>&1 \
+    && python3 -c 'import jsonschema, yaml' >/dev/null 2>&1; then
+  if python3 "$REPO_ROOT/integrations/isolation/acq-kits/validate-kits.py" --root "$REPO_ROOT" --strict \
+      >"$WORK/validate.log" 2>&1; then
+    ok "validate-kits.py --strict passes (schema, files[].source, agent block, registry)"
+  else
+    bad "validate-kits.py --strict failed"
+    sed 's/^/  | /' "$WORK/validate.log" >&2
+  fi
+else
+  skip "python3 with jsonschema+pyyaml not available (pip install jsonschema pyyaml)"
+fi
+
+info "2. Install script syntax"
+if bash -n "$INSTALL_SCRIPT" 2>"$WORK/syntax.log"; then
+  ok "opencode-install.sh parses as valid sh"
+else
+  bad "opencode-install.sh has a syntax error"
+  sed 's/^/  | /' "$WORK/syntax.log" >&2
+fi
+
+info "3. INTEGRITY NEGATIVE: a wrong pinned hash refuses to install (fail-closed)"
+# This is the one property that distinguishes this kit from every sibling kit's
+# fail-SOFT convention (docs/decisions/fail-closed-on-integrity.md) — a bad hash
+# must never result in an installed, unverified binary. Run the real script
+# against a deliberately wrong hash, pointed at a scratch install dir, and
+# assert nothing landed there.
+NEG_DEST="$WORK/negative-dest"
+mkdir -p "$NEG_DEST"
+NEG_SCRIPT="$WORK/opencode-install-negative.sh"
+sed "s|dest_dir=\"/usr/local/bin\"|dest_dir=\"$NEG_DEST\"|" "$INSTALL_SCRIPT" > "$NEG_SCRIPT"
+if command -v sh >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then
+  # Isolate PATH for this probe: the HOST may itself have an `opencode` binary
+  # on PATH (e.g. a developer's own install) which would trip the script's own
+  # idempotency short-circuit ("already installed and runnable; skipping")
+  # before ever reaching the download/verify path this test exists to exercise.
+  # The real sandbox target never has that collision; this is a host-only test
+  # artifact, isolated here rather than weakening the script under test.
+  if OPENCODE_VERSION="v1.18.34" \
+     OPENCODE_SHA256_LINUX_X64="deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" \
+     OPENCODE_SHA256_LINUX_ARM64="deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" \
+     PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
+     sh "$NEG_SCRIPT" >"$WORK/negative.log" 2>&1; then
+    if [ -z "$(find "$NEG_DEST" -mindepth 1 2>/dev/null)" ]; then
+      ok "wrong-hash run refused to install anything (dest dir stayed empty)"
+    else
+      bad "wrong-hash run INSTALLED something despite a hash mismatch — fail-closed is broken"
+      sed 's/^/  | /' "$WORK/negative.log" >&2
+    fi
+    if grep -q "SECURITY:" "$WORK/negative.log"; then
+      ok "mismatch produced the expected SECURITY:-prefixed refusal message"
+    else
+      bad "mismatch did not log the expected SECURITY:-prefixed refusal"
+    fi
+  else
+    bad "negative-hash run exited non-zero (should exit 0 — fail-closed is still a soft sandbox-level exit, see ADR)"
+    sed 's/^/  | /' "$WORK/negative.log" >&2
+  fi
+else
+  skip "sh/curl not available for the offline integrity negative test"
+fi
+
+if [ "$RUN_ACQ" != "1" ]; then
+  info "4. Live sandbox check"
+  skip "RUN_ACQ=1 not set — skipped live acq sandbox verification"
+  printf '\nSummary\n  %d passed, %d failed\n' "$pass" "$fail"
+  [ "$fail" -eq 0 ]
+  exit $?
+fi
+
+info "4. Live sandbox preconditions"
+if ! command -v acq >/dev/null 2>&1; then
+  bad "acq not on PATH"
+  exit 1
+fi
+ok "acq on PATH"
+
+info "5. Create sandbox with the kit"
+printf '  creating %s (workspace %s)...\n' "$SBX_NAME" "$WORK"
+if acq create --name "$SBX_NAME" --kit "$KIT_DIR" opencode "$WORK" >"$CREATE_LOG" 2>&1; then
+  ok "sandbox created with --kit opencode"
+else
+  bad "acq create failed"
+  sed 's/^/  | /' "$CREATE_LOG" >&2
+  exit 1
+fi
+
+in_sbx() { acq exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true; }
+
+info "6. opencode binary present and on PATH"
+_elapsed=0
+while [ "$_elapsed" -lt "$READY_TIMEOUT" ]; do
+  if [ "$(in_sbx "command -v opencode >/dev/null 2>&1 && echo yes")" = "yes" ]; then
+    break
+  fi
+  sleep "$POLL_INTERVAL"
+  _elapsed=$((_elapsed + POLL_INTERVAL))
+done
+if [ "$(in_sbx "command -v opencode >/dev/null 2>&1 && echo yes")" = "yes" ]; then
+  ok "opencode is on PATH in the sandbox"
+else
+  bad "opencode not found on PATH after ${READY_TIMEOUT}s"
+fi
+
+info "7. Installed version matches the pin"
+installed_ver="$(in_sbx "opencode --version 2>/dev/null")"
+pinned_ver="$(grep -o 'OPENCODE_VERSION="v[0-9.]*"' "$KIT_DIR/spec.yaml" | head -n1 | sed -E 's/.*="v([0-9.]*)"/\1/')"
+echo "  installed: ${installed_ver:-<none>}  pinned: ${pinned_ver:-<unknown>}"
+if [ -n "$installed_ver" ] && [ "$installed_ver" = "$pinned_ver" ]; then
+  ok "installed version matches the kit's pinned version"
+else
+  bad "installed version ($installed_ver) does not match the pin ($pinned_ver)"
+fi
+
+info "Summary"
+printf '  %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ] && printf '  \033[32mAll checks passed.\033[0m\n' || printf '  \033[31mSome checks failed — see notes above.\033[0m\n'
+
+[ "$fail" -eq 0 ]

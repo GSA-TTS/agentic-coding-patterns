@@ -1,0 +1,132 @@
+# spec.yaml — opencode (a neutral acq mixin kit, hybrid/v1)
+#
+# AGENT-HARNESS KIT: installs the pinned, SHA-256-verified OpenCode CLI binary
+# into the sandbox at create time, replacing acq's own unpinned MSB fallback
+# (`npm install -g opencode-ai`, which resolves to whatever npm currently
+# calls "latest"). This is the first harness-agent kit in the family — see the
+# top-level `agent:` block below, which declares this kit as providing the
+# `opencode` agent token so acq's built-in agent-kit readiness gate
+# (acq_validate_agent_builtin_kit_dir / kit_spec_agent_field, in the sibling
+# quickstart repo's acq.backends/common.sh) can confirm this kit genuinely
+# matches the agent it's about to enable, before enabling it. Part of the
+# devenv/agent-kits ADR-0030 line of work in that repo.
+#
+# WHY THIS KIT EXISTS (not just "nice to have a pin"): the current MSB install
+# path has two independent problems this kit closes together: (1) no version
+# pin at all — a sandbox created today and one created next month can run
+# materially different OpenCode releases with no record of which; (2) a real,
+# already-documented bug (the sibling quickstart repo's own
+# docs/KNOWN_FAILURE_MODES.md, "opencode-ai npm postinstall intermittently
+# fails to fetch its own binary"): opencode-ai's own npm postinstall step
+# fetches the real binary separately and intermittently fails, which acq
+# already carries a bespoke `ensure_opencode_postinstall` remediation for.
+# This kit's install method has
+# no postinstall step to fail — the release tarball already contains the real
+# binary — so the failure mode doesn't exist here at all, independent of the
+# pin.
+#
+# INSTALL METHOD DECISION (nixpkgs vs. SHA-pinned release binary): the
+# project's devenv sandbox image (integrations/isolation/images/devenv/) pins
+# nixpkgs at a fixed revision (`NIXPKGS_REV`, see that Dockerfile). At that
+# pinned rev, nixpkgs' own `opencode` package resolves to v0.3.112, built from
+# the pre-rename upstream repository (`sst/opencode`) — roughly 70 releases
+# stale relative to the real current release. Installing via that pinned
+# nixpkgs would downgrade users to an abandoned fork's ancient version, not
+# deliver current OpenCode. This kit therefore follows the goose-server kit's
+# SHA-pinned-release-binary pattern instead (see files/home/
+# opencode-install.sh's header for the full install-method rationale),
+# verified via a 3-role consensus review before authoring. Revisit nixpkgs
+# only if/when the devenv image's NIXPKGS_REV bumps to a revision whose own
+# opencode derivation tracks the real anomalyco/opencode repo at a current
+# version — neither is true as of this kit's authoring.
+#
+# INTEGRITY POSTURE (deliberately NOT fail-soft like every other kit in this
+# family): see docs/decisions/fail-closed-on-integrity.md. A SHA-256 mismatch
+# refuses to install the mismatched bytes rather than falling back to any
+# unpinned path — this kit's whole purpose is retiring an unpinned fallback,
+# so silently degrading TO one on a hash mismatch would defeat the kit.
+#
+# NEUTRAL (backend-agnostic) form, structured like the sibling `openchamber` /
+# `pi-coding-agent` / `prime-agent` kits. acq's kit-translate layer maps the
+# declarative caps/files/commands/agent below onto whichever isolation backend
+# acq has active (sbx, msb) — this kit carries no backend-specific config.
+schemaVersion: "hybrid/v1"
+kind: mixin
+name: opencode
+displayName: OpenCode (terminal AI coding agent)
+description: >
+  Installs a pinned, SHA-256-verified OpenCode CLI release binary into the
+  sandbox at create time (root, install phase) — no npm, no native build, no
+  postinstall step to fail. Replaces acq's own unpinned MSB fallback
+  (`npm install -g opencode-ai`, resolves to latest). Declares the `agent:`
+  block so acq's built-in agent-kit readiness gate can confirm this kit
+  genuinely provides the `opencode` agent before enabling it. Fails soft
+  (agent absent, sandbox stays up) on any availability failure, but fails
+  CLOSED (refuses to install) on a SHA-256 mismatch — see
+  docs/decisions/fail-closed-on-integrity.md.
+
+agent:
+  name: opencode
+  entrypoint: opencode
+
+caps:
+  network:
+    allow:
+      # The install script fetches the pinned release tarball from GitHub
+      # Releases. A plain `github.com` download redirects (302) to a signed,
+      # time-limited URL on release-assets.githubusercontent.com (verified
+      # live against the real v1.18.34 asset before authoring this kit — the
+      # redirect Location header resolves there, not objects.githubusercontent.com,
+      # which is a DIFFERENT GitHub asset host used for git LFS / blob objects,
+      # not release downloads). Both github.com (the initial request) and
+      # release-assets.githubusercontent.com (the redirect target) must be
+      # allow-listed, or the download fails under default-deny egress.
+      - github.com
+      - release-assets.githubusercontent.com
+
+files:
+  - path: /home/agent/opencode-install.sh
+    mode: "0755"
+    source: files/home/opencode-install.sh
+    description: Fetch, SHA-256-verify, and install the pinned OpenCode CLI binary (create-time, root)
+
+commands:
+  # INSTALL phase, as root, create-time once — matching goose-server's
+  # rationale (a single prebuilt binary tarball needs no toolchain, so there is
+  # no create-vs-startup safety tension the way there is for openchamber's
+  # native-module npm dependency). The three pins below are this kit's ONLY
+  # copy of the pin (the install script has no literal fallback values, unlike
+  # pi-coding-agent-install.sh's pattern — see that script's own header for
+  # why not duplicating the pin here matters); bump all three together, after
+  # independently re-deriving both hashes from the real release assets, to
+  # adopt a newer release.
+  - phase: install
+    user: "0"
+    description: Fetch, SHA-256-verify, and install the pinned OpenCode CLI binary
+    command:
+      - sh
+      - -c
+      - |
+        OPENCODE_VERSION="v1.18.34" \
+        OPENCODE_SHA256_LINUX_X64="0f22479647226d1d2dd99595d20082ee7bda3870b62dc6a90b41efc1a71d7e9a" \
+        OPENCODE_SHA256_LINUX_ARM64="bbdb3f00c2c51e42e315525233151309724226a8776da8e9145e3b0fa3d5310f" \
+          sh /home/agent/opencode-install.sh
+
+# No publishedPorts: opencode is a TUI, not a web UI (same as pi-coding-agent /
+# prime-agent). Nothing to publish to the host.
+
+agentContext: |
+  ## OpenCode (terminal AI coding agent)
+
+  This sandbox has **OpenCode** installed via a pinned, SHA-256-verified
+  release binary (not npm) — the kit's `opencode-install.sh` fetched the exact
+  pinned release tarball from GitHub Releases, verified its SHA-256, and
+  installed the binary at `/usr/local/bin/opencode` at sandbox creation.
+
+  There is no startup supervisor and no published port: `opencode` is a plain
+  terminal command you run directly, the same as any other locally-installed
+  CLI.
+
+# No backend_shortcuts / backend_extras: this kit is written entirely in the
+# neutral vocabulary (caps / files / commands / agent), which acq's kit
+# translation feeds to whatever backend it has active (sbx, msb).
