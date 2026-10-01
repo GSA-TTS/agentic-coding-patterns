@@ -2,7 +2,7 @@
 #
 # Configures a sandbox for cloud.gov work:
 #   - install/verify the Cloud Foundry CLI (`cf`) at create time;
-#   - allow-list cloud.gov control-plane, app-route, and documentation domains;
+#   - allow-list exact cloud.gov control-plane and documentation hosts;
 #   - document the acq secret binding needed for CF OAuth token injection without
 #     placing the real token in files readable by the agent.
 #
@@ -16,24 +16,26 @@ kind: mixin
 name: cloud-gov
 displayName: cloud.gov Cloud Foundry CLI
 description: >
-  Installs the Cloud Foundry CLI and allow-lists cloud.gov control-plane,
-  application-route, and documentation domains so agents can inspect cloud.gov
-  applications and call the Cloud Foundry API through proxied egress. Cloud
-  Foundry authorization is supplied through acq's custom secret mechanism, using
-  a token captured from `cf oauth-token`, so credentials are not stored in the kit
-  or exposed as real token material in the sandbox environment.
+  Installs the Cloud Foundry CLI and allow-lists exact cloud.gov control-plane
+  and documentation hosts so agents can inspect cloud.gov metadata and call the
+  Cloud Foundry API through proxied egress. Cloud Foundry authorization is
+  supplied through acq's custom secret mechanism, using a token captured from `cf
+  oauth-token`, so credentials are not stored in the kit or exposed as real token
+  material in the sandbox environment.
 
 caps:
   network:
     allow:
-      # cloud.gov apex and every cloud.gov subdomain, including API, login/UAA,
-      # dashboard, docs, and dynamically assigned app routes. Cloud Foundry does
-      # not expose a static per-user route list at kit generation time, so this is
-      # a deliberate broad egress exception for cloud.gov work. Keep wildcard
-      # hosts quoted: leading-* YAML scalars can otherwise be parsed as aliases by
-      # downstream translators.
+      # Exact cloud.gov control-plane and documentation hosts. Avoid wildcard
+      # semantics so sbx and msb translate the same least-privilege egress shape.
+      - api.fr.cloud.gov:443
+      - uaa.fr.cloud.gov:443
+      - login.fr.cloud.gov:443
+      - doppler.fr.cloud.gov:443
+      - log-cache.fr.cloud.gov:443
       - cloud.gov:443
-      - "*.cloud.gov:443"
+      - www.cloud.gov:443
+      - docs.cloud.gov:443
       # Upstream Cloud Foundry documentation.
       - docs.cloudfoundry.org:443
       - cli.cloudfoundry.org:443
@@ -69,8 +71,9 @@ agentContext: |
   ## cloud.gov
 
   This sandbox has the Cloud Foundry CLI (`cf`) available for cloud.gov work and
-  egress allow-listed for the cloud.gov API, login/UAA, log streaming, cloud.gov
-  app route domains, and cloud.gov / Cloud Foundry documentation domains.
+  egress allow-listed for exact cloud.gov API, login/UAA, log streaming, and
+  cloud.gov / Cloud Foundry documentation hosts. Public app routes and custom
+  domains require project-specific exact host allow-list entries.
 
   Authorization is handled through acq's secret injection path. The sandbox may
   contain a backend placeholder in `CF_OAUTH_TOKEN`, but not the real token. The

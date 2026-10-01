@@ -3,7 +3,7 @@
 # verify - host-side validation for the cloud-gov acq mixin kit.
 #
 # By default this runs offline checks only. Set RUN_ACQ=1 to create a throwaway
-# sandbox and verify the CF CLI plus cloud.gov/docs network reachability.
+# sandbox and verify the CF CLI plus exact cloud.gov/docs network reachability.
 
 set -uo pipefail
 
@@ -35,9 +35,22 @@ trap cleanup EXIT INT TERM
 in_acq() { acq exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true; }
 
 info "0. Offline preconditions"
-[ -f "$KIT_DIR/spec.yaml" ] && ok "kit spec.yaml present" || { bad "spec.yaml missing"; exit 1; }
-[ -f "$KIT_DIR/files/home/cloud-gov-install-cf-cli.sh" ] && ok "install script present" || bad "install script missing"
-[ -f "$KIT_DIR/files/home/cloud-gov-configure-cf-auth.sh" ] && ok "auth script present" || bad "auth script missing"
+if [ -f "$KIT_DIR/spec.yaml" ]; then
+  ok "kit spec.yaml present"
+else
+  bad "spec.yaml missing"
+  exit 1
+fi
+if [ -f "$KIT_DIR/files/home/cloud-gov-install-cf-cli.sh" ]; then
+  ok "install script present"
+else
+  bad "install script missing"
+fi
+if [ -f "$KIT_DIR/files/home/cloud-gov-configure-cf-auth.sh" ]; then
+  ok "auth script present"
+else
+  bad "auth script missing"
+fi
 
 if command -v bash >/dev/null 2>&1; then
   for script in \
@@ -69,14 +82,92 @@ fi
 rm -rf "$AUTH_WORK" >/dev/null 2>&1 || true
 
 AUTH_WORK="$(mktemp -d "${TMPDIR:-/tmp}/cloud-gov-auth.XXXXXX")"
-if HOME="$AUTH_WORK" PATH="$AUTH_PATH" CF_OAUTH_TOKEN="bearer eyJ.example.signature" sh "$AUTH_SCRIPT" >/dev/null 2>&1; then
+if HOME="$AUTH_WORK" PATH="$AUTH_PATH" CF_OAUTH_TOKEN="MSB_PLACEHOLDER_TOKEN" sh "$AUTH_SCRIPT" >/dev/null 2>&1; then
+  ok "auth script accepts msb placeholder token"
+else
+  bad "auth script rejected msb placeholder token"
+fi
+rm -rf "$AUTH_WORK" >/dev/null 2>&1 || true
+
+AUTH_WORK="$(mktemp -d "${TMPDIR:-/tmp}/cloud-gov-auth.XXXXXX")"
+if HOME="$AUTH_WORK" PATH="$AUTH_PATH" CF_OAUTH_TOKEN="<MSB_PLACEHOLDER>" sh "$AUTH_SCRIPT" >/dev/null 2>&1; then
+  ok "auth script accepts msb bracket placeholder"
+else
+  bad "auth script rejected msb bracket placeholder"
+fi
+rm -rf "$AUTH_WORK" >/dev/null 2>&1 || true
+
+AUTH_WORK="$(mktemp -d "${TMPDIR:-/tmp}/cloud-gov-auth.XXXXXX")"
+if HOME="$AUTH_WORK" PATH="$AUTH_PATH" CF_OAUTH_TOKEN="bearer TOKEN_HEADER.TOKEN_BODY.TOKEN_SIGNATURE" sh "$AUTH_SCRIPT" >/dev/null 2>&1; then
   bad "auth script accepted bearer/JWT token material"
 else
   ok "auth script rejects bearer/JWT token material"
 fi
+rm -rf "$AUTH_WORK" >/dev/null 2>&1 || true
+
+AUTH_WORK="$(mktemp -d "${TMPDIR:-/tmp}/cloud-gov-auth.XXXXXX")"
+if HOME="$AUTH_WORK" PATH="$AUTH_PATH" CF_OAUTH_TOKEN="TOKEN_HEADER.TOKEN_BODY.TOKEN_SIGNATURE" sh "$AUTH_SCRIPT" >/dev/null 2>&1; then
+  bad "auth script accepted JWT-like token material"
+else
+  ok "auth script rejects JWT-like token material"
+fi
 rm -rf "$AUTH_WORK" "$AUTH_PATH" >/dev/null 2>&1 || true
 
-info "2. Validate the neutral kit spec"
+info "2. Network allow-list assumptions"
+if grep -q '\*' "$KIT_DIR/spec.yaml"; then
+  bad "spec.yaml contains wildcard egress"
+else
+  ok "spec.yaml avoids wildcard egress"
+fi
+
+EXPECTED_HOSTS=$(mktemp "${TMPDIR:-/tmp}/cloud-gov-expected-hosts.XXXXXX")
+ACTUAL_HOSTS=$(mktemp "${TMPDIR:-/tmp}/cloud-gov-actual-hosts.XXXXXX")
+cat >"$EXPECTED_HOSTS" <<'HOSTS'
+api.fr.cloud.gov:443
+uaa.fr.cloud.gov:443
+login.fr.cloud.gov:443
+doppler.fr.cloud.gov:443
+log-cache.fr.cloud.gov:443
+cloud.gov:443
+www.cloud.gov:443
+docs.cloud.gov:443
+docs.cloudfoundry.org:443
+cli.cloudfoundry.org:443
+github.com:443
+objects.githubusercontent.com:443
+HOSTS
+python3 - "$KIT_DIR/spec.yaml" >"$ACTUAL_HOSTS" <<'PY'
+import sys
+from pathlib import Path
+
+in_allow = False
+for line in Path(sys.argv[1]).read_text().splitlines():
+    if line == "    allow:":
+        in_allow = True
+        continue
+    if in_allow and line.startswith("      - "):
+        print(line.split("- ", 1)[1].strip().strip('"'))
+        continue
+    if in_allow and line and not line.startswith("      "):
+        break
+PY
+while IFS= read -r host; do
+  if grep -qx -- "$host" "$ACTUAL_HOSTS"; then
+    ok "spec.yaml allows $host"
+  else
+    bad "spec.yaml missing $host"
+  fi
+done <"$EXPECTED_HOSTS"
+while IFS= read -r host; do
+  if grep -qx -- "$host" "$EXPECTED_HOSTS"; then
+    :
+  else
+    bad "spec.yaml has unexpected egress host $host"
+  fi
+done <"$ACTUAL_HOSTS"
+rm -f "$EXPECTED_HOSTS" "$ACTUAL_HOSTS"
+
+info "3. Validate the neutral kit spec"
 VALIDATOR="$REPO_ROOT/integrations/isolation/acq-kits/validate-kits.py"
 if ! command -v python3 >/dev/null 2>&1; then
   skip "validate-kits.py not run (python3 not on PATH)"
@@ -89,19 +180,23 @@ else
     ok "acq-kits validate-kits.py passes"
   else
     bad "validate-kits.py failed:"
-    printf '%s\n' "$val_out" | sed 's/^/    | /' >&2
+    while IFS= read -r line; do
+      printf '    | %s\n' "$line" >&2
+    done <<EOF
+$val_out
+EOF
   fi
 fi
 
 if [ "$RUN_ACQ" != "1" ]; then
-  info "3. Live sandbox check"
+  info "4. Live sandbox check"
   skip "RUN_ACQ=1 not set - skipped live cloud.gov sandbox verification"
   printf '\nSummary\n  %d passed, %d failed\n' "$pass" "$fail"
   [ "$fail" -eq 0 ]
   exit $?
 fi
 
-info "3. Live sandbox preconditions"
+info "4. Live sandbox preconditions"
 if ! command -v acq >/dev/null 2>&1; then
   bad "acq not on PATH"
   exit 1
@@ -116,7 +211,7 @@ else
   exit 1
 fi
 
-info "4. Create sandbox with the kit"
+info "5. Create sandbox with the kit"
 printf '  creating %s (workspace %s)...\n' "$SBX_NAME" "$WORK"
 if acq create --name "$SBX_NAME" --kit "$KIT_DIR" opencode "$WORK" >"$CREATE_LOG" 2>&1; then
   ok "sandbox created with cloud-gov kit"
@@ -126,7 +221,7 @@ else
   exit 1
 fi
 
-info "5. CF CLI installed"
+info "6. CF CLI installed"
 cf_version="$(in_acq 'cf version')"
 printf '  %s\n' "${cf_version:-<no output>}"
 case "$cf_version" in
@@ -134,10 +229,15 @@ case "$cf_version" in
   *) bad "cf CLI did not report a version" ;;
 esac
 
-info "6. cloud.gov API and docs reachable"
+info "7. cloud.gov API and docs reachable"
 for url in \
   https://api.fr.cloud.gov/v3/info \
+  https://uaa.fr.cloud.gov/ \
+  https://login.fr.cloud.gov/ \
+  https://doppler.fr.cloud.gov/ \
+  https://log-cache.fr.cloud.gov/ \
   https://cloud.gov/ \
+  https://www.cloud.gov/ \
   https://docs.cloud.gov/ \
   https://docs.cloudfoundry.org/ \
   https://cli.cloudfoundry.org/; do
@@ -149,7 +249,7 @@ for url in \
   esac
 done
 
-info "7. Authenticated CF API wiring"
+info "8. Authenticated CF API wiring"
 auth_status="$(in_acq "curl -sS -o /dev/null -w '%{http_code}' -H \"Authorization: \$CF_OAUTH_TOKEN\" https://api.fr.cloud.gov/v3/organizations")"
 printf '  authenticated /v3/organizations -> %s\n' "${auth_status:-<none>}"
 case "$auth_status" in

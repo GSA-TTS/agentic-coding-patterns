@@ -14,10 +14,10 @@ sandbox.
 - **Cloud Foundry CLI** - uses an existing `cf` binary when the base image already
   has one. If `cf` is missing, installs Cloud Foundry CLI v8.19.0 from pinned
   upstream release tarballs with committed SHA-256 checks.
-- **cloud.gov egress** - allow-lists the `cloud.gov` apex and all `cloud.gov`
-  subdomains, covering the Cloud Foundry API, login/UAA, log-stream hosts,
-  dashboard, dynamically assigned app routes, and user-facing cloud.gov
-  documentation.
+- **cloud.gov egress** - allow-lists exact cloud.gov control-plane and
+  documentation hosts: the Cloud Foundry API, login/UAA, log-stream hosts, and
+  user-facing cloud.gov documentation. Public app routes and custom domains stay
+  project-specific instead of using wildcard egress.
 - **Cloud Foundry docs egress** - allow-lists upstream Cloud Foundry CLI and docs
   hosts so agents can look up command behavior and platform guidance.
 - **Secret-safe authorization** - documents the `acq secret set` binding for a
@@ -36,8 +36,9 @@ store and binds it to `api.fr.cloud.gov`; the active backend maps that to its
 own proxy or secret-substitution mechanism. The kit validates that any injected
 `CF_OAUTH_TOKEN` value is a backend placeholder, not raw token material.
 
-The cloud.gov wildcard uses `*.cloud.gov`, which msb accepts directly as a
-suffix rule and sbx accepts as a cloud.gov subdomain wildcard.
+The network allow-list avoids wildcard semantics. Both sbx and msb receive the
+same exact host list, which keeps the shared kit least-privilege and makes app
+route/custom-domain access an explicit project-specific decision.
 
 ## Usage
 
@@ -87,9 +88,12 @@ cf oauth-token | acq secret set <sandbox-name> cloud-gov --host api.fr.cloud.gov
 The `CF_OAUTH_TOKEN` name is a placeholder binding for backend proxy/secret
 substitution. At startup the kit targets `https://api.fr.cloud.gov` and, when
 that value is present, refuses to continue unless it matches a recognized
-backend-placeholder prefix. The stock CF CLI may parse `AccessToken` locally, so
-the kit does not write the placeholder into CF CLI config or claim authenticated
-`cf` commands work without live verification.
+backend-placeholder prefix, including the msb placeholder form represented in
+tests as `MSB_PLACEHOLDER_TOKEN`. The startup guard rejects bearer/JWT-like raw
+token material before anything can be written to the workspace. The stock CF CLI
+may parse `AccessToken` locally, so the kit does not write the placeholder into
+CF CLI config or claim authenticated `cf` commands work without live
+verification.
 
 ## Network Allow-List
 
@@ -97,9 +101,16 @@ The kit allow-lists:
 
 | Host | Purpose |
 |------|---------|
-| `cloud.gov`, `*.cloud.gov` | cloud.gov apex and all cloud.gov subdomains, including API, login/UAA, dashboard, docs, and public app routes. This is intentionally broad: Cloud Foundry assigns app routes dynamically, and a reusable kit cannot know which `*.app.cloud.gov` hosts belong to the current operator at static kit-definition time. Custom domains outside `cloud.gov` stay project-specific. |
+| `api.fr.cloud.gov` | Cloud Foundry API |
+| `uaa.fr.cloud.gov`, `login.fr.cloud.gov` | cloud.gov UAA and browser-login control plane |
+| `doppler.fr.cloud.gov`, `log-cache.fr.cloud.gov` | Cloud Foundry log streaming/control-plane endpoints |
+| `cloud.gov`, `www.cloud.gov`, `docs.cloud.gov` | cloud.gov public documentation |
 | `docs.cloudfoundry.org`, `cli.cloudfoundry.org` | Cloud Foundry documentation |
-| `github.com`, `objects.githubusercontent.com` | Pinned Cloud Foundry CLI release tarball download |
+| `github.com`, `objects.githubusercontent.com` | Pinned Cloud Foundry CLI release tarball download during kit install; if runtime access to these hosts is not acceptable for a deployment context, use a base image with `cf` preinstalled or a project-specific vetted artifact source. |
+
+The kit intentionally does not allow `*.cloud.gov`. If the project needs a
+specific app route, route service, or custom domain, add that exact host in a
+project-specific kit or sandbox policy after review.
 
 ## Using `cf`
 
@@ -129,7 +140,7 @@ Failure-mode notes are in [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md).
 ## Design Decisions
 
 - [`docs/decisions/cloud-gov-cli-and-auth.md`](docs/decisions/cloud-gov-cli-and-auth.md)
-  - why this kit installs `cf`, uses broad `cloud.gov` egress, and relies on acq
+  - why this kit installs `cf`, uses exact cloud.gov egress, and relies on acq
   placeholder-based auth.
 
 ## Verifying
@@ -141,8 +152,9 @@ Run the bundled check:
 ```
 
 By default it runs offline checks only: repository kit validation, shell syntax
-for kit scripts, and auth-script guard tests. Set `RUN_ACQ=1` to create a
-throwaway sandbox and verify that `cf` is installed, cloud.gov/docs endpoints are
-reachable, and the injected placeholder reaches the CF API through a direct HTTPS
-request. `RUN_ACQ=1` requires a global `cloud-gov` acq secret. Set `KEEP=1` with
+for kit scripts, auth-script guard tests with synthetic placeholders, and exact
+egress allow-list assertions. Set `RUN_ACQ=1` to create a throwaway sandbox and
+verify that `cf` is installed, cloud.gov/docs endpoints are reachable, and the
+injected placeholder reaches the CF API through a direct HTTPS request.
+`RUN_ACQ=1` requires a global `cloud-gov` acq secret. Set `KEEP=1` with
 `RUN_ACQ=1` to keep the sandbox for inspection.

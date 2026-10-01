@@ -54,11 +54,12 @@ or no current user.
   ```
 
 - **Unexpected token value in the sandbox.** The startup script only accepts
-  recognized backend placeholders (`acq_placeholder_*` or `sbx-cs-*`) in
-  `CF_OAUTH_TOKEN`. If a raw `bearer ...` token, a JWT-looking value, or a value
-  with control characters appears in the sandbox, startup fails closed. Refresh
-  the acq secret from the host and recreate the sandbox. Do not paste the token
-  into chat or commit it to the workspace.
+  recognized backend placeholders in `CF_OAUTH_TOKEN`, including sbx/acq forms
+  and the msb placeholder form represented in tests as `MSB_PLACEHOLDER_TOKEN`.
+  If a raw `bearer ...` token, a JWT-looking value, or a value with control
+  characters appears in the sandbox, startup fails closed before writing CF CLI
+  auth state. Refresh the acq secret from the host and recreate the sandbox. Do
+  not paste the token into chat or commit it to the workspace.
 - **CF CLI wants a local login.** The kit does not write the placeholder into
   `~/.cf/config.json` because stock `cf` may parse cached tokens locally before
   sending a request. Use direct Cloud Foundry API calls with the placeholder auth
@@ -72,14 +73,14 @@ cloud.gov app route fails because egress is denied.
 
 **Causes and fixes:**
 
-- **Route outside cloud.gov.** The kit allow-lists `cloud.gov` and
-  `*.cloud.gov` because Cloud Foundry app routes are assigned dynamically and a
-  reusable kit cannot know which `*.app.cloud.gov` hosts belong to the current
-  operator at static kit-definition time. If your app uses a custom domain or an
-  internal route outside `cloud.gov`, add a separate project-specific network
-  allow-list entry rather than broadening this shared kit.
-- **Wildcard not supported by the active backend.** Confirm the generated backend
-  policy from `acq`; if needed, add the specific app host as a per-sandbox allow.
+- **Expected shared-kit limit.** The kit intentionally allow-lists exact
+  cloud.gov control-plane and documentation hosts only. It does not include a
+  `*.cloud.gov` wildcard, because wildcard semantics differ by backend and widen
+  egress beyond least privilege. Add the specific app route, route service, or
+  custom domain as a project-specific network allow-list entry after review.
+- **Backend parity check.** Confirm the generated backend policy from `acq`
+  contains the exact host you added; both sbx and msb should receive concrete
+  host allow rules, not a suffix wildcard.
 
 ## Docs Are Not Reachable
 
@@ -88,6 +89,7 @@ cloud.gov app route fails because egress is denied.
 **Causes and fixes:**
 
 - Confirm the requested host is one of `cloud.gov`, `www.cloud.gov`,
-  `docs.cloud.gov`, `docs.cloudfoundry.org`, or `cli.cloudfoundry.org`.
+  `docs.cloud.gov`, `docs.cloudfoundry.org`, `cli.cloudfoundry.org`, or an exact
+  cloud.gov control-plane host listed in `spec.yaml`.
 - If docs pull assets from another host and the backend blocks them, add the
   specific observed host after review instead of adding a broad wildcard.
