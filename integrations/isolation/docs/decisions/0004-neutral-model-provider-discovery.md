@@ -98,6 +98,45 @@ kit on the host; no provider-kit code runs on the host. See
 (*Host-Authoritative Sandbox Configuration*, pending —
 GSA-TTS/agentic-coding-quickstart#504), the mechanism of record.
 
+`providerId` is used as a **filesystem path segment** — it names the
+materialized directory `/var/lib/acq/host/models/providers/<PROVIDER_ID>/` — so
+it is validated host-side as a path component before any directory is created,
+not merely as a schema string. The invariant:
+
+- **Safe slug.** `providerId` MUST match `[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?`
+  **against the whole string**: lowercase ASCII alphanumerics and internal
+  hyphens, 1–32 characters. This rejects path separators (`/`, `\`),
+  traversal segments (`.`, `..`), absolute paths, NUL and control bytes,
+  leading/trailing hyphens, whitespace, and any non-ASCII character (so
+  visually-confusable Unicode cannot impersonate another provider's directory
+  name).
+
+  The match MUST be whole-string — `fullmatch` semantics, or an explicitly
+  newline-safe anchor such as `\A…\z`. A plain `^…$` is **not** sufficient: in
+  Python, JavaScript, PCRE and `grep` alike, `$` matches before a trailing
+  newline, so `^[a-z0-9]…$` accepts `"usai\n"`, which would then be used to
+  create a directory name containing an embedded newline. Verified:
+  `re.match(r'^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$', 'usai\n')` matches while
+  `re.fullmatch(...)` does not. Implementations MUST also reject a `providerId`
+  that is not a JSON string — a number or `null` must never be coerced into a
+  path segment.
+- **Matches its own directory.** The validated `providerId` MUST equal the name
+  of the directory `acq` materializes for it, and the orchestrator MUST derive
+  each provider's identity from the **directory name it globbed**, cross-checked
+  against the `providerId` inside that directory's `facts.json`. A mismatch is a
+  hard failure for that provider, not a warning: it means the two sources of
+  identity disagree, and neither can be trusted to select the right credential.
+- **Unique within the materialized set.** Two provider kits MUST NOT resolve to
+  the same `providerId`. `acq` fails provisioning on a collision rather than
+  letting the later kit overwrite the earlier one's `facts.json`, `normalizer`,
+  or `snapshot.json` — a silent overwrite would let one kit substitute its own
+  code and routing for another's while keeping that other's `keyEnv`.
+
+Validation runs host-side, before materialization, in the same pass as the
+checks below. A facts file failing it is rejected and that provider is absent
+from the mount — which the orchestrator treats as "no provider present"
+(Layer 2, step 4), never as a provider with a default identity.
+
 `keyEnv` names the environment variable that holds the vendor credential. A
 provider kit may only name a credential it declares itself: `acq` confirms
 `keyEnv` matches a variable in the same provider kit's own `spec.yaml`
@@ -131,19 +170,67 @@ Its `startup` phase:
 
 1. Globs the read-only provider-facts mount
    `/var/lib/acq/host/models/providers/*/facts.json` (Layer 1).
-2. For each discovered provider, invokes that provider's own normalizer —
-   `<PROVIDER_ID>/normalizer`, the sibling of the `facts.json` just read —
-   through a shared, vendored-into-this-kit bounded-fetch helper (per-provider
-   timeout + response-size cap), with one canonical implementation of that
-   helper.
+2. **The helper fetches; the normalizer never does.** The shared,
+   vendored-into-this-kit bounded-fetch helper — one canonical implementation —
+   performs the HTTPS request to `modelsUrl` itself, applying the per-provider
+   timeout, the response-size cap, and the `https://`-plus-declared-host check
+   (see [Security model](#security-model)). It then invokes that provider's own
+   normalizer — `<PROVIDER_ID>/normalizer`, the sibling of the `facts.json` just
+   read — as a **pure file-to-file transform** over the bytes it already
+   fetched:
+
+   ```text
+   normalizer --source <fetched-response-file> --out <neutral-output-file>
+   ```
+
+   The normalizer is a transform, not a client. Its containment contract:
+
+   - **No network access.** The normalizer MUST NOT perform network I/O. It
+     receives already-fetched bytes on the filesystem and writes a file. A
+     normalizer that fetches is a defect, not a supported variation, because the
+     helper's timeout / size cap / host check would no longer apply to the bytes
+     it returns.
+   - **No credential.** The normalizer is invoked with a **minimized
+     environment** that does not include `keyEnv` or any other secret. Only the
+     helper reads the credential, and only to authenticate the request it makes
+     itself. This is a deliberate narrowing of the standing trust boundary: the
+     provider's credential is used by one audited, vendored implementation, not
+     by per-vendor code the repo does not own.
+   - **Bounded like the fetch.** The normalizer runs under its own wall-clock
+     timeout and output-size cap, inside the same total budget as the fetch, so
+     a hanging or output-bombing normalizer cannot stall startup any more than a
+     hanging endpoint can.
+   - **Failure is a fallback, not a pass.** A normalizer that exits non-zero,
+     times out, exceeds its output cap, or writes output failing schema
+     validation (step 3) is treated exactly like a failed fetch — fall back to
+     that provider's snapshot. There is no path where an unusable normalizer
+     result is accepted.
+
+   Read-only mounting protects the normalizer's **integrity** (a sudo-capable
+   guest agent cannot swap it post-provisioning). It does not make *executing*
+   it safe, which is what the contract above is for. These are separate
+   properties and both are required.
 3. Validates the normalizer's **output** against the neutral catalog schema
    before accepting it — a structurally-valid-but-wrong response is still a
    routing hazard, so shape validation runs on every refresh, not only on error
    paths.
-4. On any failure (timeout, oversized, malformed, validation failure, or no
-   provider present) falls back to that provider's vendored snapshot —
-   `<PROVIDER_ID>/snapshot.json`, the sibling of the `facts.json` just read —
-   presented on the same read-only mount.
+4. **Per-provider refresh failure** — timeout, oversized response, malformed
+   response, normalizer failure, or output failing schema validation — falls
+   back to that provider's vendored snapshot, `<PROVIDER_ID>/snapshot.json`, the
+   sibling of the `facts.json` just read, presented on the same read-only mount.
+   The provider still contributes entries; they are its last-known-good ones.
+
+   **No provider present is a different case and is NOT a snapshot fallback.**
+   When the glob in step 1 matches nothing — no provider kit enabled, or every
+   candidate rejected by host-side facts validation — there is no provider
+   directory, so there is no `snapshot.json` to read. The orchestrator MUST then
+   write a **valid, explicitly empty** aggregate (`models: []`) carrying the
+   provenance that zero providers were discovered, and exit success. It MUST NOT
+   omit the file, write a partial file, invent a default provider, or fail
+   sandbox startup: a harness kit reading the catalog must be able to tell *"no
+   providers are configured"* from *"discovery did not run"*, and an absent file
+   cannot express the difference. A provider whose facts failed validation is
+   reported in that provenance as rejected, not silently absent.
 5. Aggregates every provider's neutral output into one **guest-local,
    per-sandbox** file, written read-write and never shared with any other
    sandbox: `/var/lib/acq/models/catalog.json`. The aggregate carries **only
@@ -213,9 +300,28 @@ transform pricing."
 ### Neutral catalog schema
 
 Both a normalizer's output and the aggregate carry
-`schemaVersion: "acq-neutral-model-catalog/v1"`. The schema is versioned from v1;
-there is no multi-version negotiation mechanism (renderers declaring supported
-versions, the orchestrator picking compatible pairings). A model catalog is a
+`schemaVersion: "acq-neutral-model-catalog/v1"`.
+
+Two constraints this ADR places on that shape, which the formal JSON Schema
+(tracked in GSA-TTS/agentic-coding-patterns#435) must honor:
+
+- **The model list is a required array and MAY be empty.** An aggregate with
+  zero entries is *valid*, not a schema violation — that is what the
+  orchestrator writes when no provider is present (Layer 2, step 4). A schema
+  that required a non-empty list would force the no-provider case to either omit
+  the file or write something invalid, which is exactly the ambiguity step 4
+  exists to prevent.
+- **Per-entry provenance is required, and the aggregate records discovery
+  provenance.** Each entry states which `providerId` it came from and whether it
+  came from a live refresh or that provider's vendored snapshot; the aggregate
+  additionally records the set of providers discovered, and for each, the
+  outcome (`live`, `snapshot`, or `rejected`). A consumer must be able to tell a
+  live catalog from a stale one, and *"zero providers configured"* from
+  *"discovery did not run"*, by reading the file alone.
+
+The schema is versioned from v1; there is no multi-version negotiation mechanism
+(renderers declaring supported versions, the orchestrator picking compatible
+pairings). A model catalog is a
 simple, slow-moving shape (id / context window / pricing / vendor), so a breaking
 change is handled as a rare, coordinated version bump documented in a follow-up
 ADR at that time, not by standing negotiation machinery.
@@ -249,12 +355,23 @@ ADR at that time, not by standing negotiation machinery.
   the facts file's declared `host`, which must itself be on the sandbox's
   effective `caps.network.allow` union (ADR 0002). The orchestrator never fetches
   an arbitrary URL a facts file supplies.
-- **No new credential exposure.** The orchestrator invokes each provider's
-  normalizer with that provider's already-bound credential, exactly as the
-  provider kit would for its own inference calls — reusing the standing trust
-  boundary, not creating a new one. The orchestrator's own code never sees
-  plaintext key material beyond what the guest's existing secret-injection
-  mechanism already exposes to that specific, network-permitted host.
+- **Provider-shipped code never holds the credential.** The credential named by
+  `keyEnv` is read only by the shared bounded-fetch helper — one vendored,
+  audited implementation — and only to authenticate the request that helper
+  makes itself. Each provider's `normalizer` is invoked afterwards, as a pure
+  file-to-file transform over already-fetched bytes, under a **minimized
+  environment that excludes `keyEnv` and every other secret** (Layer 2, step 2).
+  So this design does not merely reuse the standing trust boundary — it narrows
+  it: no per-vendor code the repo does not own is ever handed key material. The
+  orchestrator's own code likewise never sees plaintext key material beyond what
+  the guest's existing secret-injection mechanism already exposes to that
+  specific, network-permitted host.
+- **Executing provider code is contained separately from mounting it.** The
+  read-only mount guarantees the normalizer's integrity after provisioning; it
+  says nothing about the safety of running it. Containment of execution is the
+  explicit contract in Layer 2, step 2: no network, no credential, bounded time
+  and output, and failure routed to the snapshot fallback. Both properties are
+  required, and neither substitutes for the other.
 - **Atomic writes.** Facts and aggregate writes are temp-file + rename; no reader
   observes a partial write.
 - **Bounded resource use.** Per-provider fetch timeout + response-size cap
@@ -288,12 +405,13 @@ sequenceDiagram
     end
 
     ACQ->>KIT: fetch pinned kit (static facts + normalizer + snapshot)
-    ACQ->>ACQ: validate facts host-side (env-var-ownership, SSRF, schema)
+    ACQ->>ACQ: validate facts host-side (providerId slug/uniqueness, env-var-ownership, SSRF, schema)
     ACQ->>HSTATE: write validated facts + staged code
     ACQ->>RO: mount HSTATE read-only
     AGENT-->>RO: sudo tee providers/evil.json (FAILS: read-only mount)
     ACQ->>RO: invoke orchestrator from :ro path (restart-safe)
-    RO->>ORCH: run normalizer (in-guest, provider's own credential)
+    ORCH->>ORCH: bounded fetch (helper holds credential; timeout + size cap + host check)
+    RO->>ORCH: run normalizer on fetched bytes (no network, NO credential, bounded)
     ORCH->>CAT: write per-sandbox catalog (rw, never shared)
     Note over ACQ,RO: acq trusts only host-authoritative read-only inputs and the catalog stays guest-local (never cross sandbox)
 ```
@@ -338,6 +456,16 @@ sequenceDiagram
 - **Standing startup-ordering gap, inherited not introduced by this ADR** — see
   the Layer 2 callout above. Affects the shipped `usai-provider` config-merge
   step too; Layers 2–3 add to the same exposure rather than create it.
+- **This design executes provider-shipped code in the guest.** That is a real
+  residual risk, not one the read-only mount removes: the mount protects the
+  normalizer's integrity, while *running* it is contained only by the Layer 2
+  step 2 contract (no network, no credential, bounded time and output, failure
+  routed to the snapshot). The residual exposure is a normalizer that is
+  pointlessly slow or produces garbage — which degrades to that provider's
+  snapshot — rather than one that can exfiltrate a credential or reach an
+  unapproved host. The contract is therefore load-bearing: relaxing any clause
+  of it is explicitly not an implementer's call (see *What an agent must NOT
+  decide unilaterally*).
 
 ### Neutral
 
@@ -378,6 +506,12 @@ sequenceDiagram
   incidentally, closes it on `msb`) — not a per-kit workaround here, which
   would just be a second, divergent mechanism. Quickstart-owned; needs
   quickstart maintainer review.
+- **Any relaxation of the normalizer containment contract** (Layer 2, step 2):
+  granting a normalizer network access, passing it a credential, or removing its
+  time/output bounds. Each would move provider-shipped code back inside the
+  credential boundary this ADR deliberately narrows, and the read-only mount
+  does not substitute for it. Needs human/CODEOWNERS review, not an
+  implementer's judgement call.
 
 ## References
 
