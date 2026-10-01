@@ -45,22 +45,25 @@ USER_STORAGE_CONF="$USER_STORAGE_DIR/storage.conf"
 #
 # TIMEOUT (finding #6): this runs on EVERY boot. A wedged storage lock, a stalled
 # newuidmap, or a hung mount could otherwise block the boot sequence forever, so
-# the build is bounded by `timeout` when available (best-effort: if `timeout` is
-# absent we run unbounded rather than skip the self-test). OCI_ENGINE_SELFTEST_TIMEOUT
-# (seconds) is overridable via spec.yaml environment.
+# the build must be bounded by `timeout`. If `timeout` is unavailable, skip the
+# self-test/fallback path rather than run `podman build` unbounded on boot.
+# OCI_ENGINE_SELFTEST_TIMEOUT (seconds) is overridable via spec.yaml environment.
 OCI_ENGINE_SELFTEST_TIMEOUT="${OCI_ENGINE_SELFTEST_TIMEOUT:-120}"
 case "$OCI_ENGINE_SELFTEST_TIMEOUT" in
   ''|*[!0-9]*) OCI_ENGINE_SELFTEST_TIMEOUT=120 ;;
+  *[1-9]*) ;;
+  *) OCI_ENGINE_SELFTEST_TIMEOUT=120 ;;
 esac
 
+if ! command -v timeout >/dev/null 2>&1; then
+  echo "oci-engine: timeout command unavailable; skipping rootless self-test to avoid an unbounded boot-path build." >&2
+  exit 0
+fi
+
 _oci_build() {
-  # Run podman build, bounded by `timeout` if present. A timeout kill returns
-  # 124 (GNU) — treated as a failed self-test, which triggers the vfs fallback.
-  if command -v timeout >/dev/null 2>&1; then
-    timeout "$OCI_ENGINE_SELFTEST_TIMEOUT" podman build -q -t oci-engine-selftest:local "$1" >/dev/null 2>&1
-  else
-    podman build -q -t oci-engine-selftest:local "$1" >/dev/null 2>&1
-  fi
+  # A timeout kill returns 124 (GNU) and is treated as a failed self-test, which
+  # triggers the vfs fallback.
+  timeout "$OCI_ENGINE_SELFTEST_TIMEOUT" podman build -q -t oci-engine-selftest:local "$1" >/dev/null 2>&1
 }
 
 _oci_selftest() {

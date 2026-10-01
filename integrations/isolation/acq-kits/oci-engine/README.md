@@ -54,8 +54,11 @@ wide grant for an engine that does not exist.
 Also on **every start** (a second `startup` step, run as the **agent**) it runs a
 rootless self-test — a real `podman build` FROM scratch, which opens `/dev/fuse`
 and mounts a layer (stronger than `podman info`, which does not). The build is
-bounded by `timeout` (`OCI_ENGINE_SELFTEST_TIMEOUT`, default 120s) so a wedged
-mount cannot hang the boot. If it fails, it writes a **user-level
+bounded by `timeout` (`OCI_ENGINE_SELFTEST_TIMEOUT`, positive integer, default
+120s) so a wedged mount cannot hang the boot. If `timeout` is unavailable, the
+script skips the self-test/fallback path rather than running an unbounded
+boot-path build. If the
+bounded self-test fails, it writes a **user-level
 `~/.config/containers/storage.conf`** selecting the `vfs` driver and retries. This
 is the documented recovery for a base whose overlay+fuse-overlayfs combo is
 rejected under rootless (where `podman info` passes but a layer mount fails). It

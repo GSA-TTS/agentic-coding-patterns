@@ -140,10 +140,12 @@ direction and flagged six implementation defects, all addressed here:
    is distro-specific and already in the baseline `core` set).
 
 6. **Unbounded self-test build on the boot path.** The per-boot rootless
-   `podman build` self-test now runs under `timeout`
-   (`OCI_ENGINE_SELFTEST_TIMEOUT`, default 120s) when available, so a wedged
-   mount / stalled `newuidmap` cannot hang the boot; a timeout is treated as a
-   failed self-test and triggers the vfs fallback.
+   `podman build` self-test now requires `timeout` and runs under it
+   (`OCI_ENGINE_SELFTEST_TIMEOUT`, positive integer, default 120s), so a wedged
+   mount / stalled `newuidmap` cannot hang the boot. If `timeout` is unavailable,
+   the script skips the self-test/fallback path rather than running an unbounded boot-path
+   build; a timeout is treated as a failed self-test and triggers the vfs
+   fallback.
 
 7. **Root code sourced from agent-writable staging.** The neutral file-drop path
    stages payloads under `/home/agent`, but root commands must not execute or
