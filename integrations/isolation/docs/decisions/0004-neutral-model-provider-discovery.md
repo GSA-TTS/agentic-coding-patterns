@@ -481,6 +481,50 @@ sequenceDiagram
   material, before any sandbox trust boundary exists. Running the normalizer
   in-guest (this ADR) keeps third-party code inside the sandbox boundary while
   still using the read-only mount for the code's *integrity*.
+- **Host-side fetch by `acq`'s own first-party code, materializing the catalog
+  before the guest boots.** *Not evaluated here — deliberately left open, not
+  rejected.* This is a DIFFERENT alternative from the one above and must not be
+  read as covered by it: the objection above is to running **provider-shipped**
+  code next to real secret material, which does not apply to `acq` fetching with
+  its own audited code. It is also distinct from the cross-sandbox TTL cache
+  rejected below — a per-sandbox host-built artifact is not a shared cache.
+
+  Two host-side builders already exist in this repo, so this is a live question
+  rather than a hypothetical:
+  `acq-kits/usai-provider/scripts/sync-usai-models.mjs` (requires
+  `USAI_API_KEY` in the host environment, fetches the live models list,
+  rewrites the kit's committed `opencode.jsonc` generated block) and
+  `integrations/providers/usai/` (`build-catalog.mjs` → `catalog.json` →
+  per-harness emitters, schema `usai-model-catalog/v1`, with a byte-exact
+  round-trip test asserting the emitter reproduces both shipped kits' model
+  blocks). Both are **dev-time**: their output is committed and SHA-pinned with
+  the kit, so a refresh needs a human to cut a release. That is the staleness
+  this ADR's Context sets out to fix — not the same thing as per-sandbox
+  materialization at provision time.
+
+  The tradeoff, stated so a future reader does not have to re-derive it: a
+  host-side prebuild would remove the in-guest network dependency, would make
+  the startup-ordering gap irrelevant for the catalog (the artifact would exist
+  before the guest boots), and would mean the credential is never exercised
+  inside a sudo-capable guest for discovery. Against that, it moves a
+  credentialed outbound fetch into the `acq` host process — where TLS handling,
+  redirect following, size/timeout enforcement and the SSRF host-equality check
+  would all run outside any sandbox boundary — adds provisioning latency and
+  new failure modes, and makes the catalog boot-time-static so a long-lived
+  sandbox cannot refresh. Crucially, a host-side fetch alone does not remove
+  the need for per-vendor normalization: `acq` would have to either execute the
+  provider's normalizer on the host (the rejected alternative above) or
+  re-absorb per-vendor response knowledge into `acq` itself, which is the N × M
+  bottleneck this ADR exists to retire. Choosing it therefore means choosing
+  one of those two costs explicitly.
+
+  **Overlap to resolve before any such design is adopted:** this ADR introduces
+  `acq-neutral-model-catalog/v1` while `integrations/providers/usai/` already
+  ships `usai-model-catalog/v1`. Two neutral model-catalog schemas and two
+  host-side builders now coexist in one repo. Reconciling them is tracked with
+  the schema work in GSA-TTS/agentic-coding-patterns#435; a host-side
+  materialization design would make that reconciliation a prerequisite rather
+  than a follow-up.
 - **No discovery mechanism; hardcode one vendor per harness kit.** Excluded: a
   harness kit could not learn which provider kit(s) are present without a
   hardcoded name per pairing, reproducing the N × M problem this ADR retires.
@@ -506,6 +550,15 @@ sequenceDiagram
   incidentally, closes it on `msb`) — not a per-kit workaround here, which
   would just be a second, divergent mechanism. Quickstart-owned; needs
   quickstart maintainer review.
+- **Moving catalog materialization host-side.** Switching Layer 2's fetch from
+  in-guest to `acq`'s own host-side provisioning — or making a host-built
+  catalog
+  the default — is an architecture change, not an implementation detail: it
+  relocates a credentialed outbound fetch outside the sandbox boundary and
+  forces
+  a choice between host-executed provider code and re-centralized per-vendor
+  knowledge (see *Alternatives*). It also requires reconciling the two
+  coexisting catalog schemas first (#435). Needs human/CODEOWNERS review.
 - **Any relaxation of the normalizer containment contract** (Layer 2, step 2):
   granting a normalizer network access, passing it a credential, or removing its
   time/output bounds. Each would move provider-shipped code back inside the
