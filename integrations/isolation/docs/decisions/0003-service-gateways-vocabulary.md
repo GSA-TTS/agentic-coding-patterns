@@ -64,10 +64,15 @@ interface the sandbox consumes. The vocabulary must stay backend-neutral:
   mutable workspace paths.
 - **Sources:** local kit sources remain allowed for development and private kits.
   Remote service-gateway kits must come from trusted kit sources; fetching an
-  untrusted kit that can start companion services is not acceptable.
-- **Privileges:** service gateways must not require privileged containers. A
-  gateway that needs host-level privileges, broad mounts, or Docker socket access
-  is outside this vocabulary and requires a different reviewed design.
+  untrusted kit that can start companion services is not acceptable. v1 does not
+  add a machine-readable trusted-source gate to the kit schema or validator;
+  source trust remains a human review and consumer-configuration decision.
+- **Privileges:** service gateways must not require privileged containers,
+  container escape primitives, broad host mounts, Docker socket access, host
+  namespaces, extra Linux capabilities, host devices, disabled confinement,
+  local image builds, local file-reference features, or unresolved Compose
+  interpolation in high-risk fields. A gateway that needs those primitives is
+  outside this vocabulary and requires a different reviewed design.
 - **Images:** floating image tags are allowed only as an authoring warning, not a
   schema error. Validators and reviewers should warn on tags such as `latest` or
   on untagged image references so authors pin a stable image or digest.
@@ -83,9 +88,11 @@ interface the sandbox consumes. The vocabulary must stay backend-neutral:
   client-side software installation and configuration inside the sandbox.
   `serviceGateways` is only for the managed service side of the boundary.
 - **Interface ports:** `interface.port` is optional when the named Compose
-  service has exactly one exposed or published candidate port. It is required
-  when the named service has zero or multiple candidate ports. Ports on other
-  Compose services do not identify the gateway interface.
+  service has exactly one internal `expose:` candidate port. It is required when
+  the named service has zero or multiple exposed candidate ports. Host-published
+  Compose `ports:` are not valid endpoint evidence for service gateways and are
+  rejected in gateway Compose files. Ports on other Compose services do not
+  identify the gateway interface.
 - **Excluded schema details:** the kit schema must not include host/guest IPs,
   DNS rules, VSOCK details, Podman-machine wiring, Kubernetes resources, or
   backend-specific routing. Those are adapter/runtime concerns.
@@ -110,8 +117,12 @@ The schema should remain minimal. A service gateway entry should include:
 
 The schema should validate the shape and safe path/name/port basics. The repo
 validator should add field-level errors for unsafe or non-kit-local Compose
-paths, and warnings for floating image tags it can detect in referenced Compose
-files.
+paths, empty `runtime.compose.files`, missing named services, host-published
+Compose ports, file indirection through `include:` or `extends.file`, local
+file-reference features such as `env_file` / `secrets.file` / `configs.file`,
+unresolved interpolation in high-risk fields, and common container escape
+primitives. It should warn for floating image tags it can detect in referenced
+Compose files.
 
 ## Consequences
 
@@ -129,8 +140,9 @@ files.
 ### Negative / residual
 
 - Compose parsing in the patterns-side validator is necessarily shallow unless we
-  add a full Compose parser, which this decision avoids. Human review remains the
-  control for nuanced Compose semantics.
+  add a full Compose parser, which this decision avoids. The validator rejects
+  known high-risk primitives and fails closed on Compose file indirection, but
+  human review remains the control for nuanced Compose semantics.
 - Local kit sources are useful for development and private kits, but they widen
   the trust decision. Users must treat local service-gateway kits as executable
   local code.
@@ -149,7 +161,7 @@ files.
   the v1 runtime mechanism. The long-term contract is a service gateway, not a
   Docker Compose application.
 - **Require `interface.port` for every gateway.** Rejected because a single
-  Compose service with a single exposed/published port can be unambiguous.
+  Compose service with a single internal `expose:` port can be unambiguous.
   Validators should require it only when the interface cannot be inferred safely.
 - **Put IPs, DNS, VSOCK, Podman machine, Kubernetes, or routing details in the kit
   schema.** Rejected because those are backend/runtime concerns and would lock the
