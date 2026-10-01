@@ -218,7 +218,7 @@
     },
     "serviceGateways": {
       "type": "array",
-      "description": "Kit-declared, acq-managed service gateways for the sandbox. The field names the semantic role, not a backend topology: do not encode host/guest IPs, DNS, VSOCK, Podman-machine, Kubernetes, or routing details here. runtime.compose is the v1 runtime shape and may reference only Compose files shipped inside the kit. Existing files[] and commands[] remain responsible for client-side software/config in the sandbox. expose.env injects resolved gateway values into the sandbox/agent environment so the agent gets a narrow policy-controlled endpoint, not broader sandbox egress or API keys. acq owns gateway lifecycle: stop stops gateways; rm removes gateways and gateway-owned state.",
+      "description": "Kit-declared, acq-managed service gateways for the sandbox. The field names the semantic role, not a backend topology: do not encode host/guest IPs, DNS, VSOCK, Podman-machine, Kubernetes, or routing details here. runtime.compose is the v1 runtime shape and may reference only Compose files shipped inside the kit; the repo validator rejects Compose include:/extends.file indirection, local file-reference features, unresolved interpolation in high-risk fields, and high-risk host/container escape primitives. Existing files[] and commands[] remain responsible for client-side software/config in the sandbox. expose.env injects resolved gateway values into the sandbox/agent environment so the agent gets a narrow policy-controlled endpoint, not broader sandbox egress or API keys. acq owns gateway lifecycle: stop stops gateways; rm removes gateways and gateway-owned state. v1 source trust is a human review and consumer-configuration decision, not a schema field.",
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -247,7 +247,7 @@
                   "files": {
                     "type": "array",
                     "minItems": 1,
-                    "description": "Compose files for the v1 service-gateway runtime. Every file path is relative to the kit directory and must stay under the kit. Do not reference workspace files.",
+                    "description": "Compose files for the v1 service-gateway runtime. Every file path is relative to the kit directory and must stay under the kit. Do not reference workspace files. Validators reject Compose include:/extends.file and local file-reference features so this declared list is the inspected file set.",
                     "items": {
                       "type": "string",
                       "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+\\.ya?ml$"

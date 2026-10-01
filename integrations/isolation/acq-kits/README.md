@@ -60,9 +60,10 @@ vocabulary:
   for client-side software/config inside the sandbox. The goal is not broader
   sandbox egress or API keys in the agent; it is a narrow, policy-controlled
   gateway endpoint. Local kit sources are allowed for development/private kits;
-  remote service-gateway kits must come from trusted kit sources. The schema
-  intentionally excludes host/guest IPs, DNS, VSOCK, Podman-machine, Kubernetes,
-  and backend-specific routing details.
+  remote service-gateway kits must come from trusted kit sources, but v1 does not
+  add a machine-readable trusted-source gate to the schema or validator. The
+  schema intentionally excludes host/guest IPs, DNS, VSOCK, Podman-machine,
+  Kubernetes, and backend-specific routing details.
 - `backend_shortcuts.<backend>` — a native primitive that replaces the
   declarative path for one backend (e.g. msb's `--trust-host-cas` for the
   Zscaler kit). Adapters check this first; if present, `caps`/`files`/`commands`
