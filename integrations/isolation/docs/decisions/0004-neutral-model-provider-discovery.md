@@ -299,25 +299,56 @@ transform pricing."
 
 ### Neutral catalog schema
 
-Both a normalizer's output and the aggregate carry
-`schemaVersion: "acq-neutral-model-catalog/v1"`.
+There are **two documents, and they are versioned separately**:
 
-Two constraints this ADR places on that shape, which the formal JSON Schema
-(tracked in GSA-TTS/agentic-coding-patterns#435) must honor:
+| Document | `schemaVersion` | Written by |
+|---|---|---|
+| One provider's normalized model list | `acq-neutral-model-catalog/v1` | that provider's `normalizer`, or shipped as its vendored `snapshot.json` |
+| The multi-provider aggregate | `acq-neutral-model-aggregate/v1` | the orchestrator (Layer 2) |
+
+An earlier revision of this ADR gave both documents the *same* version string
+and required per-entry provenance on it. That was wrong, and the error is worth
+recording because it is easy to repeat: **a normalizer cannot know its own
+provenance.** It is a pure file-to-file transform over bytes the helper already
+fetched (step 2) — whether those bytes came from a live refresh or from a
+vendored snapshot is known only to its caller. Requiring `source: live|snapshot`
+in the normalizer's own output would therefore mean a field the producer must be
+*told* and cannot verify, and it would have invalidated the vendored snapshots
+already shipping in this shape.
+
+Provenance belongs where the knowledge is: the orchestrator performed the fetch
+or took the fallback, so the orchestrator records it.
+
+Constraints this ADR places on the **per-provider** shape
+(`acq-neutral-model-catalog/v1`), which the formal JSON Schema (tracked in
+GSA-TTS/agentic-coding-patterns#435) must honor:
+
+- **The model list is a required array and MAY be empty.** A provider that
+  legitimately exposes no models is *valid*, not a schema violation.
+- **Model metadata only.** It carries `providerId` plus per-model id, limits and
+  cost. It MUST NOT carry routing or credential fields (`host`, `baseUrl`,
+  `modelsUrl`, `keyEnv`): a document at this layer may be read from a
+  guest-writable path, and a rewritten routing field could redirect a consumer.
+  Those facts live in the host-validated facts file, never here.
+- **No provenance field.** See above — the producer cannot supply one honestly.
+
+Constraints on the **aggregate** shape (`acq-neutral-model-aggregate/v1`):
 
 - **The model list is a required array and MAY be empty.** An aggregate with
-  zero entries is *valid*, not a schema violation — that is what the
-  orchestrator writes when no provider is present (Layer 2, step 4). A schema
-  that required a non-empty list would force the no-provider case to either omit
-  the file or write something invalid, which is exactly the ambiguity step 4
-  exists to prevent.
-- **Per-entry provenance is required, and the aggregate records discovery
-  provenance.** Each entry states which `providerId` it came from and whether it
-  came from a live refresh or that provider's vendored snapshot; the aggregate
-  additionally records the set of providers discovered, and for each, the
-  outcome (`live`, `snapshot`, or `rejected`). A consumer must be able to tell a
-  live catalog from a stale one, and *"zero providers configured"* from
-  *"discovery did not run"*, by reading the file alone.
+  zero entries is *valid* — that is what the orchestrator writes when no
+  provider is present (Layer 2, step 4). A schema requiring a non-empty list
+  would force the no-provider case to either omit the file or write something
+  invalid, which is exactly the ambiguity step 4 exists to prevent.
+- **Discovery provenance is required.** The aggregate records the set of
+  providers discovered and, for each, the outcome (`live`, `snapshot`, or
+  `rejected`). A consumer must be able to tell a live catalog from a stale one,
+  and *"zero providers configured"* from *"discovery did not run"*, by reading
+  the file alone — and a provider rejected by host-side validation must be
+  visible as rejected rather than merely absent.
+- **Each entry names its origin provider.** Entries carry the `providerId` they
+  came from, so a consumer can attribute a model without re-deriving it. Whether
+  that entry was live or stale is answered by the per-provider outcome above,
+  not repeated on every entry.
 
 The schema is versioned from v1; there is no multi-version negotiation mechanism
 (renderers declaring supported versions, the orchestrator picking compatible
@@ -519,12 +550,12 @@ sequenceDiagram
   one of those two costs explicitly.
 
   **Overlap to resolve before any such design is adopted:** this ADR introduces
-  `acq-neutral-model-catalog/v1` while `integrations/providers/usai/` already
-  ships `usai-model-catalog/v1`. Two neutral model-catalog schemas and two
-  host-side builders now coexist in one repo. Reconciling them is tracked with
-  the schema work in GSA-TTS/agentic-coding-patterns#435; a host-side
-  materialization design would make that reconciliation a prerequisite rather
-  than a follow-up.
+  `acq-neutral-model-catalog/v1` and `acq-neutral-model-aggregate/v1` while
+  `integrations/providers/usai/` already ships `usai-model-catalog/v1`. Two
+  distinct neutral-catalog lineages and two host-side builders now coexist in
+  one repo. Reconciling them is tracked with the schema work in
+  GSA-TTS/agentic-coding-patterns#435; a host-side materialization design would
+  make that reconciliation a prerequisite rather than a follow-up.
 - **No discovery mechanism; hardcode one vendor per harness kit.** Excluded: a
   harness kit could not learn which provider kit(s) are present without a
   hardcoded name per pairing, reproducing the N × M problem this ADR retires.
