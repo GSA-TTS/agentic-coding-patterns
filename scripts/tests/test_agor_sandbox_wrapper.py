@@ -10,7 +10,6 @@ from pathlib import Path
 
 import pytest
 
-
 ROOT = Path(__file__).resolve().parents[2]
 WRAPPER = ROOT / "integrations/orchestrators/agor/sandbox-wrapper-acq.sh"
 INSTALLER = ROOT / "integrations/isolation/acq-kits/agor-daemon-egress/files/home/agor-executor-install.sh"
@@ -145,7 +144,6 @@ def test_invalid_backend_fails_closed_before_mounting(tmp_path: Path):
 
 def _fake_npm(tmp_path: Path) -> Path:
     bin_dir = tmp_path / "npm-bin"
-    npm_root = tmp_path / "npm-root"
     bin_dir.mkdir()
     npm = bin_dir / "npm"
     npm.write_text(
