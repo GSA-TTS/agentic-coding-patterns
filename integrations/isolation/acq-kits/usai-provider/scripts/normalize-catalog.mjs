@@ -3,10 +3,13 @@
 // normalize-catalog.mjs — convert the USAi-specific harness-neutral catalog
 // (integrations/providers/usai/catalog.schema.json, "usai-model-catalog/v1")
 // into the acq-neutral, cross-provider model-catalog shape
-// ("acq-neutral-model-catalog/v1") this kit vendors and ships to consumers
-// that discover providers via the facts self-registration mechanism (see
-// spec.yaml's header comment and its startup command that writes
-// /var/lib/acq/models/providers/usai.json). See
+// ("acq-neutral-model-catalog/v1") this kit vendors and ships as a snapshot.
+//
+// It does NOT depend on any provider-facts self-registration mechanism. An
+// earlier revision of this kit wrote a facts file from inside the sandbox; that
+// was removed because a guest-written path is forgeable by an agent with
+// passwordless sudo, so it could not be a trust anchor (see spec.yaml's header
+// comment). This tool only reshapes model METADATA and is unaffected. See
 // integrations/isolation/docs/decisions/0004-neutral-model-provider-discovery.md
 // (this ADR is pending merge in a separate PR; the path will resolve once it
 // lands) for why a provider-neutral shape exists at all: a future consumer

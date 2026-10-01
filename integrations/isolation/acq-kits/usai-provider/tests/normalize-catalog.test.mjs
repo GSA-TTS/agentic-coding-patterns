@@ -93,3 +93,83 @@ test("CLI: reads --source and writes --out, producing valid JSON matching normal
 
   await rm(path.dirname(outPath), { recursive: true, force: true })
 })
+
+// ---------------------------------------------------------------------------
+// Drift gate for the SHIPPED snapshot.
+//
+// The snapshot at files/home/usai-config/model-catalog-snapshot.json is a
+// hand-trimmed SUBSET of the full USAi catalog (a handful of models, so the
+// payload stays small), but every entry it keeps must be byte-equal to what
+// this normalizer produces from integrations/providers/usai/catalog.json.
+// Without this, the snapshot is a second hand-maintained copy that can silently
+// drift from its stated source -- exactly the drift this repo has been bitten by
+// before. A subset is allowed; a DIVERGENT subset is not.
+// ---------------------------------------------------------------------------
+
+const snapshotPath = path.join(
+  __dirname,
+  "../files/home/usai-config/model-catalog-snapshot.json",
+)
+const upstreamCatalogPath = path.join(
+  __dirname,
+  "../../../../providers/usai/catalog.json",
+)
+
+test("shipped snapshot: every model matches normalizeCatalog(upstream catalog) exactly", async () => {
+  const snapshot = JSON.parse(await readFile(snapshotPath, "utf8"))
+  const upstream = JSON.parse(await readFile(upstreamCatalogPath, "utf8"))
+  const regenerated = normalizeCatalog(upstream)
+
+  // Guard the gate itself: if either side is empty the comparison below would
+  // pass vacuously, which is the "no evidence read as a pass" defect. Assert
+  // there is something to compare BEFORE comparing.
+  assert.ok(
+    Array.isArray(snapshot.models) && snapshot.models.length > 0,
+    "snapshot has no models[] -- nothing to compare, so this gate cannot pass",
+  )
+  assert.ok(
+    Array.isArray(regenerated.models) && regenerated.models.length > 0,
+    "normalizer produced no models[] from the upstream catalog -- gate cannot pass",
+  )
+
+  const byId = new Map(regenerated.models.map((m) => [m.id, m]))
+  for (const model of snapshot.models) {
+    const fresh = byId.get(model.id)
+    assert.ok(
+      fresh,
+      `snapshot model '${model.id}' is absent from the upstream catalog -- ` +
+        `regenerate the snapshot with scripts/normalize-catalog.mjs`,
+    )
+    assert.deepEqual(
+      model,
+      fresh,
+      `snapshot model '${model.id}' has drifted from the normalizer output -- ` +
+        `regenerate rather than hand-editing`,
+    )
+  }
+})
+
+test("shipped snapshot: envelope matches the normalizer and carries no credential or routing fields", async () => {
+  const snapshot = JSON.parse(await readFile(snapshotPath, "utf8"))
+
+  assert.equal(snapshot.schemaVersion, "acq-neutral-model-catalog/v1")
+  assert.equal(snapshot.providerId, "usai")
+
+  // The snapshot ships to an AGENT-OWNED path (/home/agent/...), so it must
+  // carry model metadata only. A routing or credential field here would let a
+  // rewritten snapshot redirect a consumer -- the trust defect this kit's
+  // removed facts file had. Assert the shape stays metadata-only.
+  const forbidden = ["host", "baseUrl", "modelsUrl", "keyEnv", "apiKey"]
+  for (const key of forbidden) {
+    assert.ok(
+      !(key in snapshot),
+      `snapshot must not carry the routing/credential field '${key}'`,
+    )
+    for (const model of snapshot.models) {
+      assert.ok(
+        !(key in model),
+        `snapshot model '${model.id}' must not carry '${key}'`,
+      )
+    }
+  }
+})
