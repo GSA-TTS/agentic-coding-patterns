@@ -4,8 +4,9 @@
 baking backend routing details into the neutral kit schema. v1 uses kit-local
 Compose files only, names the Compose service to expose, and injects the
 resolved gateway URL into the sandbox/agent environment through expose.env. The
-validator enforces path locality, no privileged containers, explicit ports when
-the named Compose service is ambiguous, and floating-image warnings.
+validator enforces path locality, blocks Compose escape primitives and local-file
+indirection, requires explicit ports when the named Compose service is ambiguous,
+and emits floating-image warnings.
 """
 
 from __future__ import annotations
@@ -137,7 +138,7 @@ class TestServiceGatewaysValidator:
         assert errors == [], errors
         assert warnings == [], warnings
 
-    def test_multiple_compose_ports_require_interface_port(self, tmp_path):
+    def test_multiple_exposed_compose_ports_require_interface_port(self, tmp_path):
         validate_kit = _load_validate_kit()
         kit = _write_kit(
             tmp_path / "ambiguous",
@@ -157,24 +158,19 @@ class TestServiceGatewaysValidator:
             "    expose:\n"
             "      env:\n"
             "        WEB_GATEWAY_URL: url\n",
-            "services:\n"
-            "  gateway:\n"
-            "    image: ghcr.io/example/gateway:1.0.0\n"
-            "    ports:\n"
-            "      - '8080:8080'\n"
-            "      - '9090:9090'\n",
+            "services:\n  gateway:\n    image: ghcr.io/example/gateway:1.0.0\n    expose: [8080, 9090]\n",
         )
         errors, _warnings = validate_kit(kit, _load_schema())
         assert any("interface.port is required" in e and "2 candidate ports" in e for e in errors), errors
 
-    def test_ignores_ports_on_non_gateway_services(self, tmp_path):
+    def test_rejects_host_published_ports_on_any_gateway_compose_service(self, tmp_path):
         validate_kit = _load_validate_kit()
         kit = _write_kit(
-            tmp_path / "scoped",
+            tmp_path / "hostports",
             "schemaVersion: hybrid/v1\n"
             "kind: mixin\n"
-            "name: scoped\n"
-            "displayName: Scoped\n"
+            "name: hostports\n"
+            "displayName: Host Ports\n"
             "description: d\n"
             "serviceGateways:\n"
             "  - name: demo-gateway\n"
@@ -184,6 +180,7 @@ class TestServiceGatewaysValidator:
             "        service: gateway\n"
             "    interface:\n"
             "      protocol: http\n"
+            "      port: 8080\n"
             "    expose:\n"
             "      env:\n"
             "        WEB_GATEWAY_URL: url\n",
@@ -194,11 +191,10 @@ class TestServiceGatewaysValidator:
             "  metrics:\n"
             "    image: ghcr.io/example/metrics:1.0.0\n"
             "    ports:\n"
-            "      - '9090:9090'\n"
-            "      - '9191:9191'\n",
+            "      - '9090:9090'\n",
         )
         errors, _warnings = validate_kit(kit, _load_schema())
-        assert errors == [], errors
+        assert any("service 'metrics' declares ports" in e for e in errors), errors
 
     def test_missing_compose_service_is_error(self, tmp_path):
         validate_kit = _load_validate_kit()
@@ -271,15 +267,36 @@ class TestServiceGatewaysValidator:
             "    expose:\n"
             "      env:\n"
             "        WEB_GATEWAY_URL: url\n",
-            "services:\n"
-            "  gateway:\n"
-            "    image: ghcr.io/example/gateway:1.0.0\n"
-            "    ports:\n"
-            "      - '8080:8080'\n"
-            "      - '9090:9090'\n",
+            "services:\n  gateway:\n    image: ghcr.io/example/gateway:1.0.0\n    expose: [8080, 9090]\n",
         )
         errors, _warnings = validate_kit(kit, _load_schema())
         assert errors == [], errors
+
+    def test_rejects_empty_compose_files(self, tmp_path):
+        validate_kit = _load_validate_kit()
+        kit = _write_kit(
+            tmp_path / "emptyfiles",
+            "schemaVersion: hybrid/v1\n"
+            "kind: mixin\n"
+            "name: emptyfiles\n"
+            "displayName: Empty Files\n"
+            "description: d\n"
+            "serviceGateways:\n"
+            "  - name: demo-gateway\n"
+            "    runtime:\n"
+            "      compose:\n"
+            "        files: []\n"
+            "        service: gateway\n"
+            "    interface:\n"
+            "      protocol: http\n"
+            "      port: 8080\n"
+            "    expose:\n"
+            "      env:\n"
+            "        WEB_GATEWAY_URL: url\n",
+            None,
+        )
+        errors, _warnings = validate_kit(kit, _load_schema())
+        assert any("runtime.compose.files must list at least one file" in e for e in errors), errors
 
     def test_rejects_missing_nonlocal_and_privileged_compose(self, tmp_path):
         validate_kit = _load_validate_kit()
@@ -312,6 +329,158 @@ class TestServiceGatewaysValidator:
         assert any("not found: missing.yaml" in e for e in errors), errors
         assert any("must be a relative kit-local" in e for e in errors), errors
         assert any("privileged: true" in e for e in errors), errors
+
+    @pytest.mark.parametrize(
+        ("compose_yaml", "expected"),
+        [
+            (
+                "include: [../outside.yaml]\n"
+                "services:\n"
+                "  gateway:\n"
+                "    image: ghcr.io/example/gateway:1.0.0\n"
+                "    expose: [8080]\n",
+                "include:",
+            ),
+            (
+                "services:\n"
+                "  gateway:\n"
+                "    image: ghcr.io/example/gateway:1.0.0\n"
+                "    expose: [8080]\n"
+                "    extends:\n"
+                "      file: ../base.yaml\n"
+                "      service: base\n",
+                "extends.file",
+            ),
+        ],
+    )
+    def test_rejects_compose_file_indirection(self, tmp_path, compose_yaml, expected):
+        validate_kit = _load_validate_kit()
+        kit = _write_kit(
+            tmp_path / "indirection",
+            "schemaVersion: hybrid/v1\n"
+            "kind: mixin\n"
+            "name: indirection\n"
+            "displayName: Indirection\n"
+            "description: d\n"
+            "serviceGateways:\n"
+            "  - name: demo-gateway\n"
+            "    runtime:\n"
+            "      compose:\n"
+            "        files: [compose.yaml]\n"
+            "        service: gateway\n"
+            "    interface:\n"
+            "      protocol: http\n"
+            "    expose:\n"
+            "      env:\n"
+            "        WEB_GATEWAY_URL: url\n",
+            compose_yaml,
+        )
+        errors, _warnings = validate_kit(kit, _load_schema())
+        assert any(expected in e for e in errors), errors
+
+    @pytest.mark.parametrize(
+        ("snippet", "expected"),
+        [
+            ("    volumes: ['/var/run/docker.sock:/var/run/docker.sock']\n", "Docker socket"),
+            ("    volumes: ['/:/host:ro']\n", "host path mount"),
+            ("    volumes: ['${HOST_ROOT:-/}:/host:ro']\n", "Compose interpolation"),
+            ("    network_mode: host\n", "network_mode: host"),
+            ("    network_mode: ${GW_NETWORK_MODE:-host}\n", "Compose interpolation"),
+            ("    pid: host\n", "pid: host"),
+            ("    userns_mode: host\n", "userns_mode: host"),
+            ("    ipc: host\n", "ipc: host"),
+            ("    cgroup: host\n", "cgroup: host"),
+            ("    cap_add: [SYS_ADMIN]\n", "cap_add"),
+            ("    security_opt: ['apparmor:unconfined']\n", "security_opt"),
+            ("    devices: ['/dev/kvm:/dev/kvm']\n", "devices"),
+            ("    build: .\n", "build"),
+        ],
+    )
+    def test_rejects_compose_escape_primitives(self, tmp_path, snippet, expected):
+        validate_kit = _load_validate_kit()
+        kit = _write_kit(
+            tmp_path / "escape",
+            "schemaVersion: hybrid/v1\n"
+            "kind: mixin\n"
+            "name: escape\n"
+            "displayName: Escape\n"
+            "description: d\n"
+            "serviceGateways:\n"
+            "  - name: demo-gateway\n"
+            "    runtime:\n"
+            "      compose:\n"
+            "        files: [compose.yaml]\n"
+            "        service: gateway\n"
+            "    interface:\n"
+            "      protocol: http\n"
+            "      port: 8080\n"
+            "    expose:\n"
+            "      env:\n"
+            "        WEB_GATEWAY_URL: url\n",
+            f"services:\n  gateway:\n    image: ghcr.io/example/gateway:1.0.0\n    expose: [8080]\n{snippet}",
+        )
+        errors, _warnings = validate_kit(kit, _load_schema())
+        assert any(expected in e for e in errors), errors
+
+    @pytest.mark.parametrize(
+        ("compose_yaml", "expected"),
+        [
+            (
+                "services:\n"
+                "  gateway:\n"
+                "    image: ghcr.io/example/gateway:1.0.0\n"
+                "    expose: [8080]\n"
+                "    env_file: /tmp/host.env\n",
+                "env_file",
+            ),
+            (
+                "services:\n"
+                "  gateway:\n"
+                "    image: ghcr.io/example/gateway:1.0.0\n"
+                "    expose: [8080]\n"
+                "    secrets: [host_secret]\n"
+                "secrets:\n"
+                "  host_secret:\n"
+                "    file: /tmp/host-secret\n",
+                "secret 'host_secret' declares file",
+            ),
+            (
+                "services:\n"
+                "  gateway:\n"
+                "    image: ghcr.io/example/gateway:1.0.0\n"
+                "    expose: [8080]\n"
+                "    configs: [host_config]\n"
+                "configs:\n"
+                "  host_config:\n"
+                "    file: /tmp/host-config\n",
+                "config 'host_config' declares file",
+            ),
+        ],
+    )
+    def test_rejects_compose_local_file_references(self, tmp_path, compose_yaml, expected):
+        validate_kit = _load_validate_kit()
+        kit = _write_kit(
+            tmp_path / "filerefs",
+            "schemaVersion: hybrid/v1\n"
+            "kind: mixin\n"
+            "name: filerefs\n"
+            "displayName: File Refs\n"
+            "description: d\n"
+            "serviceGateways:\n"
+            "  - name: demo-gateway\n"
+            "    runtime:\n"
+            "      compose:\n"
+            "        files: [compose.yaml]\n"
+            "        service: gateway\n"
+            "    interface:\n"
+            "      protocol: http\n"
+            "    expose:\n"
+            "      env:\n"
+            "        WEB_GATEWAY_URL: url\n",
+            compose_yaml,
+        )
+        errors, _warnings = validate_kit(kit, _load_schema())
+        assert any(expected in e for e in errors), errors
 
     @pytest.mark.parametrize("image", ["redis", "redis:latest"])
     def test_warns_on_floating_image_tags(self, tmp_path, image):

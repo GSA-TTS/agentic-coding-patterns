@@ -13,7 +13,11 @@ JSON Schema cannot express on its own:
     rather than only failing the schema's additionalProperties rule)
   - every serviceGateways[].runtime.compose.files[] entry is kit-local, exists,
     and stays under the kit directory
-  - service-gateway Compose files do not declare privileged containers
+  - service-gateway Compose files do not declare container escape primitives
+    (host networking/namespaces, privileged/capability/device grants, broad host
+    mounts, Docker socket mounts, unconfined security options, or local builds)
+  - service-gateway Compose files do not use include: or extends.file to pull in
+    uninspected Compose content
   - serviceGateways[].runtime.compose.service names an existing Compose service
   - serviceGateways[].interface.port is present unless that named Compose service
     exposes a single unambiguous service port
@@ -150,22 +154,166 @@ def _compose_services(compose_doc: object) -> dict:
 
 
 def _compose_service_candidate_ports(compose_doc: object, service_name: str) -> set[int]:
-    """Return simple service ports visible for one named Compose service."""
+    """Return internal service ports exposed by one named Compose service."""
     service = _compose_services(compose_doc).get(service_name)
     if not isinstance(service, dict):
         return set()
     ports: set[int] = set()
-    for key in ("expose", "ports"):
-        values = service.get(key) or []
-        if isinstance(values, (str, int)):
-            values = [values]
-        if not isinstance(values, list):
-            continue
-        for value in values:
-            port = _parse_compose_port(value)
-            if port is not None:
-                ports.add(port)
+    values = service.get("expose") or []
+    if isinstance(values, (str, int)):
+        values = [values]
+    if not isinstance(values, list):
+        return ports
+    for value in values:
+        port = _parse_compose_port(value)
+        if port is not None:
+            ports.add(port)
     return ports
+
+
+def _compose_published_port_errors(compose_doc: object) -> list[str]:
+    """Return errors for host-published ports in a service-gateway Compose file."""
+    errors: list[str] = []
+    for service_name, service in _compose_services(compose_doc).items():
+        if isinstance(service, dict) and service.get("ports"):
+            errors.append(
+                f"Compose service {service_name!r} declares ports; service gateways must not publish host ports "
+                "from Compose. Use expose: for internal service ports or serviceGateways[].interface.port."
+            )
+    return errors
+
+
+def _compose_indirection_errors(compose_doc: object) -> list[str]:
+    """Return errors for Compose features that pull in uninspected local files."""
+    errors: list[str] = []
+    if isinstance(compose_doc, dict) and "include" in compose_doc:
+        errors.append("Compose include: is not supported for service gateways; list kit-local files explicitly")
+    for service_name, service in _compose_services(compose_doc).items():
+        if not isinstance(service, dict):
+            continue
+        extends = service.get("extends")
+        if isinstance(extends, dict) and "file" in extends:
+            errors.append(
+                f"Compose service {service_name!r} declares extends.file; service gateways must not pull in "
+                "uninspected Compose files"
+            )
+    return errors
+
+
+def _as_list(value: object) -> list[object]:
+    """Return a Compose scalar-or-list field as a list for shallow inspection."""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    return [value]
+
+
+def _volume_source(value: object) -> str | None:
+    """Return a Compose volume source for common short/long syntax forms."""
+    if isinstance(value, str):
+        parts = value.split(":", 1)
+        if len(parts) < 2:
+            return None
+        return parts[0]
+    if isinstance(value, dict):
+        source = value.get("source") or value.get("src")
+        return source if isinstance(source, str) else None
+    return None
+
+
+def _has_compose_interpolation(value: object) -> bool:
+    """True when a Compose field uses env interpolation that validation cannot resolve."""
+    if isinstance(value, str):
+        return "${" in value
+    if isinstance(value, list):
+        return any(_has_compose_interpolation(item) for item in value)
+    if isinstance(value, dict):
+        return any(_has_compose_interpolation(item) for item in value.values())
+    return False
+
+
+def _compose_file_reference_errors(compose_doc: object) -> list[str]:
+    """Return errors for Compose features that can read uninspected local files."""
+    errors: list[str] = []
+    for service_name, service in _compose_services(compose_doc).items():
+        if not isinstance(service, dict):
+            continue
+        if service.get("env_file"):
+            errors.append(
+                f"Compose service {service_name!r} declares env_file; service gateways must not read local env files"
+            )
+    if not isinstance(compose_doc, dict):
+        return errors
+    for section in ("secrets", "configs"):
+        entries = compose_doc.get(section) or {}
+        if not isinstance(entries, dict):
+            continue
+        for name, entry in entries.items():
+            if isinstance(entry, dict) and "file" in entry:
+                errors.append(
+                    f"Compose {section[:-1]} {name!r} declares file; service gateways must not read local "
+                    f"files via {section}"
+                )
+    return errors
+
+
+def _compose_escape_errors(compose_doc: object, compose_path: Path, kit_dir: Path) -> list[str]:
+    """Return errors for container escape primitives outside the gateway vocabulary."""
+    errors: list[str] = []
+    for service_name, service in _compose_services(compose_doc).items():
+        if not isinstance(service, dict):
+            continue
+        prefix = f"Compose service {service_name!r}"
+        if service.get("privileged") is True:
+            errors.append(f"{prefix} declares privileged: true")
+        if "build" in service:
+            errors.append(f"{prefix} declares build; service gateways must use prebuilt reviewed images")
+        for key in ("network_mode", "pid", "ipc", "userns_mode", "cgroup"):
+            value = service.get(key)
+            if value == "host":
+                errors.append(f"{prefix} declares {key}: host")
+            elif _has_compose_interpolation(value):
+                errors.append(f"{prefix} declares {key} with Compose interpolation; validation cannot prove it safe")
+        if service.get("cap_add"):
+            errors.append(f"{prefix} declares cap_add; added Linux capabilities are outside serviceGateways v1")
+        if _has_compose_interpolation(service.get("cap_add")):
+            errors.append(f"{prefix} declares cap_add with Compose interpolation; validation cannot prove it safe")
+        if service.get("devices"):
+            errors.append(f"{prefix} declares devices; host device passthrough is outside serviceGateways v1")
+        if _has_compose_interpolation(service.get("devices")):
+            errors.append(f"{prefix} declares devices with Compose interpolation; validation cannot prove it safe")
+        if _has_compose_interpolation(service.get("build")):
+            errors.append(f"{prefix} declares build with Compose interpolation; validation cannot prove it safe")
+        for opt in _as_list(service.get("security_opt")):
+            if _has_compose_interpolation(opt):
+                errors.append(
+                    f"{prefix} declares security_opt with Compose interpolation; validation cannot prove it safe"
+                )
+            elif isinstance(opt, str) and (
+                "unconfined" in opt or opt.startswith("seccomp=") or opt.startswith("apparmor=")
+            ):
+                errors.append(f"{prefix} disables container confinement with security_opt: {opt!r}")
+        for volume in _as_list(service.get("volumes")):
+            if _has_compose_interpolation(volume):
+                errors.append(f"{prefix} declares volume with Compose interpolation; validation cannot prove it safe")
+                continue
+            source = _volume_source(volume)
+            if not source:
+                continue
+            if "docker.sock" in source:
+                errors.append(f"{prefix} mounts the Docker socket: {source!r}")
+                continue
+            if source.startswith("/") or source.startswith("~"):
+                errors.append(f"{prefix} declares a host path mount outside the kit: {source!r}")
+                continue
+            if source.startswith("."):
+                source_path = (compose_path.parent / source).resolve()
+                try:
+                    source_path.relative_to(kit_dir.resolve())
+                except ValueError:
+                    errors.append(f"{prefix} declares a volume source outside the kit: {source!r}")
+    return errors
 
 
 def _parse_compose_port(value: object) -> int | None:
@@ -201,14 +349,6 @@ def _uses_floating_image(image: str) -> bool:
     if ":" not in last_segment:
         return True
     return last_segment.rsplit(":", 1)[-1] == "latest"
-
-
-def _compose_has_privileged_service(compose_doc: object) -> bool:
-    """True when any Compose service declares privileged: true."""
-    return any(
-        isinstance(service, dict) and service.get("privileged") is True
-        for service in _compose_services(compose_doc).values()
-    )
 
 
 def validate_kit(kit_dir: Path, schema: dict) -> tuple[list[str], list[str]]:
@@ -280,9 +420,7 @@ def validate_kit(kit_dir: Path, schema: dict) -> tuple[list[str], list[str]]:
             errors.append(f"{kit_dir.name}: serviceGateways must be an array of gateway objects")
         else:
             gateway_names = [
-                g.get("name")
-                for g in service_gateways
-                if isinstance(g, dict) and isinstance(g.get("name"), str)
+                g.get("name") for g in service_gateways if isinstance(g, dict) and isinstance(g.get("name"), str)
             ]
             for dup in sorted({name for name in gateway_names if gateway_names.count(name) > 1}):
                 errors.append(
@@ -328,6 +466,10 @@ def validate_kit(kit_dir: Path, schema: dict) -> tuple[list[str], list[str]]:
                 if not isinstance(compose_files, list):
                     errors.append(f"{kit_dir.name}: serviceGateways[{i}].runtime.compose.files must be an array")
                     compose_files = []
+                elif not compose_files:
+                    errors.append(
+                        f"{kit_dir.name}: serviceGateways[{i}].runtime.compose.files must list at least one file"
+                    )
 
                 candidate_ports: set[int] = set()
                 inspected_compose = False
@@ -355,16 +497,18 @@ def validate_kit(kit_dir: Path, schema: dict) -> tuple[list[str], list[str]]:
                         compose_doc = yaml.safe_load(compose_path.read_text())
                     except yaml.YAMLError as e:
                         errors.append(
-                            f"{kit_dir.name}: serviceGateways[{i}].runtime.compose file {rel} "
-                            f"is not valid YAML: {e}"
+                            f"{kit_dir.name}: serviceGateways[{i}].runtime.compose file {rel} is not valid YAML: {e}"
                         )
                         continue
                     inspected_compose = True
-                    if _compose_has_privileged_service(compose_doc):
-                        errors.append(
-                            f"{kit_dir.name}: serviceGateways[{i}].runtime.compose file {rel} declares "
-                            "privileged: true; service gateways must not require privileged containers"
-                        )
+                    for detail in _compose_indirection_errors(compose_doc):
+                        errors.append(f"{kit_dir.name}: serviceGateways[{i}].runtime.compose file {rel}: {detail}")
+                    for detail in _compose_escape_errors(compose_doc, compose_path, kit_dir):
+                        errors.append(f"{kit_dir.name}: serviceGateways[{i}].runtime.compose file {rel}: {detail}")
+                    for detail in _compose_file_reference_errors(compose_doc):
+                        errors.append(f"{kit_dir.name}: serviceGateways[{i}].runtime.compose file {rel}: {detail}")
+                    for detail in _compose_published_port_errors(compose_doc):
+                        errors.append(f"{kit_dir.name}: serviceGateways[{i}].runtime.compose file {rel}: {detail}")
                     if compose_service and compose_service in _compose_services(compose_doc):
                         found_named_service = True
                         candidate_ports.update(_compose_service_candidate_ports(compose_doc, compose_service))
@@ -392,9 +536,7 @@ def validate_kit(kit_dir: Path, schema: dict) -> tuple[list[str], list[str]]:
                     expose = {}
                 expose_env = expose.get("env") or {}
                 if not isinstance(expose_env, dict):
-                    errors.append(
-                        f"{kit_dir.name}: serviceGateways[{i}].expose.env must be a mapping of NAME -> url"
-                    )
+                    errors.append(f"{kit_dir.name}: serviceGateways[{i}].expose.env must be a mapping of NAME -> url")
                 elif not expose_env:
                     errors.append(f"{kit_dir.name}: serviceGateways[{i}].expose.env must expose at least one env var")
                 else:
