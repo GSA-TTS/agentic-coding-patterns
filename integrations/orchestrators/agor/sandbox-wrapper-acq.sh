@@ -52,16 +52,85 @@ IFS=$'\n\t'
 : "${AGOR_EGRESS_KIT:=}"                 # acq kit ref that allow-lists the daemon
                                          #   (local dir or git+https #ref=&dir=);
                                          #   see integrations/isolation/acq-kits/agor-daemon-egress
-: "${AGOR_DAEMON_HOST:=host.microsandbox.internal}"  # host alias the sandboxed
-                                         #   executor uses to reach the daemon
-                                         #   (msb, the default backend); sbx uses
-                                         #   host.docker.internal instead
+: "${AGOR_ACQ_BACKEND:=}"                # optional acq backend selector (msb or sbx);
+                                         #   passed through as `acq --backend ...`
+: "${AGOR_DAEMON_HOST:=}"                # optional override for the sandbox host
+                                         #   alias used to reach the daemon
 : "${AGOR_USAI_SECRET:=0}"               # 0 = assume a global `usai` acq secret
                                          #   is set (default); 1 = set a per-sandbox
                                          #   secret from AGOR_USAI_KEY_FILE
 : "${AGOR_USAI_KEY_FILE:=}"              # optional file the operator populates with
                                          #   the USAi key (used when AGOR_USAI_SECRET=1);
                                          #   piped to `acq secret set`
+
+_daemon_host_for_backend() {
+  case "${1}" in
+    ""|msb) printf '%s\n' "host.microsandbox.internal" ;;
+    sbx) printf '%s\n' "host.docker.internal" ;;
+    *)
+      echo "ERROR: unsupported AGOR_ACQ_BACKEND '${1}' (expected msb or sbx)" >&2
+      exit 2
+      ;;
+  esac
+}
+
+# Normalize a host path so gitdir-derived paths and managed-root allowlist entries
+# compare in the same form. On MSYS/Git Bash, cygpath folds /c/... and C:/...
+# into one comparable form; elsewhere realpath resolves symlinks and traversals.
+_canon_path() {
+  local _p="${1:-}"
+  [[ -n "${_p}" ]] || { printf '\n'; return 0; }
+  if command -v cygpath >/dev/null 2>&1; then
+    local _m
+    _m="$(cygpath -m "${_p}" 2>/dev/null)" && [[ -n "${_m}" ]] && _p="${_m}"
+  else
+    local _r
+    _r="$(realpath -m "${_p}" 2>/dev/null || realpath "${_p}" 2>/dev/null || true)"
+    [[ -n "${_r}" ]] && _p="${_r}"
+  fi
+  printf '%s\n' "${_p}"
+}
+
+_split_managed_roots() {
+  _roots=()
+  _cur=""
+  IFS=':' read -r -a _raw <<< "${1}" || true
+  for _tok in "${_raw[@]}"; do
+    if [[ -z "${_cur}" ]]; then
+      _cur="${_tok}"
+    elif [[ "${_cur}" =~ ^[A-Za-z]$ ]]; then
+      _cur="${_cur}:${_tok}"       # re-join a Windows drive letter with its path
+    else
+      _roots+=("${_cur}")
+      _cur="${_tok}"
+    fi
+  done
+  [[ -n "${_cur}" ]] && _roots+=("${_cur}")
+}
+
+_join_args() {
+  local IFS=' '
+  printf '%s' "$*"
+}
+
+_is_agor_managed_path() {
+  local _path
+  _path="$(_canon_path "${1}")"
+  local _root
+  _split_managed_roots "${managed_roots}"
+  for _root in "${_roots[@]}"; do
+    [[ -z "${_root}" ]] && continue
+    _root="$(_canon_path "${_root}")"
+    case "${_path}/" in
+    "${_root%/}"/*)
+      return 0
+      ;;
+    esac
+  done
+  return 1
+}
+
+AGOR_DAEMON_HOST="${AGOR_DAEMON_HOST:-$(_daemon_host_for_backend "${AGOR_ACQ_BACKEND}")}"
 
 usage() {
   cat >&2 <<'EOF'
@@ -87,7 +156,10 @@ Env (all optional; none are secrets):
   AGOR_MANAGED_ROOTS   extra colon-separated managed roots to allow (e.g. an EFS
                        mount), in addition to AGOR_DATA_HOME
   AGOR_EGRESS_KIT      acq kit ref allow-listing the daemon (local dir or git+https)
-  AGOR_DAEMON_HOST     host alias the executor uses to reach the daemon (default: host.microsandbox.internal)
+  AGOR_ACQ_BACKEND     optional acq backend selector (msb or sbx); passed through
+                       as `acq --backend ...` and used for the daemon host alias
+  AGOR_DAEMON_HOST     optional host-alias override; otherwise derived from
+                       AGOR_ACQ_BACKEND, defaulting to msb's host alias
   AGOR_USAI_SECRET     0 = assume a global `usai` secret is set (default);
                        1 = set a per-sandbox secret from AGOR_USAI_KEY_FILE
   AGOR_USAI_KEY_FILE   file holding the USAi key (used when AGOR_USAI_SECRET=1)
@@ -118,6 +190,10 @@ command -v "${AGOR_ACQ_BIN}" >/dev/null 2>&1 || {
 
 # Sandbox name: prefix + first 8 chars of the session id (matches the guides).
 SANDBOX_NAME="${AGOR_SANDBOX_PREFIX}${SESSION_ID:0:8}"
+ACQ_BASE_ARGS=()
+if [[ -n "${AGOR_ACQ_BACKEND}" ]]; then
+  ACQ_BASE_ARGS+=("--backend" "${AGOR_ACQ_BACKEND}")
+fi
 
 # --------------------------------------------------------------------------
 # Buffer stdin (the JSON payload) so we can BOTH parse it and pipe it onward.
@@ -133,7 +209,7 @@ cleanup() {
   # Tear the sandbox down if we created one (best effort). acq rm is already
   # force; do NOT pass --force (acq would misparse it as the sandbox name).
   if [[ "${SANDBOX_CREATED}" -eq 1 ]]; then
-    "${AGOR_ACQ_BIN}" rm "${SANDBOX_NAME}" >/dev/null 2>&1 || true
+    "${AGOR_ACQ_BIN}" "${ACQ_BASE_ARGS[@]}" rm "${SANDBOX_NAME}" >/dev/null 2>&1 || true
   fi
 }
 trap cleanup EXIT INT TERM
@@ -160,20 +236,30 @@ fi
 #        the user's working tree — the wrapper refuses; use clone-mode branches.
 #        The exact .git-only hiding mechanism is an open prototype question,
 #        map #251/#253.)
-#   clone mode: .git is a DIRECTORY (self-contained) -> mount just the clone dir.
+#   clone mode: .git is a DIRECTORY (self-contained) -> mount just the clone dir
+#     after verifying the clone is under an Agor managed root.
 #
 # On sbx, extra mounts are positional workspace paths mounted at their ABSOLUTE
 # HOST path (there is no --mount flag; see map #248). We can't bind only `.git`
 # without its parent, so we mount whole directories.
 # --------------------------------------------------------------------------
 POSITIONAL_MOUNTS=("${WORKTREE_PATH}")
+agor_data_home="${AGOR_DATA_HOME:-${AGOR_HOME:-${HOME:-}/.agor}}"
+# Allow operators to extend the managed-root allowlist (colon-separated), e.g.
+# AGOR_MANAGED_ROOTS="/mnt/efs/agor:/srv/agor-data". A Windows drive letter
+# also contains a colon, so _split_managed_roots handles C:/... entries.
+managed_roots="${agor_data_home}${AGOR_MANAGED_ROOTS:+:${AGOR_MANAGED_ROOTS}}"
 
 if [[ -f "${WORKTREE_PATH}/.git" ]]; then
   # Worktree mode: derive <main>/.git from the gitdir pointer.
   gitdir_line="$(cat "${WORKTREE_PATH}/.git")"
   # "gitdir: /path/to/main/.git/worktrees/<name>" -> "/path/to/main/.git"
   main_git="${gitdir_line#gitdir: }"
-  main_git="${main_git%%/worktrees/*}"
+  if [[ "${main_git}" != */.git/worktrees/* ]]; then
+    echo "ERROR: unexpected worktree gitdir path (missing /.git/worktrees/): ${gitdir_line}" >&2
+    exit 4
+  fi
+  main_git="${main_git%/worktrees/*}"
   if [[ -z "${main_git}" || ! -d "${main_git}" ]]; then
     echo "ERROR: could not resolve main .git from worktree pointer: ${gitdir_line}" >&2
     exit 4
@@ -193,63 +279,17 @@ if [[ -f "${WORKTREE_PATH}/.git" ]]; then
   # NOTE: this wrapper cannot read config.yaml's paths.data_home; if a deploy
   # sets data_home ONLY in config (not via env), export AGOR_DATA_HOME (or
   # AGOR_MANAGED_ROOTS) for this wrapper too. See the README.
-  # Normalize a host path so the gitdir-derived repo path and the managed-root
-  # allowlist compare in the same form. Under MSYS/Git Bash, Agor writes the
-  # worktree gitdir in native Windows form (C:/...) while $HOME is MSYS form
-  # (/c/...); cygpath folds both to mixed Windows form (mirrors acq's
-  # canonicalize_path convention, quickstart#463). Elsewhere, resolve symlinks
-  # and `..` so the prefix check cannot be fooled by a symlink or a traversing
-  # gitdir. Best-effort: if no normalizer is available the path is used as-is.
-  _canon_path() {
-    local _p="${1:-}"
-    [[ -n "${_p}" ]] || { printf '\n'; return 0; }
-    if command -v cygpath >/dev/null 2>&1; then
-      local _m
-      _m="$(cygpath -m "${_p}" 2>/dev/null)" && [[ -n "${_m}" ]] && _p="${_m}"
-    else
-      local _r
-      _r="$(realpath -m "${_p}" 2>/dev/null || realpath "${_p}" 2>/dev/null || true)"
-      [[ -n "${_r}" ]] && _p="${_r}"
-    fi
-    printf '%s\n' "${_p}"
-  }
-
-  agor_data_home="${AGOR_DATA_HOME:-${AGOR_HOME:-${HOME:-}/.agor}}"
-  # Allow operators to extend the managed-root allowlist (colon-separated),
-  # e.g. AGOR_MANAGED_ROOTS="/mnt/efs/agor:/srv/agor-data". A Windows drive
-  # letter ("C:/...") also contains a colon, so the list is split with a drive-
-  # prefix guard below rather than a bare IFS=':' word-split.
-  managed_roots="${agor_data_home}${AGOR_MANAGED_ROOTS:+:${AGOR_MANAGED_ROOTS}}"
   main_repo_dir="$(_canon_path "${main_repo_dir}")"
 
-  managed=0
-  _roots=()
-  _cur=""
-  IFS=':' read -r -a _raw <<< "${managed_roots}" || true
-  for _tok in "${_raw[@]}"; do
-    if [[ -z "${_cur}" ]]; then
-      _cur="${_tok}"
-    elif [[ "${_cur}" =~ ^[A-Za-z]$ ]]; then
-      _cur="${_cur}:${_tok}"       # re-join a Windows drive letter with its path
-    else
-      _roots+=("${_cur}")
-      _cur="${_tok}"
-    fi
-  done
-  [[ -n "${_cur}" ]] && _roots+=("${_cur}")
+  if ! _is_agor_managed_path "${WORKTREE_PATH}"; then
+    echo "ERROR: refusing to mount a non-Agor-managed worktree (${WORKTREE_PATH})." >&2
+    echo "       It is outside AGOR_DATA_HOME (${agor_data_home}), so it looks like a" >&2
+    echo "       user's local worktree — mounting it could expose .env/working files." >&2
+    echo "       If this IS Agor-managed, export AGOR_DATA_HOME/AGOR_MANAGED_ROOTS." >&2
+    exit 5
+  fi
 
-  for _root in "${_roots[@]}"; do
-    [[ -z "${_root}" ]] && continue
-    _root="$(_canon_path "${_root}")"
-    case "${main_repo_dir}/" in
-    "${_root%/}"/*)
-      managed=1
-      break
-      ;;
-    esac
-  done
-
-  if [[ "${managed}" -eq 1 ]]; then
+  if _is_agor_managed_path "${main_repo_dir}"; then
     # Agor-managed clean clone under AGOR_DATA_HOME: safe to mount the main .git.
     POSITIONAL_MOUNTS+=("${main_git}")
   else
@@ -262,7 +302,15 @@ if [[ -f "${WORKTREE_PATH}/.git" ]]; then
     exit 5
   fi
 elif [[ -d "${WORKTREE_PATH}/.git" ]]; then
-  : # Clone mode: self-contained .git; the worktree mount alone is enough.
+  # Clone mode is self-contained, but still must be Agor-managed. Otherwise any
+  # arbitrary host clone with a .git/ directory could be mounted into the sandbox.
+  if ! _is_agor_managed_path "${WORKTREE_PATH}"; then
+    echo "ERROR: refusing to mount a non-Agor-managed clone (${WORKTREE_PATH})." >&2
+    echo "       It is outside AGOR_DATA_HOME (${agor_data_home}), so it looks like a" >&2
+    echo "       user's local clone. v1 supports Agor-managed remote repos only." >&2
+    echo "       If this IS Agor-managed, export AGOR_DATA_HOME/AGOR_MANAGED_ROOTS." >&2
+    exit 5
+  fi
 fi
 
 # --------------------------------------------------------------------------
@@ -286,20 +334,20 @@ fi
 # --------------------------------------------------------------------------
 if [[ "${AGOR_SANDBOX_DRY_RUN}" -eq 1 ]]; then
   echo "[dry-run] worktree:      ${WORKTREE_PATH}"
-  echo "[dry-run] mounts:        ${POSITIONAL_MOUNTS[*]}"
-  echo "[dry-run] ${AGOR_ACQ_BIN} ${create_args[*]}"
+  echo "[dry-run] mounts:        $(_join_args "${POSITIONAL_MOUNTS[@]}")"
+  echo "[dry-run] ${AGOR_ACQ_BIN} $(_join_args "${ACQ_BASE_ARGS[@]}" "${create_args[@]}")"
   if [[ "${AGOR_USAI_SECRET}" -eq 1 ]]; then
-    echo "[dry-run] ${AGOR_ACQ_BIN} secret set ${SANDBOX_NAME} usai   (key piped on stdin)"
+    echo "[dry-run] ${AGOR_ACQ_BIN} $(_join_args "${ACQ_BASE_ARGS[@]}" secret set "${SANDBOX_NAME}" usai)   (key piped on stdin)"
   fi
-  echo "[dry-run] <payload> | ${AGOR_ACQ_BIN} exec ${SANDBOX_NAME} -- agor-executor --stdin"
-  echo "[dry-run] ${AGOR_ACQ_BIN} rm ${SANDBOX_NAME}   (on exit)"
+  echo "[dry-run] <payload> | ${AGOR_ACQ_BIN} $(_join_args "${ACQ_BASE_ARGS[@]}" exec "${SANDBOX_NAME}" -- agor-executor --stdin)"
+  echo "[dry-run] ${AGOR_ACQ_BIN} $(_join_args "${ACQ_BASE_ARGS[@]}" rm "${SANDBOX_NAME}")   (on exit)"
   exit 0
 fi
 
 # --------------------------------------------------------------------------
 # Create the sandbox.
 # --------------------------------------------------------------------------
-"${AGOR_ACQ_BIN}" "${create_args[@]}"
+"${AGOR_ACQ_BIN}" "${ACQ_BASE_ARGS[@]}" "${create_args[@]}"
 SANDBOX_CREATED=1
 
 # --------------------------------------------------------------------------
@@ -311,7 +359,7 @@ SANDBOX_CREATED=1
 # --------------------------------------------------------------------------
 if [[ "${AGOR_USAI_SECRET}" -eq 1 ]]; then
   if [[ -n "${AGOR_USAI_KEY_FILE}" && -r "${AGOR_USAI_KEY_FILE}" ]]; then
-    "${AGOR_ACQ_BIN}" secret set "${SANDBOX_NAME}" usai <"${AGOR_USAI_KEY_FILE}" ||
+    "${AGOR_ACQ_BIN}" "${ACQ_BASE_ARGS[@]}" secret set "${SANDBOX_NAME}" usai <"${AGOR_USAI_KEY_FILE}" ||
       echo "WARNING: 'acq secret set ${SANDBOX_NAME} usai' failed; USAi calls may fail." >&2
   else
     echo "NOTE: AGOR_USAI_SECRET=1 but AGOR_USAI_KEY_FILE is unset/unreadable; no per-sandbox secret." >&2
@@ -359,4 +407,4 @@ fi
 # The executor connects back to the daemon over WebSocket using the payload's
 # sessionToken; the egress kit must allow that route.
 # --------------------------------------------------------------------------
-"${AGOR_ACQ_BIN}" exec "${SANDBOX_NAME}" -- agor-executor --stdin <"${PAYLOAD_FILE}"
+"${AGOR_ACQ_BIN}" "${ACQ_BASE_ARGS[@]}" exec "${SANDBOX_NAME}" -- agor-executor --stdin <"${PAYLOAD_FILE}"

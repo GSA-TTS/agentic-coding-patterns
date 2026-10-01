@@ -37,12 +37,13 @@
 # BACKEND PARITY:
 #   - msb (acq's DEFAULT backend): caps.network.allow -> `--net-rule allow@<host>`
 #     with the port STRIPPED (msb keys on domain only), so egress is host-wide for
-#     that host. The host alias is host.microsandbox.internal.
+#     that single backend alias. This is unavoidable in msb's current network-rule
+#     model; keep the alias narrow and do not add broad hostnames.
 #   - sbx: caps.network.allow is synthesized into the sbx-v2 kit; the full
 #     host:port is preserved (quoted). The host alias is host.docker.internal.
-#   - Both aliases are allow-listed (a static kit cannot template them; the
-#     wrapper rewrites the executor payload's daemonUrl to the active backend's
-#     alias via AGOR_DAEMON_HOST).
+#   - Both aliases are allow-listed because a static kit cannot template the active
+#     backend. The wrapper derives the runtime alias from AGOR_ACQ_BACKEND (or
+#     AGOR_DAEMON_HOST when explicitly overridden).
 #
 # DAEMON HOST ALIAS + PORT: allow-lists the sbx alias host.docker.internal and the
 # msb alias host.microsandbox.internal, both on the Agor default daemon port 3030.
@@ -69,8 +70,8 @@ caps:
       - host.docker.internal:3030
       - host.microsandbox.internal:3030
       # npm registry — install-time only (the install phase runs
-      # `npm install -g agor-live`). Metadata + tarballs both come from
-      # registry.npmjs.org.
+      # `npm install -g --ignore-scripts agor-live@<pinned-version>`). Metadata +
+      # tarballs both come from registry.npmjs.org.
       - registry.npmjs.org:443
 
 files:
@@ -93,10 +94,10 @@ commands:
       - /home/agent/agor-executor-install.sh
 
 # Non-secret guest env. AGOR_EXECUTOR_VERSION is the single pin point for the
-# executor runtime (the install script reads it); set it to a specific agor-live
-# version to lock the executor to the daemon rather than tracking `latest`.
+# executor runtime (the install script reads it). Default is pinned for
+# reproducibility; set to `latest` only as an explicit opt-out.
 environment:
-  AGOR_EXECUTOR_VERSION: "latest"
+  AGOR_EXECUTOR_VERSION: "0.26.8"
 
 # Bundle provenance (quickstart#235). Declares the source repo so a consumer
 # (acq) can attribute this kit. Unlike the acq-builtin bundle kits, this kit is a

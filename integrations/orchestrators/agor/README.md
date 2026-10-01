@@ -51,8 +51,8 @@ acq sandbox (msb) ── acq exec -- agor-executor --stdin ──▶ agent SDK
 - **`acq`** installed and configured with a backend (**msb** is the default; see
   [Backend support](#backend-support)).
 - A **base sandbox image with `node`/`npm`** — the egress kit installs
-  `agor-executor` at create time (`npm install -g agor-live`), so the image must
-  be able to run `npm`/`node`. (The default `shell-docker` image does.)
+  `agor-executor` at create time (`npm install -g --ignore-scripts agor-live@0.26.8`),
+  so the image must be able to run `npm`/`node`. (The default `shell-docker` image does.)
 - **`jq`** on the host (the wrapper parses the payload with it).
 - A **daemon-egress kit** ref (see [Daemon reachability](#daemon-reachability)).
 - A **USAi API key** available to the operator (see [Credentials](#credentials-usai)).
@@ -102,7 +102,8 @@ All are optional and **none are secrets**:
 | `AGOR_DATA_HOME` | (Agor default) | Agor's git-data root (`repos/` + `worktrees/`); used to tell an Agor-managed repo from a user's local repo. Falls back to `AGOR_HOME`, then `~/.agor`. **Export it if your deploy sets `paths.data_home` only in `config.yaml`** (this wrapper can't read the config file). |
 | `AGOR_MANAGED_ROOTS` | (unset) | Extra colon-separated managed roots to allow (e.g. an EFS/NFS mount), in addition to `AGOR_DATA_HOME`. |
 | `AGOR_EGRESS_KIT` | (unset) | acq kit ref that allow-lists the daemon and installs the executor (local dir or `git+https…#ref=&dir=`). |
-| `AGOR_DAEMON_HOST` | `host.microsandbox.internal` | Host alias the executor uses to reach the daemon (msb default); set `host.docker.internal` for sbx. |
+| `AGOR_ACQ_BACKEND` | (unset; acq default) | Optional backend selector (`msb` or `sbx`); when set, passed through as `acq --backend … create` and used to derive the daemon host alias. |
+| `AGOR_DAEMON_HOST` | derived | Optional host-alias override. If unset, derived from `AGOR_ACQ_BACKEND` (`host.microsandbox.internal` for unset/`msb`, `host.docker.internal` for `sbx`). |
 | `AGOR_USAI_SECRET` | `0` | `0` = assume a global `usai` secret is set (default); `1` = set a per-sandbox secret from `AGOR_USAI_KEY_FILE`. |
 | `AGOR_USAI_KEY_FILE` | (unset) | File holding the USAi key (used only when `AGOR_USAI_SECRET` is `1`); piped to `acq secret set` (never argv). |
 
@@ -116,7 +117,8 @@ daemon calls**:
   `<main>/.git`, and mounts **the worktree + the main repo's `.git`** so git
   commit/push and `gitdir:` resolution work.
 - **Clone branches** — `.git` is a *directory* (self-contained). The wrapper
-  mounts **only the clone dir**.
+  mounts **only the clone dir**, but only when the clone path is under an Agor
+  managed root.
 
 Both backends mount positional workspaces at their **absolute host path**, so the
 worktree appears at the same path inside the sandbox (preserving `gitdir:`
@@ -133,7 +135,9 @@ refuses this** (exit 5). v1 supports:
 - **Agor-managed remote repos** — the main checkout is a clean clone under
   Agor's git-data root (`$AGOR_DATA_HOME/repos/…`, default `~/.agor/`) with no
   user secrets; safe to mount. (This is the default path.)
-- **Clone-mode branches** — self-contained; only the clone dir is mounted.
+- **Clone-mode branches** — self-contained; only the clone dir is mounted, and the
+  clone still must be under an Agor managed root. Arbitrary host clones with a
+  `.git/` directory are refused.
 
 > The wrapper detects "Agor-managed" by whether the main repo lives under
 > **`AGOR_DATA_HOME`** (falling back to `AGOR_HOME`, then `~/.agor`) — matching
@@ -162,9 +166,9 @@ The executor inside the sandbox must reach the daemon over WebSocket. `acq` has
 **no per-invocation network flag** — outbound egress can only be allow-listed by
 an **acq kit's `caps.network.allow`**, and backends are default-deny for
 arbitrary hosts. The egress kit also **installs the executor** (its `install`
-phase runs `npm install -g agor-live` and shims `agor-executor`), since
-`agor-live` ships no `agor-executor` bin. Its allow-list carries **both** backend
-host aliases on the Agor default port:
+phase runs `npm install -g --ignore-scripts agor-live@0.26.8` and shims
+`agor-executor`), since `agor-live` ships no `agor-executor` bin. Its allow-list
+carries **both** backend host aliases on the Agor default port:
 
 ```yaml
 # integrations/isolation/acq-kits/agor-daemon-egress/spec.yaml (see map #259)
@@ -183,10 +187,10 @@ or the **git form**
 
 > The daemon advertises `http://localhost:3030` by default, but inside the sandbox
 > `localhost` is the **guest's** loopback, not the host. The wrapper rewrites a
-> loopback `daemonUrl` in the payload to `AGOR_DAEMON_HOST`
-> (`host.microsandbox.internal` on msb, `host.docker.internal` on sbx), preserving
-> the port. If your daemon uses a non-default port, the egress kit's allow entry
-> must match.
+> loopback `daemonUrl` in the payload to `AGOR_DAEMON_HOST`. If unset, that alias
+> is derived from `AGOR_ACQ_BACKEND` (`host.microsandbox.internal` for unset/`msb`,
+> `host.docker.internal` for `sbx`), preserving the port. If your daemon uses a
+> non-default port, the egress kit's allow entry must match.
 
 ## Credentials (USAi)
 
@@ -214,7 +218,7 @@ agent never sees it):
 | Agent credentials (OpenCode) | ❌ not handled | | ✅ MITM (key set out-of-band) |
 | Worktree + `.git` mount | | ✅ derive from `.git`, pass to acq | ✅ performs the mount (host path, both backends) |
 | Daemon egress | | ✅ apply egress kit via `--kit`; rewrite loopback `daemonUrl` → host alias | ✅ `caps.network.allow` |
-| Executor install | | (references the kit) | ✅ install-phase `npm install -g agor-live` + shim |
+| Executor install | | (references the kit) | ✅ install-phase `npm install -g --ignore-scripts agor-live@0.26.8` + shim |
 | USAi key storage/rotation | (not for OpenCode today) | ✅ read operator key → `acq secret set` | ✅ injection mechanism |
 | USAi endpoint config | | | ✅ `usai-provider` kit |
 | Zscaler CA / playbook / git-sign | | | ✅ the respective kits |

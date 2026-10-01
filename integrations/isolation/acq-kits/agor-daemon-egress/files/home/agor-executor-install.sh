@@ -18,19 +18,12 @@
 # npm at runtime rather than committed to this CC0 kit.
 #
 # AGOR_EXECUTOR_VERSION: pin to a specific agor-live version to lock the executor
-# to the daemon (default: latest).
+# to the daemon. Set to "latest" only as an explicit reproducibility opt-out.
 
 set -u
 
-AGOR_EXECUTOR_VERSION="${AGOR_EXECUTOR_VERSION:-latest}"
-EXECUTOR_BIN="/usr/local/bin/agor-executor"
-NPM_GLOBAL_ROOT="$(npm root -g 2>/dev/null || echo '')"
-CLI_PATH="${NPM_GLOBAL_ROOT}/agor-live/dist/executor/cli.js"
-
-if [ -x "${EXECUTOR_BIN}" ] && [ -f "${CLI_PATH}" ]; then
-  echo "agor-executor already installed; skipping." >&2
-  exit 0
-fi
+AGOR_EXECUTOR_VERSION="${AGOR_EXECUTOR_VERSION:-0.26.8}"
+EXECUTOR_BIN="${AGOR_EXECUTOR_BIN:-/usr/local/bin/agor-executor}"
 
 if ! command -v npm >/dev/null 2>&1; then
   echo "WARNING: npm not found in the sandbox; cannot install agor-executor." >&2
@@ -39,8 +32,28 @@ if ! command -v npm >/dev/null 2>&1; then
   exit 0
 fi
 
+NPM_GLOBAL_ROOT="$(npm root -g 2>/dev/null || echo '')"
+CLI_PATH="${NPM_GLOBAL_ROOT}/agor-live/dist/executor/cli.js"
+EXPECTED_SHIM="$(cat <<EOF
+#!/bin/sh
+exec node "${CLI_PATH}" "\$@"
+EOF
+)"
+
+if [ -x "${EXECUTOR_BIN}" ] && [ -f "${CLI_PATH}" ]; then
+  if [ "$(cat "${EXECUTOR_BIN}" 2>/dev/null || true)" = "${EXPECTED_SHIM}" ]; then
+    echo "OK: agor-executor already installed at ${EXECUTOR_BIN} -> ${CLI_PATH}; skipping." >&2
+    exit 0
+  fi
+  echo "WARNING: stale agor-executor shim found at ${EXECUTOR_BIN}; rewriting it." >&2
+fi
+
+if [ "${AGOR_EXECUTOR_VERSION}" = "latest" ]; then
+  echo "WARNING: AGOR_EXECUTOR_VERSION=latest is an explicit reproducibility opt-out." >&2
+fi
+
 echo "Installing agor-live@${AGOR_EXECUTOR_VERSION} (executor runtime)..." >&2
-if ! npm install -g --no-fund --no-audit "agor-live@${AGOR_EXECUTOR_VERSION}"; then
+if ! npm install -g --no-fund --ignore-scripts "agor-live@${AGOR_EXECUTOR_VERSION}"; then
   echo "WARNING: npm install agor-live failed; agor-executor will not be available." >&2
   exit 0
 fi
@@ -48,16 +61,18 @@ fi
 # npm install -g may have moved the global root; re-resolve it.
 NPM_GLOBAL_ROOT="$(npm root -g 2>/dev/null || echo '')"
 CLI_PATH="${NPM_GLOBAL_ROOT}/agor-live/dist/executor/cli.js"
+EXPECTED_SHIM="$(cat <<EOF
+#!/bin/sh
+exec node "${CLI_PATH}" "\$@"
+EOF
+)"
 if [ ! -f "${CLI_PATH}" ]; then
   echo "WARNING: installed agor-live but could not locate ${CLI_PATH}; agor-executor will not be available." >&2
   exit 0
 fi
 
 # Write the shim. agor-live's bin does not include agor-executor.
-cat > "${EXECUTOR_BIN}" <<EOF
-#!/bin/sh
-exec node "${CLI_PATH}" "\$@"
-EOF
+printf '%s\n' "${EXPECTED_SHIM}" > "${EXECUTOR_BIN}"
 chmod 0755 "${EXECUTOR_BIN}"
 
 echo "agor-executor installed at ${EXECUTOR_BIN} -> ${CLI_PATH}" >&2

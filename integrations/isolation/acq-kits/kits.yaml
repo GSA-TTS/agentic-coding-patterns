@@ -106,10 +106,12 @@ kits:
       back to the daemon. Both backend host aliases are allow-listed
       (host.docker.internal for sbx, host.microsandbox.internal for msb — the
       default backend); the executor is installed from npm at create time via an
-      install-phase command (agor-live does not ship an `agor-executor` bin). No
-      backend shortcut — both use caps.network.allow + the same install command.
-      sbx PRESERVES the full host:port; msb STRIPS the port (--net-rule
-      allow@<host>, domain only), so egress is host-wide for that host on msb. A
+      install-phase command pinned to agor-live@0.26.8 with npm scripts disabled
+      (agor-live does not ship an `agor-executor` bin). No backend shortcut — both
+      use caps.network.allow + the same install command. sbx PRESERVES the full
+      host:port; msb STRIPS the port (--net-rule allow@<host>, domain only), so
+      generated msb policy may allow host-wide egress to both static backend
+      aliases. A
       live msb run is tracked at GSA-TTS/agentic-coding-patterns#257.
       Security-relevant (widens egress + runs a create-time install) — governed by
       human review, not schema fields (the kit schema models no governance

@@ -59,14 +59,16 @@ the egress it already provides.
 
 - **Not a committed binary.** `agor-live` is **BUSL-1.1**; committing the executor
   into this **CC0-1.0** repo would violate the no-copy rule. Instead the kit's
-  `install` phase runs `npm install -g agor-live` at create time (fetched from
-  `registry.npmjs.org`) and writes a thin `agor-executor` shim — the same
-  install-at-create-time pattern as the `prime-agent` kit.
+  `install` phase runs `npm install -g --ignore-scripts agor-live@0.26.8` at
+  create time (fetched from `registry.npmjs.org`) and writes a thin
+  `agor-executor` shim — the same install-at-create-time pattern as the
+  `prime-agent` kit.
 - **Not a separate kit.** A second Agor kit would split one consumer's sandbox
   needs across two artifacts with no added clarity; the egress and the executor
   are both "the sandbox side of the Agor integration" and compose as one mixin.
-- **Version drift.** The executor defaults to `agor-live@latest`; pin
-  `AGOR_EXECUTOR_VERSION` to lock it to the daemon.
+- **Version drift.** The executor defaults to `agor-live@0.26.8`; change
+  `AGOR_EXECUTOR_VERSION` to another concrete version to lock it to the daemon.
+  `latest` is allowed only as an explicit reproducibility opt-out.
 
 ### 4. Backend host aliases (amendment)
 
@@ -74,8 +76,10 @@ The daemon is reached through a backend-specific host alias: `host.docker.intern
 (sbx) and `host.microsandbox.internal` (msb, now acq's **default** backend). Both
 are allow-listed because a `hybrid/v1` kit cannot template the value; the wrapper
 rewrites the executor payload's loopback `daemonUrl` to the active backend's alias
-(`AGOR_DAEMON_HOST`). On msb the `:port` is stripped (domain-only), so egress is
-host-wide for that host.
+(derived from `AGOR_ACQ_BACKEND`, or `AGOR_DAEMON_HOST` when explicitly
+overridden). On msb the `:port` is stripped (domain-only). Because the static kit
+includes both backend aliases, generated msb policy may allow host-wide egress to
+both aliases.
 
 ## Alternatives considered
 
@@ -97,6 +101,7 @@ host-wide for that host.
   installed at create time from npm and shimmed onto PATH.
 - The static allow entries must be edited for a non-default daemon port/alias
   (a `hybrid/v1` kit cannot template them); documented in the README.
-- On msb the port is stripped (host-wide for that host); acceptable — a live msb
-  run is tracked at
+- On msb the port is stripped (host-wide for each translated alias); unavoidable
+  with msb's current net-rule model and a static cross-backend kit, so the alias
+  allowlist stays narrow. A live msb run is tracked at
   ([#257](https://github.com/GSA-TTS/agentic-coding-patterns/issues/257)).

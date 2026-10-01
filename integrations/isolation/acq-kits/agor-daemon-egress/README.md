@@ -43,8 +43,8 @@ See [`GSA-TTS/agentic-coding-patterns#259`](https://github.com/GSA-TTS/agentic-c
   fetch.
 - **Executor install** — a create-time (`install`) command runs
   [`files/home/agor-executor-install.sh`](files/home/agor-executor-install.sh),
-  which `npm install -g agor-live` (BUSL; fetched at runtime, never committed) and
-  writes an `agor-executor` shim.
+  which `npm install -g --ignore-scripts agor-live@0.26.8` (BUSL; fetched at
+  runtime, never committed) and writes an `agor-executor` shim.
 - No secret.
 
 ## Security posture
@@ -57,7 +57,7 @@ it is reviewed as a **security-relevant** kit (`human_review_required`; PR label
 |---|---|---|
 | Egress | daemon control-plane (one alias/backend) + npm registry | least-privilege: the control-plane the executor must reach + its install source |
 | Filesystem | one committed installer script | the executor runtime is fetched at runtime, not committed |
-| Commands | one create-time `install` (root) | `npm install -g agor-live` + shim |
+| Commands | one create-time `install` (root) | `npm install -g --ignore-scripts agor-live@0.26.8` + shim |
 | Secrets | none | the daemon URL is not sensitive |
 
 The `hybrid/v1` kit schema is `additionalProperties: false` and models **no**
@@ -70,7 +70,7 @@ and enforced by **human review**, not by schema fields — consistent with
 
 | Backend | Support | Notes |
 |---|---|---|
-| **msb** (default) | Works, port-stripped | acq emits `--net-rule allow@host.microsandbox.internal` and **drops the `:port`** (msb keys on domain only), so egress is host-wide for that host — acceptable. A live msb run is tracked at [#257](https://github.com/GSA-TTS/agentic-coding-patterns/issues/257). |
+| **msb** (default) | Works, port-stripped | acq emits msb `--net-rule allow@<host>` entries and **drops `:port`** (msb keys on domain only). Because the static kit includes both backend aliases, generated msb policy may allow host-wide egress to both `host.microsandbox.internal` and `host.docker.internal`. This is an msb/static-kit limitation, not desired policy; keep these aliases narrow and do not add broad hostnames. A live msb run is tracked at [#257](https://github.com/GSA-TTS/agentic-coding-patterns/issues/257). |
 | **sbx** | Supported | `caps.network.allow` is synthesized into the sbx-v2 kit; the full `host.docker.internal:3030` is preserved (quoted). |
 | **ppp** (later) | Deferred | Same `caps.network.allow` path as sbx. |
 
@@ -101,10 +101,10 @@ port** `3030`. If your daemon uses a different port or alias, edit
 `caps.network.allow` in [`spec.yaml`](spec.yaml). (On msb the port is dropped
 either way.)
 
-The executor version defaults to **`latest`** (the `AGOR_EXECUTOR_VERSION` entry
-in the spec's `environment`). To lock the executor to the daemon, set that value
-to a specific `agor-live` version — it is a kit-authoring pin, not a runtime
-operator env var.
+The executor version defaults to **`0.26.8`** (the `AGOR_EXECUTOR_VERSION` entry
+in the spec's `environment`). Set that value to a different concrete `agor-live`
+version to lock the executor to your daemon. `latest` is supported only as an
+explicit reproducibility opt-out and the installer warns when it is used.
 
 ## Verifying
 

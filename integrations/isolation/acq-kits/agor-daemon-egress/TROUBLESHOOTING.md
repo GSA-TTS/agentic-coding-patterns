@@ -11,9 +11,10 @@ WebSocket/connection error to the daemon.
    line includes `--kit`.
 2. **Confirm the daemonUrl host alias matches the backend.** Inside the sandbox,
    `localhost`/`127.0.0.1` is the *guest's own loopback* — it never reaches the
-   host daemon. The wrapper rewrites a loopback `daemonUrl` to `AGOR_DAEMON_HOST`
-   (default `host.microsandbox.internal` for msb; `host.docker.internal` for sbx).
-   If the daemon advertises a non-loopback URL, set `AGOR_DAEMON_HOST` to match.
+   host daemon. The wrapper rewrites a loopback `daemonUrl` to `AGOR_DAEMON_HOST`.
+   If unset, that alias is derived from `AGOR_ACQ_BACKEND` (`host.microsandbox.internal`
+   for unset/`msb`; `host.docker.internal` for `sbx`). If the daemon advertises a
+   non-loopback URL, set `AGOR_DAEMON_HOST` to match.
 3. **Confirm the host alias + port are allow-listed.** The kit allow-lists
    `host.docker.internal:3030` (sbx) and `host.microsandbox.internal:3030` (msb).
    If your daemon uses a different port, edit `spec.yaml`'s `caps.network.allow`.
@@ -32,9 +33,10 @@ Symptoms: the wrapper's `acq exec … -- agor-executor --stdin` fails with
 `command not found`.
 
 1. **The install phase needs node/npm.** The kit's `install` command runs
-   `npm install -g agor-live`. If the base image lacks node/npm, the script warns
-   and skips (non-fatal), leaving no `agor-executor`. Use a base image that ships
-   node/npm (the default `shell-docker` image does), or bake the executor in.
+   `npm install -g --ignore-scripts agor-live@0.26.8`. If the base image lacks
+   node/npm, the script warns and skips (non-fatal), leaving no `agor-executor`.
+   Use a base image that ships node/npm (the default `shell-docker` image does),
+   or bake the executor in.
 2. **npm install failed (offline / blocked egress).** The install needs
    `registry.npmjs.org` (allow-listed by this kit). If the sandbox could not reach
    npm, `agor-executor` is absent. Re-create the sandbox once npm egress works.
@@ -46,8 +48,10 @@ Symptoms: the wrapper's `acq exec … -- agor-executor --stdin` fails with
 
 Expected. `acq`'s msb adapter emits `--net-rule allow@host.microsandbox.internal`
 and **strips the `:port`** — msb keys on the domain only, so egress is host-wide
-for that host. sbx keeps the port. The msb port-stripping is benign for this
-single-host egress. A live msb run is tracked at
+for each translated host entry. Because this static kit includes both backend aliases,
+generated msb policy may allow host-wide egress to both aliases. sbx keeps the port.
+This is an msb/static-kit limitation, not desired policy; keep these aliases narrow
+and do not add broad hostnames. A live msb run is tracked at
 [#257](https://github.com/GSA-TTS/agentic-coding-patterns/issues/257).
 
 ## `validate-kits.py` fails for this kit
