@@ -24,10 +24,11 @@
 // SAFETY: this is a read-modify-write of a JSON file. It preserves every existing
 // key, only sets/overwrites `worktrees.root` (and creates the `worktrees` object
 // if absent). It refuses a non-absolute root (Paseo would resolve it against
-// PASEO_HOME, defeating the purpose). It writes atomically (temp file + rename)
-// with private 0600 perms, matching how Paseo itself stores config.json.
+// PASEO_HOME, defeating the purpose). It takes the same coarse lock used by the
+// startup script, then writes atomically (temp file + rename) with private 0600
+// perms, matching how Paseo itself stores config.json.
 
-import { readFileSync, writeFileSync, mkdirSync, renameSync, existsSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmdirSync, writeFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -59,16 +60,33 @@ function resolvePaseoHome(explicit) {
   return path.join(homedir(), ".paseo");
 }
 
-function main() {
-  const { root, paseoHome: paseoHomeArg } = parseArgs(process.argv.slice(2));
-
-  if (!path.isAbsolute(root)) {
-    // A relative root would be resolved by Paseo against PASEO_HOME, not the
-    // project — refuse rather than silently mis-place worktrees.
-    throw new Error(`--root must be an absolute path (got: ${root})`);
+function withConfigLock(paseoHome, fn) {
+  const lockDir = path.join(paseoHome, ".config-json.lock");
+  const timeoutMs = Number.parseInt(process.env.PASEO_CONFIG_LOCK_TIMEOUT_MS || "30000", 10);
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    try {
+      mkdirSync(lockDir);
+      break;
+    } catch (err) {
+      if (err.code !== "EEXIST" || Date.now() >= deadline) {
+        throw new Error(`cannot lock ${path.join(paseoHome, "config.json")}: ${err.message}`);
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
+    }
   }
+  try {
+    return fn();
+  } finally {
+    try {
+      rmdirSync(lockDir);
+    } catch {
+      // Best effort cleanup; a later run times out rather than racing config writes.
+    }
+  }
+}
 
-  const paseoHome = resolvePaseoHome(paseoHomeArg);
+function updateConfig(root, paseoHome) {
   const configPath = path.join(paseoHome, "config.json");
 
   // Read the existing config if present. The daemon initializes config.json on
@@ -126,6 +144,20 @@ function main() {
   }
 
   process.stdout.write("changed\n");
+}
+
+function main() {
+  const { root, paseoHome: paseoHomeArg } = parseArgs(process.argv.slice(2));
+
+  if (!path.isAbsolute(root)) {
+    // A relative root would be resolved by Paseo against PASEO_HOME, not the
+    // project — refuse rather than silently mis-place worktrees.
+    throw new Error(`--root must be an absolute path (got: ${root})`);
+  }
+
+  const paseoHome = resolvePaseoHome(paseoHomeArg);
+  mkdirSync(paseoHome, { recursive: true });
+  withConfigLock(paseoHome, () => updateConfig(root, paseoHome));
 }
 
 try {

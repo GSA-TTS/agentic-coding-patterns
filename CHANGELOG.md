@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.10.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.9.0...v1.10.0) (2026-10-02)
+
+
+### Features
+
+* **isolation:** add generic devenv sandbox image built and published to GHCR ([#395](https://github.com/GSA-TTS/agentic-coding-patterns/issues/395)) ([8c7e9ca](https://github.com/GSA-TTS/agentic-coding-patterns/commit/8c7e9ca50cda3409234b8f38e6a5e89f20a87598))
+* **oci-engine:** add rootless podman OCI-engine capability kit ([#437](https://github.com/GSA-TTS/agentic-coding-patterns/issues/437)) ([b980c93](https://github.com/GSA-TTS/agentic-coding-patterns/commit/b980c936ef9fda66c3a6324005f39f8ea5ed8a40))
+* **paseo:** bump pinned Paseo CLI to 0.10.2 ([#439](https://github.com/GSA-TTS/agentic-coding-patterns/issues/439)) ([ef3aa29](https://github.com/GSA-TTS/agentic-coding-patterns/commit/ef3aa290dcf0842cd90843dd97ada546ca6b47ac))
+* **paseo:** register child repos in parent mounts ([#391](https://github.com/GSA-TTS/agentic-coding-patterns/issues/391)) ([eded00c](https://github.com/GSA-TTS/agentic-coding-patterns/commit/eded00cecaea06e34a732eb28468efa0808f4b28))
+* **patterns:** add pi-coding-agent acq-kit (earendil-works/pi, npm install, unprivileged startup-only) ([#399](https://github.com/GSA-TTS/agentic-coding-patterns/issues/399)) ([5d1a877](https://github.com/GSA-TTS/agentic-coding-patterns/commit/5d1a87714b6e500c4c910ab1b0dcf11baba09d13))
+* **schema:** add optional agent block to hybrid/v1 kit schema ([#454](https://github.com/GSA-TTS/agentic-coding-patterns/issues/454)) ([856c975](https://github.com/GSA-TTS/agentic-coding-patterns/commit/856c9759ba2aa54f35c87a0c0b8d1fa97e3a806d))
+
+
+### Bug Fixes
+
+* **ci:** bump js-yaml to 4.3.2 to clear a high-severity CPU-DoS advisory ([#409](https://github.com/GSA-TTS/agentic-coding-patterns/issues/409)) ([086f9f6](https://github.com/GSA-TTS/agentic-coding-patterns/commit/086f9f6c99908b76d7b66b9b4877debe33aa8cf9))
+* **ci:** bump smol-toml to 1.7.1 to clear an infinite-loop DoS advisory ([#411](https://github.com/GSA-TTS/agentic-coding-patterns/issues/411)) ([acc0346](https://github.com/GSA-TTS/agentic-coding-patterns/commit/acc03460565b842876eba63ac43c955140f0b792))
+* **ci:** pin markdownlint-cli2 once and stop the pre-commit/CI drift ([#451](https://github.com/GSA-TTS/agentic-coding-patterns/issues/451)) ([543e08f](https://github.com/GSA-TTS/agentic-coding-patterns/commit/543e08f089f1f8992504a041f4662991948516ba))
+* **paseo:** keep npm cache agent-owned ([#402](https://github.com/GSA-TTS/agentic-coding-patterns/issues/402)) ([c0ad118](https://github.com/GSA-TTS/agentic-coding-patterns/commit/c0ad1186fad7ce54eaed9102010e74526bb3d445))
+* **usai-provider:** USAi model catalog refresh + NIST-grounded permission hardening ([#417](https://github.com/GSA-TTS/agentic-coding-patterns/issues/417)) ([b3afd89](https://github.com/GSA-TTS/agentic-coding-patterns/commit/b3afd899ea0652a9f4f8bdbdccb79e0f0f72f4db))
+
 ## [1.9.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.8.0...v1.9.0) (2026-08-25)
 
 

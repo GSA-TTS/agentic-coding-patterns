@@ -120,7 +120,6 @@ const VENDOR_PROVIDER_MAP = {
 const DISPLAY_NAME_OVERRIDES = {
   "gpt-5.4-latest-guardrails-defaultv2": "GPT-5.4 Latest — Guardrails Default v2",
   "gpt-5.2-latest-guardrails-defaultv2": "GPT-5.2 Latest — Guardrails Default v2",
-  cohere_english_v3: "Cohere English v3",
 }
 
 // -----------------------------------------------------------------------------
@@ -513,7 +512,13 @@ function parseBootstrapModels(blockBody) {
 function bootstrapModelsFromBlock(entries) {
   const models = []
   const vendorsSeen = new Set()
+  const excluded = []
   for (const { id, obj } of entries) {
+    const reason = nonChatReason(id, obj?.name ?? "")
+    if (reason) {
+      excluded.push({ id, reason })
+      continue
+    }
     const vendor = classifyVendor(id, "")
     vendorsSeen.add(vendor)
     const model = { id, vendor, name: obj.name ?? generateDisplayName(id) }
@@ -536,6 +541,7 @@ function bootstrapModelsFromBlock(entries) {
     }
     models.push(model)
   }
+  reportExclusions(excluded)
   return { models, vendorsSeen }
 }
 
@@ -556,20 +562,57 @@ function buildVendors(vendorKeysInOrder) {
 // -----------------------------------------------------------------------------
 // Live-feed shaping: parse USAi list, classify, optionally enrich from models.dev.
 // -----------------------------------------------------------------------------
+// Models the gateway serves that cannot be prompted, keyed to the reason.
+// The gateway's /v1/models response carries no capability field, so
+// promptability is decided here rather than read from the feed.
+const NON_CHAT_MODELS = {
+  cohere_english_v3: "embedding model; /chat/completions returns 403 AccessDeniedException",
+  "text-embedding-005": "embedding model; /chat/completions returns 400 (no generation support)",
+}
+
+// Default-deny net for a non-chat model not yet listed above. Substring, not
+// `\bembed\b`: `_` is a word character, so a word-boundary form matches no
+// underscore-delimited id.
+const EMBEDDING_ID_RE = /embedding|embed/
+
+/**
+ * Why this model cannot be offered as a chat model, or null if it can.
+ * Checked by exact id first, then by the conservative id pattern.
+ */
+function nonChatReason(id, name = "") {
+  if (Object.hasOwn(NON_CHAT_MODELS, id)) return NON_CHAT_MODELS[id]
+  if (EMBEDDING_ID_RE.test(`${id} ${name}`.toLowerCase())) {
+    return "id or name indicates an embedding model"
+  }
+  return null
+}
+
+/** Report excluded models to stderr. */
+function reportExclusions(excluded) {
+  for (const { id, reason } of excluded) {
+    process.stderr.write(`  excluded ${id}: ${reason}\n`)
+  }
+}
+
 function shapeFromFeeds(usaiList, modelsDevCatalog) {
-  // Chat models only (exclude embeddings), preserve incoming list order but
-  // group by vendor display order for a stable catalog.
+  // Chat models only, preserve incoming list order but group by vendor display
+  // order for a stable catalog.
+  const excluded = []
   const parsed = usaiList
     .map((raw) => {
       const id = raw.id || raw.model_id || raw.name
       if (!id) return null
       const vendor = classifyVendor(id, raw.owned_by)
-      const haystack = `${id} ${raw.name ?? ""}`.toLowerCase()
-      const isEmbedding = /embedding|embed/.test(haystack)
-      return { id, vendor, name: raw.name || generateDisplayName(id), isEmbedding, raw }
+      const reason = nonChatReason(id, raw.name ?? "")
+      if (reason) {
+        excluded.push({ id, reason })
+        return null
+      }
+      return { id, vendor, name: raw.name || generateDisplayName(id), raw }
     })
     .filter(Boolean)
-    .filter((m) => !m.isEmbedding)
+
+  reportExclusions(excluded)
 
   parsed.sort((a, b) => {
     const oa = VENDOR_CONFIG[a.vendor]?.order ?? 99
@@ -913,6 +956,8 @@ export {
   shapeFromFeeds,
   findModelsDevMatch,
   classifyVendor,
+  nonChatReason,
+  NON_CHAT_MODELS,
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
