@@ -11,6 +11,23 @@
 schemaVersion: "acq-kits-registry/v1"
 
 kits:
+  opencode:
+    backends: [sbx, msb]
+    parity: |
+      First harness-agent kit in the family (declares the top-level `agent:`
+      block so acq's built-in agent-kit readiness gate can confirm this kit
+      genuinely provides the `opencode` agent token before enabling it).
+      Written entirely in the neutral vocabulary with no backend shortcut or
+      extras: a single install-phase script (files/home/opencode-install.sh)
+      fetches a pinned, SHA-256-verified OpenCode release binary (NOT npm, NOT
+      nixpkgs — see README.md) and installs it to /usr/local/bin at create
+      time, root, once. Fails soft (agent absent, sandbox stays up) on any
+      availability failure, but fails CLOSED (refuses to install) on a SHA-256
+      mismatch — see docs/decisions/fail-closed-on-integrity.md, which is a
+      deliberate divergence from every other kit in this family's uniform
+      fail-soft convention. Publishes NO ports (a TUI, not a web UI).
+      Replaces acq's own unpinned MSB fallback (npm install -g opencode-ai).
+
   usai-provider:
     backends: [sbx, msb]
     parity: |
