@@ -138,7 +138,14 @@ function parseModel(rawModel) {
   }
 }
 
+// Models the gateway serves that cannot be prompted, keyed to the reason.
+// Not caught by the embedding-id pattern above.
+const NON_CHAT_MODEL_IDS = {
+  cohere_english_v3: "embedding model; /chat/completions returns 403 AccessDeniedException",
+}
+
 function isAllowedModel(model) {
+  if (Object.hasOwn(NON_CHAT_MODEL_IDS, model.id)) return false
   return model.isChat
 }
 

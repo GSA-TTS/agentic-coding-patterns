@@ -353,19 +353,6 @@
             "input": 0.24,
             "output": 0.97
           }
-        },
-
-        // Cohere Models
-        "cohere_english_v3": {
-          "name": "Cohere English v3",
-          "limit": {
-            "context": 128000,
-            "output": 4000
-          },
-          "cost": {
-            "input": 0.0375,
-            "output": 0.15
-          }
         }
         // END GENERATED USAI MODELS
       }
