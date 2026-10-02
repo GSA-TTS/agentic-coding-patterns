@@ -90,6 +90,18 @@
       "created": 1787675321,
       "object": "model",
       "owned_by": "Meta"
+    },
+    {
+      "id": "cohere_english_v3",
+      "created": 1698883200,
+      "object": "model",
+      "owned_by": "Cohere"
+    },
+    {
+      "id": "text-embedding-005",
+      "created": 1715644800,
+      "object": "model",
+      "owned_by": "Google"
     }
   ]
 }

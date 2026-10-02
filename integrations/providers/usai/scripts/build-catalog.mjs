@@ -106,10 +106,13 @@ const VENDOR_PROVIDER_MAP = {
 }
 
 // Display-name overrides carried over from the monolith for complex IDs.
+// `cohere_english_v3` is deliberately absent: it is an embedding model excluded
+// by NON_CHAT_MODELS below, so it can never reach display-name generation. An
+// override for a permanently excluded id reads as a contradiction of the
+// exclusion.
 const DISPLAY_NAME_OVERRIDES = {
   "gpt-5.4-latest-guardrails-defaultv2": "GPT-5.4 Latest — Guardrails Default v2",
   "gpt-5.2-latest-guardrails-defaultv2": "GPT-5.2 Latest — Guardrails Default v2",
-  cohere_english_v3: "Cohere English v3",
 }
 
 // -----------------------------------------------------------------------------
