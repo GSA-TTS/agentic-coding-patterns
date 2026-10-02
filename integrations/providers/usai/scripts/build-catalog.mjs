@@ -586,7 +586,15 @@ const NON_CHAT_MODELS = {
 // Secondary, deliberately conservative: catches a NEW embedding model whose id
 // announces itself, so the next gateway addition is excluded by default rather
 // than shipped as promptable. The explicit map above is the authority.
-const EMBEDDING_ID_RE = /embedding|\bembed\b/
+//
+// Substring, NOT word-boundary, on purpose. `\bembed\b` would let an id like
+// `text-embed-v2` or `embedded-retrieval` through, and the cost of the two
+// error directions is not symmetric: a wrongly-excluded chat model is a visible
+// absence someone reports, while a wrongly-included embedding model ships as a
+// selectable option that fails opaquely at prompt time. This net is default-deny
+// by design; widening it defeats its only purpose. To admit a model this pattern
+// catches, add it to an explicit allow decision rather than loosening the regex.
+const EMBEDDING_ID_RE = /embedding|embed/
 
 /**
  * Why this model cannot be offered as a chat model, or null if it can.
