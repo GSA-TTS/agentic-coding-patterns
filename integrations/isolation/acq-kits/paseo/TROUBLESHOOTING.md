@@ -306,15 +306,11 @@ acq exec <sandbox> -- sh -c 'cat "${PASEO_HOME:-$HOME/.paseo}/config.json"'
   `acq run opencode <project>` once.
 - `worktrees.root` points at `<project>/.paseo-worktrees` but new worktrees still
   land elsewhere → the daemon may not have restarted to pick it up. The wrapper
-  bounces the daemon only when the value **changes**; force a bounce by killing
-  the daemon child (the supervisor respawns it):
+  restarts the daemon only when the value **changes**; force a restart with the
+  supported CLI command:
 
   ```bash
-  acq exec <sandbox> -- sh -c '
-    for pid in $(pgrep -u "$(id -u)" -f "paseo daemon start"); do
-      tr "\0" " " </proc/"$pid"/cmdline | grep -q "supervisor:paseo-daemon" && continue
-      kill "$pid"
-    done'
+  acq exec <sandbox> -- paseo daemon restart --home /home/agent/.paseo
   ```
 
 - **The root must be absolute.** A relative `worktrees.root` resolves against
@@ -353,18 +349,15 @@ serves the API + WebSocket + UI locally; `curl http://127.0.0.1:6767/api/health`
 returns 200 throughout. If the **host** browser sees a refused connection, that is
 a port-mapping issue (see "The browser UI never loads" above), not the relay.
 
-**Fix.** The kit now sets `PASEO_RELAY_ENABLED=false` in `spec.yaml` (read at
-daemon config load, precedence over persisted config, survives restarts/self-
-updates), so the relay is off by default. If you are running an older sandbox that
-predates this, disable it live and bounce the daemon:
+**Fix.** The kit sets `PASEO_RELAY_ENABLED=false` in `spec.yaml` and persists
+`daemon.relay.enabled=false` in config.json for Paseo 0.9 managed/config tooling,
+so the relay is off by default. If you are running an older sandbox that predates
+this, disable it live and restart the daemon:
 
 ```bash
 acq exec <sandbox> -- sh -c '
-  node -e "const f=process.env.HOME+\"/.paseo/config.json\";const c=require(f);(c.daemon??={}).relay={enabled:false};require(\"fs\").writeFileSync(f,JSON.stringify(c,null,2)+\"\n\",{mode:0o600})"
-  for pid in $(pgrep -u "$(id -u)" -f "paseo daemon start"); do
-    tr "\0" " " </proc/"$pid"/cmdline | grep -q "supervisor:paseo-daemon" && continue
-    kill "$pid"
-  done'
+  paseo daemon config set --home "${PASEO_HOME:-$HOME/.paseo}" daemon.relay.enabled false
+  paseo daemon restart --home "${PASEO_HOME:-$HOME/.paseo}"'
 ```
 
 ## The daemon keeps restarting in the logs
