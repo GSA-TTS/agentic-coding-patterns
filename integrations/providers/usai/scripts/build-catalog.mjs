@@ -106,10 +106,6 @@ const VENDOR_PROVIDER_MAP = {
 }
 
 // Display-name overrides carried over from the monolith for complex IDs.
-// `cohere_english_v3` is deliberately absent: it is an embedding model excluded
-// by NON_CHAT_MODELS below, so it can never reach display-name generation. An
-// override for a permanently excluded id reads as a contradiction of the
-// exclusion.
 const DISPLAY_NAME_OVERRIDES = {
   "gpt-5.4-latest-guardrails-defaultv2": "GPT-5.4 Latest — Guardrails Default v2",
   "gpt-5.2-latest-guardrails-defaultv2": "GPT-5.2 Latest — Guardrails Default v2",
@@ -507,9 +503,6 @@ function bootstrapModelsFromBlock(entries) {
   const vendorsSeen = new Set()
   const excluded = []
   for (const { id, obj } of entries) {
-    // The bootstrap path reads the shipped config, which is how a non-chat model
-    // persists once it has been committed. Filter here too, or regenerating from
-    // the shipped file silently reintroduces what the feed path excludes.
     const reason = nonChatReason(id, obj?.name ?? "")
     if (reason) {
       excluded.push({ id, reason })
@@ -558,45 +551,17 @@ function buildVendors(vendorKeysInOrder) {
 // -----------------------------------------------------------------------------
 // Live-feed shaping: parse USAi list, classify, optionally enrich from models.dev.
 // -----------------------------------------------------------------------------
-// Non-chat models, recorded as DATA with the reason each is excluded.
-//
-// The gateway serves chat and embedding models from one /v1/models list and its
-// response carries no capability field — only id, created, object, owned_by. So
-// "is this promptable?" has to be decided here, and an id-pattern guess is not
-// enough: `text-embedding-005` contains "embedding" and is caught by the regex
-// below, but `cohere_english_v3` does not, and it reached the shipped configs
-// listed as a selectable chat model. Probed against the live gateway:
-//
-//   cohere_english_v3   POST /chat/completions -> 403 AccessDeniedException
-//                       POST /embeddings       -> 200, 1024-dim vector
-//   text-embedding-005  POST /chat/completions -> 400 "No multi-modal generation support"
-//                       POST /embeddings       -> 200, 768-dim vector
-//
-// Both work correctly on the endpoint they belong to; neither can be prompted.
-// A harness model block is assumed promptable throughout — OpenCode's published
-// schema gives `modalities` the enum text|audio|image|video|pdf and has no
-// embedding modality — so listing one offers a selection that can only fail.
-//
-// Entries are keyed by exact id and carry their reason, so an exclusion is never
-// mistaken for an oversight and silently re-added. Prefer adding an id here over
-// widening the regex: an exact key cannot capture an unrelated model whose name
-// happens to contain a matched word.
+// Models the gateway serves that cannot be prompted, keyed to the reason.
+// The gateway's /v1/models response carries no capability field, so
+// promptability is decided here rather than read from the feed.
 const NON_CHAT_MODELS = {
   cohere_english_v3: "embedding model; /chat/completions returns 403 AccessDeniedException",
   "text-embedding-005": "embedding model; /chat/completions returns 400 (no generation support)",
 }
 
-// Secondary, deliberately conservative: catches a NEW embedding model whose id
-// announces itself, so the next gateway addition is excluded by default rather
-// than shipped as promptable. The explicit map above is the authority.
-//
-// Substring, NOT word-boundary, on purpose. `\bembed\b` would let an id like
-// `text-embed-v2` or `embedded-retrieval` through, and the cost of the two
-// error directions is not symmetric: a wrongly-excluded chat model is a visible
-// absence someone reports, while a wrongly-included embedding model ships as a
-// selectable option that fails opaquely at prompt time. This net is default-deny
-// by design; widening it defeats its only purpose. To admit a model this pattern
-// catches, add it to an explicit allow decision rather than loosening the regex.
+// Default-deny net for a non-chat model not yet listed above. Substring, not
+// `\bembed\b`: `_` is a word character, so a word-boundary form matches no
+// underscore-delimited id.
 const EMBEDDING_ID_RE = /embedding|embed/
 
 /**
@@ -611,7 +576,7 @@ function nonChatReason(id, name = "") {
   return null
 }
 
-/** Report excluded models to stderr so a dropped id is visible, never silent. */
+/** Report excluded models to stderr. */
 function reportExclusions(excluded) {
   for (const { id, reason } of excluded) {
     process.stderr.write(`  excluded ${id}: ${reason}\n`)
@@ -620,7 +585,7 @@ function reportExclusions(excluded) {
 
 function shapeFromFeeds(usaiList, modelsDevCatalog) {
   // Chat models only, preserve incoming list order but group by vendor display
-  // order for a stable catalog. Exclusions are reported, never silent.
+  // order for a stable catalog.
   const excluded = []
   const parsed = usaiList
     .map((raw) => {

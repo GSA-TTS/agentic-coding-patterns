@@ -2,25 +2,8 @@
 // non-chat-filter.test.mjs — the gate that keeps unpromptable models out of a
 // harness model block.
 //
-// Why this test exists: the USAi gateway serves chat and embedding models from
-// one /v1/models list and its response carries no capability field (only id,
-// created, object, owned_by). So "is this promptable?" is inferred here, and
-// getting it wrong is not symmetric:
-//
-//   - a wrongly EXCLUDED chat model is a visible absence someone reports
-//   - a wrongly INCLUDED embedding model ships as a selectable option that
-//     fails opaquely at prompt time
-//
-// `cohere_english_v3` is the live proof of the second case: it does not announce
-// itself in its id, passed the original pattern-only filter, and reached both
-// shipped opencode.jsonc kits listed with limit/cost as though selectable. It
-// answers POST /embeddings with a 1024-dim vector and POST /chat/completions
-// with 403 AccessDeniedException.
-//
-// The regenerated-artifact tests elsewhere assert the EMITTED output matches the
-// catalog. None of them exercises the gate itself, so the bootstrap-path filter
-// could be deleted and every other test would stay green. This file covers the
-// rules, not the rendering.
+// Covers the exclusion RULES. The byte-exact round-trip tests elsewhere compare
+// emitted output against catalog.json and pass whether or not the gate works.
 // =============================================================================
 
 import assert from "node:assert/strict"
@@ -52,25 +35,19 @@ test("every explicitly excluded id is rejected, and carries a reason", () => {
 })
 
 test("cohere_english_v3 is excluded by exact id, not by pattern", () => {
-  // The regression that motivated the exclusion map: its id contains no
-  // embedding-ish token, so a pattern alone cannot catch it.
   assert.equal(/embedding|embed/.test("cohere_english_v3"), false)
   assert.ok(nonChatReason("cohere_english_v3"), "must still be excluded")
   assert.ok(Object.hasOwn(NON_CHAT_MODELS, "cohere_english_v3"))
 })
 
 test("the id pattern is substring, not word-boundary (default-deny)", () => {
-  // A `\bembed\b` pattern would admit these. The asymmetric cost of the two
-  // error directions means this net must stay wide; narrowing it silently
-  // re-opens the exact hole the exclusion map exists to cover.
+  // `_` is a word character, so `\bembed\b` matches no underscore-delimited id.
   for (const id of ["text-embed-v2", "embedded-retrieval", "embedding-gecko-001"]) {
     assert.ok(nonChatReason(id), `${id} must be excluded by the conservative pattern`)
   }
 })
 
 test("real chat models are NOT excluded", () => {
-  // Guards against an over-greedy pattern: a false exclusion silently removes a
-  // working model from every shipped config.
   const promptable = [
     "claude_4_5_haiku",
     "claude_4_8_opus",
@@ -90,7 +67,6 @@ test("real chat models are NOT excluded", () => {
 })
 
 test("every model in the committed catalog passes the gate", () => {
-  // Closes the loop: the shipped catalog must contain nothing the gate rejects.
   const catalog = JSON.parse(readFileSync(CATALOG, "utf8"))
   for (const model of catalog.models) {
     assert.equal(
@@ -115,9 +91,6 @@ test("the live-feed path drops non-chat models", () => {
 })
 
 test("the BOOTSTRAP path drops non-chat models too", () => {
-  // The bootstrap path reads the shipped config, which is how an already
-  // committed non-chat model persists. Gating only the feed path would let a
-  // regeneration reintroduce exactly what the feed excludes.
   const entries = [
     { id: "claude-opus-5", obj: { name: "Claude Opus 5" } },
     { id: "cohere_english_v3", obj: { name: "Cohere English v3" } },
@@ -131,8 +104,6 @@ test("the BOOTSTRAP path drops non-chat models too", () => {
 })
 
 test("an excluded model's vendor does not leak into the vendor list", () => {
-  // cohere_english_v3 was the only Cohere entry; dropping it must drop the
-  // vendor, or the catalog advertises a vendor with no usable models.
   const { models, vendorsSeen } = bootstrapModelsFromBlock([
     { id: "claude-opus-5", obj: { name: "Claude Opus 5" } },
     { id: "cohere_english_v3", obj: { name: "Cohere English v3" } },
@@ -145,7 +116,6 @@ test("an excluded model's vendor does not leak into the vendor list", () => {
 })
 
 test("name is consulted, not just id", () => {
-  // A gateway entry can carry an uninformative id and a descriptive name.
   assert.ok(nonChatReason("vendor-model-7", "Text Embedding Large"))
   assert.equal(nonChatReason("vendor-model-7", "Chat Model Large"), null)
 })
