@@ -9,10 +9,10 @@ version-pinned install.
 This is the first **harness-agent kit** in the family: it declares the
 top-level `agent:` block (`name: opencode`, `entrypoint: opencode`) so acq's
 built-in agent-kit readiness gate can confirm this kit genuinely provides the
-`opencode` agent token before enabling it for implicit agent selection — see
-GSA-TTS/agentic-coding-quickstart's `acq.backends/common.sh`
-(`acq_validate_agent_builtin_kit_dir`) and the ADR-0030 devenv/agent-kits
-epic this kit is part of.
+`opencode` agent token before enabling it for implicit agent selection. The
+sibling quickstart repository implements that gate in `acq.backends/common.sh`
+(`acq_validate_agent_builtin_kit_dir`). This kit is the reusable, declarative
+replacement for acq's older backend-specific fallback installer.
 
 opencode is a **TUI, not a web UI** (contrast the sibling `paseo` and
 `openchamber` kits, which each publish a browser-UI port), so this kit
@@ -111,10 +111,10 @@ revisited.
 ## Version pin
 
 `OPENCODE_VERSION` / `OPENCODE_SHA256_LINUX_X64` / `OPENCODE_SHA256_LINUX_ARM64`
-default to a specific, reviewed release — never `latest`. Bump all three
-together, as a deliberate reviewed change, after independently re-deriving
-both hashes from the real release assets (download + `shasum -a 256`, not
-copied from any third party).
+are set by `spec.yaml` to a specific, reviewed release - never `latest`. Bump all
+three together, as a deliberate reviewed change, after independently re-deriving
+both hashes from the real release assets (download + `shasum -a 256`, not copied
+from any third party).
 
 ## Backend parity
 

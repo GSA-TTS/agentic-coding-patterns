@@ -9,9 +9,11 @@
 #      + registry + the `agent:` block). Needs python3 with jsonschema + pyyaml;
 #      if those aren't importable this check reports SKIP (with the fix), not a
 #      false FAIL. Also offline: an INTEGRITY NEGATIVE test — runs the real
-#      install script against a deliberately-wrong pinned hash and asserts it
-#      refuses to install anything (see docs/decisions/fail-closed-on-integrity.md)
-#      rather than falling back to any unpinned path.
+#      install script against a local, deterministic tarball with a deliberately
+#      wrong pinned hash and asserts it refuses to install anything. It also
+#      checks that hash-matching archives with non-regular or duplicate
+#      `opencode` members are rejected before install (see
+#      docs/decisions/fail-closed-on-integrity.md).
 #
 #   2. LIVE END-TO-END (opt-in, RUN_ACQ=1): create a real sandbox with the kit
 #      applied and assert the pinned opencode binary is present, on PATH, and
@@ -56,8 +58,18 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 info "0. Preconditions"
-[ -f "$KIT_DIR/spec.yaml" ] && ok "kit spec.yaml present" || { bad "spec.yaml missing"; exit 1; }
-[ -x "$INSTALL_SCRIPT" ] || [ -f "$INSTALL_SCRIPT" ] && ok "install script present" || { bad "opencode-install.sh missing"; exit 1; }
+if [ -f "$KIT_DIR/spec.yaml" ]; then
+  ok "kit spec.yaml present"
+else
+  bad "spec.yaml missing"
+  exit 1
+fi
+if [ -x "$INSTALL_SCRIPT" ] || [ -f "$INSTALL_SCRIPT" ]; then
+  ok "install script present"
+else
+  bad "opencode-install.sh missing"
+  exit 1
+fi
 
 info "1. Offline schema + registry validation"
 if command -v python3 >/dev/null 2>&1 \
@@ -74,7 +86,7 @@ else
 fi
 
 info "2. Install script syntax"
-if bash -n "$INSTALL_SCRIPT" 2>"$WORK/syntax.log"; then
+if sh -n "$INSTALL_SCRIPT" 2>"$WORK/syntax.log"; then
   ok "opencode-install.sh parses as valid sh"
 else
   bad "opencode-install.sh has a syntax error"
@@ -88,20 +100,47 @@ info "3. INTEGRITY NEGATIVE: a wrong pinned hash refuses to install (fail-closed
 # against a deliberately wrong hash, pointed at a scratch install dir, and
 # assert nothing landed there.
 NEG_DEST="$WORK/negative-dest"
-mkdir -p "$NEG_DEST"
+LAYOUT_DEST="$WORK/layout-dest"
+DUP_DEST="$WORK/duplicate-dest"
+DUP_REGULAR_DEST="$WORK/duplicate-regular-dest"
+mkdir -p "$NEG_DEST" "$LAYOUT_DEST" "$DUP_DEST" "$DUP_REGULAR_DEST"
 NEG_SCRIPT="$WORK/opencode-install-negative.sh"
-sed "s|dest_dir=\"/usr/local/bin\"|dest_dir=\"$NEG_DEST\"|" "$INSTALL_SCRIPT" > "$NEG_SCRIPT"
-if command -v sh >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then
+LAYOUT_SCRIPT="$WORK/opencode-install-layout.sh"
+DUP_SCRIPT="$WORK/opencode-install-duplicate.sh"
+DUP_REGULAR_SCRIPT="$WORK/opencode-install-duplicate-regular.sh"
+STUB_BIN="$WORK/bin"
+STUB_SRC="$WORK/stub-src"
+mkdir -p "$STUB_BIN" "$STUB_SRC"
+printf '%s\n' '#!/bin/sh' 'echo stub-opencode' > "$STUB_SRC/opencode"
+chmod 0755 "$STUB_SRC/opencode"
+cat > "$STUB_BIN/curl" <<'EOF'
+#!/bin/sh
+out=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o)
+      shift
+      out="${1:-}"
+      ;;
+  esac
+  shift || exit 2
+done
+[ -n "$out" ] || exit 2
+cp "$STUB_OPENCODE_ARCHIVE" "$out"
+EOF
+chmod 0755 "$STUB_BIN/curl"
+if tar -czf "$WORK/stub-opencode.tar.gz" -C "$STUB_SRC" opencode 2>"$WORK/stub-tar.log"; then
+  sed "s|dest_dir=\"/usr/local/bin\"|dest_dir=\"$NEG_DEST\"|" "$INSTALL_SCRIPT" > "$NEG_SCRIPT"
   # Isolate PATH for this probe: the HOST may itself have an `opencode` binary
   # on PATH (e.g. a developer's own install) which would trip the script's own
-  # idempotency short-circuit ("already installed and runnable; skipping")
-  # before ever reaching the download/verify path this test exists to exercise.
-  # The real sandbox target never has that collision; this is a host-only test
-  # artifact, isolated here rather than weakening the script under test.
+  # idempotency short-circuit before ever reaching the download/verify path this
+  # test exists to exercise. The local curl stub keeps the gate offline while
+  # still running the real installer download/hash/extract control flow.
   if OPENCODE_VERSION="v1.18.34" \
      OPENCODE_SHA256_LINUX_X64="deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" \
      OPENCODE_SHA256_LINUX_ARM64="deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" \
-     PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
+     STUB_OPENCODE_ARCHIVE="$WORK/stub-opencode.tar.gz" \
+     PATH="$STUB_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
      sh "$NEG_SCRIPT" >"$WORK/negative.log" 2>&1; then
     if [ -z "$(find "$NEG_DEST" -mindepth 1 2>/dev/null)" ]; then
       ok "wrong-hash run refused to install anything (dest dir stayed empty)"
@@ -119,25 +158,141 @@ if command -v sh >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then
     sed 's/^/  | /' "$WORK/negative.log" >&2
   fi
 else
-  skip "sh/curl not available for the offline integrity negative test"
+  skip "tar not available for the offline integrity negative test"
+  sed 's/^/  | /' "$WORK/stub-tar.log" >&2
+fi
+
+info "4. ARCHIVE LAYOUT NEGATIVE: a hardlink member refuses to install (fail-closed)"
+HARDLINK_SRC="$WORK/hardlink-src"
+mkdir -p "$HARDLINK_SRC"
+printf '%s\n' '#!/bin/sh' 'echo hardlink-target' > "$HARDLINK_SRC/target"
+chmod 0755 "$HARDLINK_SRC/target"
+ln "$HARDLINK_SRC/target" "$HARDLINK_SRC/opencode"
+if tar -czf "$WORK/hardlink-opencode.tar.gz" -C "$HARDLINK_SRC" target opencode 2>"$WORK/hardlink-tar.log"; then
+  hardlink_sha="$( (sha256sum "$WORK/hardlink-opencode.tar.gz" 2>/dev/null || shasum -a 256 "$WORK/hardlink-opencode.tar.gz" 2>/dev/null) | cut -d' ' -f1)"
+  sed "s|dest_dir=\"/usr/local/bin\"|dest_dir=\"$LAYOUT_DEST\"|" "$INSTALL_SCRIPT" > "$LAYOUT_SCRIPT"
+  if OPENCODE_VERSION="v1.18.34" \
+     OPENCODE_SHA256_LINUX_X64="$hardlink_sha" \
+     OPENCODE_SHA256_LINUX_ARM64="$hardlink_sha" \
+     STUB_OPENCODE_ARCHIVE="$WORK/hardlink-opencode.tar.gz" \
+     PATH="$STUB_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
+     sh "$LAYOUT_SCRIPT" >"$WORK/layout.log" 2>&1; then
+    if [ -z "$(find "$LAYOUT_DEST" -mindepth 1 2>/dev/null)" ]; then
+      ok "hardlink-member archive refused to install anything (dest dir stayed empty)"
+    else
+      bad "hardlink-member archive INSTALLED something despite non-regular member"
+      sed 's/^/  | /' "$WORK/layout.log" >&2
+    fi
+    if grep -q "SECURITY: archive member 'opencode' is not a regular file" "$WORK/layout.log"; then
+      ok "hardlink member produced the expected SECURITY:-prefixed refusal message"
+    else
+      bad "hardlink member did not log the expected SECURITY:-prefixed refusal"
+      sed 's/^/  | /' "$WORK/layout.log" >&2
+    fi
+  else
+    bad "hardlink-member run exited non-zero (should exit 0 — fail-closed is still a soft sandbox-level exit, see ADR)"
+    sed 's/^/  | /' "$WORK/layout.log" >&2
+  fi
+else
+  skip "tar hardlink fixture could not be created for the archive-layout negative test"
+  sed 's/^/  | /' "$WORK/hardlink-tar.log" >&2
+fi
+
+info "5. ARCHIVE LAYOUT NEGATIVE: duplicate opencode entries refuse to install (fail-closed)"
+DUP_SRC_REGULAR="$WORK/duplicate-regular"
+DUP_SRC_HARDLINK="$WORK/duplicate-hardlink"
+mkdir -p "$DUP_SRC_REGULAR" "$DUP_SRC_HARDLINK"
+printf '%s\n' '#!/bin/sh' 'echo duplicate-regular' > "$DUP_SRC_REGULAR/opencode"
+printf '%s\n' '#!/bin/sh' 'echo duplicate-target' > "$DUP_SRC_HARDLINK/target"
+chmod 0755 "$DUP_SRC_REGULAR/opencode" "$DUP_SRC_HARDLINK/target"
+ln "$DUP_SRC_HARDLINK/target" "$DUP_SRC_HARDLINK/opencode"
+if tar -cf "$WORK/duplicate-opencode.tar" -C "$DUP_SRC_REGULAR" opencode 2>"$WORK/duplicate-tar.log" \
+    && tar -rf "$WORK/duplicate-opencode.tar" -C "$DUP_SRC_HARDLINK" target opencode 2>>"$WORK/duplicate-tar.log" \
+    && gzip -c "$WORK/duplicate-opencode.tar" > "$WORK/duplicate-opencode.tar.gz"; then
+  duplicate_sha="$( (sha256sum "$WORK/duplicate-opencode.tar.gz" 2>/dev/null || shasum -a 256 "$WORK/duplicate-opencode.tar.gz" 2>/dev/null) | cut -d' ' -f1)"
+  sed "s|dest_dir=\"/usr/local/bin\"|dest_dir=\"$DUP_DEST\"|" "$INSTALL_SCRIPT" > "$DUP_SCRIPT"
+  if OPENCODE_VERSION="v1.18.34" \
+     OPENCODE_SHA256_LINUX_X64="$duplicate_sha" \
+     OPENCODE_SHA256_LINUX_ARM64="$duplicate_sha" \
+     STUB_OPENCODE_ARCHIVE="$WORK/duplicate-opencode.tar.gz" \
+     PATH="$STUB_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
+     sh "$DUP_SCRIPT" >"$WORK/duplicate.log" 2>&1; then
+    if [ -z "$(find "$DUP_DEST" -mindepth 1 2>/dev/null)" ]; then
+      ok "duplicate-member archive refused to install anything (dest dir stayed empty)"
+    else
+      bad "duplicate-member archive INSTALLED something despite a later non-regular member"
+      sed 's/^/  | /' "$WORK/duplicate.log" >&2
+    fi
+    if grep -q "SECURITY: archive member 'opencode' is not a regular file" "$WORK/duplicate.log"; then
+      ok "duplicate member produced the expected SECURITY:-prefixed refusal message"
+    else
+      bad "duplicate member did not log the expected SECURITY:-prefixed refusal"
+      sed 's/^/  | /' "$WORK/duplicate.log" >&2
+    fi
+  else
+    bad "duplicate-member run exited non-zero (should exit 0 — fail-closed is still a soft sandbox-level exit, see ADR)"
+    sed 's/^/  | /' "$WORK/duplicate.log" >&2
+  fi
+else
+  skip "tar duplicate-member fixture could not be created for the archive-layout negative test"
+  sed 's/^/  | /' "$WORK/duplicate-tar.log" >&2
+fi
+
+info "6. ARCHIVE LAYOUT NEGATIVE: duplicate regular opencode entries refuse to install (fail-closed)"
+DUP_REGULAR_A="$WORK/duplicate-regular-a"
+DUP_REGULAR_B="$WORK/duplicate-regular-b"
+mkdir -p "$DUP_REGULAR_A" "$DUP_REGULAR_B"
+printf '%s\n' '#!/bin/sh' 'echo duplicate-regular-a' > "$DUP_REGULAR_A/opencode"
+printf '%s\n' '#!/bin/sh' 'echo duplicate-regular-b' > "$DUP_REGULAR_B/opencode"
+chmod 0755 "$DUP_REGULAR_A/opencode" "$DUP_REGULAR_B/opencode"
+if tar -cf "$WORK/duplicate-regular-opencode.tar" -C "$DUP_REGULAR_A" opencode 2>"$WORK/duplicate-regular-tar.log" \
+    && tar -rf "$WORK/duplicate-regular-opencode.tar" -C "$DUP_REGULAR_B" opencode 2>>"$WORK/duplicate-regular-tar.log" \
+    && gzip -c "$WORK/duplicate-regular-opencode.tar" > "$WORK/duplicate-regular-opencode.tar.gz"; then
+  duplicate_regular_sha="$( (sha256sum "$WORK/duplicate-regular-opencode.tar.gz" 2>/dev/null || shasum -a 256 "$WORK/duplicate-regular-opencode.tar.gz" 2>/dev/null) | cut -d' ' -f1)"
+  sed "s|dest_dir=\"/usr/local/bin\"|dest_dir=\"$DUP_REGULAR_DEST\"|" "$INSTALL_SCRIPT" > "$DUP_REGULAR_SCRIPT"
+  if OPENCODE_VERSION="v1.18.34" \
+     OPENCODE_SHA256_LINUX_X64="$duplicate_regular_sha" \
+     OPENCODE_SHA256_LINUX_ARM64="$duplicate_regular_sha" \
+     STUB_OPENCODE_ARCHIVE="$WORK/duplicate-regular-opencode.tar.gz" \
+     PATH="$STUB_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
+     sh "$DUP_REGULAR_SCRIPT" >"$WORK/duplicate-regular.log" 2>&1; then
+    if [ -z "$(find "$DUP_REGULAR_DEST" -mindepth 1 2>/dev/null)" ]; then
+      ok "duplicate-regular-member archive refused to install anything (dest dir stayed empty)"
+    else
+      bad "duplicate-regular-member archive INSTALLED something despite duplicate regular members"
+      sed 's/^/  | /' "$WORK/duplicate-regular.log" >&2
+    fi
+    if grep -q "SECURITY: archive lists 2 'opencode' members" "$WORK/duplicate-regular.log"; then
+      ok "duplicate regular members produced the expected SECURITY:-prefixed refusal message"
+    else
+      bad "duplicate regular members did not log the expected SECURITY:-prefixed refusal"
+      sed 's/^/  | /' "$WORK/duplicate-regular.log" >&2
+    fi
+  else
+    bad "duplicate-regular-member run exited non-zero (should exit 0 — fail-closed is still a soft sandbox-level exit, see ADR)"
+    sed 's/^/  | /' "$WORK/duplicate-regular.log" >&2
+  fi
+else
+  skip "tar duplicate-regular-member fixture could not be created for the archive-layout negative test"
+  sed 's/^/  | /' "$WORK/duplicate-regular-tar.log" >&2
 fi
 
 if [ "$RUN_ACQ" != "1" ]; then
-  info "4. Live sandbox check"
+  info "7. Live sandbox check"
   skip "RUN_ACQ=1 not set — skipped live acq sandbox verification"
   printf '\nSummary\n  %d passed, %d failed\n' "$pass" "$fail"
   [ "$fail" -eq 0 ]
   exit $?
 fi
 
-info "4. Live sandbox preconditions"
+info "7. Live sandbox preconditions"
 if ! command -v acq >/dev/null 2>&1; then
   bad "acq not on PATH"
   exit 1
 fi
 ok "acq on PATH"
 
-info "5. Create sandbox with the kit"
+info "8. Create sandbox with the kit"
 printf '  creating %s (workspace %s)...\n' "$SBX_NAME" "$WORK"
 if acq create --name "$SBX_NAME" --kit "$KIT_DIR" opencode "$WORK" >"$CREATE_LOG" 2>&1; then
   ok "sandbox created with --kit opencode"
@@ -149,7 +304,7 @@ fi
 
 in_sbx() { acq exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true; }
 
-info "6. opencode binary present and on PATH"
+info "9. opencode binary present and on PATH"
 _elapsed=0
 while [ "$_elapsed" -lt "$READY_TIMEOUT" ]; do
   if [ "$(in_sbx "command -v opencode >/dev/null 2>&1 && echo yes")" = "yes" ]; then
@@ -164,7 +319,7 @@ else
   bad "opencode not found on PATH after ${READY_TIMEOUT}s"
 fi
 
-info "7. Installed version matches the pin"
+info "10. Installed version matches the pin"
 installed_ver="$(in_sbx "opencode --version 2>/dev/null")"
 pinned_ver="$(grep -o 'OPENCODE_VERSION="v[0-9.]*"' "$KIT_DIR/spec.yaml" | head -n1 | sed -E 's/.*="v([0-9.]*)"/\1/')"
 echo "  installed: ${installed_ver:-<none>}  pinned: ${pinned_ver:-<unknown>}"

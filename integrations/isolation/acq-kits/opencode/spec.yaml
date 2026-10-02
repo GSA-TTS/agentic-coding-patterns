@@ -8,8 +8,9 @@
 # `opencode` agent token so acq's built-in agent-kit readiness gate
 # (acq_validate_agent_builtin_kit_dir / kit_spec_agent_field, in the sibling
 # quickstart repo's acq.backends/common.sh) can confirm this kit genuinely
-# matches the agent it's about to enable, before enabling it. Part of the
-# devenv/agent-kits ADR-0030 line of work in that repo.
+# matches the agent it's about to enable, before enabling it. This is the
+# reusable, declarative replacement for acq's older backend-specific fallback
+# installer.
 #
 # WHY THIS KIT EXISTS (not just "nice to have a pin"): the current MSB install
 # path has two independent problems this kit closes together: (1) no version

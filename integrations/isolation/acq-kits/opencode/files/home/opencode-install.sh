@@ -158,8 +158,10 @@ if ! command -v curl >/dev/null 2>&1; then
   exit 0
 fi
 
-work_dir="$(mktemp -d "${TMPDIR:-/tmp}/opencode-install.XXXXXX" 2>/dev/null || echo "/tmp/opencode-install.$$")"
-mkdir -p "$work_dir" 2>/dev/null || true
+if ! work_dir="$(mktemp -d "${TMPDIR:-/tmp}/opencode-install.XXXXXX" 2>/dev/null)"; then
+  warn "could not create a private temporary directory; cannot download opencode safely. Skipping (non-fatal)."
+  exit 0
+fi
 cleanup() { rm -rf "$work_dir" 2>/dev/null || true; }
 trap cleanup EXIT
 
@@ -196,6 +198,45 @@ if [ "$got_sha" != "$sha" ]; then
   exit 0
 fi
 echo "opencode-kit(install): sha256 verified for $asset ($ver)"
+
+member_listing="$(tar -tvzf "$archive" opencode 2>"$work_dir/tar-list.log" || true)"
+if [ -z "$member_listing" ]; then
+  warn "SECURITY: archive does not list an 'opencode' member;"
+  warn "  refusing to install. This is a fail-closed integrity refusal, not a"
+  warn "  transient-failure degrade — see docs/decisions/fail-closed-on-integrity.md."
+  [ -s "$work_dir/tar-list.log" ] && sed 's/^/opencode-kit(install):   /' "$work_dir/tar-list.log" >&2
+  exit 0
+fi
+bad_member=""
+member_count=0
+old_ifs="$IFS"
+IFS='
+'
+for member_line in $member_listing; do
+  member_count=$((member_count + 1))
+  case "$member_line" in
+    -*) ;;
+    *)
+      bad_member="$member_line"
+      break
+      ;;
+  esac
+done
+IFS="$old_ifs"
+if [ -n "$bad_member" ]; then
+  warn "SECURITY: archive member 'opencode' is not a regular file;"
+  warn "  refusing to install. This is a fail-closed integrity refusal, not a"
+  warn "  transient-failure degrade — see docs/decisions/fail-closed-on-integrity.md."
+  warn "  tar listing: $bad_member"
+  [ -s "$work_dir/tar-list.log" ] && sed 's/^/opencode-kit(install):   /' "$work_dir/tar-list.log" >&2
+  exit 0
+fi
+if [ "$member_count" -ne 1 ]; then
+  warn "SECURITY: archive lists $member_count 'opencode' members; expected exactly one;"
+  warn "  refusing to install. This is a fail-closed integrity refusal, not a"
+  warn "  transient-failure degrade — see docs/decisions/fail-closed-on-integrity.md."
+  exit 0
+fi
 
 if ! tar -xzf "$archive" -C "$work_dir" opencode 2>"$work_dir/tar.log"; then
   warn "extraction failed (non-fatal; opencode will be absent this boot)"
@@ -236,7 +277,7 @@ if ! install -m 0755 "$work_dir/opencode" "$dest_dir/opencode" 2>"$work_dir/inst
   exit 0
 fi
 
-if command -v opencode >/dev/null 2>&1 && opencode --version >/dev/null 2>&1; then
+if "$dest_dir/opencode" --version >/dev/null 2>&1; then
   echo "opencode-kit(install): opencode $ver ($oc_arch) installed and runnable at $dest_dir/opencode"
 else
   warn "opencode installed to $dest_dir but is not runnable (non-fatal; check base image compatibility)"
