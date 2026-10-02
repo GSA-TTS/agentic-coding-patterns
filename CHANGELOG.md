@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.11.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.10.0...v1.11.0) (2026-10-02)
+
+
+### Features
+
+* **acq-kits:** add opencode agent-harness kit (SHA-pinned release binary) ([#455](https://github.com/GSA-TTS/agentic-coding-patterns/issues/455)) ([36038a6](https://github.com/GSA-TTS/agentic-coding-patterns/commit/36038a6d1a7055ae90c775be94bd4d4f3d08805a))
+
+
+### Bug Fixes
+
+* **usai-provider:** drop embedding models from the chat-model catalog ([#462](https://github.com/GSA-TTS/agentic-coding-patterns/issues/462)) ([56500ba](https://github.com/GSA-TTS/agentic-coding-patterns/commit/56500baec328ba26041878d03bab35e2a997e401))
+* **usai-provider:** make the catalog drift check report real drift ([#459](https://github.com/GSA-TTS/agentic-coding-patterns/issues/459)) ([73606d7](https://github.com/GSA-TTS/agentic-coding-patterns/commit/73606d73be670754c33002765de1a2d6ad996c45))
+
 ## [1.10.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.9.0...v1.10.0) (2026-10-02)
 
 
