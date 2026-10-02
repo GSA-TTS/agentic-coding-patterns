@@ -14,7 +14,7 @@ nist_controls: ["SC-7", "AC-4", "CM-7", "SI-10"]
 > kit spec (ADR 0001) and the network egress tiers (ADR 0002). It changes neither
 > schema; the mechanism composes from already-shipped primitives
 > (`caps.network.allow` union, sequential kit startup) plus the
-> host-authoritative read-only config mount defined in quickstart ADR-0030
+> host-authoritative read-only config mount defined in quickstart ADR-0035
 > (pending — GSA-TTS/agentic-coding-quickstart#504).
 
 ## Context and Problem Statement
@@ -94,7 +94,7 @@ sudo (the sandbox, not the guest OS user boundary, is the security boundary), so
 a root-owned *guest* path is not a trust boundary against a prompt-injected
 agent. The read-only host mount is. `acq` reads only **static data** from the
 kit on the host; no provider-kit code runs on the host. See
-[Security model](#security-model) and quickstart ADR-0030
+[Security model](#security-model) and quickstart ADR-0035
 (*Host-Authoritative Sandbox Configuration*, pending —
 GSA-TTS/agentic-coding-quickstart#504), the mechanism of record.
 
@@ -253,11 +253,11 @@ There is no cross-sandbox catalog cache — a cache written by one sandbox and r
 by another would be a cross-sandbox poisoning channel (a compromised sandbox
 could poison the catalog a different sandbox routes against). The clean split is:
 the orchestrator's **inputs** (provider facts and normalizer code) are
-host-authoritative and read-only (Layer 1 + ADR-0030 (pending)); its
+host-authoritative and read-only (Layer 1 + ADR-0035 (pending)); its
 **output** (the catalog) is guest-local and trusted by no other sandbox.
 
 The orchestrator's own code, and each provider's normalizer and vendored
-snapshot, run from the read-only mount (ADR-0030 Mechanism 2, pending), so a
+snapshot, run from the read-only mount (ADR-0035 Mechanism 2, pending), so a
 sudo-capable agent cannot tamper the startup code between restarts and have
 `acq` re-run a tampered copy.
 
@@ -474,7 +474,7 @@ sequenceDiagram
 - New moving parts: a per-sandbox host config directory + read-only mount, an
   orchestrator kit, and a versioned schema contract between N producers and M
   consumers. Mitigated by strict layering (each layer independently testable and
-  shippable), reuse of the existing host-state-dir conventions (ADR-0030,
+  shippable), reuse of the existing host-state-dir conventions (ADR-0035,
   pending), and the versioned-not-negotiated schema.
 - Startup gains a conditional outbound refresh on the critical path, bounded by
   the per-provider timeout and total wall-clock budget; on failure it falls back
@@ -502,7 +502,7 @@ sequenceDiagram
 
 - Requires no change to the `hybrid/v1` schema. The mechanism composes from the
   `caps.network.allow` union, sequential startup-phase ordering, and the
-  host-authoritative read-only config mount from quickstart ADR-0030
+  host-authoritative read-only config mount from quickstart ADR-0035
   (pending — GSA-TTS/agentic-coding-quickstart#504).
 
 ## Alternatives Considered
@@ -599,7 +599,7 @@ sequenceDiagram
 
 ## References
 
-- Quickstart ADR-0030 (*Host-Authoritative Sandbox Configuration*, pending —
+- Quickstart ADR-0035 (*Host-Authoritative Sandbox Configuration*, pending —
   GSA-TTS/agentic-coding-quickstart#504) — the general principle and the
   per-sandbox host config dir + read-only mount + trusted-startup-execution
   mechanism this ADR's Layers 1 and 2 build on.
