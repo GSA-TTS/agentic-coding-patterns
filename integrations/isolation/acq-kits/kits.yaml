@@ -111,13 +111,33 @@ kits:
       script (files/home/prime-agent-install.sh) installs the CLI at create time,
       and two startup-phase scripts drop the USAi model catalog
       (files/home/prime-agent-install-models-json.sh) and bootstrap the IPython
-      kernel (files/home/prime-agent-bootstrap-kernel.sh). Publishes NO ports
+      kernel (files/home/prime-agent-bootstrap-kernel.sh).       Publishes NO ports
       (prime-agent is a TUI, not a web UI) — unlike openchamber/paseo. SKELETON
       only: the three scripts are placeholders; the real install/CA-bundle/
       kernel logic and the generated model catalog
       (files/home/prime-agent-config/models.json) land in follow-up work tracked
       in the patterns repo's prime-agent epic. Model-provider egress is the
       usai-provider kit's job, not this one.
+
+  agor-daemon-egress:
+    backends: [sbx, msb]
+    parity: |
+      Allow-lists outbound egress to the Agor daemon control-plane and installs
+      the Agor executor (agor-executor) into the guest, so an Agor executor
+      running in the sandbox (via the orchestrators/agor integration) can connect
+      back to the daemon. Both backend host aliases are allow-listed
+      (host.docker.internal for sbx, host.microsandbox.internal for msb — the
+      default backend); the executor is installed from npm at create time via an
+      install-phase command pinned to agor-live@0.26.8 with npm scripts disabled
+      (agor-live does not ship an `agor-executor` bin). No backend shortcut — both
+      use caps.network.allow + the same install command. sbx PRESERVES the full
+      host:port; msb STRIPS the port (--net-rule allow@<host>, domain only), so
+      generated msb policy may allow host-wide egress to both static backend
+      aliases. A
+      live msb run is tracked at GSA-TTS/agentic-coding-patterns#257.
+      Security-relevant (widens egress + runs a create-time install) — governed by
+      human review, not schema fields (the kit schema models no governance
+      frontmatter); see the kit README + its ADR.
 
   pi-coding-agent:
     backends: [sbx, msb]
