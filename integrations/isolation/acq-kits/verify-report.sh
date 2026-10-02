@@ -17,7 +17,7 @@
 #      line above is true, so the script prints "All checks passed." and exits 0
 #      having verified nothing.
 #   2. A skipped check is indistinguishable from a passing one. The scripts had
-#      29 `skip`/NOTE sites and 9 `warn` sites that incremented no counter, so a
+#      35 `skip`/NOTE sites and 9 `warn` sites that incremented no counter, so a
 #      run that skipped its single most important assertion — git-ssh-sign skips
 #      the end-to-end signed-commit check when no key is in the forwarded agent —
 #      still ended in "All checks passed."

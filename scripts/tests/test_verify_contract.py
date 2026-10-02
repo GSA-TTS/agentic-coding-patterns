@@ -7,13 +7,13 @@ Every kit's `scripts/verify` used to end with:
     [ "$fail" -eq 0 ]
 
 That is a two-state verdict. It answers "did anything fail?" and cannot answer
-"did we actually check anything?", so two things were true of all seven scripts:
+"did we actually check anything?", so two things were true of all eight scripts:
 
 1. A run where NOTHING executed reported success — with `pass=0` and `fail=0` the
    test above is true, so the script printed "All checks passed." and exited 0.
-2. A skipped check was indistinguishable from a passing one. Between them the
-   scripts had 29 `skip`/NOTE sites and 9 `warn` sites that incremented no
-   counter, including `git-ssh-sign` skipping its end-to-end signed-commit
+2. A skipped check was indistinguishable from a passing one. Across the eight
+   scripts there were 35 `skip`/NOTE sites and 9 `warn` sites that incremented
+   no counter, including `git-ssh-sign` skipping its end-to-end signed-commit
    check — the kit's entire purpose — whenever no key was in the forwarded agent.
 
 `integrations/isolation/acq-kits/verify-report.sh` replaces that with a
@@ -48,14 +48,30 @@ ACQ_KITS = ROOT / "integrations/isolation/acq-kits"
 LIB = ACQ_KITS / "verify-report.sh"
 
 # Kits whose verify script has NOT yet been migrated to the shared contract.
-# Shrink this as they are converted; it must reach empty, and the test below
-# fails if an entry no longer belongs here.
+# Shrink this as they are converted; it must reach empty.
+#
+# This is an explicit DENY list, not a default. A kit absent from both this set
+# and CONVERTED is a hard error (see test_every_kit_is_classified), because the
+# alternative -- treating an unclassified kit as converted -- is how a new kit
+# silently inherits a contract it does not implement. That is not hypothetical:
+# `oci-engine` landed on main while this change was in review, and the original
+# set-subtraction classified it as converted, failing four tests with a
+# misleading "does not source lib/verify-report.sh" instead of the true cause
+# ("a kit appeared that nobody classified").
 UNCONVERTED = {
     "agentic-coding-playbook",
+    "oci-engine",
     "openchamber",
     "paseo",
     "pi-coding-agent",
     "zscaler-ca-certificate",
+}
+
+# Kits that HAVE adopted the shared contract. Listing them explicitly, rather
+# than deriving them by subtraction, is what makes an unclassified kit visible.
+CONVERTED = {
+    "git-ssh-sign",
+    "usai-provider",
 }
 
 # The old two-state verdict. Its absence is the thing being enforced.
@@ -72,7 +88,7 @@ def _verify_scripts() -> dict[str, Path]:
 
 
 def _converted() -> dict[str, Path]:
-    return {k: p for k, p in _verify_scripts().items() if k not in UNCONVERTED}
+    return {k: p for k, p in _verify_scripts().items() if k in CONVERTED}
 
 
 def test_shared_library_exists_and_defines_the_five_states():
@@ -97,6 +113,31 @@ def test_library_verdict_degrades_on_unverified_and_on_zero_checks():
         'verify_verdict no longer degrades on unverified checks — "could not check" would be reported as a pass'
     )
     assert "return 3" in text, "verify_verdict no longer has a distinct could-not-check exit code"
+
+
+def test_every_kit_is_classified():
+    """A kit in neither set is a hard error, not a default.
+
+    This is the test that would have named the real problem when `oci-engine`
+    appeared: the failure message says "a kit appeared that nobody classified"
+    rather than four confusing assertions about a missing `source` line.
+    """
+    scripts = _verify_scripts()
+    classified = CONVERTED | UNCONVERTED
+
+    unclassified = scripts.keys() - classified
+    assert not unclassified, (
+        f"verify script(s) in no classification set: {sorted(unclassified)}. "
+        "Add each to CONVERTED (if it sources verify-report.sh) or to "
+        "UNCONVERTED (if it is still on the old two-state verdict). A kit is "
+        "never converted by default."
+    )
+
+    phantom = classified - scripts.keys()
+    assert not phantom, f"classification sets name kits with no verify script: {sorted(phantom)} — remove them"
+
+    overlap = CONVERTED & UNCONVERTED
+    assert not overlap, f"kits in both sets: {sorted(overlap)}"
 
 
 def test_unconverted_allowlist_is_accurate():
