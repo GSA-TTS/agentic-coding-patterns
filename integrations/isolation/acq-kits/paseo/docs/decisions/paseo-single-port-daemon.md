@@ -14,9 +14,9 @@ Paseo is architected differently:
 - A **single daemon process** (`@getpaseo/server`, launched by `@getpaseo/cli`)
   serves the daemon API, the WebSocket, **and** the bundled browser web UI, all
   on **one** port (default `6767`). Verified against the Paseo Docker image and
-  the published npm tarball: `PASEO_WEB_UI_ENABLED=true` (or `--web-ui`) serves
-  the UI from `dist/server/web-ui/` inside the `@getpaseo/server` package on the
-  same origin as the API.
+  the published npm tarball: `PASEO_WEB_UI_ENABLED=true` serves the UI from
+  `dist/server/web-ui/` inside the `@getpaseo/server` package on the same origin
+  as the API.
 - Paseo is **not** an OpenCode server. It orchestrates agent CLIs (Claude Code,
   Codex, Copilot, OpenCode, Pi) by **launching them as child processes**. There
   is no attachable "raw agent server" that a terminal TUI could join.
