@@ -138,7 +138,25 @@ function parseModel(rawModel) {
   }
 }
 
+// Non-chat models, keyed by exact id with the reason each is excluded.
+//
+// The regex above catches an id that announces itself ("embedding"/"embed"), but
+// the gateway serves embedding models whose ids do not: `cohere_english_v3`
+// passed the pattern and reached the shipped config as a selectable chat model.
+// Probed live: it answers POST /embeddings with a 1024-dim vector and
+// POST /chat/completions with 403 AccessDeniedException. A harness model block
+// is assumed promptable throughout, so listing it offers a selection that can
+// only fail.
+//
+// Exact keys, not a wider pattern: a key cannot catch an unrelated model whose
+// name happens to contain a matched word. Each entry carries its reason so the
+// exclusion is never mistaken for an oversight and silently re-added.
+const NON_CHAT_MODEL_IDS = {
+  cohere_english_v3: "embedding model; /chat/completions returns 403 AccessDeniedException",
+}
+
 function isAllowedModel(model) {
+  if (Object.hasOwn(NON_CHAT_MODEL_IDS, model.id)) return false
   return model.isChat
 }
 

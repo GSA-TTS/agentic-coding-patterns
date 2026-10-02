@@ -502,7 +502,16 @@ function parseBootstrapModels(blockBody) {
 function bootstrapModelsFromBlock(entries) {
   const models = []
   const vendorsSeen = new Set()
+  const excluded = []
   for (const { id, obj } of entries) {
+    // The bootstrap path reads the shipped config, which is how a non-chat model
+    // persists once it has been committed. Filter here too, or regenerating from
+    // the shipped file silently reintroduces what the feed path excludes.
+    const reason = nonChatReason(id, obj?.name ?? "")
+    if (reason) {
+      excluded.push({ id, reason })
+      continue
+    }
     const vendor = classifyVendor(id, "")
     vendorsSeen.add(vendor)
     const model = { id, vendor, name: obj.name ?? generateDisplayName(id) }
@@ -525,6 +534,7 @@ function bootstrapModelsFromBlock(entries) {
     }
     models.push(model)
   }
+  reportExclusions(excluded)
   return { models, vendorsSeen }
 }
 
@@ -545,20 +555,77 @@ function buildVendors(vendorKeysInOrder) {
 // -----------------------------------------------------------------------------
 // Live-feed shaping: parse USAi list, classify, optionally enrich from models.dev.
 // -----------------------------------------------------------------------------
+// Non-chat models, recorded as DATA with the reason each is excluded.
+//
+// The gateway serves chat and embedding models from one /v1/models list and its
+// response carries no capability field — only id, created, object, owned_by. So
+// "is this promptable?" has to be decided here, and an id-pattern guess is not
+// enough: `text-embedding-005` contains "embedding" and is caught by the regex
+// below, but `cohere_english_v3` does not, and it reached the shipped configs
+// listed as a selectable chat model. Probed against the live gateway:
+//
+//   cohere_english_v3   POST /chat/completions -> 403 AccessDeniedException
+//                       POST /embeddings       -> 200, 1024-dim vector
+//   text-embedding-005  POST /chat/completions -> 400 "No multi-modal generation support"
+//                       POST /embeddings       -> 200, 768-dim vector
+//
+// Both work correctly on the endpoint they belong to; neither can be prompted.
+// A harness model block is assumed promptable throughout — OpenCode's published
+// schema gives `modalities` the enum text|audio|image|video|pdf and has no
+// embedding modality — so listing one offers a selection that can only fail.
+//
+// Entries are keyed by exact id and carry their reason, so an exclusion is never
+// mistaken for an oversight and silently re-added. Prefer adding an id here over
+// widening the regex: an exact key cannot capture an unrelated model whose name
+// happens to contain a matched word.
+const NON_CHAT_MODELS = {
+  cohere_english_v3: "embedding model; /chat/completions returns 403 AccessDeniedException",
+  "text-embedding-005": "embedding model; /chat/completions returns 400 (no generation support)",
+}
+
+// Secondary, deliberately conservative: catches a NEW embedding model whose id
+// announces itself, so the next gateway addition is excluded by default rather
+// than shipped as promptable. The explicit map above is the authority.
+const EMBEDDING_ID_RE = /embedding|\bembed\b/
+
+/**
+ * Why this model cannot be offered as a chat model, or null if it can.
+ * Checked by exact id first, then by the conservative id pattern.
+ */
+function nonChatReason(id, name = "") {
+  if (Object.hasOwn(NON_CHAT_MODELS, id)) return NON_CHAT_MODELS[id]
+  if (EMBEDDING_ID_RE.test(`${id} ${name}`.toLowerCase())) {
+    return "id or name indicates an embedding model"
+  }
+  return null
+}
+
+/** Report excluded models to stderr so a dropped id is visible, never silent. */
+function reportExclusions(excluded) {
+  for (const { id, reason } of excluded) {
+    process.stderr.write(`  excluded ${id}: ${reason}\n`)
+  }
+}
+
 function shapeFromFeeds(usaiList, modelsDevCatalog) {
-  // Chat models only (exclude embeddings), preserve incoming list order but
-  // group by vendor display order for a stable catalog.
+  // Chat models only, preserve incoming list order but group by vendor display
+  // order for a stable catalog. Exclusions are reported, never silent.
+  const excluded = []
   const parsed = usaiList
     .map((raw) => {
       const id = raw.id || raw.model_id || raw.name
       if (!id) return null
       const vendor = classifyVendor(id, raw.owned_by)
-      const haystack = `${id} ${raw.name ?? ""}`.toLowerCase()
-      const isEmbedding = /embedding|embed/.test(haystack)
-      return { id, vendor, name: raw.name || generateDisplayName(id), isEmbedding, raw }
+      const reason = nonChatReason(id, raw.name ?? "")
+      if (reason) {
+        excluded.push({ id, reason })
+        return null
+      }
+      return { id, vendor, name: raw.name || generateDisplayName(id), raw }
     })
     .filter(Boolean)
-    .filter((m) => !m.isEmbedding)
+
+  reportExclusions(excluded)
 
   parsed.sort((a, b) => {
     const oa = VENDOR_CONFIG[a.vendor]?.order ?? 99
@@ -849,6 +916,8 @@ export {
   shapeFromFeeds,
   findModelsDevMatch,
   classifyVendor,
+  nonChatReason,
+  NON_CHAT_MODELS,
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
