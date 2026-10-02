@@ -26,7 +26,18 @@
 //                           when neither --models-url nor live fetch is used).
 //   --opencode-jsonc <path> override the bootstrap source path.
 //   --out <path>            override the output catalog.json path.
-//   --check                 do not write; fail if catalog.json is out of date.
+//   --check                 do not write; fail if catalog.json has drifted.
+//
+// What --check compares: the SUBSTANTIVE catalog — schemaVersion, gateway,
+// vendors, and models. It deliberately IGNORES the `sources` block, which
+// records provenance (which feed or file this run read) and legitimately
+// differs between a live-feed regeneration and an offline bootstrap of the
+// same models. Comparing it would make --check fail on every offline run
+// regardless of real drift, and a drift detector that always fires is one
+// everybody learns to ignore — at which point genuine model drift is
+// indistinguishable from the noise. On a real difference, --check reports
+// WHICH ids were added, removed, or changed, because a diff is actionable
+// where a boolean is not.
 //
 // CI / round-trip callers use the offline paths (--bootstrap, or --models-url
 // against committed fixtures with --no-enrichment) so no network is required.
@@ -859,6 +870,50 @@ async function buildCatalog(args) {
   return catalog
 }
 
+/**
+ * The substantive catalog: everything a consumer renders, with provenance
+ * stripped. `sources` names the feed or file this particular run read, so it
+ * differs between a live regeneration and an offline bootstrap of identical
+ * models — it is metadata about the build, not about the catalog's content.
+ */
+function substantive(catalog) {
+  const { sources: _provenance, ...rest } = catalog
+  return rest
+}
+
+/**
+ * Describe how two catalogs differ, as caller-actionable lines.
+ * Returns [] when the substantive content matches.
+ */
+function describeDrift(existing, fresh) {
+  const lines = []
+  for (const key of ["schemaVersion", "generatedBy"]) {
+    if (existing?.[key] !== fresh?.[key]) {
+      lines.push(`${key}: ${JSON.stringify(existing?.[key])} -> ${JSON.stringify(fresh?.[key])}`)
+    }
+  }
+  if (JSON.stringify(existing?.gateway) !== JSON.stringify(fresh?.gateway)) {
+    lines.push("gateway block changed")
+  }
+  if (JSON.stringify(existing?.vendors) !== JSON.stringify(fresh?.vendors)) {
+    lines.push("vendors block changed")
+  }
+
+  const byId = (list) => new Map((list || []).map((m) => [m.id, m]))
+  const before = byId(existing?.models)
+  const after = byId(fresh?.models)
+  const added = [...after.keys()].filter((id) => !before.has(id)).sort()
+  const removed = [...before.keys()].filter((id) => !after.has(id)).sort()
+  if (added.length) lines.push(`models added: ${added.join(", ")}`)
+  if (removed.length) lines.push(`models removed: ${removed.join(", ")}`)
+  for (const id of [...after.keys()].filter((i) => before.has(i)).sort()) {
+    if (JSON.stringify(before.get(id)) !== JSON.stringify(after.get(id))) {
+      lines.push(`model changed: ${id}`)
+    }
+  }
+  return lines
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2))
   const outPath = args.opts["--out"] || DEFAULT_OUT
@@ -866,14 +921,21 @@ async function main() {
   const serialized = serialize(catalog)
 
   if (args.flags.has("--check")) {
-    let existing = null
+    let existingRaw = null
     try {
-      existing = await readFile(outPath, "utf8")
+      existingRaw = await readFile(outPath, "utf8")
     } catch {
       throw new Error(`catalog.json missing at ${outPath}; run without --check to generate`)
     }
-    if (existing !== serialized) {
-      throw new Error("catalog.json is out of date with the current sources")
+    let existing
+    try {
+      existing = JSON.parse(existingRaw)
+    } catch {
+      throw new Error(`catalog.json at ${outPath} is not valid JSON; regenerate it`)
+    }
+    const drift = describeDrift(substantive(existing), substantive(catalog))
+    if (drift.length) {
+      throw new Error(`catalog.json has drifted from the current sources:\n  - ${drift.join("\n  - ")}`)
     }
     process.stdout.write(`catalog.json is up to date (${catalog.models.length} models)\n`)
     return
@@ -887,6 +949,8 @@ export {
   buildCatalog,
   validateCatalog,
   serialize,
+  substantive,
+  describeDrift,
   parseBootstrapModels,
   bootstrapModelsFromBlock,
   shapeFromFeeds,
