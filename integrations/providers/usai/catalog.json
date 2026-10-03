@@ -2,8 +2,7 @@
   "schemaVersion": "usai-model-catalog/v1",
   "generatedBy": "build-catalog.mjs (generated — do not hand-edit)",
   "sources": {
-    "modelsList": "https://api.gsa.usai.gov/api/v1/models",
-    "enrichment": "https://models.dev/api.json"
+    "bootstrappedFrom": "integrations/isolation/acq-kits/usai-provider/files/home/usai-config/opencode.jsonc"
   },
   "gateway": {
     "host": "api.gsa.usai.gov",
@@ -35,12 +34,6 @@
       "label": "Meta",
       "order": 4,
       "usaiBackend": "amazon-bedrock"
-    },
-    {
-      "key": "cohere",
-      "label": "Cohere",
-      "order": 5,
-      "usaiBackend": "cohere"
     }
   ],
   "models": [
@@ -324,17 +317,6 @@
       "cost": {
         "input": 0.24,
         "output": 0.97
-      }
-    },
-    {
-      "id": "cohere_english_v3",
-      "vendor": "cohere",
-      "name": "Cohere English v3",
-      "contextWindow": 128000,
-      "maxOutputTokens": 4000,
-      "cost": {
-        "input": 0.0375,
-        "output": 0.15
       }
     }
   ]
