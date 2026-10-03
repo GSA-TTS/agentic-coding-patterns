@@ -1,0 +1,457 @@
+#!/usr/bin/env bash
+#
+# paseo-verify-identity — READ-ONLY host-side readiness gate for the paseo acq kit.
+#
+# Answers ONE question with an exit code: does the host-published port reach the
+# SAME Paseo daemon that `acq exec` reaches?
+#
+# Why this is not covered by the bundle readiness gate: that gate proves the UI
+# assets are fully serveable (see docs/decisions/ui-readiness-gate-immutable-cache.md).
+# It does NOT prove the published port is attached to the daemon you think it is.
+# When a stale host forwarder survives `acq stop`/`acq rm` and keeps the
+# create-time `-p` bind, the browser talks to an OLD daemon while `acq exec`
+# talks to the new one. Both look healthy in isolation; every request from the
+# browser then bypasses the microsandbox TLS-intercept path that substitutes
+# injected API-key placeholders on the wire, so provider calls fail with a
+# non-empty-but-rejected credential (e.g. HTTP 401 "Authentication failed",
+# which is distinct from "Not authenticated" for a missing header).
+#
+# Usage:
+#   scripts/paseo-verify-identity <sandbox-name>
+#   HOST_HP=127.0.0.1:6767 scripts/paseo-verify-identity <sandbox-name>   # pin host map
+#
+# Env knobs:
+#   CONTAINER_PORT=6767   guest port the daemon listens on
+#   HOST_HP=<ip:port>     pin the host mapping instead of asking `acq ports`
+#   HEALTH_GRACE=30       seconds to keep retrying host health before believing a
+#                         failure. A daemon that has just restarted returns
+#                         rc=52 "Empty reply from server" for a few seconds; without
+#                         this the probe reports a false transport fault (the same
+#                         boot race scripts/verify guards with POST_INSTALL_GRACE).
+#   ORPHAN_SLACK=120      seconds the listener may predate the sandbox before we
+#                         call it an orphan (clock/startup-ordering slack)
+#
+# Exit codes:
+#   0  host and sandbox agree — safe to open the UI
+#   1  actionable fault (identity mismatch, orphaned forwarder, no listener)
+#   2  precondition failure (missing acq/node, sandbox not running)
+set -uo pipefail
+
+SBX="${1:-}"
+[ -n "$SBX" ] || { echo "usage: $0 <sandbox-name>" >&2; exit 2; }
+
+CONTAINER_PORT="${CONTAINER_PORT:-6767}"
+HEALTH_GRACE="${HEALTH_GRACE:-30}"
+ORPHAN_SLACK="${ORPHAN_SLACK:-120}"
+
+pass=0
+fail=0
+warns=0
+ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass+1)); }
+bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail+1)); }
+warn() { printf '  \033[33mWARN\033[0m %s\n' "$1"; warns=$((warns+1)); }
+skip() { printf '  \033[33mSKIP\033[0m %s\n' "$1"; }
+note() { printf '       %s\n' "$1"; }
+info() { printf '\n\033[1m%s\033[0m\n' "$1"; }
+
+TMP="$(mktemp "${TMPDIR:-/tmp}/paseo-verify-identity.XXXXXX")"
+trap 'rm -f "$TMP"' EXIT
+
+# `acq exec` returns CRLF line endings, so every value read out of the guest
+# carries a trailing CR. Unstripped, a CR makes an id compare unequal to its own
+# printed form, breaks `[ "$v" -gt 0 ]` with an arithmetic error, and mangles the
+# terminal via carriage returns. Strip it at the boundary, once.
+strip_cr() { tr -d '\r'; }
+
+# --------------------------------------------------------------- 0. environment
+
+info "0. Environment"
+command -v acq  >/dev/null 2>&1 || { echo "FATAL: acq not on PATH" >&2; exit 2; }
+command -v curl >/dev/null 2>&1 || { echo "FATAL: curl not on PATH" >&2; exit 2; }
+command -v node >/dev/null 2>&1 || {
+  echo "FATAL: node not on PATH; the WebSocket server-id probe is the core check" >&2
+  exit 2
+}
+
+HOST_HP="${HOST_HP:-$(acq ports "$SBX" 2>/dev/null | grep -Eo '127\.0\.0\.1:[0-9]+' | head -1)}"
+if [ -z "$HOST_HP" ]; then
+  echo "FATAL: could not resolve a 127.0.0.1:<port> host mapping for $SBX." >&2
+  echo "       Is the sandbox running?  acq ls" >&2
+  exit 2
+fi
+HOST_PORT="${HOST_HP##*:}"
+
+echo "sandbox:        $SBX"
+echo "guest port:     $CONTAINER_PORT"
+echo "host mapping:   $HOST_HP"
+note "Host and guest ports need not match (post-hoc publish uses a different host port),"
+note "so every probe below uses the RESOLVED mapping, never a hardcoded 6767."
+
+# ------------------------------------------ 1. host listener, provenance, build
+
+info "1. Host Listener and Provenance"
+printf '+ lsof -nP -iTCP:%s -sTCP:LISTEN\n' "$HOST_PORT"
+LSOF_OUT="$(lsof -nP -iTCP:"$HOST_PORT" -sTCP:LISTEN 2>/dev/null)"
+if [ -n "$LSOF_OUT" ]; then printf '%s\n' "$LSOF_OUT"; else echo "(no listener)"; fi
+
+LISTEN_PID="$(printf '%s\n' "$LSOF_OUT"  | awk 'NR>1 {print $2; exit}')"
+LISTEN_TYPE="$(printf '%s\n' "$LSOF_OUT" | awk 'NR>1 {print $5; exit}')"
+# How MANY processes hold this port. More than one means the families are split
+# (e.g. an IPv4 forwarder on *:PORT plus an unrelated [::1]:PORT listener), which
+# lets a client connecting BY NAME reach whichever the resolver returns first.
+LISTEN_COUNT="$(printf '%s\n' "$LSOF_OUT" | awk 'NR>1 && NF {n++} END {print n+0}')"
+LISTEN_FAMILIES="$(printf '%s\n' "$LSOF_OUT" | awk 'NR>1 && NF {print $5}' | sort -u | tr '\n' ' ')"
+
+is_num() { case "${1:-}" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac; }
+
+# ps etime ([[DD-]HH:]MM:SS) -> seconds
+etime_to_secs() {
+  awk -v t="$1" 'BEGIN {
+    gsub(/^[ \t]+|[ \t]+$/, "", t); d = 0
+    if (split(t, a, "-") == 2) { d = a[1]; t = a[2] }
+    m = split(t, b, ":")
+    if (m == 3)      s = b[1]*3600 + b[2]*60 + b[3]
+    else if (m == 2) s = b[1]*60 + b[2]
+    else             s = b[1]
+    print d*86400 + s
+  }'
+}
+
+LISTEN_AGE=""
+LISTEN_ARGV=""
+if is_num "${LISTEN_PID:-}"; then
+  printf '\n'
+  # -ww: do NOT truncate argv. The binary PATH is the highest-signal field here
+  # (which msb build owns the port), and a truncated command hides it.
+  ps -ww -o pid,ppid,lstart,etime -p "$LISTEN_PID" 2>/dev/null || true
+  LISTEN_ARGV="$(ps -ww -o command= -p "$LISTEN_PID" 2>/dev/null)"
+  echo "argv: ${LISTEN_ARGV:-<unreadable>}"
+  LISTEN_PPID="$(ps -o ppid= -p "$LISTEN_PID" 2>/dev/null | tr -d ' ')"
+  LISTEN_AGE="$(etime_to_secs "$(ps -o etime= -p "$LISTEN_PID" 2>/dev/null)")"
+  printf '\n'
+
+  # PPID 1 is NORMAL for an msb forwarder (launchd adopts it); it is deliberately
+  # informational, not a warning. A check that fires on every healthy system is
+  # noise. The real orphan signals are the age compare (section 3) and the build
+  # compare immediately below.
+  note "listener PID $LISTEN_PID PPID ${LISTEN_PPID:-?} (PPID 1 is normal here — launchd adopts msb forwarders)"
+
+  # Which msb build owns the port vs which one acq drives. A listener from a
+  # DIFFERENT, co-installed msb build is invisible to the active one, so neither
+  # `acq stop` nor `acq rm` can reach it — it must be killed by PID.
+  LISTEN_BIN="$(printf '%s\n' "$LISTEN_ARGV" | awk '{print $1}')"
+  ACTIVE_BIN="$(command -v msb 2>/dev/null)"
+  [ -n "$ACTIVE_BIN" ] && ACTIVE_BIN="$( (readlink -f "$ACTIVE_BIN" 2>/dev/null) || echo "$ACTIVE_BIN")"
+  echo "listener binary: ${LISTEN_BIN:-<unknown>}"
+  echo "msb on PATH:     ${ACTIVE_BIN:-<none>}"
+  if [ -n "${LISTEN_BIN:-}" ] && [ -n "${ACTIVE_BIN:-}" ]; then
+    # Compare the installation prefix (…/Cellar/<formula>/<version>/…), not the
+    # basename — both are named "msb".
+    l_pfx="$(printf '%s\n' "$LISTEN_BIN" | sed -n 's;\(.*/Cellar/[^/]*/[^/]*\)/.*;\1;p')"
+    a_pfx="$(printf '%s\n' "$ACTIVE_BIN" | sed -n 's;\(.*/Cellar/[^/]*/[^/]*\)/.*;\1;p')"
+    if [ -n "$l_pfx" ] && [ -n "$a_pfx" ] && [ "$l_pfx" != "$a_pfx" ]; then
+      warn "the port is held by a DIFFERENT msb installation than the one on PATH."
+      note "holding: $l_pfx"
+      note "on PATH: $a_pfx"
+      note "acq cannot manage a forwarder from another build, so 'acq stop'/'acq rm'"
+      note "will not release this port. See the remediation below."
+    else
+      ok "listener binary and the msb on PATH are the same installation"
+    fi
+  fi
+else
+  bad "nothing is listening on $HOST_HP — the UI cannot load"
+  note "acq start $SBX"
+fi
+
+# --------------------------------------- 2. loopback name resolution and family
+
+info "2. Loopback Name Resolution"
+# What a client connecting BY NAME gets is decided by resolution order AND by how
+# many listeners are bound. MEASURED on an IPv4-only listener: ::1-first is benign
+# on its own — an unbound loopback port answers ECONNREFUSED immediately (it does
+# NOT stall), and browsers race both families per RFC 8305 and reach IPv4 anyway.
+# The real hazard is a SECOND listener on the other family: the binds do not
+# conflict, so the name can silently select the wrong process. So: report the
+# pairing, escalate on listener COUNT.
+LOCALHOST_ADDRS="$(node -e 'require("dns").lookup("localhost",{all:true,verbatim:true},(e,a)=>{if(e){console.log("ERR "+e.message);return}console.log(a.map(x=>x.address).join(" "))})' 2>/dev/null)"
+LOCALHOST_FIRST="${LOCALHOST_ADDRS%% *}"
+echo "localhost resolves to: ${LOCALHOST_ADDRS:-<unresolved>}  (first: ${LOCALHOST_FIRST:-?})"
+echo "listeners on $HOST_PORT:   ${LISTEN_COUNT:-0}  (families: ${LISTEN_FAMILIES:-<none>})"
+if [ "${LISTEN_COUNT:-0}" -gt 1 ]; then
+  warn "MORE THAN ONE process is listening on $HOST_PORT, across families."
+  note "A 'localhost' URL selects whichever family the resolver returns first, so it"
+  note "can reach a DIFFERENT daemon than the IPv4 literal does. Use http://127.0.0.1:$HOST_PORT"
+  note "to pin the family, and check the lsof rows above for the unexpected listener."
+elif [ "${LOCALHOST_FIRST:-}" = "::1" ] && [ "${LISTEN_TYPE:-}" = "IPv4" ]; then
+  ok "single IPv4 listener; 'localhost' resolves ::1 first but that is benign here"
+  note "Browsers race both families (RFC 8305) and reach IPv4; an unbound loopback"
+  note "port refuses immediately rather than stalling. Prefer http://127.0.0.1:$HOST_PORT"
+  note "anyway: it pins the family, so no second listener can ever shadow it."
+else
+  ok "name resolution and listener family are compatible"
+fi
+
+# ---------------------------------------------------------- 3. sandbox identity
+
+info "3. Sandbox Identity via acq exec"
+# One exec, KEY=VALUE out. The remote script is single-quoted (no host
+# interpolation); the guest port arrives as $1.
+SBX_RAW="$(acq exec "$SBX" -- sh -lc '
+  p="$1"
+  printf "SERVER_ID=%s\n"  "$(cat "$HOME/.paseo/server-id" 2>/dev/null)"
+  printf "DAEMON_PID=%s\n" "$(sed -n "s/.*\"pid\":\([0-9]*\).*/\1/p" "$HOME/.paseo/paseo.pid" 2>/dev/null)"
+  printf "VM_UPTIME=%s\n"  "$(cut -d. -f1 /proc/uptime 2>/dev/null)"
+  printf "BIND=%s\n"       "$(awk "\$4==\"0A\" {print \$2}" /proc/net/tcp 2>/dev/null | tr "\n" " ")"
+  printf "HEALTH=%s\n"     "$(curl -sS --max-time 5 "http://127.0.0.1:$p/api/health" 2>&1 | tr -d "\n")"
+  printf "EXTERNAL=%s\n"   "$(grep -c "\"peer\":\"external\"" "$HOME/.paseo/daemon.log" 2>/dev/null || echo 0)"
+  printf "LOOPBACK=%s\n"   "$(grep -c "\"peer\":\"loopback\"" "$HOME/.paseo/daemon.log" 2>/dev/null || echo 0)"
+' _ "$CONTAINER_PORT" 2>/dev/null | strip_cr)"
+
+sbx_val() { printf '%s\n' "$SBX_RAW" | sed -n "s/^$1=//p" | head -1; }
+SBX_SERVER_ID="$(sbx_val SERVER_ID)"
+SBX_DAEMON_PID="$(sbx_val DAEMON_PID)"
+SBX_VM_UPTIME="$(sbx_val VM_UPTIME)"
+SBX_HEALTH="$(sbx_val HEALTH)"
+SBX_EXTERNAL="$(sbx_val EXTERNAL)"
+SBX_LOOPBACK="$(sbx_val LOOPBACK)"
+SBX_BIND="$(sbx_val BIND)"
+
+echo "server-id:      ${SBX_SERVER_ID:-<unreadable>}"
+echo "daemon pid:     ${SBX_DAEMON_PID:-?}"
+echo "vm uptime (s):  ${SBX_VM_UPTIME:-?}"
+echo "guest health:   ${SBX_HEALTH:-<no answer>}"
+echo "guest listen:   ${SBX_BIND:-?}"
+note "hex: :1A6F = port 6767; 00000000 = 0.0.0.0 (reachable via create-time -p),"
+note "0100007F = 127.0.0.1 (loopback-only; create-time publish cannot reach it)"
+
+if [ -z "$SBX_SERVER_ID" ]; then
+  bad "could not read ~/.paseo/server-id in the guest"
+else
+  ok "guest reports server-id $SBX_SERVER_ID"
+fi
+case "$SBX_HEALTH" in
+  *'"status":"ok"'*) ok "guest daemon health is ok" ;;
+  *)                 bad "guest daemon is not healthy: ${SBX_HEALTH:-<no answer>}" ;;
+esac
+# Guard the loopback-only bind for the ACTUAL guest port, not a fixed 1A6F.
+GUEST_HEX="$(printf '%04X' "$CONTAINER_PORT" 2>/dev/null || echo '1A6F')"
+case "$SBX_BIND" in
+  *"0100007F:$GUEST_HEX"*)
+    bad "guest daemon is bound to 127.0.0.1 only; create-time -p dials the guest network IP"
+    note "this kit sets PASEO_LISTEN=0.0.0.0:$CONTAINER_PORT — see TROUBLESHOOTING.md" ;;
+  *"00000000:$GUEST_HEX"*)
+    ok "guest daemon is bound to 0.0.0.0:$CONTAINER_PORT" ;;
+esac
+
+# Orphan cross-check: a forwarder OLDER than the sandbox it serves is a leak.
+if is_num "${LISTEN_AGE:-}" && is_num "${SBX_VM_UPTIME:-}"; then
+  note "listener age ${LISTEN_AGE}s vs sandbox uptime ${SBX_VM_UPTIME}s"
+  if [ "$LISTEN_AGE" -gt "$((SBX_VM_UPTIME + ORPHAN_SLACK))" ]; then
+    bad "the host listener PREDATES the running sandbox by $((LISTEN_AGE - SBX_VM_UPTIME))s — orphaned forwarder"
+  else
+    ok "listener is no older than the sandbox it serves"
+  fi
+fi
+
+# ------------------------------------------- 4. host health, with a boot grace
+
+info "4. Host HTTP Health (through the published port)"
+deadline=$(( $(date +%s) + HEALTH_GRACE ))
+while :; do
+  OUT="$(curl -g -sS --max-time 5 "http://127.0.0.1:${HOST_PORT}/api/health" 2>&1)"
+  case "$OUT" in *'"status":"ok"'*) break ;; esac
+  [ "$(date +%s)" -ge "$deadline" ] && break
+  note "not ready yet ($OUT) — retrying within ${HEALTH_GRACE}s grace"
+  sleep 3
+done
+for host in "127.0.0.1" "localhost" "[::ffff:127.0.0.1]"; do
+  OUT="$(curl -g -sS --max-time 5 "http://${host}:${HOST_PORT}/api/health" 2>&1)"
+  case "$OUT" in
+    *'"status":"ok"'*) ok   "http://${host}:${HOST_PORT}/api/health -> $OUT" ;;
+    *)                 warn "http://${host}:${HOST_PORT}/api/health -> $OUT" ;;
+  esac
+done
+note "The daemon does not log /api/health, so its absence from daemon.log proves nothing."
+
+# ------------------------------------------------- 5. host WebSocket server ids
+
+info "5. Host WebSocket Server IDs (the browser's path)"
+node - "$HOST_PORT" 2>/dev/null <<'NODE' | tee "$TMP"
+const net = require('net');
+const crypto = require('crypto');
+
+const port = Number(process.argv[2] || 6767);
+const probes = [
+  { label: 'localhost',   connectHost: 'localhost',        hostHeader: `localhost:${port}`,             origin: `http://127.0.0.1:${port}` },
+  { label: '127.0.0.1',   connectHost: '127.0.0.1',        hostHeader: `127.0.0.1:${port}`,             origin: `http://127.0.0.1:${port}` },
+  { label: 'ipv4-mapped', connectHost: '::ffff:127.0.0.1', hostHeader: `[::ffff:127.0.0.1]:${port}`,    origin: `http://[::ffff:127.0.0.1]:${port}` },
+];
+
+function encodeFrame(text) {
+  const payload = Buffer.from(text);
+  const header = [0x81];
+  if (payload.length < 126) header.push(0x80 | payload.length);
+  else if (payload.length < 65536) header.push(0x80 | 126, (payload.length >> 8) & 255, payload.length & 255);
+  else throw new Error('payload too large');
+  const mask = crypto.randomBytes(4);
+  const masked = Buffer.alloc(payload.length);
+  for (let i = 0; i < payload.length; i++) masked[i] = payload[i] ^ mask[i % 4];
+  return Buffer.concat([Buffer.from(header), mask, masked]);
+}
+
+function decodeFirstTextFrame(buffer) {
+  const marker = Buffer.from('\r\n\r\n');
+  let offset = buffer.indexOf(marker);
+  if (offset >= 0) offset += marker.length; else offset = 0;
+  while (offset + 2 <= buffer.length) {
+    const opcode = buffer[offset] & 0x0f;
+    let len = buffer[offset + 1] & 0x7f;
+    const masked = (buffer[offset + 1] & 0x80) !== 0;
+    offset += 2;
+    if (len === 126) {
+      if (offset + 2 > buffer.length) return null;
+      len = buffer.readUInt16BE(offset); offset += 2;
+    } else if (len === 127) return null;
+    let mask;
+    if (masked) {
+      if (offset + 4 > buffer.length) return null;
+      mask = buffer.subarray(offset, offset + 4); offset += 4;
+    }
+    if (offset + len > buffer.length) return null;
+    const payload = Buffer.from(buffer.subarray(offset, offset + len));
+    offset += len;
+    if (masked && mask) for (let i = 0; i < payload.length; i++) payload[i] ^= mask[i % 4];
+    if (opcode === 1) return payload.toString('utf8');
+  }
+  return null;
+}
+
+function probe(p) {
+  return new Promise((resolve) => {
+    const key = crypto.randomBytes(16).toString('base64');
+    const socket = net.createConnection({ host: p.connectHost, port, timeout: 5000 });
+    let data = Buffer.alloc(0);
+    let upgraded = false, settled = false;
+    const done = (r) => { if (settled) return; settled = true; socket.destroy(); resolve(r); };
+    socket.on('connect', () => {
+      socket.write([
+        'GET /ws HTTP/1.1', `Host: ${p.hostHeader}`, 'Upgrade: websocket', 'Connection: Upgrade',
+        `Sec-WebSocket-Key: ${key}`, 'Sec-WebSocket-Version: 13', `Origin: ${p.origin}`, '', '',
+      ].join('\r\n'));
+    });
+    socket.on('data', (chunk) => {
+      data = Buffer.concat([data, chunk]);
+      if (!upgraded) {
+        const headerEnd = data.indexOf(Buffer.from('\r\n\r\n'));
+        if (headerEnd < 0) return;
+        const status = data.subarray(0, headerEnd).toString('utf8').split('\r\n')[0] || '';
+        if (!status.includes('101')) return done(`${p.label}: ${status}`);
+        upgraded = true;
+        data = data.subarray(headerEnd + 4);
+        socket.write(encodeFrame(JSON.stringify({
+          type: 'hello',
+          clientId: `probe-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          clientType: 'mobile', protocolVersion: 1, capabilities: {}, appVersion: '0.9.1',
+        })));
+      }
+      const text = decodeFirstTextFrame(data);
+      if (text) {
+        const m = text.match(/srv_[A-Za-z0-9_-]+/);
+        done(`${p.label}: ${m ? m[0] : text.slice(0, 200)}`);
+      }
+    });
+    socket.on('timeout', () => done(`${p.label}: timeout`));
+    socket.on('error', (e) => done(`${p.label}: error ${e.message}`));
+    setTimeout(() => done(`${p.label}: timeout`), 7000);
+  });
+}
+
+(async () => { for (const p of probes) console.log(await probe(p)); })();
+NODE
+
+HOST_IDS="$(sed -n 's/.*\(srv_[A-Za-z0-9_-]*\).*/\1/p' "$TMP" | sort -u)"
+HOST_ID_COUNT="$(printf '%s\n' "$HOST_IDS" | grep -c 'srv_' || true)"
+PROBE_TIMEOUTS="$(grep -c 'timeout' "$TMP" || true)"
+
+# ------------------------------------ 6. did host traffic reach THIS daemon?
+
+info "6. Did Host Traffic Reach This Daemon?"
+echo "daemon.log WebSocket clients by peer:  external=${SBX_EXTERNAL:-?}  loopback=${SBX_LOOPBACK:-?}"
+if is_num "${SBX_EXTERNAL:-}" && [ "${SBX_EXTERNAL:-0}" -gt 0 ]; then
+  ok "host-originated (peer=external) clients have attached to this daemon"
+else
+  warn "no peer=external clients — no host/browser client has reached THIS daemon"
+  note "Expected if the UI has not been opened since the last restart. If you HAVE"
+  note "opened it and this stays 0, host traffic is landing on a different daemon."
+fi
+
+# ------------------------------------------------------------------ 7. verdict
+
+info "7. Verdict"
+echo "host WS server ids:  ${HOST_IDS:-<none>}"
+echo "sandbox server id:   ${SBX_SERVER_ID:-<unknown>}"
+
+if [ "$HOST_ID_COUNT" = "0" ]; then
+  bad "no host probe reached a Paseo daemon at all"
+elif [ "$HOST_ID_COUNT" != "1" ]; then
+  bad "host probes disagree with EACH OTHER ($(printf '%s' "$HOST_IDS" | tr '\n' ' ')) — multiple backends behind one port"
+elif [ -n "$SBX_SERVER_ID" ] && [ "$HOST_IDS" != "$SBX_SERVER_ID" ]; then
+  bad "MISMATCH — the host port serves $HOST_IDS but acq exec sees $SBX_SERVER_ID"
+  note "Browser-originated provider calls will fail with a rejected credential"
+  note "(HTTP 401 \"Authentication failed\"): the request never traverses the"
+  note "TLS-intercept path that substitutes injected key placeholders."
+elif [ -n "$SBX_SERVER_ID" ]; then
+  ok "host port and acq exec agree on $SBX_SERVER_ID"
+fi
+
+if is_num "${PROBE_TIMEOUTS:-}" && [ "${PROBE_TIMEOUTS:-0}" -gt 0 ]; then
+  warn "$PROBE_TIMEOUTS host WS probe(s) timed out — see section 2 for the name-resolution check"
+fi
+
+printf '\n%d passed, %d failed, %d warning(s)\n' "$pass" "$fail" "$warns"
+
+if [ "$fail" -gt 0 ]; then
+  cat <<EOF
+
+RESULT: FAIL
+
+Remediation for a stale host forwarder — the case 'acq stop' + 'acq rm' do NOT fix:
+
+  1. Identify what holds the port, with FULL argv (note the -ww):
+       lsof -nP -iTCP:${HOST_PORT} -sTCP:LISTEN
+       ps -ww -o pid,ppid,lstart,etime,command -p <listener-pid>
+     Compare its binary path to 'command -v msb'. A listener from a DIFFERENT
+     msb installation is invisible to the acq you are running, which is why the
+     lifecycle commands cannot release it.
+
+  2. Kill it by PID, then confirm the port is genuinely free:
+       kill <listener-pid>
+       lsof -nP -iTCP:${HOST_PORT} -sTCP:LISTEN   # must print NOTHING before continuing
+       # only if it survived SIGTERM:
+       kill -9 <listener-pid>
+
+     If its PPID is NOT 1, do not SIGKILL blindly — it may have siblings under a
+     supervisor. Investigate the parent first.
+
+  3. Restart the sandbox so its own forwarder can finally bind:
+       acq stop $SBX && acq start $SBX
+
+  4. Re-run this check. Success is the two ids AGREEING WITH EACH OTHER — never
+     matching a remembered value, since the id changes when the VM is recreated.
+
+  5. Clear stale browser state, which does not self-heal once the pinned
+     serverId no longer exists anywhere:
+       DevTools > Application > Storage > Clear site data
+     ("Empty Cache and Hard Reload" does NOT clear Local Storage, where the
+      @paseo:daemon-registry and @paseo:replica-cache keys live.)
+EOF
+  exit 1
+fi
+
+if [ "$warns" -gt 0 ]; then
+  printf 'RESULT: PASS WITH WARNINGS — identities agree; review the warnings above.\n'
+else
+  printf 'RESULT: PASS — safe to open http://127.0.0.1:%s\n' "$HOST_PORT"
+fi
+exit 0
