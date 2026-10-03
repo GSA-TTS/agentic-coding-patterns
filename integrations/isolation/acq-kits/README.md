@@ -81,3 +81,31 @@ make test-kits
 # Live, per-backend end-to-end check (needs a backend CLI + a sandbox-capable host):
 <kit>/scripts/verify
 ```
+
+### What a `scripts/verify` exit code means
+
+Verify scripts share one verdict contract, `verify-report.sh` in this directory.
+It exists because the previous per-kit verdict was `[ "$fail" -eq 0 ]`, which
+reports success both when **zero** checks ran and when checks were **skipped** —
+so a run that exercised nothing still printed "All checks passed."
+
+| Exit | Meaning |
+|---|---|
+| `0` | every check that ran passed, and at least one check ran |
+| `1` | at least one check FAILED |
+| `3` | nothing failed, but the run is **not** a pass: a check could not be performed, or no check ran at all |
+
+`3` is distinct from `1` so a caller can tell *"we looked and found problems"*
+from *"we could not look"*. Treat any non-zero exit as "do not ship".
+
+The five reporters: `ok` / `bad` are the ran-and-passed / ran-and-failed cases;
+`unver` is **could not check** (missing tool, absent credential, no network) and
+degrades the verdict to `3`; `skip` is *not applicable in this configuration*
+(e.g. a backend-specific check on the other backend) and does **not** degrade
+it; `warn` is advisory. The `unver` / `skip` distinction is load-bearing —
+collapsing the two is how a verify script ends up claiming coverage it does not
+have.
+
+`scripts/tests/test_verify_contract.py` enforces this statically, because CI
+cannot run these scripts (they need a live sandbox). Its `UNCONVERTED` set lists
+kits not yet migrated; it must reach empty.
