@@ -1,0 +1,55 @@
+{
+  "schemaVersion": "acq-neutral-model-catalog/v1",
+  "providerId": "usai",
+  "models": [
+    {
+      "id": "claude_4_5_sonnet",
+      "contextWindow": 200000,
+      "maxOutputTokens": 64000,
+      "cost": {
+        "input": 3,
+        "output": 15,
+        "cacheRead": 0.3,
+        "cacheWrite": 3.75
+      }
+    },
+    {
+      "id": "gpt_5_4_default_v2",
+      "contextWindow": 1050000,
+      "maxOutputTokens": 128000,
+      "cost": {
+        "input": 2.5,
+        "output": 15,
+        "cacheRead": 0.25
+      }
+    },
+    {
+      "id": "gemini-2.5-pro",
+      "contextWindow": 1048576,
+      "maxOutputTokens": 65536,
+      "cost": {
+        "input": 1.25,
+        "output": 10,
+        "cacheRead": 0.125
+      }
+    },
+    {
+      "id": "llama_4_maverick",
+      "contextWindow": 1000000,
+      "maxOutputTokens": 8192,
+      "cost": {
+        "input": 0.24,
+        "output": 0.97
+      }
+    },
+    {
+      "id": "cohere_english_v3",
+      "contextWindow": 128000,
+      "maxOutputTokens": 4000,
+      "cost": {
+        "input": 0.0375,
+        "output": 0.15
+      }
+    }
+  ]
+}
