@@ -220,6 +220,24 @@
       "type": "string",
       "description": "Markdown context surfaced to the agent (written to the agent context root by each backend)."
     },
+    "agent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "entrypoint"],
+      "description": "Declares this kit as a harness-agent kit: it installs and starts a specific coding-agent harness (e.g. OpenCode) rather than only layering a capability onto one. Optional — most mixin kits (providers, CA trust, chat-harness servers) have no agent block. A consumer (e.g. acq's built-in agent-kit inference) reads name/entrypoint to validate that a kit fetched for a given agent token is genuinely that agent's kit before enabling implicit selection, so a wrong or mismatched kit cannot silently satisfy the gate.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$",
+          "description": "The agent token this kit provides (e.g. \"opencode\"). Kebab-case, matching the consumer's known-agent vocabulary. SHOULD equal the kit's own `name`, but is declared separately because a kit's directory/kit name and the agent token it installs are conceptually distinct fields even when they share a value today."
+        },
+        "entrypoint": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9._-]{0,62}[a-z0-9])?$",
+          "description": "The command name the installed agent binary is invoked as inside the guest (e.g. \"opencode\"). Used by a consumer to confirm the kit's own metadata agrees with what it is about to exec."
+        }
+      }
+    },
     "backend_shortcuts": {
       "type": "object",
       "additionalProperties": false,

@@ -26,7 +26,18 @@
 //                           when neither --models-url nor live fetch is used).
 //   --opencode-jsonc <path> override the bootstrap source path.
 //   --out <path>            override the output catalog.json path.
-//   --check                 do not write; fail if catalog.json is out of date.
+//   --check                 do not write; fail if catalog.json has drifted.
+//
+// What --check compares: the SUBSTANTIVE catalog — schemaVersion, gateway,
+// vendors, and models. It deliberately IGNORES the `sources` block, which
+// records provenance (which feed or file this run read) and legitimately
+// differs between a live-feed regeneration and an offline bootstrap of the
+// same models. Comparing it would make --check fail on every offline run
+// regardless of real drift, and a drift detector that always fires is one
+// everybody learns to ignore — at which point genuine model drift is
+// indistinguishable from the noise. On a real difference, --check reports
+// WHICH ids were added, removed, or changed, because a diff is actionable
+// where a boolean is not.
 //
 // CI / round-trip callers use the offline paths (--bootstrap, or --models-url
 // against committed fixtures with --no-enrichment) so no network is required.
@@ -109,7 +120,6 @@ const VENDOR_PROVIDER_MAP = {
 const DISPLAY_NAME_OVERRIDES = {
   "gpt-5.4-latest-guardrails-defaultv2": "GPT-5.4 Latest — Guardrails Default v2",
   "gpt-5.2-latest-guardrails-defaultv2": "GPT-5.2 Latest — Guardrails Default v2",
-  cohere_english_v3: "Cohere English v3",
 }
 
 // -----------------------------------------------------------------------------
@@ -502,7 +512,13 @@ function parseBootstrapModels(blockBody) {
 function bootstrapModelsFromBlock(entries) {
   const models = []
   const vendorsSeen = new Set()
+  const excluded = []
   for (const { id, obj } of entries) {
+    const reason = nonChatReason(id, obj?.name ?? "")
+    if (reason) {
+      excluded.push({ id, reason })
+      continue
+    }
     const vendor = classifyVendor(id, "")
     vendorsSeen.add(vendor)
     const model = { id, vendor, name: obj.name ?? generateDisplayName(id) }
@@ -525,6 +541,7 @@ function bootstrapModelsFromBlock(entries) {
     }
     models.push(model)
   }
+  reportExclusions(excluded)
   return { models, vendorsSeen }
 }
 
@@ -545,20 +562,57 @@ function buildVendors(vendorKeysInOrder) {
 // -----------------------------------------------------------------------------
 // Live-feed shaping: parse USAi list, classify, optionally enrich from models.dev.
 // -----------------------------------------------------------------------------
+// Models the gateway serves that cannot be prompted, keyed to the reason.
+// The gateway's /v1/models response carries no capability field, so
+// promptability is decided here rather than read from the feed.
+const NON_CHAT_MODELS = {
+  cohere_english_v3: "embedding model; /chat/completions returns 403 AccessDeniedException",
+  "text-embedding-005": "embedding model; /chat/completions returns 400 (no generation support)",
+}
+
+// Default-deny net for a non-chat model not yet listed above. Substring, not
+// `\bembed\b`: `_` is a word character, so a word-boundary form matches no
+// underscore-delimited id.
+const EMBEDDING_ID_RE = /embedding|embed/
+
+/**
+ * Why this model cannot be offered as a chat model, or null if it can.
+ * Checked by exact id first, then by the conservative id pattern.
+ */
+function nonChatReason(id, name = "") {
+  if (Object.hasOwn(NON_CHAT_MODELS, id)) return NON_CHAT_MODELS[id]
+  if (EMBEDDING_ID_RE.test(`${id} ${name}`.toLowerCase())) {
+    return "id or name indicates an embedding model"
+  }
+  return null
+}
+
+/** Report excluded models to stderr. */
+function reportExclusions(excluded) {
+  for (const { id, reason } of excluded) {
+    process.stderr.write(`  excluded ${id}: ${reason}\n`)
+  }
+}
+
 function shapeFromFeeds(usaiList, modelsDevCatalog) {
-  // Chat models only (exclude embeddings), preserve incoming list order but
-  // group by vendor display order for a stable catalog.
+  // Chat models only, preserve incoming list order but group by vendor display
+  // order for a stable catalog.
+  const excluded = []
   const parsed = usaiList
     .map((raw) => {
       const id = raw.id || raw.model_id || raw.name
       if (!id) return null
       const vendor = classifyVendor(id, raw.owned_by)
-      const haystack = `${id} ${raw.name ?? ""}`.toLowerCase()
-      const isEmbedding = /embedding|embed/.test(haystack)
-      return { id, vendor, name: raw.name || generateDisplayName(id), isEmbedding, raw }
+      const reason = nonChatReason(id, raw.name ?? "")
+      if (reason) {
+        excluded.push({ id, reason })
+        return null
+      }
+      return { id, vendor, name: raw.name || generateDisplayName(id), raw }
     })
     .filter(Boolean)
-    .filter((m) => !m.isEmbedding)
+
+  reportExclusions(excluded)
 
   parsed.sort((a, b) => {
     const oa = VENDOR_CONFIG[a.vendor]?.order ?? 99
@@ -816,6 +870,50 @@ async function buildCatalog(args) {
   return catalog
 }
 
+/**
+ * The substantive catalog: everything a consumer renders, with provenance
+ * stripped. `sources` names the feed or file this particular run read, so it
+ * differs between a live regeneration and an offline bootstrap of identical
+ * models — it is metadata about the build, not about the catalog's content.
+ */
+function substantive(catalog) {
+  const { sources: _provenance, ...rest } = catalog
+  return rest
+}
+
+/**
+ * Describe how two catalogs differ, as caller-actionable lines.
+ * Returns [] when the substantive content matches.
+ */
+function describeDrift(existing, fresh) {
+  const lines = []
+  for (const key of ["schemaVersion", "generatedBy"]) {
+    if (existing?.[key] !== fresh?.[key]) {
+      lines.push(`${key}: ${JSON.stringify(existing?.[key])} -> ${JSON.stringify(fresh?.[key])}`)
+    }
+  }
+  if (JSON.stringify(existing?.gateway) !== JSON.stringify(fresh?.gateway)) {
+    lines.push("gateway block changed")
+  }
+  if (JSON.stringify(existing?.vendors) !== JSON.stringify(fresh?.vendors)) {
+    lines.push("vendors block changed")
+  }
+
+  const byId = (list) => new Map((list || []).map((m) => [m.id, m]))
+  const before = byId(existing?.models)
+  const after = byId(fresh?.models)
+  const added = [...after.keys()].filter((id) => !before.has(id)).sort()
+  const removed = [...before.keys()].filter((id) => !after.has(id)).sort()
+  if (added.length) lines.push(`models added: ${added.join(", ")}`)
+  if (removed.length) lines.push(`models removed: ${removed.join(", ")}`)
+  for (const id of [...after.keys()].filter((i) => before.has(i)).sort()) {
+    if (JSON.stringify(before.get(id)) !== JSON.stringify(after.get(id))) {
+      lines.push(`model changed: ${id}`)
+    }
+  }
+  return lines
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2))
   const outPath = args.opts["--out"] || DEFAULT_OUT
@@ -823,14 +921,21 @@ async function main() {
   const serialized = serialize(catalog)
 
   if (args.flags.has("--check")) {
-    let existing = null
+    let existingRaw = null
     try {
-      existing = await readFile(outPath, "utf8")
+      existingRaw = await readFile(outPath, "utf8")
     } catch {
       throw new Error(`catalog.json missing at ${outPath}; run without --check to generate`)
     }
-    if (existing !== serialized) {
-      throw new Error("catalog.json is out of date with the current sources")
+    let existing
+    try {
+      existing = JSON.parse(existingRaw)
+    } catch {
+      throw new Error(`catalog.json at ${outPath} is not valid JSON; regenerate it`)
+    }
+    const drift = describeDrift(substantive(existing), substantive(catalog))
+    if (drift.length) {
+      throw new Error(`catalog.json has drifted from the current sources:\n  - ${drift.join("\n  - ")}`)
     }
     process.stdout.write(`catalog.json is up to date (${catalog.models.length} models)\n`)
     return
@@ -844,11 +949,15 @@ export {
   buildCatalog,
   validateCatalog,
   serialize,
+  substantive,
+  describeDrift,
   parseBootstrapModels,
   bootstrapModelsFromBlock,
   shapeFromFeeds,
   findModelsDevMatch,
   classifyVendor,
+  nonChatReason,
+  NON_CHAT_MODELS,
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
