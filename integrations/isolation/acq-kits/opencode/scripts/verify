@@ -9,10 +9,10 @@
 #      + registry + the `agent:` block). Needs python3 with jsonschema + pyyaml;
 #      if those aren't importable this check reports SKIP (with the fix), not a
 #      false FAIL. Also offline: an INTEGRITY NEGATIVE test — runs the real
-#      install script against a local, deterministic tarball with a deliberately
-#      wrong pinned hash and asserts it refuses to install anything. It also
-#      checks that hash-matching archives with non-regular or duplicate
-#      `opencode` members are rejected before install (see
+#      install script against a local, deterministic npm-layout tarball with a
+#      deliberately wrong pinned hash and asserts it refuses to install anything.
+#      It also checks that hash-matching archives with non-regular or duplicate
+#      `package/bin/opencode` members are rejected before install (see
 #      docs/decisions/fail-closed-on-integrity.md).
 #
 #   2. LIVE END-TO-END (opt-in, RUN_ACQ=1): create a real sandbox with the kit
@@ -39,6 +39,7 @@ KEEP="${KEEP:-0}"
 RUN_ACQ="${RUN_ACQ:-0}"
 READY_TIMEOUT="${READY_TIMEOUT:-60}"
 POLL_INTERVAL="${POLL_INTERVAL:-2}"
+PINNED_VER="$(grep -E -o 'OPENCODE_VERSION=\"v?[0-9.]*\"' "$KIT_DIR/spec.yaml" | head -n1 | sed -E 's/.*=\"v?([0-9.]*)\"/\1/')"
 
 pass=0
 fail=0
@@ -100,19 +101,21 @@ info "3. INTEGRITY NEGATIVE: a wrong pinned hash refuses to install (fail-closed
 # against a deliberately wrong hash, pointed at a scratch install dir, and
 # assert nothing landed there.
 NEG_DEST="$WORK/negative-dest"
+POS_DEST="$WORK/positive-dest"
 LAYOUT_DEST="$WORK/layout-dest"
 DUP_DEST="$WORK/duplicate-dest"
 DUP_REGULAR_DEST="$WORK/duplicate-regular-dest"
-mkdir -p "$NEG_DEST" "$LAYOUT_DEST" "$DUP_DEST" "$DUP_REGULAR_DEST"
+mkdir -p "$NEG_DEST" "$POS_DEST" "$LAYOUT_DEST" "$DUP_DEST" "$DUP_REGULAR_DEST"
 NEG_SCRIPT="$WORK/opencode-install-negative.sh"
+POS_SCRIPT="$WORK/opencode-install-positive.sh"
 LAYOUT_SCRIPT="$WORK/opencode-install-layout.sh"
 DUP_SCRIPT="$WORK/opencode-install-duplicate.sh"
 DUP_REGULAR_SCRIPT="$WORK/opencode-install-duplicate-regular.sh"
 STUB_BIN="$WORK/bin"
 STUB_SRC="$WORK/stub-src"
-mkdir -p "$STUB_BIN" "$STUB_SRC"
-printf '%s\n' '#!/bin/sh' 'echo stub-opencode' > "$STUB_SRC/opencode"
-chmod 0755 "$STUB_SRC/opencode"
+mkdir -p "$STUB_BIN" "$STUB_SRC/package/bin"
+printf '%s\n' '#!/bin/sh' "if [ \"\${1:-}\" = \"--version\" ]; then echo \"$PINNED_VER\"; else echo stub-opencode; fi" > "$STUB_SRC/package/bin/opencode"
+chmod 0755 "$STUB_SRC/package/bin/opencode"
 cat > "$STUB_BIN/curl" <<'EOF'
 #!/bin/sh
 out=""
@@ -129,15 +132,16 @@ done
 cp "$STUB_OPENCODE_ARCHIVE" "$out"
 EOF
 chmod 0755 "$STUB_BIN/curl"
-if tar -czf "$WORK/stub-opencode.tar.gz" -C "$STUB_SRC" opencode 2>"$WORK/stub-tar.log"; then
+if tar -czf "$WORK/stub-opencode.tar.gz" -C "$STUB_SRC" package/bin/opencode 2>"$WORK/stub-tar.log"; then
   sed "s|dest_dir=\"/usr/local/bin\"|dest_dir=\"$NEG_DEST\"|" "$INSTALL_SCRIPT" > "$NEG_SCRIPT"
   # Isolate PATH for this probe: the HOST may itself have an `opencode` binary
   # on PATH (e.g. a developer's own install) which would trip the script's own
   # idempotency short-circuit before ever reaching the download/verify path this
   # test exists to exercise. The local curl stub keeps the gate offline while
   # still running the real installer download/hash/extract control flow.
-  if OPENCODE_VERSION="v1.18.34" \
+  if OPENCODE_VERSION="$PINNED_VER" \
      OPENCODE_SHA256_LINUX_X64="deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" \
+     OPENCODE_SHA256_LINUX_X64_BASELINE="deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" \
      OPENCODE_SHA256_LINUX_ARM64="deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" \
      STUB_OPENCODE_ARCHIVE="$WORK/stub-opencode.tar.gz" \
      PATH="$STUB_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
@@ -157,22 +161,117 @@ if tar -czf "$WORK/stub-opencode.tar.gz" -C "$STUB_SRC" opencode 2>"$WORK/stub-t
     bad "negative-hash run exited non-zero (should exit 0 — fail-closed is still a soft sandbox-level exit, see ADR)"
     sed 's/^/  | /' "$WORK/negative.log" >&2
   fi
+
+  info "4. POSITIVE INSTALL: valid npm-layout archive installs the binary"
+  stub_sha="$( (sha256sum "$WORK/stub-opencode.tar.gz" 2>/dev/null || shasum -a 256 "$WORK/stub-opencode.tar.gz" 2>/dev/null) | cut -d' ' -f1)"
+  sed "s|dest_dir=\"/usr/local/bin\"|dest_dir=\"$POS_DEST\"|" "$INSTALL_SCRIPT" > "$POS_SCRIPT"
+  if OPENCODE_VERSION="$PINNED_VER" \
+     OPENCODE_SHA256_LINUX_X64="$stub_sha" \
+     OPENCODE_SHA256_LINUX_X64_BASELINE="$stub_sha" \
+     OPENCODE_SHA256_LINUX_ARM64="$stub_sha" \
+     STUB_OPENCODE_ARCHIVE="$WORK/stub-opencode.tar.gz" \
+     PATH="$STUB_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
+     sh "$POS_SCRIPT" >"$WORK/positive.log" 2>&1; then
+    if [ -x "$POS_DEST/opencode" ]; then
+      ok "valid npm-layout archive installed an executable opencode binary"
+    else
+      bad "valid npm-layout archive did not install opencode"
+      sed 's/^/  | /' "$WORK/positive.log" >&2
+    fi
+    if [ "$($POS_DEST/opencode --version 2>/dev/null || true)" = "$PINNED_VER" ]; then
+      ok "valid npm-layout archive installed a runnable binary reporting the pin"
+    else
+      bad "valid npm-layout archive installed binary did not report the pin"
+      sed 's/^/  | /' "$WORK/positive.log" >&2
+    fi
+    if grep -q "cli-linux-arm64-${PINNED_VER}.tgz" "$WORK/positive.log"; then
+      ok "host arm64 path selected the arm64 npm platform tarball"
+    elif grep -q "cli-linux-x64-baseline-${PINNED_VER}.tgz" "$WORK/positive.log"; then
+      ok "host x64 path without AVX2 selected the baseline npm platform tarball"
+    elif grep -q "cli-linux-x64-${PINNED_VER}.tgz" "$WORK/positive.log"; then
+      ok "host x64 path with AVX2 selected the x64 npm platform tarball"
+    else
+      bad "positive install did not fetch an expected npm platform tarball URL"
+      sed 's/^/  | /' "$WORK/positive.log" >&2
+    fi
+  else
+    bad "positive install run exited non-zero"
+    sed 's/^/  | /' "$WORK/positive.log" >&2
+  fi
+
+  info "5. ARCHITECTURE SELECTION: x64 AVX2 and baseline packages are selected correctly"
+  ARCH_SCRIPT="$WORK/opencode-install-arch.sh"
+  sed "s|dest_dir=\"/usr/local/bin\"|dest_dir=\"$WORK/arch-dest\"|" "$INSTALL_SCRIPT" > "$ARCH_SCRIPT"
+  ARCH_STUB_BASE="$WORK/arch-stubs"
+  mkdir -p "$ARCH_STUB_BASE/avx2" "$ARCH_STUB_BASE/baseline"
+  cat > "$ARCH_STUB_BASE/avx2/uname" <<'EOF'
+#!/bin/sh
+echo x86_64
+EOF
+  cat > "$ARCH_STUB_BASE/baseline/uname" <<'EOF'
+#!/bin/sh
+echo x86_64
+EOF
+  cat > "$ARCH_STUB_BASE/avx2/grep" <<'EOF'
+#!/bin/sh
+case "$1" in
+  -qi) exit 0 ;;
+  *) exec /usr/bin/grep "$@" ;;
+esac
+EOF
+  cat > "$ARCH_STUB_BASE/baseline/grep" <<'EOF'
+#!/bin/sh
+case "$1" in
+  -qi) exit 1 ;;
+  *) exec /usr/bin/grep "$@" ;;
+esac
+EOF
+  chmod 0755 "$ARCH_STUB_BASE/avx2/uname" "$ARCH_STUB_BASE/baseline/uname" "$ARCH_STUB_BASE/avx2/grep" "$ARCH_STUB_BASE/baseline/grep"
+  rm -rf "$WORK/arch-dest"
+  if OPENCODE_VERSION="$PINNED_VER" \
+     OPENCODE_SHA256_LINUX_X64="$stub_sha" \
+     OPENCODE_SHA256_LINUX_X64_BASELINE="3333333333333333333333333333333333333333333333333333333333333333" \
+     OPENCODE_SHA256_LINUX_ARM64="4444444444444444444444444444444444444444444444444444444444444444" \
+     STUB_OPENCODE_ARCHIVE="$WORK/stub-opencode.tar.gz" \
+     PATH="$ARCH_STUB_BASE/avx2:$STUB_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
+     sh "$ARCH_SCRIPT" >"$WORK/arch-avx2.log" 2>&1 \
+     && grep -q "cli-linux-x64-${PINNED_VER}.tgz" "$WORK/arch-avx2.log"; then
+    ok "x64 host with AVX2 selects the x64 npm platform tarball"
+  else
+    bad "x64 host with AVX2 did not select the x64 npm platform tarball"
+    sed 's/^/  | /' "$WORK/arch-avx2.log" >&2
+  fi
+  rm -rf "$WORK/arch-dest"
+  if OPENCODE_VERSION="$PINNED_VER" \
+     OPENCODE_SHA256_LINUX_X64="5555555555555555555555555555555555555555555555555555555555555555" \
+     OPENCODE_SHA256_LINUX_X64_BASELINE="$stub_sha" \
+     OPENCODE_SHA256_LINUX_ARM64="6666666666666666666666666666666666666666666666666666666666666666" \
+     STUB_OPENCODE_ARCHIVE="$WORK/stub-opencode.tar.gz" \
+     PATH="$ARCH_STUB_BASE/baseline:$STUB_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
+     sh "$ARCH_SCRIPT" >"$WORK/arch-baseline.log" 2>&1 \
+     && grep -q "cli-linux-x64-baseline-${PINNED_VER}.tgz" "$WORK/arch-baseline.log"; then
+    ok "x64 host without AVX2 selects the baseline npm platform tarball"
+  else
+    bad "x64 host without AVX2 did not select the baseline npm platform tarball"
+    sed 's/^/  | /' "$WORK/arch-baseline.log" >&2
+  fi
 else
-  skip "tar not available for the offline integrity negative test"
+  skip "tar not available for the offline integrity tests"
   sed 's/^/  | /' "$WORK/stub-tar.log" >&2
 fi
 
-info "4. ARCHIVE LAYOUT NEGATIVE: a hardlink member refuses to install (fail-closed)"
+info "6. ARCHIVE LAYOUT NEGATIVE: a hardlink member refuses to install (fail-closed)"
 HARDLINK_SRC="$WORK/hardlink-src"
-mkdir -p "$HARDLINK_SRC"
-printf '%s\n' '#!/bin/sh' 'echo hardlink-target' > "$HARDLINK_SRC/target"
-chmod 0755 "$HARDLINK_SRC/target"
-ln "$HARDLINK_SRC/target" "$HARDLINK_SRC/opencode"
-if tar -czf "$WORK/hardlink-opencode.tar.gz" -C "$HARDLINK_SRC" target opencode 2>"$WORK/hardlink-tar.log"; then
+mkdir -p "$HARDLINK_SRC/package/bin"
+printf '%s\n' '#!/bin/sh' 'echo hardlink-target' > "$HARDLINK_SRC/package/bin/target"
+chmod 0755 "$HARDLINK_SRC/package/bin/target"
+ln "$HARDLINK_SRC/package/bin/target" "$HARDLINK_SRC/package/bin/opencode"
+if tar -czf "$WORK/hardlink-opencode.tar.gz" -C "$HARDLINK_SRC" package/bin/target package/bin/opencode 2>"$WORK/hardlink-tar.log"; then
   hardlink_sha="$( (sha256sum "$WORK/hardlink-opencode.tar.gz" 2>/dev/null || shasum -a 256 "$WORK/hardlink-opencode.tar.gz" 2>/dev/null) | cut -d' ' -f1)"
   sed "s|dest_dir=\"/usr/local/bin\"|dest_dir=\"$LAYOUT_DEST\"|" "$INSTALL_SCRIPT" > "$LAYOUT_SCRIPT"
-  if OPENCODE_VERSION="v1.18.34" \
+  if OPENCODE_VERSION="$PINNED_VER" \
      OPENCODE_SHA256_LINUX_X64="$hardlink_sha" \
+     OPENCODE_SHA256_LINUX_X64_BASELINE="$hardlink_sha" \
      OPENCODE_SHA256_LINUX_ARM64="$hardlink_sha" \
      STUB_OPENCODE_ARCHIVE="$WORK/hardlink-opencode.tar.gz" \
      PATH="$STUB_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
@@ -183,7 +282,7 @@ if tar -czf "$WORK/hardlink-opencode.tar.gz" -C "$HARDLINK_SRC" target opencode 
       bad "hardlink-member archive INSTALLED something despite non-regular member"
       sed 's/^/  | /' "$WORK/layout.log" >&2
     fi
-    if grep -q "SECURITY: archive member 'opencode' is not a regular file" "$WORK/layout.log"; then
+    if grep -q "SECURITY: archive member 'package/bin/opencode' is not a regular file" "$WORK/layout.log"; then
       ok "hardlink member produced the expected SECURITY:-prefixed refusal message"
     else
       bad "hardlink member did not log the expected SECURITY:-prefixed refusal"
@@ -198,21 +297,22 @@ else
   sed 's/^/  | /' "$WORK/hardlink-tar.log" >&2
 fi
 
-info "5. ARCHIVE LAYOUT NEGATIVE: duplicate opencode entries refuse to install (fail-closed)"
+info "7. ARCHIVE LAYOUT NEGATIVE: duplicate opencode entries refuse to install (fail-closed)"
 DUP_SRC_REGULAR="$WORK/duplicate-regular"
 DUP_SRC_HARDLINK="$WORK/duplicate-hardlink"
-mkdir -p "$DUP_SRC_REGULAR" "$DUP_SRC_HARDLINK"
-printf '%s\n' '#!/bin/sh' 'echo duplicate-regular' > "$DUP_SRC_REGULAR/opencode"
-printf '%s\n' '#!/bin/sh' 'echo duplicate-target' > "$DUP_SRC_HARDLINK/target"
-chmod 0755 "$DUP_SRC_REGULAR/opencode" "$DUP_SRC_HARDLINK/target"
-ln "$DUP_SRC_HARDLINK/target" "$DUP_SRC_HARDLINK/opencode"
-if tar -cf "$WORK/duplicate-opencode.tar" -C "$DUP_SRC_REGULAR" opencode 2>"$WORK/duplicate-tar.log" \
-    && tar -rf "$WORK/duplicate-opencode.tar" -C "$DUP_SRC_HARDLINK" target opencode 2>>"$WORK/duplicate-tar.log" \
+mkdir -p "$DUP_SRC_REGULAR/package/bin" "$DUP_SRC_HARDLINK/package/bin"
+printf '%s\n' '#!/bin/sh' 'echo duplicate-regular' > "$DUP_SRC_REGULAR/package/bin/opencode"
+printf '%s\n' '#!/bin/sh' 'echo duplicate-target' > "$DUP_SRC_HARDLINK/package/bin/target"
+chmod 0755 "$DUP_SRC_REGULAR/package/bin/opencode" "$DUP_SRC_HARDLINK/package/bin/target"
+ln "$DUP_SRC_HARDLINK/package/bin/target" "$DUP_SRC_HARDLINK/package/bin/opencode"
+if tar -cf "$WORK/duplicate-opencode.tar" -C "$DUP_SRC_REGULAR" package/bin/opencode 2>"$WORK/duplicate-tar.log" \
+    && tar -rf "$WORK/duplicate-opencode.tar" -C "$DUP_SRC_HARDLINK" package/bin/target package/bin/opencode 2>>"$WORK/duplicate-tar.log" \
     && gzip -c "$WORK/duplicate-opencode.tar" > "$WORK/duplicate-opencode.tar.gz"; then
   duplicate_sha="$( (sha256sum "$WORK/duplicate-opencode.tar.gz" 2>/dev/null || shasum -a 256 "$WORK/duplicate-opencode.tar.gz" 2>/dev/null) | cut -d' ' -f1)"
   sed "s|dest_dir=\"/usr/local/bin\"|dest_dir=\"$DUP_DEST\"|" "$INSTALL_SCRIPT" > "$DUP_SCRIPT"
-  if OPENCODE_VERSION="v1.18.34" \
+  if OPENCODE_VERSION="$PINNED_VER" \
      OPENCODE_SHA256_LINUX_X64="$duplicate_sha" \
+     OPENCODE_SHA256_LINUX_X64_BASELINE="$duplicate_sha" \
      OPENCODE_SHA256_LINUX_ARM64="$duplicate_sha" \
      STUB_OPENCODE_ARCHIVE="$WORK/duplicate-opencode.tar.gz" \
      PATH="$STUB_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
@@ -223,7 +323,7 @@ if tar -cf "$WORK/duplicate-opencode.tar" -C "$DUP_SRC_REGULAR" opencode 2>"$WOR
       bad "duplicate-member archive INSTALLED something despite a later non-regular member"
       sed 's/^/  | /' "$WORK/duplicate.log" >&2
     fi
-    if grep -q "SECURITY: archive member 'opencode' is not a regular file" "$WORK/duplicate.log"; then
+    if grep -q "SECURITY: archive member 'package/bin/opencode' is not a regular file" "$WORK/duplicate.log"; then
       ok "duplicate member produced the expected SECURITY:-prefixed refusal message"
     else
       bad "duplicate member did not log the expected SECURITY:-prefixed refusal"
@@ -238,20 +338,21 @@ else
   sed 's/^/  | /' "$WORK/duplicate-tar.log" >&2
 fi
 
-info "6. ARCHIVE LAYOUT NEGATIVE: duplicate regular opencode entries refuse to install (fail-closed)"
+info "8. ARCHIVE LAYOUT NEGATIVE: duplicate regular opencode entries refuse to install (fail-closed)"
 DUP_REGULAR_A="$WORK/duplicate-regular-a"
 DUP_REGULAR_B="$WORK/duplicate-regular-b"
-mkdir -p "$DUP_REGULAR_A" "$DUP_REGULAR_B"
-printf '%s\n' '#!/bin/sh' 'echo duplicate-regular-a' > "$DUP_REGULAR_A/opencode"
-printf '%s\n' '#!/bin/sh' 'echo duplicate-regular-b' > "$DUP_REGULAR_B/opencode"
-chmod 0755 "$DUP_REGULAR_A/opencode" "$DUP_REGULAR_B/opencode"
-if tar -cf "$WORK/duplicate-regular-opencode.tar" -C "$DUP_REGULAR_A" opencode 2>"$WORK/duplicate-regular-tar.log" \
-    && tar -rf "$WORK/duplicate-regular-opencode.tar" -C "$DUP_REGULAR_B" opencode 2>>"$WORK/duplicate-regular-tar.log" \
+mkdir -p "$DUP_REGULAR_A/package/bin" "$DUP_REGULAR_B/package/bin"
+printf '%s\n' '#!/bin/sh' 'echo duplicate-regular-a' > "$DUP_REGULAR_A/package/bin/opencode"
+printf '%s\n' '#!/bin/sh' 'echo duplicate-regular-b' > "$DUP_REGULAR_B/package/bin/opencode"
+chmod 0755 "$DUP_REGULAR_A/package/bin/opencode" "$DUP_REGULAR_B/package/bin/opencode"
+if tar -cf "$WORK/duplicate-regular-opencode.tar" -C "$DUP_REGULAR_A" package/bin/opencode 2>"$WORK/duplicate-regular-tar.log" \
+    && tar -rf "$WORK/duplicate-regular-opencode.tar" -C "$DUP_REGULAR_B" package/bin/opencode 2>>"$WORK/duplicate-regular-tar.log" \
     && gzip -c "$WORK/duplicate-regular-opencode.tar" > "$WORK/duplicate-regular-opencode.tar.gz"; then
   duplicate_regular_sha="$( (sha256sum "$WORK/duplicate-regular-opencode.tar.gz" 2>/dev/null || shasum -a 256 "$WORK/duplicate-regular-opencode.tar.gz" 2>/dev/null) | cut -d' ' -f1)"
   sed "s|dest_dir=\"/usr/local/bin\"|dest_dir=\"$DUP_REGULAR_DEST\"|" "$INSTALL_SCRIPT" > "$DUP_REGULAR_SCRIPT"
-  if OPENCODE_VERSION="v1.18.34" \
+  if OPENCODE_VERSION="$PINNED_VER" \
      OPENCODE_SHA256_LINUX_X64="$duplicate_regular_sha" \
+     OPENCODE_SHA256_LINUX_X64_BASELINE="$duplicate_regular_sha" \
      OPENCODE_SHA256_LINUX_ARM64="$duplicate_regular_sha" \
      STUB_OPENCODE_ARCHIVE="$WORK/duplicate-regular-opencode.tar.gz" \
      PATH="$STUB_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
@@ -262,7 +363,7 @@ if tar -cf "$WORK/duplicate-regular-opencode.tar" -C "$DUP_REGULAR_A" opencode 2
       bad "duplicate-regular-member archive INSTALLED something despite duplicate regular members"
       sed 's/^/  | /' "$WORK/duplicate-regular.log" >&2
     fi
-    if grep -q "SECURITY: archive lists 2 'opencode' members" "$WORK/duplicate-regular.log"; then
+    if grep -q "SECURITY: archive lists 2 'package/bin/opencode' members" "$WORK/duplicate-regular.log"; then
       ok "duplicate regular members produced the expected SECURITY:-prefixed refusal message"
     else
       bad "duplicate regular members did not log the expected SECURITY:-prefixed refusal"
@@ -278,21 +379,21 @@ else
 fi
 
 if [ "$RUN_ACQ" != "1" ]; then
-  info "7. Live sandbox check"
+  info "9. Live sandbox check"
   skip "RUN_ACQ=1 not set — skipped live acq sandbox verification"
   printf '\nSummary\n  %d passed, %d failed\n' "$pass" "$fail"
   [ "$fail" -eq 0 ]
   exit $?
 fi
 
-info "7. Live sandbox preconditions"
+info "9. Live sandbox preconditions"
 if ! command -v acq >/dev/null 2>&1; then
   bad "acq not on PATH"
   exit 1
 fi
 ok "acq on PATH"
 
-info "8. Create sandbox with the kit"
+info "10. Create sandbox with the kit"
 printf '  creating %s (workspace %s)...\n' "$SBX_NAME" "$WORK"
 if acq create --name "$SBX_NAME" --kit "$KIT_DIR" opencode "$WORK" >"$CREATE_LOG" 2>&1; then
   ok "sandbox created with --kit opencode"
@@ -304,7 +405,7 @@ fi
 
 in_sbx() { acq exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true; }
 
-info "9. opencode binary present and on PATH"
+info "11. opencode binary present and on PATH"
 _elapsed=0
 while [ "$_elapsed" -lt "$READY_TIMEOUT" ]; do
   if [ "$(in_sbx "command -v opencode >/dev/null 2>&1 && echo yes")" = "yes" ]; then
@@ -319,9 +420,11 @@ else
   bad "opencode not found on PATH after ${READY_TIMEOUT}s"
 fi
 
-info "10. Installed version matches the pin"
+info "12. Installed version matches the pin"
 installed_ver="$(in_sbx "opencode --version 2>/dev/null")"
-pinned_ver="$(grep -o 'OPENCODE_VERSION="v[0-9.]*"' "$KIT_DIR/spec.yaml" | head -n1 | sed -E 's/.*="v([0-9.]*)"/\1/')"
+installed_ver="${installed_ver##* }"
+installed_ver="${installed_ver#v}"
+pinned_ver="$PINNED_VER"
 echo "  installed: ${installed_ver:-<none>}  pinned: ${pinned_ver:-<unknown>}"
 if [ -n "$installed_ver" ] && [ "$installed_ver" = "$pinned_ver" ]; then
   ok "installed version matches the kit's pinned version"
