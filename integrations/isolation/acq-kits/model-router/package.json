@@ -1,0 +1,9 @@
+{
+  "name": "model-router",
+  "private": true,
+  "type": "module",
+  "description": "acq mixin kit (hybrid/v1): request-aware model selection for OpenCode via a local, offline model_select MCP tool",
+  "scripts": {
+    "test": "python3 tests/test_model_router.py"
+  }
+}

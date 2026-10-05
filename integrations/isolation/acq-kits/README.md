@@ -27,6 +27,7 @@ not agent behavior. (Behavioral patterns live in `skills/`, `prompts/`, etc.)
 | [`paseo/`](paseo/) | Self-host the [Paseo](https://github.com/getpaseo/paseo) daemon + browser web UI (for coding agents) inside the sandbox on one port. Opt-in; agent-generic wrapper, no shared TUI session. |
 | [`prime-agent/`](prime-agent/) | Install [PrimeIntellect-ai/prime-agent](https://github.com/PrimeIntellect-ai/prime-agent), a terminal AI coding assistant with an embedded IPython tool. Opt-in; TUI, no ports. |
 | [`pi-coding-agent/`](pi-coding-agent/) | Install [earendil-works/pi](https://github.com/earendil-works/pi) (`@earendil-works/pi-coding-agent`), a plain terminal AI coding agent (read/write/edit/bash tools only). Opt-in; TUI, no ports. |
+| [`model-router/`](model-router/) | Register a local, offline `model_select` MCP tool with OpenCode that suggests the smallest/cheapest model fitting a request (or abstains). Opt-in; stdio, no ports, no egress. |
 
 Each kit is self-contained: a `spec.yaml` (`hybrid/v1`), any `files/` payload, a
 `scripts/verify` host-side check, a `README.md` (with a **backend parity** note),

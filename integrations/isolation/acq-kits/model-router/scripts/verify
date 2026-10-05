@@ -1,0 +1,251 @@
+#!/usr/bin/env bash
+#
+# verify — host-side validation for the model-router acq mixin kit.
+#
+# Two layers, matching the sibling pi-coding-agent/openchamber kits:
+#
+#   1. OFFLINE GATE (always runs): the backend-agnostic validator
+#      integrations/isolation/acq-kits/validate-kits.py (schema + files[].source
+#      + registry), the kit's own Python unit tests (the scorer policy), and a
+#      direct JSON-RPC smoke test of the MCP server over a pipe. Needs python3;
+#      jsonschema+pyyaml for the validator step (reports SKIP, not FAIL, if those
+#      are absent).
+#
+#   2. LIVE END-TO-END (opt-in): create a real sandbox with the kit applied,
+#      wait for the startup step, then assert the `mcp.model-router` entry landed
+#      in OpenCode's global config and the server self-test passed.
+#
+#      Preferred driver — RUN_ACQ=1 (acq translates the neutral spec and applies
+#      it). Legacy — RUN_SBX=1 SBX_KIT_DIR=<pre-translated sbx-v2 dir>.
+#
+# Usage (from anywhere):
+#   path/to/model-router/scripts/verify          # offline gate only (default)
+#   RUN_ACQ=1 path/to/.../scripts/verify         # live, via acq (preferred)
+#   KEEP=1 RUN_ACQ=1 path/to/.../scripts/verify  # keep the sandbox to inspect
+
+set -uo pipefail
+
+KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+REPO_ROOT="$(cd "$KIT_DIR/../../../.." && pwd)"
+SERVER_DIR="$KIT_DIR/files/home/model-router"
+SBX_NAME="model-router-verify-$$"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/model-router-verify.XXXXXX")"
+CREATE_LOG="$WORK/create.log"
+KEEP="${KEEP:-0}"
+RUN_ACQ="${RUN_ACQ:-0}"
+RUN_SBX="${RUN_SBX:-0}"
+SBX_KIT_DIR="${SBX_KIT_DIR:-}"
+READY_TIMEOUT="${READY_TIMEOUT:-60}"
+POLL_INTERVAL="${POLL_INTERVAL:-2}"
+
+pass=0
+fail=0
+ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass+1)); }
+bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail+1)); }
+skip() { printf '  \033[33mSKIP\033[0m %s\n' "$1"; }
+info() { printf '\n\033[1m%s\033[0m\n' "$1"; }
+
+cleanup() {
+  if [ "$KEEP" = "1" ]; then
+    printf '\nKEEP=1 set; leaving sandbox %s and %s in place.\n' "$SBX_NAME" "$WORK" >&2
+    return
+  fi
+  case "${DRIVER:-}" in
+    acq) acq rm "$SBX_NAME" >/dev/null 2>&1 || true ;;
+    *)   sbx rm -f "$SBX_NAME" >/dev/null 2>&1 || true ;;
+  esac
+  rm -rf "$WORK" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT INT TERM
+
+in_sbx() {
+  case "${DRIVER:-}" in
+    acq) acq exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true ;;
+    *)   sbx exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true ;;
+  esac
+}
+
+info "0. Preconditions"
+[ -f "$KIT_DIR/spec.yaml" ] && ok "kit spec.yaml present" || { bad "spec.yaml missing"; exit 1; }
+[ -f "$SERVER_DIR/mcp_server.py" ] && ok "MCP server present" || { bad "mcp_server.py missing"; exit 1; }
+[ -f "$SERVER_DIR/model_router.py" ] && ok "scorer present" || { bad "model_router.py missing"; exit 1; }
+[ -f "$SERVER_DIR/adapter.py" ] && ok "adapter (central-mode client) present" || { bad "adapter.py missing"; exit 1; }
+[ -f "$SERVER_DIR/http_server.py" ] && ok "central HTTP server present" || { bad "http_server.py missing"; exit 1; }
+
+info "1. Validate the neutral kit spec"
+VALIDATOR="$REPO_ROOT/integrations/isolation/acq-kits/validate-kits.py"
+if ! command -v python3 >/dev/null 2>&1; then
+  skip "validate-kits.py not run (python3 not on PATH)"
+elif [ ! -f "$VALIDATOR" ]; then
+  skip "validate-kits.py not found at $VALIDATOR"
+elif ! python3 -c 'import jsonschema, yaml' >/dev/null 2>&1; then
+  skip "validate-kits.py needs 'jsonschema' + 'pyyaml' (pip install jsonschema pyyaml)"
+else
+  if val_out="$(python3 "$VALIDATOR" --root "$REPO_ROOT" 2>&1)"; then
+    ok "acq-kits validate-kits.py passes (schema + registry)"
+  else
+    bad "validate-kits.py failed:"
+    printf '%s\n' "$val_out" | sed 's/^/    | /' >&2
+  fi
+fi
+
+info "2. Scorer unit tests (offline policy regression gate)"
+if command -v python3 >/dev/null 2>&1; then
+  if test_out="$(python3 "$KIT_DIR/tests/test_model_router.py" 2>&1)"; then
+    ok "model-router unit tests pass"
+  else
+    bad "model-router unit tests failed:"
+    printf '%s\n' "$test_out" | sed 's/^/    | /' >&2
+  fi
+else
+  skip "unit tests not run (python3 not on PATH)"
+fi
+
+info "3. MCP server smoke test (JSON-RPC over a pipe, offline)"
+# Drive the server exactly as an MCP host would: initialize, then one
+# tools/call, and assert a well-formed suggest decision comes back. This is the
+# behaviour that is otherwise only exercised live, so it is a load-bearing
+# offline guard.
+if command -v python3 >/dev/null 2>&1; then
+  smoke="$(printf '%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"model_select","arguments":{"request":"fix a quick typo in a comment"}}}' \
+    | PYTHONPATH="$SERVER_DIR" python3 "$SERVER_DIR/mcp_server.py" 2>/dev/null)"
+  if printf '%s' "$smoke" | grep -q '"serverInfo"' \
+     && printf '%s' "$smoke" | grep -q '"decision": "suggest"'; then
+    ok "MCP server initializes and returns a suggest decision"
+  else
+    bad "MCP server smoke test did not produce the expected handshake + suggest"
+    printf '%s\n' "$smoke" | sed 's/^/    | /' >&2
+  fi
+else
+  skip "MCP smoke test not run (python3 not on PATH)"
+fi
+
+info "4. Install script is idempotent + fail-soft (source guards, offline)"
+INSTALL_SCRIPT="$KIT_DIR/files/home/model-router-install.sh"
+if grep -q 'command -v python3' "$INSTALL_SCRIPT" && grep -q 'exit 0' "$INSTALL_SCRIPT"; then
+  ok "install script preflights python3 and fails soft (exit 0)"
+else
+  bad "install script lost its python3 preflight / fail-soft exit"
+fi
+if grep -q 'self-test failed' "$INSTALL_SCRIPT"; then
+  ok "install script self-tests the scorer before registering"
+else
+  bad "install script no longer self-tests the scorer before registering"
+fi
+if grep -q 'cannot be safely merged' "$INSTALL_SCRIPT"; then
+  ok "install script refuses to clobber a JSONC global config it can't parse"
+else
+  bad "install script no longer guards against clobbering a JSONC global config"
+fi
+
+info "4b. Central HTTP server round-trips a /route decision (adapter contract, offline)"
+# Start the bundled central server on an ephemeral loopback port, POST /route,
+# and assert a well-formed decision comes back. This is the server half of the
+# adapter contract documented in docs/central-server.md; the client half
+# (adapter.py) is covered by the unit tests in step 2.
+if command -v python3 >/dev/null 2>&1; then
+  http_out="$(PYTHONPATH="$SERVER_DIR" python3 - "$SERVER_DIR" <<'PY' 2>/dev/null
+import json, sys, threading, time, urllib.request
+sys.path.insert(0, sys.argv[1])
+import http_server
+from http.server import ThreadingHTTPServer
+
+httpd = ThreadingHTTPServer(("127.0.0.1", 0), http_server._Handler)
+port = httpd.server_address[1]
+t = threading.Thread(target=httpd.serve_forever, daemon=True)
+t.start()
+try:
+    # healthz
+    h = urllib.request.urlopen(f"http://127.0.0.1:{port}/healthz", timeout=3).read().decode()
+    # route
+    body = json.dumps({"request": "refactor the whole auth architecture"}).encode()
+    req = urllib.request.Request(f"http://127.0.0.1:{port}/route", data=body, method="POST")
+    req.add_header("Content-Type", "application/json")
+    r = json.loads(urllib.request.urlopen(req, timeout=3).read())
+    print("HEALTH:" + h)
+    print("DECISION:" + r.get("decision", ""))
+finally:
+    httpd.shutdown()
+PY
+)"
+  if printf '%s' "$http_out" | grep -q 'HEALTH:{"status": "ok"}' \
+     && printf '%s' "$http_out" | grep -q 'DECISION:suggest'; then
+    ok "central HTTP server answers /healthz and /route with a decision"
+  else
+    bad "central HTTP server round-trip did not produce the expected health + decision"
+    printf '%s\n' "$http_out" | sed 's/^/    | /' >&2
+  fi
+else
+  skip "central HTTP server check not run (python3 not on PATH)"
+fi
+
+# --- Select the live driver. -------------------------------------------------
+DRIVER=""
+if [ "$RUN_ACQ" = "1" ]; then
+  DRIVER="acq"
+elif [ "$RUN_SBX" = "1" ]; then
+  DRIVER="sbx"
+fi
+
+if [ -z "$DRIVER" ]; then
+  info "Live sandbox checks (5-6): SKIPPED"
+  echo "  Set RUN_ACQ=1 to run the live end-to-end check via acq (preferred)." >&2
+  info "Summary"
+  printf '  %d passed, %d failed\n' "$pass" "$fail"
+  [ "$fail" -eq 0 ] && printf '  \033[32mOffline gate passed.\033[0m\n' || printf '  \033[31mOffline gate failed — see above.\033[0m\n'
+  exit "$([ "$fail" -eq 0 ] && echo 0 || echo 1)"
+fi
+
+if ! command -v "$DRIVER" >/dev/null 2>&1; then
+  echo "  RUN_${DRIVER^^}=1 set but '$DRIVER' not on PATH. Install it and retry." >&2
+  exit 1
+fi
+echo "  driver: $DRIVER"
+
+info "5. Create a sandbox with the kit"
+if [ "$DRIVER" = "acq" ]; then
+  if ACQ_EXTRA_KITS="$KIT_DIR" acq create --name "$SBX_NAME" opencode "$WORK" </dev/null >"$CREATE_LOG" 2>&1; then
+    ok "sandbox created via acq (kit translated + applied)"
+  else
+    bad "acq create failed (exit $?)"
+    sed 's/^/  | /' "$CREATE_LOG" >&2
+    exit 1
+  fi
+else
+  if [ -z "$SBX_KIT_DIR" ]; then
+    info "Live sandbox checks (5-6): SKIPPED"
+    echo "  RUN_SBX=1 needs a PRE-TRANSLATED sbx-v2 kit dir in SBX_KIT_DIR. Prefer RUN_ACQ=1." >&2
+    info "Summary"
+    printf '  %d passed, %d failed\n' "$pass" "$fail"
+    exit "$([ "$fail" -eq 0 ] && echo 0 || echo 1)"
+  fi
+  if sbx create --name "$SBX_NAME" --kit "$SBX_KIT_DIR" opencode "$WORK" </dev/null >"$CREATE_LOG" 2>&1; then
+    ok "sandbox created with --kit"
+  else
+    bad "sbx create failed (exit $?)"
+    sed 's/^/  | /' "$CREATE_LOG" >&2
+    exit 1
+  fi
+fi
+
+info "6. The MCP server is registered in OpenCode's global config"
+registered=""
+deadline=$(( $(date +%s) + READY_TIMEOUT ))
+while :; do
+  got="$(in_sbx 'grep -l model-router "$HOME/.config/opencode/opencode.jsonc" 2>/dev/null && echo FOUND')"
+  case "$got" in *FOUND*) registered=yes; break ;; esac
+  [ "$(date +%s)" -ge "$deadline" ] && break
+  sleep "$POLL_INTERVAL"
+done
+if [ -n "$registered" ]; then
+  ok "mcp.model-router entry present in the global config"
+else
+  bad "mcp.model-router entry not found within ${READY_TIMEOUT}s"
+  in_sbx 'tail -n 25 "$HOME/.local/state/model-router/install.log" 2>/dev/null || true' | sed 's/^/    | /'
+fi
+
+info "Summary"
+[ "$fail" -eq 0 ] && printf '  \033[32mAll checks passed.\033[0m\n' || printf '  \033[31mSome checks failed — see notes above.\033[0m\n'
+[ "$fail" -eq 0 ]
