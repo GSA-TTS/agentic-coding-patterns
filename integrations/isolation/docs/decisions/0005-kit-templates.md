@@ -26,8 +26,8 @@ shared rc files, binary payloads, create-time installs through the proxy,
 secret rotation changing the placeholder, `environment` last-wins shadowing)
 that the next team would hit again.
 
-The pattern is documented in `../scope-layers.md`. This record covers the two
-structural decisions that document depends on.
+The pattern is documented in [`../scope-layers.md`](../scope-layers.md). This
+record covers the two structural decisions that document depends on.
 
 ## Decision Drivers
 
@@ -136,8 +136,8 @@ Adopt **templates (option 1)** and **placement (B)**.
 
 ## Links
 
-- Pattern doc: `../scope-layers.md`.
-- Template: `../../acq-kits/examples/team-kit/`.
+- Pattern doc: [`../scope-layers.md`](../scope-layers.md).
+- Template: [`../../acq-kits/examples/team-kit/`](../../acq-kits/examples/team-kit/).
 - Validator: [`../../acq-kits/validate-kits.py`](../../acq-kits/validate-kits.py)
   (`TEMPLATES_DIR`).
 - ADR 0001 (isolation): the neutral `hybrid/v1` acq-kits area this extends.
