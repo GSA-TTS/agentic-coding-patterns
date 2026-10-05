@@ -65,8 +65,27 @@ ver="${ver_raw#v}"
 sha_x64="${OPENCODE_SHA256_LINUX_X64:-}"
 sha_x64_baseline="${OPENCODE_SHA256_LINUX_X64_BASELINE:-}"
 sha_arm64="${OPENCODE_SHA256_LINUX_ARM64:-}"
+# Install into a system PATH dir (root at create time). /usr/local/bin is on
+# PATH for every user in the base image (same destination as the goose-server
+# and openchamber kits' root-installed binaries).
+dest_dir="/usr/local/bin"
+dest_path="$dest_dir/opencode"
 
 warn() { echo "opencode-kit(install): $*" >&2; }
+
+remove_existing_non_pinned() {
+  # If anything else is present at this kit-owned path, remove it before any
+  # degraded exit. Otherwise a failed v2 upgrade could leave a stale v1 binary
+  # runnable and satisfy the sandbox readiness gate incorrectly.
+  if [ -e "$dest_path" ] || [ -L "$dest_path" ]; then
+    if rm -f "$dest_path" 2>/dev/null; then
+      echo "opencode-kit(install): removed existing non-pinned opencode at $dest_path before replacement."
+    else
+      warn "SECURITY: could not remove existing non-pinned opencode at $dest_path; refusing to continue with a stale binary present."
+      exit 1
+    fi
+  fi
+}
 
 # A pinned version + hashes are REQUIRED. Without them we cannot install a
 # verified binary; degrade to "agent absent" (non-fatal — see header) rather
@@ -75,6 +94,7 @@ warn() { echo "opencode-kit(install): $*" >&2; }
 # not an integrity failure — there is nothing yet to mismatch).
 if [ -z "$ver_raw" ]; then
   warn "OPENCODE_VERSION not set; refusing to install an unpinned opencode. (non-fatal)"
+  remove_existing_non_pinned
   exit 0
 fi
 
@@ -86,15 +106,37 @@ case "$ver" in
     case "$ver" in
       *[!0-9A-Za-z.-]*)
         warn "OPENCODE_VERSION='$ver_raw' contains characters outside [0-9A-Za-z.-]; refusing to install"
+        remove_existing_non_pinned
         exit 0
         ;;
     esac
     ;;
   *)
     warn "OPENCODE_VERSION='$ver_raw' doesn't look like a version (want X.Y.Z or vX.Y.Z); refusing to install"
+    remove_existing_non_pinned
     exit 0
     ;;
 esac
+
+# Idempotency: if the pinned opencode is already installed AND executes, do
+# nothing. Checks the FIXED destination path directly ($dest_dir/opencode),
+# NOT whatever `opencode` first resolves to on PATH — a PATH lookup here would
+# trust an attacker- or another-kit-controlled binary earlier on PATH as if it
+# were this kit's own verified install, silently skipping this run's integrity
+# gate entirely. Also rejects a symlink at that path for the same reason the
+# post-extraction check below does (SECURITY, not just availability): a
+# symlink masquerading at the destination path would have its target's
+# `--version` output trusted as this kit's own.
+if [ -f "$dest_path" ] && [ ! -L "$dest_path" ] && [ -x "$dest_path" ]; then
+  installed_ver="$("$dest_path" --version 2>/dev/null || true)"
+  installed_ver="${installed_ver##* }"
+  installed_ver="${installed_ver#v}"
+  if [ -n "$installed_ver" ] && [ "$installed_ver" = "$ver" ]; then
+    echo "opencode-kit(install): opencode $ver already installed and runnable at $dest_path; skipping."
+    exit 0
+  fi
+fi
+remove_existing_non_pinned
 
 supports_avx2() {
   [ -r /proc/cpuinfo ] && grep -qi ' avx2 ' /proc/cpuinfo
@@ -129,29 +171,6 @@ fi
 pkg="cli-linux-${oc_arch}"
 asset="${pkg}-${ver}.tgz"
 url="https://registry.npmjs.org/@opencode/${pkg}/-/${asset}"
-# Install into a system PATH dir (root at create time). /usr/local/bin is on
-# PATH for every user in the base image (same destination as the goose-server
-# and openchamber kits' root-installed binaries).
-dest_dir="/usr/local/bin"
-
-# Idempotency: if the pinned opencode is already installed AND executes, do
-# nothing. Checks the FIXED destination path directly ($dest_dir/opencode),
-# NOT whatever `opencode` first resolves to on PATH — a PATH lookup here would
-# trust an attacker- or another-kit-controlled binary earlier on PATH as if it
-# were this kit's own verified install, silently skipping this run's integrity
-# gate entirely. Also rejects a symlink at that path for the same reason the
-# post-extraction check below does (SECURITY, not just availability): a
-# symlink masquerading at the destination path would have its target's
-# `--version` output trusted as this kit's own.
-if [ -f "$dest_dir/opencode" ] && [ ! -L "$dest_dir/opencode" ] && [ -x "$dest_dir/opencode" ]; then
-  installed_ver="$("$dest_dir/opencode" --version 2>/dev/null || true)"
-  installed_ver="${installed_ver##* }"
-  installed_ver="${installed_ver#v}"
-  if [ -n "$installed_ver" ] && [ "$installed_ver" = "$ver" ]; then
-    echo "opencode-kit(install): opencode $ver ($oc_arch) already installed and runnable at $dest_dir/opencode; skipping."
-    exit 0
-  fi
-fi
 
 if ! command -v curl >/dev/null 2>&1; then
   warn "curl not found in base image; cannot download opencode. Skipping (non-fatal)."
@@ -273,15 +292,15 @@ if [ ! -x "$extracted" ]; then
 fi
 
 mkdir -p "$dest_dir" 2>/dev/null || true
-if ! install -m 0755 "$extracted" "$dest_dir/opencode" 2>"$work_dir/install.log"; then
+if ! install -m 0755 "$extracted" "$dest_path" 2>"$work_dir/install.log"; then
   warn "failed to install binary to $dest_dir (non-fatal; opencode will be absent this boot)"
   [ -s "$work_dir/install.log" ] && sed 's/^/opencode-kit(install):   /' "$work_dir/install.log" >&2
   exit 0
 fi
 
-if "$dest_dir/opencode" --version >/dev/null 2>&1; then
-  echo "opencode-kit(install): opencode $ver ($oc_arch) installed and runnable at $dest_dir/opencode"
+if "$dest_path" --version >/dev/null 2>&1; then
+  echo "opencode-kit(install): opencode $ver ($oc_arch) installed and runnable at $dest_path"
 else
   warn "opencode installed to $dest_dir but is not runnable (non-fatal; check base image compatibility)"
-  rm -f "$dest_dir/opencode" 2>/dev/null || true
+  rm -f "$dest_path" 2>/dev/null || true
 fi

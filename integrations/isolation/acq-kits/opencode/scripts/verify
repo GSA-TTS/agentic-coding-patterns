@@ -101,19 +101,22 @@ info "3. INTEGRITY NEGATIVE: a wrong pinned hash refuses to install (fail-closed
 # against a deliberately wrong hash, pointed at a scratch install dir, and
 # assert nothing landed there.
 NEG_DEST="$WORK/negative-dest"
+FAIL_DEST="$WORK/failing-upgrade-dest"
 POS_DEST="$WORK/positive-dest"
 LAYOUT_DEST="$WORK/layout-dest"
 DUP_DEST="$WORK/duplicate-dest"
 DUP_REGULAR_DEST="$WORK/duplicate-regular-dest"
-mkdir -p "$NEG_DEST" "$POS_DEST" "$LAYOUT_DEST" "$DUP_DEST" "$DUP_REGULAR_DEST"
+mkdir -p "$NEG_DEST" "$FAIL_DEST" "$POS_DEST" "$LAYOUT_DEST" "$DUP_DEST" "$DUP_REGULAR_DEST"
 NEG_SCRIPT="$WORK/opencode-install-negative.sh"
+FAIL_SCRIPT="$WORK/opencode-install-failing-upgrade.sh"
 POS_SCRIPT="$WORK/opencode-install-positive.sh"
 LAYOUT_SCRIPT="$WORK/opencode-install-layout.sh"
 DUP_SCRIPT="$WORK/opencode-install-duplicate.sh"
 DUP_REGULAR_SCRIPT="$WORK/opencode-install-duplicate-regular.sh"
 STUB_BIN="$WORK/bin"
+FAIL_BIN="$WORK/failing-bin"
 STUB_SRC="$WORK/stub-src"
-mkdir -p "$STUB_BIN" "$STUB_SRC/package/bin"
+mkdir -p "$STUB_BIN" "$FAIL_BIN" "$STUB_SRC/package/bin"
 printf '%s\n' '#!/bin/sh' "if [ \"\${1:-}\" = \"--version\" ]; then echo \"$PINNED_VER\"; else echo stub-opencode; fi" > "$STUB_SRC/package/bin/opencode"
 chmod 0755 "$STUB_SRC/package/bin/opencode"
 cat > "$STUB_BIN/curl" <<'EOF'
@@ -131,7 +134,12 @@ done
 [ -n "$out" ] || exit 2
 cp "$STUB_OPENCODE_ARCHIVE" "$out"
 EOF
-chmod 0755 "$STUB_BIN/curl"
+cat > "$FAIL_BIN/curl" <<'EOF'
+#!/bin/sh
+echo "stub curl failure" >&2
+exit 22
+EOF
+chmod 0755 "$STUB_BIN/curl" "$FAIL_BIN/curl"
 if tar -czf "$WORK/stub-opencode.tar.gz" -C "$STUB_SRC" package/bin/opencode 2>"$WORK/stub-tar.log"; then
   sed "s|dest_dir=\"/usr/local/bin\"|dest_dir=\"$NEG_DEST\"|" "$INSTALL_SCRIPT" > "$NEG_SCRIPT"
   # Isolate PATH for this probe: the HOST may itself have an `opencode` binary
@@ -162,7 +170,56 @@ if tar -czf "$WORK/stub-opencode.tar.gz" -C "$STUB_SRC" package/bin/opencode 2>"
     sed 's/^/  | /' "$WORK/negative.log" >&2
   fi
 
-  info "4. POSITIVE INSTALL: valid npm-layout archive installs the binary"
+  info "4. FAILED UPGRADE: a stale wrong-version binary is removed before degraded install"
+  sed "s|dest_dir=\"/usr/local/bin\"|dest_dir=\"$FAIL_DEST\"|" "$INSTALL_SCRIPT" > "$FAIL_SCRIPT"
+  printf '%s\n' '#!/bin/sh' 'if [ "${1:-}" = "--version" ]; then echo "opencode v1.18.34"; else echo old-opencode; fi' > "$FAIL_DEST/opencode"
+  chmod 0755 "$FAIL_DEST/opencode"
+  if OPENCODE_VERSION="$PINNED_VER" \
+     OPENCODE_SHA256_LINUX_X64="deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" \
+     OPENCODE_SHA256_LINUX_X64_BASELINE="deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" \
+     OPENCODE_SHA256_LINUX_ARM64="deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" \
+     PATH="$FAIL_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
+     sh "$FAIL_SCRIPT" >"$WORK/failing-upgrade.log" 2>&1; then
+    if [ ! -e "$FAIL_DEST/opencode" ] && [ ! -L "$FAIL_DEST/opencode" ]; then
+      ok "failed upgrade removed the stale wrong-version opencode binary"
+    else
+      bad "failed upgrade left a stale wrong-version opencode binary runnable"
+      sed 's/^/  | /' "$WORK/failing-upgrade.log" >&2
+    fi
+    if grep -q "removed existing non-pinned opencode" "$WORK/failing-upgrade.log" \
+        && grep -q "download failed" "$WORK/failing-upgrade.log"; then
+      ok "failed upgrade logs removal before the degraded download failure"
+    else
+      bad "failed upgrade did not log both stale-binary removal and download failure"
+      sed 's/^/  | /' "$WORK/failing-upgrade.log" >&2
+    fi
+  else
+    bad "failed-upgrade run exited non-zero (availability failure should still be sandbox-soft)"
+    sed 's/^/  | /' "$WORK/failing-upgrade.log" >&2
+  fi
+
+  rm -rf "$FAIL_DEST"
+  mkdir -p "$FAIL_DEST"
+  printf '%s\n' '#!/bin/sh' 'if [ "${1:-}" = "--version" ]; then echo "opencode v1.18.34"; else echo old-opencode; fi' > "$FAIL_DEST/opencode"
+  chmod 0755 "$FAIL_DEST/opencode"
+  if OPENCODE_VERSION="not-a-version" \
+     OPENCODE_SHA256_LINUX_X64="deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" \
+     OPENCODE_SHA256_LINUX_X64_BASELINE="deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" \
+     OPENCODE_SHA256_LINUX_ARM64="deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" \
+     PATH="/usr/bin:/bin:/usr/sbin:/sbin" \
+     sh "$FAIL_SCRIPT" >"$WORK/invalid-version-upgrade.log" 2>&1; then
+    if [ ! -e "$FAIL_DEST/opencode" ] && [ ! -L "$FAIL_DEST/opencode" ]; then
+      ok "invalid-version upgrade removed the stale wrong-version opencode binary"
+    else
+      bad "invalid-version upgrade left a stale wrong-version opencode binary runnable"
+      sed 's/^/  | /' "$WORK/invalid-version-upgrade.log" >&2
+    fi
+  else
+    bad "invalid-version upgrade exited non-zero (pin validation failure should still be sandbox-soft)"
+    sed 's/^/  | /' "$WORK/invalid-version-upgrade.log" >&2
+  fi
+
+  info "5. POSITIVE INSTALL: valid npm-layout archive installs the binary"
   stub_sha="$( (sha256sum "$WORK/stub-opencode.tar.gz" 2>/dev/null || shasum -a 256 "$WORK/stub-opencode.tar.gz" 2>/dev/null) | cut -d' ' -f1)"
   sed "s|dest_dir=\"/usr/local/bin\"|dest_dir=\"$POS_DEST\"|" "$INSTALL_SCRIPT" > "$POS_SCRIPT"
   if OPENCODE_VERSION="$PINNED_VER" \
@@ -199,9 +256,13 @@ if tar -czf "$WORK/stub-opencode.tar.gz" -C "$STUB_SRC" package/bin/opencode 2>"
     sed 's/^/  | /' "$WORK/positive.log" >&2
   fi
 
-  info "5. ARCHITECTURE SELECTION: x64 AVX2 and baseline packages are selected correctly"
+  info "6. ARCHITECTURE SELECTION: x64 AVX2 and baseline packages are selected correctly"
   ARCH_SCRIPT="$WORK/opencode-install-arch.sh"
-  sed "s|dest_dir=\"/usr/local/bin\"|dest_dir=\"$WORK/arch-dest\"|" "$INSTALL_SCRIPT" > "$ARCH_SCRIPT"
+  ARCH_CPUINFO="$WORK/arch-cpuinfo"
+  sed \
+    -e "s|dest_dir=\"/usr/local/bin\"|dest_dir=\"$WORK/arch-dest\"|" \
+    -e "s|/proc/cpuinfo|$ARCH_CPUINFO|g" \
+    "$INSTALL_SCRIPT" > "$ARCH_SCRIPT"
   ARCH_STUB_BASE="$WORK/arch-stubs"
   mkdir -p "$ARCH_STUB_BASE/avx2" "$ARCH_STUB_BASE/baseline"
   cat > "$ARCH_STUB_BASE/avx2/uname" <<'EOF'
@@ -214,19 +275,20 @@ echo x86_64
 EOF
   cat > "$ARCH_STUB_BASE/avx2/grep" <<'EOF'
 #!/bin/sh
-case "$1" in
-  -qi) exit 0 ;;
-  *) exec /usr/bin/grep "$@" ;;
-esac
+for arg in "$@"; do
+  [ "$arg" = "/proc/cpuinfo" ] && exit 0
+done
+exec /usr/bin/grep "$@"
 EOF
   cat > "$ARCH_STUB_BASE/baseline/grep" <<'EOF'
 #!/bin/sh
-case "$1" in
-  -qi) exit 1 ;;
-  *) exec /usr/bin/grep "$@" ;;
-esac
+for arg in "$@"; do
+  [ "$arg" = "/proc/cpuinfo" ] && exit 1
+done
+exec /usr/bin/grep "$@"
 EOF
   chmod 0755 "$ARCH_STUB_BASE/avx2/uname" "$ARCH_STUB_BASE/baseline/uname" "$ARCH_STUB_BASE/avx2/grep" "$ARCH_STUB_BASE/baseline/grep"
+  printf '%s\n' 'flags : fpu sse avx avx2 aes' > "$ARCH_CPUINFO"
   rm -rf "$WORK/arch-dest"
   if OPENCODE_VERSION="$PINNED_VER" \
      OPENCODE_SHA256_LINUX_X64="$stub_sha" \
@@ -241,6 +303,7 @@ EOF
     bad "x64 host with AVX2 did not select the x64 npm platform tarball"
     sed 's/^/  | /' "$WORK/arch-avx2.log" >&2
   fi
+  printf '%s\n' 'flags : fpu sse avx' > "$ARCH_CPUINFO"
   rm -rf "$WORK/arch-dest"
   if OPENCODE_VERSION="$PINNED_VER" \
      OPENCODE_SHA256_LINUX_X64="5555555555555555555555555555555555555555555555555555555555555555" \
@@ -260,7 +323,7 @@ else
   sed 's/^/  | /' "$WORK/stub-tar.log" >&2
 fi
 
-info "6. ARCHIVE LAYOUT NEGATIVE: a hardlink member refuses to install (fail-closed)"
+info "7. ARCHIVE LAYOUT NEGATIVE: a hardlink member refuses to install (fail-closed)"
 HARDLINK_SRC="$WORK/hardlink-src"
 mkdir -p "$HARDLINK_SRC/package/bin"
 printf '%s\n' '#!/bin/sh' 'echo hardlink-target' > "$HARDLINK_SRC/package/bin/target"
@@ -297,7 +360,7 @@ else
   sed 's/^/  | /' "$WORK/hardlink-tar.log" >&2
 fi
 
-info "7. ARCHIVE LAYOUT NEGATIVE: duplicate opencode entries refuse to install (fail-closed)"
+info "8. ARCHIVE LAYOUT NEGATIVE: duplicate opencode entries refuse to install (fail-closed)"
 DUP_SRC_REGULAR="$WORK/duplicate-regular"
 DUP_SRC_HARDLINK="$WORK/duplicate-hardlink"
 mkdir -p "$DUP_SRC_REGULAR/package/bin" "$DUP_SRC_HARDLINK/package/bin"
@@ -338,7 +401,7 @@ else
   sed 's/^/  | /' "$WORK/duplicate-tar.log" >&2
 fi
 
-info "8. ARCHIVE LAYOUT NEGATIVE: duplicate regular opencode entries refuse to install (fail-closed)"
+info "9. ARCHIVE LAYOUT NEGATIVE: duplicate regular opencode entries refuse to install (fail-closed)"
 DUP_REGULAR_A="$WORK/duplicate-regular-a"
 DUP_REGULAR_B="$WORK/duplicate-regular-b"
 mkdir -p "$DUP_REGULAR_A/package/bin" "$DUP_REGULAR_B/package/bin"
@@ -379,21 +442,21 @@ else
 fi
 
 if [ "$RUN_ACQ" != "1" ]; then
-  info "9. Live sandbox check"
+  info "10. Live sandbox check"
   skip "RUN_ACQ=1 not set — skipped live acq sandbox verification"
   printf '\nSummary\n  %d passed, %d failed\n' "$pass" "$fail"
   [ "$fail" -eq 0 ]
   exit $?
 fi
 
-info "9. Live sandbox preconditions"
+info "10. Live sandbox preconditions"
 if ! command -v acq >/dev/null 2>&1; then
   bad "acq not on PATH"
   exit 1
 fi
 ok "acq on PATH"
 
-info "10. Create sandbox with the kit"
+info "11. Create sandbox with the kit"
 printf '  creating %s (workspace %s)...\n' "$SBX_NAME" "$WORK"
 if acq create --name "$SBX_NAME" --kit "$KIT_DIR" opencode "$WORK" >"$CREATE_LOG" 2>&1; then
   ok "sandbox created with --kit opencode"
@@ -405,7 +468,7 @@ fi
 
 in_sbx() { acq exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true; }
 
-info "11. opencode binary present and on PATH"
+info "12. opencode binary present and on PATH"
 _elapsed=0
 while [ "$_elapsed" -lt "$READY_TIMEOUT" ]; do
   if [ "$(in_sbx "command -v opencode >/dev/null 2>&1 && echo yes")" = "yes" ]; then
@@ -420,7 +483,7 @@ else
   bad "opencode not found on PATH after ${READY_TIMEOUT}s"
 fi
 
-info "12. Installed version matches the pin"
+info "13. Installed version matches the pin"
 installed_ver="$(in_sbx "opencode --version 2>/dev/null")"
 installed_ver="${installed_ver##* }"
 installed_ver="${installed_ver#v}"
