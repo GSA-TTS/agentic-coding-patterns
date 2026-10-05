@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.12.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.11.0...v1.12.0) (2026-10-05)
+
+
+### Features
+
+* **acq-kits:** install OpenCode v2 via opencode kit ([#466](https://github.com/GSA-TTS/agentic-coding-patterns/issues/466)) ([dc84c6c](https://github.com/GSA-TTS/agentic-coding-patterns/commit/dc84c6c2d0756447f88931a04c15e5fe438062a6))
+
+
+### Bug Fixes
+
+* **ci:** replace markdownlint-cli2 with markdownlint-cli, drop the shim ([#471](https://github.com/GSA-TTS/agentic-coding-patterns/issues/471)) ([dd22daf](https://github.com/GSA-TTS/agentic-coding-patterns/commit/dd22daffcafe7aa54f9c6074bb95cca51b71c8c1))
+
 ## [1.11.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.10.0...v1.11.0) (2026-10-02)
 
 
