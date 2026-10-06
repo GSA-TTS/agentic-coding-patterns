@@ -1,5 +1,37 @@
 # Changelog
 
+## [1.12.1](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.12.0...v1.12.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* **ci:** clear two new markdownlint-cli transitive CVEs (katex, smol-toml) ([#478](https://github.com/GSA-TTS/agentic-coding-patterns/issues/478)) ([f1913ba](https://github.com/GSA-TTS/agentic-coding-patterns/commit/f1913bae5754f2401a165ed5bc961a0a61f697f7))
+
+## [1.12.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.11.0...v1.12.0) (2026-10-05)
+
+
+### Features
+
+* **acq-kits:** install OpenCode v2 via opencode kit ([#466](https://github.com/GSA-TTS/agentic-coding-patterns/issues/466)) ([dc84c6c](https://github.com/GSA-TTS/agentic-coding-patterns/commit/dc84c6c2d0756447f88931a04c15e5fe438062a6))
+
+
+### Bug Fixes
+
+* **ci:** replace markdownlint-cli2 with markdownlint-cli, drop the shim ([#471](https://github.com/GSA-TTS/agentic-coding-patterns/issues/471)) ([dd22daf](https://github.com/GSA-TTS/agentic-coding-patterns/commit/dd22daffcafe7aa54f9c6074bb95cca51b71c8c1))
+
+## [1.11.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.10.0...v1.11.0) (2026-10-02)
+
+
+### Features
+
+* **acq-kits:** add opencode agent-harness kit (SHA-pinned release binary) ([#455](https://github.com/GSA-TTS/agentic-coding-patterns/issues/455)) ([36038a6](https://github.com/GSA-TTS/agentic-coding-patterns/commit/36038a6d1a7055ae90c775be94bd4d4f3d08805a))
+
+
+### Bug Fixes
+
+* **usai-provider:** drop embedding models from the chat-model catalog ([#462](https://github.com/GSA-TTS/agentic-coding-patterns/issues/462)) ([56500ba](https://github.com/GSA-TTS/agentic-coding-patterns/commit/56500baec328ba26041878d03bab35e2a997e401))
+* **usai-provider:** make the catalog drift check report real drift ([#459](https://github.com/GSA-TTS/agentic-coding-patterns/issues/459)) ([73606d7](https://github.com/GSA-TTS/agentic-coding-patterns/commit/73606d73be670754c33002765de1a2d6ad996c45))
+
 ## [1.10.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.9.0...v1.10.0) (2026-10-02)
 
 

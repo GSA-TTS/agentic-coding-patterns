@@ -23,7 +23,7 @@ not agent behavior. (Behavioral patterns live in `skills/`, `prompts/`, etc.)
 | [`zscaler-ca-certificate/`](zscaler-ca-certificate/) | Trust the public Zscaler Root CA in the sandbox (msb: native `--trust-host-cas`; sbx: file-drop + `update-ca-certificates`). |
 | [`git-ssh-sign/`](git-ssh-sign/) | Sign git commits and tags with the SSH key forwarded from the host agent (vendored from sbx-kits-contrib). |
 | [`openchamber/`](openchamber/) | Run OpenChamber, a browser UI for OpenCode, inside the sandbox alongside the terminal TUI. Opt-in (see its parity note). |
-| [`opencode/`](opencode/) | Install the OpenCode terminal AI coding agent as a pinned, SHA-256-verified release binary. Agent-harness kit; no ports. |
+| [`opencode/`](opencode/) | Install the OpenCode v2 terminal AI coding agent from pinned, SHA-256-verified npm platform tarballs. Agent-harness kit; no ports. |
 | [`paseo/`](paseo/) | Self-host the [Paseo](https://github.com/getpaseo/paseo) daemon + browser web UI (for coding agents) inside the sandbox on one port. Opt-in; agent-generic wrapper, no shared TUI session. |
 | [`prime-agent/`](prime-agent/) | Install [PrimeIntellect-ai/prime-agent](https://github.com/PrimeIntellect-ai/prime-agent), a terminal AI coding assistant with an embedded IPython tool. Opt-in; TUI, no ports. |
 | [`pi-coding-agent/`](pi-coding-agent/) | Install [earendil-works/pi](https://github.com/earendil-works/pi) (`@earendil-works/pi-coding-agent`), a plain terminal AI coding agent (read/write/edit/bash tools only). Opt-in; TUI, no ports. |
