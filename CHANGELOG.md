@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.1](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.12.0...v1.12.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* **ci:** clear two new markdownlint-cli transitive CVEs (katex, smol-toml) ([#478](https://github.com/GSA-TTS/agentic-coding-patterns/issues/478)) ([f1913ba](https://github.com/GSA-TTS/agentic-coding-patterns/commit/f1913bae5754f2401a165ed5bc961a0a61f697f7))
+
 ## [1.12.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.11.0...v1.12.0) (2026-10-05)
 
 
