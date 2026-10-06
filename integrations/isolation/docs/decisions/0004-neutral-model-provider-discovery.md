@@ -403,6 +403,42 @@ ADR at that time, not by standing negotiation machinery.
   explicit contract in Layer 2, step 2: no network, no credential, bounded time
   and output, and failure routed to the snapshot fallback. Both properties are
   required, and neither substitutes for the other.
+- **The containment contract is a documented requirement, not yet a technically
+  enforced one — this is a known gap, not an oversight, and it is a release
+  blocker, not accepted debt.** Verified directly against `acq.backends/`
+  (quickstart): no per-subprocess network restriction exists at all (acq's
+  network policy is sandbox-wide and create-time-only, with no mechanism to
+  deny network to one guest process while permitting it to siblings — this
+  includes loopback and any inherited socket, not just the obvious egress
+  path); no environment-minimization helper exists (the two existing exec
+  paths only ever *add* `-e` flags via inheritance, never construct an
+  explicit allowlist — "no credential in env" bounds only the environment-
+  variable channel, not every way a process could reach credential material,
+  e.g. an inherited file descriptor or a guest-local metadata endpoint); the
+  two existing wall-clock `timeout(1)` uses are narrow, hand-copied, and
+  **fail open** (silently run unbounded) when `timeout` is absent from the
+  guest, which a containment contract cannot inherit, and neither kills the
+  full process tree, only the immediate child; and no subprocess output-size
+  cap exists anywhere in either repo (the sibling `fetchJsonBounded` helper
+  bounds an in-process JS `fetch()` response, not a child process's stdout or
+  stderr, and does not stop an uncapped write from being buffered before the
+  cap is checked). Each of the four properties would be new implementation
+  work, not reuse of an existing primitive.
+
+  **Until an orchestrator-controlled mechanism enforces all four properties,
+  a provider-shipped normalizer MUST be treated as trusted arbitrary code
+  running with the privileges and reachability available to any process in
+  that guest — not as code already contained by this ADR.** Implementation
+  MUST NOT represent the contract as enforced, or run a normalizer under it,
+  on the strength of this ADR alone. If a required mechanism is unavailable
+  on the target guest, the orchestrator MUST refuse to execute that
+  provider's normalizer and fall back to the snapshot — never degrade to an
+  unenforced run. Concretely: process-tree-wide termination on timeout (not
+  single-child), an explicit allowlisted environment (not inherited-then-
+  trimmed), network denial established before exec (not probed after), and a
+  streamed byte-counting cap on both stdout and stderr (not a post-hoc size
+  check after unbounded buffering). None of this may depend on an
+  opportunistically-available guest utility with a silent unbounded fallback.
 - **Atomic writes.** Facts and aggregate writes are temp-file + rename; no reader
   observes a partial write.
 - **Bounded resource use.** Per-provider fetch timeout + response-size cap
@@ -441,7 +477,7 @@ sequenceDiagram
     ACQ->>RO: mount HSTATE read-only
     AGENT-->>RO: sudo tee providers/evil.json (FAILS: read-only mount)
     ACQ->>RO: invoke orchestrator from :ro path (restart-safe)
-    ORCH->>ORCH: bounded fetch (helper holds credential; timeout + size cap + host check)
+    ORCH->>ORCH: bounded fetch (helper holds credential, timeout + size cap + host check)
     RO->>ORCH: run normalizer on fetched bytes (no network, NO credential, bounded)
     ORCH->>CAT: write per-sandbox catalog (rw, never shared)
     Note over ACQ,RO: acq trusts only host-authoritative read-only inputs and the catalog stays guest-local (never cross sandbox)
@@ -596,6 +632,15 @@ sequenceDiagram
   credential boundary this ADR deliberately narrows, and the read-only mount
   does not substitute for it. Needs human/CODEOWNERS review, not an
   implementer's judgement call.
+- **Shipping Layer 2 with the containment contract unenforced.** Per
+  [Consequences → Negative](#negative--risks), none of the four properties has
+  an existing enforcement primitive to reuse; each needs new, fail-closed
+  implementation. An implementer choosing to ship a first cut that documents
+  the contract without mechanically enforcing it — treating this ADR's prose
+  as sufficient — is the same category of decision as relaxing the contract
+  outright, just reached by omission instead of by edit. Needs human/
+  CODEOWNERS review before any normalizer is run against a non-pinned,
+  live-fetched provider feed on that basis.
 
 ## References
 
@@ -613,7 +658,8 @@ sequenceDiagram
   harness-adapter open questions this ADR's Layer 3 boundary answers for the
   model-config slice.
 - Quickstart [issue #506](https://github.com/GSA-TTS/agentic-coding-quickstart/issues/506)
-  tracking the startup-ordering race flagged above (`acq run` does not wait
+  (closed, fixed by [PR #512](https://github.com/GSA-TTS/agentic-coding-quickstart/pull/512))
+  — the startup-ordering race flagged above (`acq run` did not wait
   for an in-guest `startup`-phase config write to finish before attach,
-  reproduced live against `sbx` v0.43.0) — the upstream fix this ADR's
-  Layers 2–3 depend on but do not themselves provide.
+  reproduced live against `sbx` v0.43.0) that Layers 2–3's startup-phase
+  ordering assumption depends on. Fixed upstream of this ADR, not by it.
