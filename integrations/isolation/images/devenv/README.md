@@ -34,6 +34,30 @@ The image contains only the base-agnostic toolchain: Nix (single-user store
 owned by `agent`), devenv + direnv pinned to a nixpkgs rev, flakes enabled,
 and the bash wiring that puts the Nix profile and direnv hook in every shell.
 
+The devenv major is part of the image contract: `1.x` tags ship devenv 1.x
+(nixos-25.05), `2.x` tags ship devenv 2.x (nixos-26.05). devenv 2.x bundles
+its own Nix for evaluation and builds and shares the single-user store with
+the installer's Nix on `PATH`; both read and write the same store database.
+
+## devenv 2.x notes for consuming repos
+
+A 2.x image runs a repo's `devenv.nix` with the modules pinned by that repo's
+`devenv.lock` (the `devenv` input), so a 1.x-locked repo keeps its 1.x module
+semantics until someone runs `devenv update`. What the CLI major changes
+regardless of the lock:
+
+- The `git-hooks` input is no longer implicit. A repo using `git-hooks.hooks`
+  fails with `git-hooks or pre-commit-hooks input required` until it declares
+  the input in `devenv.yaml`.
+- `devenv shell` rewrites `devenv.lock` to drop the implicit `git-hooks`,
+  `pre-commit-hooks`, and `flake-compat` nodes; a 1.x CLI adds them back at
+  current HEAD. Teams mixing 1.x CI with 2.x sandboxes see lock churn until
+  `git-hooks` is declared explicitly, which makes both majors agree.
+- `.devenv/` written by either major is reusable by the other (the eval cache
+  is keyed on the devenv version).
+- `devenv up -d` works; `devenv processes down` may time out and SIGKILL the
+  process group without stopping the service's children.
+
 Everything else is a kit's job:
 
 - **Runtime CA trust** — e.g. the `zscaler-ca-certificate` kit; the image pins
@@ -53,6 +77,7 @@ docker build --build-arg EXTRA_CA_CERT="$(cat proxy-root-ca.crt)" .
 ## Versioning
 
 [`VERSION`](VERSION) is the published tag, bumped together with any toolchain
-change (`NIXPKGS_REV`, installer version, base image); tags are never reused —
+change (`NIXPKGS_REV`, installer version, base image), with a major bump when
+the devenv major changes; tags are never reused —
 the workflow refuses to republish an existing version tag. A moving `latest`
 also exists — pin the version tag in anything durable.
