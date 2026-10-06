@@ -187,3 +187,25 @@ kits:
       Adapter mode is the only path that makes a network call, and requires the
       operator to allow-list the central host via a companion mixin (the kit
       itself still declares no egress).
+
+  model-router-proxy:
+    backends: [sbx, msb]
+    parity: |
+      POC mixin that runs the model-router PROXY inside the sandbox and points
+      OpenCode's usai baseURL at it, so every prompt auto-switches to the best
+      model (graded reasoning + cheap LLM judge). This is the request-path,
+      auto-switching counterpart to the advisory model-router MCP kit. A single
+      startup-phase script (files/home/model-router-proxy-install.sh) fetches
+      the model-router-service repo at a PINNED SHA (public GitHub tarball via
+      codeload), installs its pinned deps to the user prefix, runs it in the
+      background on 127.0.0.1 reusing the usai-provider USAI_API_KEY and the
+      sandbox CA trust (no new secret, no ROUTER_CA_BUNDLE — the
+      zscaler-ca-certificate kit supplies the proxy root), waits for /readyz,
+      then flips OpenCode's baseURL via the installed model-router-toggle CLI.
+      Both backends run the identical step. Publishes NO ports (loopback only).
+      Egress allow-list: codeload.github.com + api.github.com (fetch), pypi.org
+      + files.pythonhosted.org (deps), api.gsa.usai.gov (the proxy's upstream).
+      Fail-soft: missing python3/key, failed fetch/deps/boot, or a proxy that
+      never readies all leave OpenCode on the direct USAi gateway and exit 0.
+      Compose with usai-provider and zscaler-ca-certificate. POC only; the
+      production shape is the cloud.gov deployment in the service repo.

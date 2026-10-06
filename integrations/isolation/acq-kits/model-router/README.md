@@ -16,6 +16,21 @@ idea behind the public
 [`jev-skill-router`](https://github.com/ydmw74/jev-skill-router), applied to
 **models** instead of skills.
 
+## Advisory tool vs. automatic proxy (planned)
+
+This kit is **advisory**: the `model_select` tool *recommends* a model; the agent
+(or you) decides whether to adopt it. OpenCode gives a tool no hook to change the
+active model mid-turn, so this kit cannot auto-switch.
+
+A separate, **planned** kit — `model-router-proxy` — will make routing automatic
+by pointing OpenCode's `usai` `baseURL` at a running **model-router-service**
+(an OpenAI-compatible proxy that inspects each prompt, picks a model via a graded
+reasoning score + a cheap LLM judge, and forwards transparently). That is the
+request-path counterpart to this advisory tool, and the two compose (proxy for
+auto-switch, this tool for in-agent visibility). See the proposal in
+[`docs/proposals/model-router-proxy-kit.md`](docs/proposals/model-router-proxy-kit.md)
+(tracking only — it lands after the service is ready).
+
 ## Inspiration, not copy
 
 This kit mirrors the **shape** of `jev-skill-router` (a stdio MCP server that

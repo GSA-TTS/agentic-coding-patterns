@@ -1,0 +1,94 @@
+# spec.yaml — model-router-proxy (POC acq mixin kit, hybrid/v1)
+#
+# WHAT: run the model-router proxy INSIDE the sandbox and point OpenCode at it,
+# so every prompt auto-routes to the best model (graded reasoning + cheap LLM
+# judge). This is the request-path, AUTO-SWITCHING counterpart to the advisory
+# `model-router` MCP kit — see that kit's docs/proposals/model-router-proxy-kit.md.
+#
+# POC SCOPE (minimal, self-contained in the sandbox):
+#   - fetch the model-router-service repo at a PINNED SHA (public GitHub tarball)
+#   - run it in the background with the sandbox python3, reusing the usai-provider
+#     kit's injected USAI_API_KEY + the sandbox CA trust (no new secret)
+#   - flip OpenCode's usai baseURL to the loopback proxy, install the toggle CLI
+#   This is NOT the production shape (that's cloud.gov, per the service repo).
+#
+# COMPOSES WITH: usai-provider (provides USAI_API_KEY + the config this kit flips)
+# and zscaler-ca-certificate (puts the proxy root in the sandbox trust store so
+# the in-sandbox proxy can reach USAi over an inspected TLS path). Apply all
+# three together.
+#
+# FAIL-SOFT: a routing convenience. Any failure (no python3, no key, fetch/dep/
+# boot failure, proxy never ready) leaves OpenCode on the DIRECT USAi gateway and
+# exits 0 — never a dead sandbox. The install script enforces this.
+#
+# NEUTRAL (backend-agnostic) hybrid/v1 form; acq maps files/commands onto the
+# active backend (sbx, msb).
+schemaVersion: "hybrid/v1"
+kind: mixin
+name: model-router-proxy
+displayName: Model Router Proxy (auto-switch models for OpenCode, in-sandbox POC)
+description: >
+  POC kit that runs the model-router proxy inside the sandbox and points
+  OpenCode's usai provider at it, so every prompt is auto-routed to the best
+  model (graded reasoning score + cheap LLM judge) with streaming preserved.
+  Fetches the service at a pinned SHA, reuses the usai-provider USAi key and the
+  sandbox CA trust, binds loopback only, and installs the model-router-toggle
+  CLI to flip routing on/off. Fail-soft: any problem leaves OpenCode on the
+  direct gateway. Compose with usai-provider and zscaler-ca-certificate.
+
+caps:
+  network:
+    allow:
+      # Fetch the pinned service tarball. GitHub serves source archives from
+      # codeload (api.github.com 302s there); allow both so the fetch resolves.
+      - codeload.github.com
+      - api.github.com
+      # pip needs the Python package index to install the service's pinned deps
+      # (fastapi/uvicorn/httpx/pydantic). Files are served from the fastly CDN.
+      - pypi.org
+      - files.pythonhosted.org
+      # The proxy itself forwards to USAi — same host usai-provider allow-lists.
+      # Harmless to repeat; keeps this kit self-describing if applied alone.
+      - api.gsa.usai.gov
+
+files:
+  - path: /home/agent/model-router-proxy-install.sh
+    mode: "0755"
+    source: files/home/model-router-proxy-install.sh
+    description: >
+      Startup: fetch the pinned service, install deps to a local prefix, run the
+      proxy in the background (reusing USAI_API_KEY + sandbox CA), wait for
+      /readyz, flip OpenCode baseURL to the loopback proxy, install the toggle.
+
+commands:
+  # Startup phase, as the agent user. Runs AFTER usai-provider's merge (both are
+  # startup/user 1000; acq preserves file-drop-before-startup ordering). Idempotent
+  # and fail-soft — see the script header.
+  - phase: startup
+    user: "1000"
+    description: Fetch + run the model-router proxy in-sandbox and route OpenCode through it
+    command:
+      - sh
+      - /home/agent/model-router-proxy-install.sh
+
+# No publishedPorts: the proxy binds 127.0.0.1 and is consumed by OpenCode
+# in-sandbox over loopback. Nothing is exposed outside the sandbox.
+
+agentContext: |
+  ## Model Router Proxy (auto-switch, POC)
+
+  This sandbox runs a **model-router proxy** on `127.0.0.1` and OpenCode's `usai`
+  provider is pointed at it, so **every prompt is auto-routed** to the model that
+  best fits it (cheap/fast for trivial edits, strong-reasoning for hard tasks).
+  Routing is transparent; the chosen model is reported in the
+  `x-model-router-decision` response header and the service's decision log.
+
+  Controls (installed on PATH):
+  - `model-router-toggle status` — show whether routing is ON and the proxy is up
+  - `model-router-toggle off` / `on` — stop/start routing (restart the OpenCode
+    session for the change to take effect — baseURL is read at init)
+  - `model-router feedback --last --model <id>` then `model-router recalibrate` —
+    correct a bad route and re-tune the reasoning thresholds
+
+  If the proxy ever isn't running, OpenCode falls back to talking to USAi
+  directly — routing is a convenience, never a hard dependency.

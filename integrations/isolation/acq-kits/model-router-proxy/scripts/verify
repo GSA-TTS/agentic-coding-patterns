@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+#
+# verify — host-side validation for the model-router-proxy POC kit.
+#
+#   OFFLINE (default): the acq-kits validator (schema + files[].source +
+#   registry) and static guards on the install script (fail-soft exits, pinned
+#   SHA present, loopback bind, reuse-USAI_API_KEY, flip-via-toggle).
+#
+#   LIVE (RUN_ACQ=1): create a sandbox with this kit (+ usai-provider +
+#   zscaler-ca-certificate), wait for startup, then assert the proxy answers
+#   /readyz in-sandbox and OpenCode's baseURL was flipped to the loopback proxy.
+#
+# Usage:
+#   path/to/model-router-proxy/scripts/verify
+#   RUN_ACQ=1 path/to/.../scripts/verify
+#   KEEP=1 RUN_ACQ=1 path/to/.../scripts/verify
+
+set -uo pipefail
+
+KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+REPO_ROOT="$(cd "$KIT_DIR/../../../.." && pwd)"
+INSTALL="$KIT_DIR/files/home/model-router-proxy-install.sh"
+SBX_NAME="mrp-verify-$$"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/mrp-verify.XXXXXX")"
+KEEP="${KEEP:-0}"
+RUN_ACQ="${RUN_ACQ:-0}"
+READY_TIMEOUT="${READY_TIMEOUT:-90}"
+PORT="${MODEL_ROUTER_PORT:-8080}"
+
+pass=0; fail=0
+ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass+1)); }
+bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail+1)); }
+skip() { printf '  \033[33mSKIP\033[0m %s\n' "$1"; }
+info() { printf '\n\033[1m%s\033[0m\n' "$1"; }
+
+cleanup() {
+  if [ "$KEEP" = "1" ]; then printf '\nKEEP=1; leaving %s and %s\n' "$SBX_NAME" "$WORK" >&2; return; fi
+  [ "$RUN_ACQ" = "1" ] && acq rm "$SBX_NAME" >/dev/null 2>&1 || true
+  rm -rf "$WORK" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT INT TERM
+
+info "0. Preconditions"
+[ -f "$KIT_DIR/spec.yaml" ] && ok "spec.yaml present" || { bad "spec.yaml missing"; exit 1; }
+[ -f "$INSTALL" ] && ok "install script present" || { bad "install script missing"; exit 1; }
+
+info "1. Validate the kit spec (schema + registry)"
+VAL="$REPO_ROOT/integrations/isolation/acq-kits/validate-kits.py"
+if ! command -v python3 >/dev/null 2>&1; then skip "python3 not on PATH"
+elif ! python3 -c 'import jsonschema, yaml' >/dev/null 2>&1; then skip "needs jsonschema+pyyaml"
+else
+  if out="$(python3 "$VAL" --root "$REPO_ROOT" 2>&1)"; then ok "validate-kits.py passes"
+  else bad "validate-kits.py failed:"; printf '%s\n' "$out" | sed 's/^/    | /' >&2; fi
+fi
+
+info "2. Install-script safety guards (static, offline)"
+grep -q 'exit 0' "$INSTALL" && ok "has fail-soft exit 0 paths" || bad "no fail-soft exit"
+grep -q 'command -v python3' "$INSTALL" && ok "preflights python3" || bad "no python3 preflight"
+grep -q 'USAI_API_KEY' "$INSTALL" && ok "reuses injected USAI_API_KEY" || bad "does not reuse USAI_API_KEY"
+grep -q '127.0.0.1' "$INSTALL" && ok "binds loopback only" || bad "not loopback-bound"
+grep -q 'codeload.github.com' "$INSTALL" && ok "fetches pinned tarball from codeload" || bad "no codeload fetch"
+grep -Eq 'MODEL_ROUTER_SERVICE_REF:-[0-9a-f]{40}' "$INSTALL" && ok "service ref pinned to a full SHA" || bad "service ref not a full-SHA pin"
+grep -q -- '--harness opencode on' "$INSTALL" && ok "flips OpenCode baseURL via toggle" || bad "does not flip via toggle"
+grep -q '/readyz' "$INSTALL" && ok "waits for /readyz before flipping" || bad "no readiness wait"
+
+info "3. Pinned SHA is fetchable (network; non-fatal if offline)"
+REF="$(grep -Eo 'MODEL_ROUTER_SERVICE_REF:-[0-9a-f]{40}' "$INSTALL" | head -1 | sed 's/.*://')"
+REPO="$(grep -Eo 'MODEL_ROUTER_SERVICE_REPO:-[^}]+' "$INSTALL" | head -1 | sed 's/^MODEL_ROUTER_SERVICE_REPO:-//')"
+if command -v curl >/dev/null 2>&1 && [ -n "$REF" ]; then
+  if curl -fsI "https://codeload.github.com/${REPO}/tar.gz/${REF}" >/dev/null 2>&1; then
+    ok "codeload tarball for ${REPO}@${REF:0:12} resolves (200)"
+  else
+    skip "pinned tarball not reachable from here (offline, or ref not pushed yet)"
+  fi
+else
+  skip "curl unavailable or no ref parsed"
+fi
+
+if [ "$RUN_ACQ" != "1" ]; then
+  info "Live checks (4-5): SKIPPED (set RUN_ACQ=1)"
+  info "Summary"; printf '  %d passed, %d failed\n' "$pass" "$fail"
+  [ "$fail" -eq 0 ] && printf '  \033[32mOffline gate passed.\033[0m\n' || printf '  \033[31mOffline gate failed.\033[0m\n'
+  exit "$([ "$fail" -eq 0 ] && echo 0 || echo 1)"
+fi
+
+command -v acq >/dev/null 2>&1 || { echo "RUN_ACQ=1 but acq not on PATH" >&2; exit 1; }
+
+info "4. Create a sandbox (this kit + usai-provider + zscaler-ca-certificate)"
+# acq needs the sibling kits applied for the key + CA; compose via ACQ_EXTRA_KITS.
+EXTRA="$KIT_DIR $REPO_ROOT/integrations/isolation/acq-kits/usai-provider $REPO_ROOT/integrations/isolation/acq-kits/zscaler-ca-certificate"
+if ACQ_EXTRA_KITS="$EXTRA" acq create --name "$SBX_NAME" opencode "$WORK" </dev/null >"$WORK/create.log" 2>&1; then
+  ok "sandbox created"
+else
+  bad "acq create failed (exit $?)"; sed 's/^/  | /' "$WORK/create.log" >&2; exit 1
+fi
+
+info "5. Proxy up in-sandbox + OpenCode baseURL flipped"
+ready=""; deadline=$(( $(date +%s) + READY_TIMEOUT ))
+while :; do
+  got="$(acq exec "$SBX_NAME" -- sh -c "curl -fsS http://127.0.0.1:$PORT/readyz 2>/dev/null && echo READY" </dev/null 2>/dev/null)"
+  case "$got" in *READY*) ready=yes; break ;; esac
+  [ "$(date +%s)" -ge "$deadline" ] && break
+  sleep 3
+done
+if [ -n "$ready" ]; then ok "proxy answers /readyz on 127.0.0.1:$PORT"
+else bad "proxy not ready within ${READY_TIMEOUT}s"
+  acq exec "$SBX_NAME" -- sh -c 'tail -n 30 ~/.local/state/model-router-proxy/service.log 2>/dev/null' </dev/null | sed 's/^/    | /'
+fi
+base="$(acq exec "$SBX_NAME" -- sh -c 'grep -o "127.0.0.1:[0-9]*/v1" ~/.config/opencode/opencode.jsonc 2>/dev/null | head -1' </dev/null 2>/dev/null)"
+if [ -n "$base" ]; then ok "OpenCode baseURL flipped to $base"
+else bad "OpenCode baseURL not flipped to the proxy"; fi
+
+info "Summary"
+[ "$fail" -eq 0 ] && printf '  \033[32mAll checks passed.\033[0m\n' || printf '  \033[31mSome checks failed.\033[0m\n'
+[ "$fail" -eq 0 ]
