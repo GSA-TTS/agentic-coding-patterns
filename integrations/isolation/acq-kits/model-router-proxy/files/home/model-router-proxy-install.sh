@@ -29,7 +29,7 @@ set -eu
 
 # --- Pins / config (overridable via env) ------------------------------------
 SERVICE_REPO="${MODEL_ROUTER_SERVICE_REPO:-btylerburton/model-router-service}"
-SERVICE_REF="${MODEL_ROUTER_SERVICE_REF:-03175b33cd232d7b372e5d9f1bd85c700eef5ce5}"
+SERVICE_REF="${MODEL_ROUTER_SERVICE_REF:-b9835f21f44d44944e85141a8ed0addb94271f7a}"
 PORT="${MODEL_ROUTER_PORT:-8080}"
 JUDGE_MODEL="${MODEL_ROUTER_JUDGE_MODEL:-claude_4_5_haiku}"
 DEFAULT_MODEL="${MODEL_ROUTER_DEFAULT_MODEL:-claude_4_5_sonnet}"
@@ -79,14 +79,21 @@ else
   note "service already present at $APP_DIR; skipping fetch"
 fi
 
-# --- 2. Install the pinned deps to a local prefix (no root, no network beyond pip)
-# The service pins fastapi/uvicorn/httpx/pydantic in requirements.txt. Install to
-# the user prefix so we need neither root nor a venv tool. If pip egress is
-# blocked this fails soft.
+# --- 2. Install the service's deps to a local prefix (no root, no venv tool) ---
+# The service declares bounded dep RANGES (fastapi/uvicorn/httpx/pydantic/...).
+# We install WHEELS ONLY (--only-binary=:all:): this fails fast with a clear
+# message if no prebuilt wheel exists for the sandbox's Python/arch, rather than
+# silently falling back to a from-source Rust build of pydantic-core (which needs
+# a C/Rust toolchain the image may not have — the "linker cc not found" failure).
+# Ranges let pip pick a version that HAS a wheel for the running interpreter.
+# Fails soft either way (OpenCode stays on the direct gateway).
 if [ -f "$APP_DIR/requirements.txt" ]; then
-  note "installing service deps to $VENV_PREFIX"
-  if ! python3 -m pip install --quiet --prefix "$VENV_PREFIX" -r "$APP_DIR/requirements.txt" >>"$LOG" 2>&1; then
-    warn "could not install service deps (see $LOG); staying on the direct gateway"
+  note "installing service deps to $VENV_PREFIX (wheels only)"
+  if ! python3 -m pip install --quiet --only-binary=:all: --prefix "$VENV_PREFIX" \
+        -r "$APP_DIR/requirements.txt" >>"$LOG" 2>&1; then
+    warn "could not install service deps as wheels for $(python3 -V 2>&1) (see $LOG); \
+staying on the direct gateway. Likely no prebuilt wheel for this Python/arch — \
+widen the ranges in the service's requirements.txt or run on a Python with wheels."
     exit 0
   fi
 fi
