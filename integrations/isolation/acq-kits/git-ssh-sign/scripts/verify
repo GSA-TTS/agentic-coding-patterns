@@ -32,9 +32,8 @@ CREATE_LOG="$WORK/sbx-create.log"
 KEEP="${KEEP:-0}"
 
 # Shared verdict contract (ok / bad / unver / skip / warn + verify_verdict).
-# Sourced rather than redefined here so one fix cannot leave the other kits
-# behind: the old local reporters had no "could not check" state, so a run that
-# skipped every meaningful assertion still reported "All checks passed."
+# Sourced rather than redefined here so a future fix to the contract cannot
+# leave this kit's copy behind.
 . "$KIT_DIR/../verify-report.sh"
 verify_reset
 

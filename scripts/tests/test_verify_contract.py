@@ -1,29 +1,15 @@
 """Contract tests for the acq-kit `scripts/verify` verdict discipline.
 
-WHY THIS FILE EXISTS
-
-Every kit's `scripts/verify` used to end with:
-
-    [ "$fail" -eq 0 ]
-
-That is a two-state verdict. It answers "did anything fail?" and cannot answer
-"did we actually check anything?", so two things were true of all eight scripts:
-
-1. A run where NOTHING executed reported success — with `pass=0` and `fail=0` the
-   test above is true, so the script printed "All checks passed." and exited 0.
-2. A skipped check was indistinguishable from a passing one. Across the eight
-   scripts there were 35 `skip`/NOTE sites and 9 `warn` sites that incremented
-   no counter, including `git-ssh-sign` skipping its end-to-end signed-commit
-   check — the kit's entire purpose — whenever no key was in the forwarded agent.
-
-`integrations/isolation/acq-kits/verify-report.sh` replaces that with a
-five-state contract whose verdict is a function of a coverage record. These tests
-keep it that way.
+`integrations/isolation/acq-kits/verify-report.sh` gives converted kits a
+five-state verdict (`ok`/`bad`/`unver`/`skip`/`warn`) whose exit code is a
+function of a coverage record, not a failure counter — this distinguishes "we
+checked and it passed" from "nothing ran" and from "we could not check this
+part." These tests keep that contract in force as kits adopt it.
 
 NOTHING IN CI RUNS THESE SHELL SCRIPTS. They need a live sandbox, which this
-repo's CI cannot create, and the repo has no shellcheck hook. So the contract is
-enforced here, statically, by reading them as text — otherwise the next verify
-script added would quietly reintroduce the defect.
+repo's CI cannot create, and the repo has no shellcheck hook. So the contract
+is enforced here, statically, by reading them as text — otherwise the next
+verify script added would quietly ship without the five-state verdict.
 
 MIGRATION STATE: the conversion is deliberately staged. `UNCONVERTED` lists the
 kits still on the old pattern. Each test asserts the contract for converted kits
@@ -51,16 +37,13 @@ LIB = ACQ_KITS / "verify-report.sh"
 # Shrink this as they are converted; it must reach empty.
 #
 # This is an explicit DENY list, not a default. A kit absent from both this set
-# and CONVERTED is a hard error (see test_every_kit_is_classified), because the
-# alternative -- treating an unclassified kit as converted -- is how a new kit
-# silently inherits a contract it does not implement. That is not hypothetical:
-# `oci-engine` landed on main while this change was in review, and the original
-# set-subtraction classified it as converted, failing four tests with a
-# misleading "does not source lib/verify-report.sh" instead of the true cause
-# ("a kit appeared that nobody classified").
+# and CONVERTED is a hard error (see test_every_kit_is_classified) — the
+# alternative, treating an unclassified kit as converted by subtraction, lets a
+# new kit silently inherit a contract it does not implement.
 UNCONVERTED = {
     "agentic-coding-playbook",
     "oci-engine",
+    "opencode",
     "openchamber",
     "paseo",
     "pi-coding-agent",
@@ -118,9 +101,9 @@ def test_library_verdict_degrades_on_unverified_and_on_zero_checks():
 def test_every_kit_is_classified():
     """A kit in neither set is a hard error, not a default.
 
-    This is the test that would have named the real problem when `oci-engine`
-    appeared: the failure message says "a kit appeared that nobody classified"
-    rather than four confusing assertions about a missing `source` line.
+    The failure message names the real problem directly: a kit appeared that
+    nobody classified, rather than failing a different test with a misleading
+    cause (e.g. "does not source lib/verify-report.sh").
     """
     scripts = _verify_scripts()
     classified = CONVERTED | UNCONVERTED

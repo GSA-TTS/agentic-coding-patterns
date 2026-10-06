@@ -40,9 +40,8 @@ KEEP="${KEEP:-0}"
 USAI_MODELS_URL="https://api.gsa.usai.gov/api/v1/models"
 
 # Shared verdict contract (ok / bad / unver / skip / warn + verify_verdict).
-# Sourced rather than redefined here so one fix cannot leave the other kits
-# behind: the old local reporters had no "could not check" state, so a run with
-# no secret and no network still reported "All checks passed."
+# Sourced rather than redefined here so a future fix to the contract cannot
+# leave this kit's copy behind.
 . "$KIT_DIR/../verify-report.sh"
 verify_reset
 

@@ -85,9 +85,8 @@ make test-kits
 ### What a `scripts/verify` exit code means
 
 Verify scripts share one verdict contract, `verify-report.sh` in this directory.
-It exists because the previous per-kit verdict was `[ "$fail" -eq 0 ]`, which
-reports success both when **zero** checks ran and when checks were **skipped** —
-so a run that exercised nothing still printed "All checks passed."
+A verdict is a function of a coverage record, not a failure counter, so a run
+that exercised nothing cannot report the same result as a run that passed.
 
 | Exit | Meaning |
 |---|---|

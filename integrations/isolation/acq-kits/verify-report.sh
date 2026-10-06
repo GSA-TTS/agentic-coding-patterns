@@ -2,28 +2,10 @@
 #
 # verify-report.sh — the shared verdict contract for acq-kit `scripts/verify`.
 #
-# WHY THIS EXISTS
-#
-# Every kit's verify script defined its own reporters and ended with the same
-# verdict:
-#
-#     [ "$fail" -eq 0 ]
-#
-# That is a two-state tool: it answers "did anything fail?" and cannot answer
-# "did we actually check anything?". Two consequences, both observed in the
-# scripts this file replaces:
-#
-#   1. A run where NOTHING executed reports success. With pass=0 and fail=0 the
-#      line above is true, so the script prints "All checks passed." and exits 0
-#      having verified nothing.
-#   2. A skipped check is indistinguishable from a passing one. The scripts had
-#      35 `skip`/NOTE sites and 9 `warn` sites that incremented no counter, so a
-#      run that skipped its single most important assertion — git-ssh-sign skips
-#      the end-to-end signed-commit check when no key is in the forwarded agent —
-#      still ended in "All checks passed."
-#
-# A verdict must be a function of a COVERAGE RECORD, not of a failure counter.
-# This library supplies that record and the five states a verify script needs.
+# A verdict is a function of a COVERAGE RECORD, not a failure counter: a run
+# that checked nothing, and a run where every check passed, must not produce
+# the same result. This library supplies that record and the five states a
+# verify script needs to express it.
 #
 # STATES
 #
@@ -129,8 +111,8 @@ verify_verdict() {
     return 1
   fi
 
-  # Nothing ran. Arithmetic over zero must never produce a pass: with the old
-  # `[ "$fail" -eq 0 ]` verdict this exact state printed "All checks passed."
+  # Nothing ran. Arithmetic over zero must never produce a pass: pass=0 and
+  # fail=0 is a report of nothing proven, not a report of success.
   if [ "$pass" -eq 0 ]; then
     printf '  \033[35m%s UNVERIFIED — no check ran, so nothing was proven.\033[0m\n' \
       "$_vr_label"
