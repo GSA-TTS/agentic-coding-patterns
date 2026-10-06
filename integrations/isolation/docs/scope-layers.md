@@ -208,8 +208,8 @@ global layer does.
 
 | Need | Mechanism |
 |------|-----------|
-| Aliases, prompt, shell functions | `files/home/.rc.d/NN-name.sh` drop-ins. `acq` writes `~/.profile` so that every bash login shell sources `~/.rc.d/*.sh` in lexical order, on both backends, so a kit only delivers drop-ins. Never add a loop of your own: a kit that also appends one to `~/.bashrc` makes every drop-in run twice. The loop has no interactive guard, so drop-ins also run in scripted `bash -lc` runs: keep them POSIX and safe without a terminal, and wrap interactive-only lines in `case $- in *i*) ... esac`. A non-login bash (typing `bash` at a prompt) sources none. |
-| Your working shell | An `exec zsh` line in a `99-` drop-in, so it sorts last. Wrap it in `case $- in *i*)`, or it hijacks scripted `bash -lc` runs. The `acq` loop runs only in bash: give `~/.zshrc` its own loop with an append-if-absent startup step, and make the `exec` line skip when it is already in zsh (`[ -z "${ZSH_VERSION:-}" ]`), or zsh sourcing it through that loop re-execs forever. |
+| Aliases, prompt, shell functions | `files/home/.rc.d/NN-name.sh` drop-ins. `acq` writes `~/.profile` so that every bash login shell sources `~/.rc.d/*.sh` in lexical order, on both backends, so a kit only delivers drop-ins. Never add a loop of your own: a kit that also appends one to `~/.bashrc` makes every drop-in run twice. The loop has no interactive guard, so drop-ins also run in scripted `bash -lc` runs: keep them POSIX and safe without a terminal, and wrap interactive-only lines in `case $- in *i*) ... esac`. A non-login bash (typing `bash` at a prompt) sources none. The personal-kit template's `scripts/verify` checks that its drop-in is sourced exactly once. |
+| Your working shell | An `exec zsh` line in a `99-` drop-in, so it sorts last. Wrap it in `case $- in *i*)`, or it hijacks scripted `bash -lc` runs. Also guard the `exec` on a terminal (`[ -t 0 ]`), on `BASH_EXECUTION_STRING` being empty (bash sets it whenever it runs a command string, so `bash -lic '...'` still runs its command), on `ZSH_VERSION` being empty, and on an exported handoff marker, or zsh sourcing the same drop-in re-execs itself forever. The personal-kit template's `50-example.sh` carries the full guard. The `acq` loop runs only in bash: give `~/.zshrc` its own loop with an append-if-absent startup step (the personal-kit template has a commented one). |
 | Terminfo for your terminal | Ship the *source* (`infocmp -x`) and compile it in a startup step (`tic -x`) |
 | Git preferences | One startup command per key, or ship a file and add it with `include.path` |
 | Overriding a team setting | `environment` (last wins) or a later file at the same path (last wins) — deliberately, and only for settings the team marks as personal |
@@ -218,7 +218,10 @@ global layer does.
 
 ### Neither
 
-- **Tools and toolchains.** Bake them into the image (`ACQ_IMAGE`).
+- **Tools and toolchains.** Bake them into the image (`ACQ_IMAGE`). The one
+  exception is a tool only you want in your personal kit: a guarded,
+  non-fatal startup step, never `phase: install` (the personal-kit template
+  shows one).
 - **Secrets.** Host-side only.
 - **Whole shared files** (`~/.bashrc`, `~/.zshrc`, `~/.gitconfig`).
 - **Binary files.** Kit file delivery is for text. Ship sources and generate
@@ -407,8 +410,13 @@ future teammates inherit the *why*, not just the YAML.
   copy-and-rename starting point for the team layer. Every extension point
   carries one live, harmless value that the schema checks and its
   `scripts/verify` asserts, together with the composition rules in the table
-  above. A personal kit has the same shape; [Personal kit](#personal-kit)
-  above says what goes in it.
+  above.
+- [`../acq-kits/examples/personal-kit/`](../acq-kits/examples/personal-kit/)
+  is the same for the personal layer: shell drop-ins with the `~/.rc.d` loop
+  wired, a git preference, and an OpenCode TUI theme through
+  `OPENCODE_TUI_CONFIG`. Its `scripts/verify` stacks it on a team kit (the
+  team-kit template by default) and asserts the three-layer stack: the global
+  and team layers survive under it, and both kits' values coexist.
 - The reference implementation is login.gov Team Data's team kit, with a
   personal-kit example beside it. The gotchas above are the ones that team
   hit; this doc is the generalization.
