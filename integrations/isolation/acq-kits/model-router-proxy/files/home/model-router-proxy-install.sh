@@ -30,7 +30,7 @@ set -eu
 
 # --- Pins / config (overridable via env) ------------------------------------
 SERVICE_REPO="${MODEL_ROUTER_SERVICE_REPO:-btylerburton/model-router-service}"
-SERVICE_REF="${MODEL_ROUTER_SERVICE_REF:-a821611c6192d21e682fb7146e93b5e5d00ed143}"
+SERVICE_REF="${MODEL_ROUTER_SERVICE_REF:-1c96f344e285a5b2d5ea37ffff9a8cc78b2b6a23}"
 MODE="${MODEL_ROUTER_MODE:-in-sandbox}"      # in-sandbox (default) | external
 PORT="${MODEL_ROUTER_PORT:-8080}"
 JUDGE_MODEL="${MODEL_ROUTER_JUDGE_MODEL:-claude_4_5_haiku}"
