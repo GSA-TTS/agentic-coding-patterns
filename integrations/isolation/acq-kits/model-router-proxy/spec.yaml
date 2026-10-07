@@ -1,64 +1,65 @@
-# spec.yaml — model-router-proxy (POC acq mixin kit, hybrid/v1)
+# spec.yaml — model-router-proxy (acq mixin kit, hybrid/v1)
 #
-# WHAT: run the model-router proxy INSIDE the sandbox and point OpenCode at it,
-# so every prompt auto-routes to the best model (graded reasoning + cheap LLM
-# judge). This is the request-path, AUTO-SWITCHING counterpart to the advisory
+# WHAT: point OpenCode at an EXTERNAL model-router service so every prompt
+# auto-routes to the best model (graded reasoning scorer; optional LLM judge).
+# This is the request-path, AUTO-SWITCHING counterpart to the advisory
 # `model-router` MCP kit — see that kit's docs/proposals/model-router-proxy-kit.md.
 #
-# POC SCOPE (minimal, self-contained in the sandbox):
-#   - fetch the model-router-service repo at a PINNED SHA (public GitHub tarball)
-#   - run it in the background with the sandbox python3, reusing the usai-provider
-#     kit's injected USAI_API_KEY + the sandbox CA trust (no new secret)
-#   - flip OpenCode's usai baseURL to the loopback proxy, install the toggle CLI
-#   This is NOT the production shape (that's cloud.gov, per the service repo).
+# SHAPE (external service; the kit does NOT run a server in-sandbox):
+#   - the model-router-service runs WHERE YOU DEPLOY IT: your localhost during
+#     dev (reachable from the sandbox as e.g. host.docker.internal) or a
+#     cloud.gov app in a real environment.
+#   - this kit fetches ONLY the stdlib `model-router-toggle` CLI (at a pinned
+#     SHA, public tarball), installs it on PATH, and flips OpenCode's usai
+#     baseURL to MODEL_ROUTER_URL/v1. No pip install, no background process.
+#   - MODEL_ROUTER_URL is REQUIRED (no default host) — the whole point of the
+#     external shape. Pass it via ACQ_EXTRA_KITS env / the sandbox environment.
 #
-# COMPOSES WITH: usai-provider (provides USAI_API_KEY + the config this kit flips)
-# and zscaler-ca-certificate (puts the proxy root in the sandbox trust store so
-# the in-sandbox proxy can reach USAi over an inspected TLS path). Apply all
-# three together.
+# COMPOSES WITH: usai-provider (owns the usai provider block this kit flips).
+# The service holds its OWN upstream key where it is deployed, so this kit needs
+# neither USAI_API_KEY nor the Zscaler CA in-sandbox (the SERVICE handles TLS to
+# USAi on its side).
 #
-# FAIL-SOFT: a routing convenience. Any failure (no python3, no key, fetch/dep/
-# boot failure, proxy never ready) leaves OpenCode on the DIRECT USAi gateway and
-# exits 0 — never a dead sandbox. The install script enforces this.
+# FAIL-SOFT: a routing convenience. Any failure (no python3, no MODEL_ROUTER_URL,
+# fetch failure) leaves OpenCode on the DIRECT USAi gateway and exits 0 — never a
+# dead sandbox. The install script enforces this.
 #
 # NEUTRAL (backend-agnostic) hybrid/v1 form; acq maps files/commands onto the
 # active backend (sbx, msb).
 schemaVersion: "hybrid/v1"
 kind: mixin
 name: model-router-proxy
-displayName: Model Router Proxy (auto-switch models for OpenCode, in-sandbox POC)
+displayName: Model Router Proxy (route OpenCode at an external model-router service)
 description: >
-  POC kit that runs the model-router proxy inside the sandbox and points
-  OpenCode's usai provider at it, so every prompt is auto-routed to the best
-  model (graded reasoning score + cheap LLM judge) with streaming preserved.
-  Fetches the service at a pinned SHA, reuses the usai-provider USAi key and the
-  sandbox CA trust, binds loopback only, and installs the model-router-toggle
-  CLI to flip routing on/off. Fail-soft: any problem leaves OpenCode on the
-  direct gateway. Compose with usai-provider and zscaler-ca-certificate.
+  Points OpenCode's usai provider at an EXTERNAL model-router service so every
+  prompt is auto-routed to the best model (graded reasoning score; optional LLM
+  judge) with streaming preserved. The service runs on your localhost (dev) or
+  cloud.gov (real) — this kit only fetches the stdlib model-router-toggle CLI at
+  a pinned SHA, installs it on PATH, and flips the usai baseURL to
+  MODEL_ROUTER_URL/v1. Fail-soft: any problem leaves OpenCode on the direct
+  gateway. Compose with usai-provider.
 
 caps:
   network:
     allow:
-      # Fetch the pinned service tarball. GitHub serves source archives from
-      # codeload (api.github.com 302s there); allow both so the fetch resolves.
+      # Fetch ONLY the pinned toggle code (stdlib Python modules). GitHub serves
+      # source archives from codeload (api.github.com 302s there); allow both.
       - codeload.github.com
       - api.github.com
-      # pip needs the Python package index to install the service's pinned deps
-      # (fastapi/uvicorn/httpx/pydantic). Files are served from the fastly CDN.
-      - pypi.org
-      - files.pythonhosted.org
-      # The proxy itself forwards to USAi — same host usai-provider allow-lists.
-      # Harmless to repeat; keeps this kit self-describing if applied alone.
-      - api.gsa.usai.gov
+      # NOTE: the external service URL (MODEL_ROUTER_URL) must be reachable from
+      # the sandbox too. For a host-run service on Docker-based acq that is
+      # host.docker.internal (loopback bridge, no allow-list entry needed); for a
+      # cloud.gov service, add that app's host to the sandbox egress (e.g. via
+      # the project's egress kit) — it is deployment-specific, so it is NOT
+      # hardcoded here.
 
 files:
   - path: /home/agent/model-router-proxy-install.sh
     mode: "0755"
     source: files/home/model-router-proxy-install.sh
     description: >
-      Startup: fetch the pinned service, install deps to a local prefix, run the
-      proxy in the background (reusing USAI_API_KEY + sandbox CA), wait for
-      /readyz, flip OpenCode baseURL to the loopback proxy, install the toggle.
+      Startup: fetch the stdlib toggle CLI at a pinned SHA, install it on PATH,
+      and flip OpenCode's usai baseURL to the external MODEL_ROUTER_URL/v1.
 
 commands:
   # Startup phase, as the agent user. Runs AFTER usai-provider's merge (both are
@@ -66,29 +67,28 @@ commands:
   # and fail-soft — see the script header.
   - phase: startup
     user: "1000"
-    description: Fetch + run the model-router proxy in-sandbox and route OpenCode through it
+    description: Install the toggle CLI and route OpenCode at the external model-router service
     command:
       - sh
       - /home/agent/model-router-proxy-install.sh
 
-# No publishedPorts: the proxy binds 127.0.0.1 and is consumed by OpenCode
-# in-sandbox over loopback. Nothing is exposed outside the sandbox.
+# No publishedPorts: this kit runs no server. OpenCode talks to the EXTERNAL
+# service at MODEL_ROUTER_URL (your localhost via the host bridge, or cloud.gov).
 
 agentContext: |
-  ## Model Router Proxy (auto-switch, POC)
+  ## Model Router Proxy (auto-switch via an external service)
 
-  This sandbox runs a **model-router proxy** on `127.0.0.1` and OpenCode's `usai`
-  provider is pointed at it, so **every prompt is auto-routed** to the model that
-  best fits it (cheap/fast for trivial edits, strong-reasoning for hard tasks).
+  OpenCode's `usai` provider is pointed at an **external model-router service**
+  (`MODEL_ROUTER_URL`), so **every prompt is auto-routed** to the model that best
+  fits it (cheap/fast for trivial edits, strong-reasoning for hard tasks). The
+  service runs outside this sandbox — on the developer's host or a cloud.gov app.
   Routing is transparent; the chosen model is reported in the
   `x-model-router-decision` response header and the service's decision log.
 
   Controls (installed on PATH):
-  - `model-router-toggle status` — show whether routing is ON and the proxy is up
+  - `model-router-toggle status` — show whether routing is ON and the service is up
   - `model-router-toggle off` / `on` — stop/start routing (restart the OpenCode
     session for the change to take effect — baseURL is read at init)
-  - `model-router feedback --last --model <id>` then `model-router recalibrate` —
-    correct a bad route and re-tune the reasoning thresholds
 
-  If the proxy ever isn't running, OpenCode falls back to talking to USAi
-  directly — routing is a convenience, never a hard dependency.
+  If the external service is unreachable, OpenCode still talks to USAi directly —
+  routing is a convenience, never a hard dependency.

@@ -1,53 +1,63 @@
-# model-router-proxy (acq mixin kit — POC)
+# model-router-proxy (acq mixin kit)
 
-Runs the **model-router proxy inside the sandbox** and points OpenCode's `usai`
-provider at it, so **every prompt is auto-routed** to the best model (graded
-reasoning score + a cheap LLM judge), with streaming preserved. This is the
-request-path, **auto-switching** counterpart to the advisory
-[`model-router`](../model-router/) MCP kit (which only *recommends* a model).
+Points OpenCode's `usai` provider at an **external** model-router service so
+**every prompt is auto-routed** to the best model (graded reasoning score;
+optional LLM judge), with streaming preserved. This is the request-path,
+**auto-switching** counterpart to the advisory [`model-router`](../model-router/)
+MCP kit (which only *recommends* a model).
 
-> **POC scope.** Minimal, self-contained in the sandbox: fetch the service at a
-> pinned SHA, run it on loopback with the sandbox `python3`, flip OpenCode's
-> `baseURL`. It is **not** the production shape — production is the cloud.gov
-> deployment in the service repo. See the design proposal in
+> **External service shape.** The model-router-service runs **where you deploy
+> it** — your localhost during dev (reachable from the sandbox via the host
+> bridge) or a **cloud.gov** app in a real environment. This kit does **not** run
+> a server in the sandbox: it fetches only the stdlib `model-router-toggle` CLI
+> and flips OpenCode's `baseURL` to `MODEL_ROUTER_URL/v1`. See the design
+> proposal in
 > [`../model-router/docs/proposals/model-router-proxy-kit.md`](../model-router/docs/proposals/model-router-proxy-kit.md).
 
 ## What it does (startup, idempotent, fail-soft)
 
-1. **Fetch** [`btylerburton/model-router-service`](https://github.com/btylerburton/model-router-service)
-   at a pinned SHA (public GitHub tarball via `codeload`) into
-   `~/model-router-service`, unless already present.
-2. **Install** the service's pinned deps (`fastapi`/`uvicorn`/`httpx`/`pydantic`)
-   to the user prefix (`~/.local`) — no root, no venv tool.
-3. **Run** the proxy in the background on `127.0.0.1:8080`, reusing the
-   **usai-provider** kit's injected `USAI_API_KEY` as `ROUTER_UPSTREAM_API_KEY`
-   and the sandbox's **CA trust** (the `zscaler-ca-certificate` kit puts the
-   proxy root in the system store, so no `ROUTER_CA_BUNDLE` is needed). Wait for
-   `/readyz`.
-4. **Flip** OpenCode's `usai` `baseURL` → `http://127.0.0.1:8080/v1` via the
-   installed `model-router-toggle` CLI (merge-not-clobber; idempotent).
+1. **Fetch** only the stdlib toggle modules (`toggle.py` + `adapters/`) from
+   [`btylerburton/model-router-service`](https://github.com/btylerburton/model-router-service)
+   at a pinned SHA (public GitHub tarball via `codeload`). No pip install, no
+   server, no background process.
+2. **Install** the `model-router-toggle` CLI on PATH.
+3. **Flip** OpenCode's `usai` `baseURL` → `MODEL_ROUTER_URL/v1` via that CLI
+   (merge-not-clobber; idempotent; saves the original so `off` restores it).
 
-**Fail-soft:** missing `python3`, missing `USAI_API_KEY`, a failed fetch/dep
-install, or a proxy that never becomes ready all leave OpenCode on the **direct
-USAi gateway** and exit 0 — never a dead sandbox.
+**Fail-soft:** missing `python3`, a missing `MODEL_ROUTER_URL`, or a failed fetch
+all leave OpenCode on the **direct USAi gateway** and exit 0 — never a dead
+sandbox. The external service being down is non-fatal too (the toggle warns; set
+`MODEL_ROUTER_REQUIRE_READY=1` to instead stay direct until the service answers
+`/readyz`).
+
+## Required config
+
+| Var | Required | Meaning |
+|-----|----------|---------|
+| `MODEL_ROUTER_URL` | **yes** | External service base URL — **no default host**. e.g. `http://host.docker.internal:8080` (service on your laptop) or `https://<app>.app.cloud.gov` (cloud.gov) |
+
+The service holds its **own** upstream key where it is deployed, so this kit
+needs neither `USAI_API_KEY` nor the Zscaler CA in the sandbox — the **service**
+handles TLS and auth to USAi on its side.
 
 ## Compose with
 
 | Kit | Why |
 |-----|-----|
-| `usai-provider` | provides `USAI_API_KEY` and the OpenCode config this kit flips |
-| `zscaler-ca-certificate` | puts the Zscaler root in the sandbox trust store so the in-sandbox proxy can reach USAi over an inspected TLS path |
+| `usai-provider` | owns the OpenCode `usai` provider block this kit flips |
 
-Apply all three together.
+Reaching the external service from the sandbox is **deployment-specific**: a
+host-run service on Docker-based acq is reachable at `host.docker.internal`
+(loopback bridge, no egress entry needed); a cloud.gov service needs that app's
+host added to the sandbox egress (via your project's egress kit). It is not
+hardcoded here.
 
 ## Controls (installed on PATH)
 
 ```bash
-model-router-toggle status          # routing ON/OFF + proxy /readyz
+model-router-toggle status          # routing ON/OFF + service /readyz
 model-router-toggle off             # stop routing (restart OpenCode session to apply)
 model-router-toggle on              # resume routing
-model-router feedback --last --model claude_4_8_opus   # correct a bad route
-model-router recalibrate            # re-tune reasoning thresholds from feedback
 ```
 
 > OpenCode reads `baseURL` at provider init, so a routing change needs a session
@@ -57,32 +67,31 @@ model-router recalibrate            # re-tune reasoning thresholds from feedback
 
 | Var | Default | Meaning |
 |-----|---------|---------|
-| `MODEL_ROUTER_SERVICE_REPO` | `btylerburton/model-router-service` | source repo |
-| `MODEL_ROUTER_SERVICE_REF` | pinned SHA | commit to fetch |
-| `MODEL_ROUTER_PORT` | `8080` | loopback port |
-| `MODEL_ROUTER_JUDGE_MODEL` | `claude_4_5_haiku` | cheap ranking model |
-| `MODEL_ROUTER_DEFAULT_MODEL` | `claude_4_5_sonnet` | fail-open landing model |
+| `MODEL_ROUTER_URL` | *(required)* | external service base URL |
+| `MODEL_ROUTER_SERVICE_REPO` | `btylerburton/model-router-service` | source repo (for the toggle code) |
+| `MODEL_ROUTER_SERVICE_REF` | pinned SHA | commit to fetch the toggle code from |
+| `MODEL_ROUTER_REQUIRE_READY` | `0` | `1` = only flip routing if the service answers `/readyz` |
 
 ## Logs (in-sandbox)
 
 ```
 ~/.local/state/model-router-proxy/install.log      # fetch/flip steps
-~/.local/state/model-router-proxy/service.log      # the proxy's own stdout
-~/.local/state/model-router-proxy/decisions.jsonl  # one line per routed turn
 ```
+
+(The decision log and the proxy's own stdout live wherever the **service** runs —
+on your host or on cloud.gov — not in the sandbox.)
 
 ## Verifying
 
 ```bash
 ./scripts/verify              # offline: schema/registry + install-script guards
-RUN_ACQ=1 ./scripts/verify    # live: create a sandbox, assert proxy up + baseURL flipped
+RUN_ACQ=1 MODEL_ROUTER_URL=... ./scripts/verify    # live: create a sandbox, assert baseURL flipped
 ```
 
 ## Backend parity
 
 Written in the neutral `hybrid/v1` vocabulary (`files` + a single startup
 `command`), no backend shortcut. Both `sbx` and `msb` drop the install script and
-run the identical fetch → run → flip step. No published port (loopback only). The
-egress allow-list (`codeload.github.com`, `api.github.com`, `pypi.org`,
-`files.pythonhosted.org`, `api.gsa.usai.gov`) is emitted per backend from
-`caps.network.allow`.
+run the identical fetch → install-CLI → flip step. No published port (no server).
+The egress allow-list (`codeload.github.com`, `api.github.com`) is emitted per
+backend from `caps.network.allow`.

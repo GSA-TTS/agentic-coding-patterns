@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 #
-# verify — host-side validation for the model-router-proxy POC kit.
+# verify — host-side validation for the model-router-proxy kit (external shape).
 #
 #   OFFLINE (default): the acq-kits validator (schema + files[].source +
 #   registry) and static guards on the install script (fail-soft exits, pinned
-#   SHA present, loopback bind, reuse-USAI_API_KEY, flip-via-toggle).
+#   SHA present, requires MODEL_ROUTER_URL, flip-via-toggle, no in-sandbox server).
 #
-#   LIVE (RUN_ACQ=1): create a sandbox with this kit (+ usai-provider +
-#   zscaler-ca-certificate), wait for startup, then assert the proxy answers
-#   /readyz in-sandbox and OpenCode's baseURL was flipped to the loopback proxy.
+#   LIVE (RUN_ACQ=1, MODEL_ROUTER_URL=...): create a sandbox with this kit (+
+#   usai-provider), wait for startup, then assert OpenCode's baseURL was flipped
+#   to the external MODEL_ROUTER_URL.
 #
 # Usage:
 #   path/to/model-router-proxy/scripts/verify
-#   RUN_ACQ=1 path/to/.../scripts/verify
-#   KEEP=1 RUN_ACQ=1 path/to/.../scripts/verify
+#   RUN_ACQ=1 MODEL_ROUTER_URL=http://host.docker.internal:8080 path/to/.../scripts/verify
+#   KEEP=1 RUN_ACQ=1 MODEL_ROUTER_URL=... path/to/.../scripts/verify
 
 set -uo pipefail
 
@@ -25,7 +25,6 @@ WORK="$(mktemp -d "${TMPDIR:-/tmp}/mrp-verify.XXXXXX")"
 KEEP="${KEEP:-0}"
 RUN_ACQ="${RUN_ACQ:-0}"
 READY_TIMEOUT="${READY_TIMEOUT:-90}"
-PORT="${MODEL_ROUTER_PORT:-8080}"
 
 pass=0; fail=0
 ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass+1)); }
@@ -56,12 +55,13 @@ fi
 info "2. Install-script safety guards (static, offline)"
 grep -q 'exit 0' "$INSTALL" && ok "has fail-soft exit 0 paths" || bad "no fail-soft exit"
 grep -q 'command -v python3' "$INSTALL" && ok "preflights python3" || bad "no python3 preflight"
-grep -q 'USAI_API_KEY' "$INSTALL" && ok "reuses injected USAI_API_KEY" || bad "does not reuse USAI_API_KEY"
-grep -q '127.0.0.1' "$INSTALL" && ok "binds loopback only" || bad "not loopback-bound"
-grep -q 'codeload.github.com' "$INSTALL" && ok "fetches pinned tarball from codeload" || bad "no codeload fetch"
+grep -q 'MODEL_ROUTER_URL' "$INSTALL" && ok "requires external MODEL_ROUTER_URL" || bad "does not require MODEL_ROUTER_URL"
+grep -q 'codeload.github.com' "$INSTALL" && ok "fetches pinned toggle code from codeload" || bad "no codeload fetch"
 grep -Eq 'MODEL_ROUTER_SERVICE_REF:-[0-9a-f]{40}' "$INSTALL" && ok "service ref pinned to a full SHA" || bad "service ref not a full-SHA pin"
 grep -q -- '--harness opencode on' "$INSTALL" && ok "flips OpenCode baseURL via toggle" || bad "does not flip via toggle"
-grep -q '/readyz' "$INSTALL" && ok "waits for /readyz before flipping" || bad "no readiness wait"
+# External shape: the kit must NOT run a server or pip-install deps in-sandbox.
+grep -q -- '--only-binary' "$INSTALL" && bad "unexpected pip dep install (should be external shape)" || ok "no in-sandbox dep install (external shape)"
+grep -q 'setsid' "$INSTALL" && bad "unexpected background server launch (should be external shape)" || ok "no in-sandbox server launch (external shape)"
 
 info "3. Pinned SHA is fetchable (network; non-fatal if offline)"
 REF="$(grep -Eo 'MODEL_ROUTER_SERVICE_REF:-[0-9a-f]{40}' "$INSTALL" | head -1 | sed 's/.*://')"
@@ -77,38 +77,32 @@ else
 fi
 
 if [ "$RUN_ACQ" != "1" ]; then
-  info "Live checks (4-5): SKIPPED (set RUN_ACQ=1)"
+  info "Live checks (4-5): SKIPPED (set RUN_ACQ=1 and MODEL_ROUTER_URL)"
   info "Summary"; printf '  %d passed, %d failed\n' "$pass" "$fail"
   [ "$fail" -eq 0 ] && printf '  \033[32mOffline gate passed.\033[0m\n' || printf '  \033[31mOffline gate failed.\033[0m\n'
   exit "$([ "$fail" -eq 0 ] && echo 0 || echo 1)"
 fi
 
 command -v acq >/dev/null 2>&1 || { echo "RUN_ACQ=1 but acq not on PATH" >&2; exit 1; }
+[ -n "${MODEL_ROUTER_URL:-}" ] || { echo "RUN_ACQ=1 requires MODEL_ROUTER_URL=<external service url>" >&2; exit 1; }
 
-info "4. Create a sandbox (this kit + usai-provider + zscaler-ca-certificate)"
-# acq needs the sibling kits applied for the key + CA; compose via ACQ_EXTRA_KITS.
-EXTRA="$KIT_DIR $REPO_ROOT/integrations/isolation/acq-kits/usai-provider $REPO_ROOT/integrations/isolation/acq-kits/zscaler-ca-certificate"
-if ACQ_EXTRA_KITS="$EXTRA" acq create --name "$SBX_NAME" opencode "$WORK" </dev/null >"$WORK/create.log" 2>&1; then
+info "4. Create a sandbox (this kit + usai-provider), MODEL_ROUTER_URL passed through"
+EXTRA="$KIT_DIR $REPO_ROOT/integrations/isolation/acq-kits/usai-provider"
+if ACQ_EXTRA_KITS="$EXTRA" MODEL_ROUTER_URL="$MODEL_ROUTER_URL" \
+     acq create --name "$SBX_NAME" opencode "$WORK" </dev/null >"$WORK/create.log" 2>&1; then
   ok "sandbox created"
 else
   bad "acq create failed (exit $?)"; sed 's/^/  | /' "$WORK/create.log" >&2; exit 1
 fi
 
-info "5. Proxy up in-sandbox + OpenCode baseURL flipped"
-ready=""; deadline=$(( $(date +%s) + READY_TIMEOUT ))
-while :; do
-  got="$(acq exec "$SBX_NAME" -- sh -c "curl -fsS http://127.0.0.1:$PORT/readyz 2>/dev/null && echo READY" </dev/null 2>/dev/null)"
-  case "$got" in *READY*) ready=yes; break ;; esac
-  [ "$(date +%s)" -ge "$deadline" ] && break
-  sleep 3
-done
-if [ -n "$ready" ]; then ok "proxy answers /readyz on 127.0.0.1:$PORT"
-else bad "proxy not ready within ${READY_TIMEOUT}s"
-  acq exec "$SBX_NAME" -- sh -c 'tail -n 30 ~/.local/state/model-router-proxy/service.log 2>/dev/null' </dev/null | sed 's/^/    | /'
-fi
-base="$(acq exec "$SBX_NAME" -- sh -c 'grep -o "127.0.0.1:[0-9]*/v1" ~/.config/opencode/opencode.jsonc 2>/dev/null | head -1' </dev/null 2>/dev/null)"
+info "5. OpenCode baseURL flipped to the external service"
+# The flipped baseURL is MODEL_ROUTER_URL/v1 — match on its host:port/v1 tail.
+host_tail="$(printf '%s' "${MODEL_ROUTER_URL%/}" | sed 's#^https\?://##')"
+base="$(acq exec "$SBX_NAME" -- sh -c "grep -o '${host_tail}/v1' ~/.config/opencode/opencode.jsonc 2>/dev/null | head -1" </dev/null 2>/dev/null)"
 if [ -n "$base" ]; then ok "OpenCode baseURL flipped to $base"
-else bad "OpenCode baseURL not flipped to the proxy"; fi
+else bad "OpenCode baseURL not flipped to the external service"
+  acq exec "$SBX_NAME" -- sh -c 'tail -n 30 ~/.local/state/model-router-proxy/install.log 2>/dev/null' </dev/null | sed 's/^/    | /'
+fi
 
 info "Summary"
 [ "$fail" -eq 0 ] && printf '  \033[32mAll checks passed.\033[0m\n' || printf '  \033[31mSome checks failed.\033[0m\n'
