@@ -9,6 +9,9 @@
 #   2. Install the `model-router-toggle` CLI on PATH.
 #   3. Flip OpenCode's usai baseURL -> $MODEL_ROUTER_URL/v1 via that CLI
 #      (merge-not-clobber; idempotent; saves the original so `off` restores it).
+#      When MODEL_ROUTER_URL is unset, AUTO-DETECT the backend's host alias
+#      (host.microsandbox.internal / host.containers.internal / host.docker.internal)
+#      so a host-run service is reachable without the caller knowing the backend.
 #
 # WHY EXTERNAL: calling the decision service in-process per prompt was only ever a
 # POC shape. The service now runs where you deploy it — your localhost during dev
@@ -31,11 +34,13 @@ set -eu
 # --- Pins / config (overridable via env) ------------------------------------
 SERVICE_REPO="${MODEL_ROUTER_SERVICE_REPO:-btylerburton/model-router-service}"
 SERVICE_REF="${MODEL_ROUTER_SERVICE_REF:-8bb1bd4a9c55f917906361686e150dd7e13fd28a}"
-# REQUIRED: the external model-router-service base URL (NO default host — this is
-# the whole point of the external shape). Examples:
-#   http://host.docker.internal:8080   (service on your laptop, Docker-based acq)
-#   https://model-router.app.cloud.gov (deployed to cloud.gov)
+# REQUIRED: the external model-router-service base URL. If unset, the script
+# AUTO-DETECTS the host alias for the active sandbox backend (they differ:
+# microsandbox -> host.microsandbox.internal, podman -> host.containers.internal,
+# Docker -> host.docker.internal) and uses it with $MODEL_ROUTER_PORT. Set it
+# explicitly for a non-host target (e.g. https://model-router.app.cloud.gov).
 MODEL_ROUTER_URL="${MODEL_ROUTER_URL:-}"
+MODEL_ROUTER_PORT="${MODEL_ROUTER_PORT:-8080}"
 # If "1", only flip routing when the service answers /readyz (else leave direct).
 REQUIRE_READY="${MODEL_ROUTER_REQUIRE_READY:-0}"
 
@@ -57,12 +62,29 @@ if ! command -v python3 >/dev/null 2>&1; then
 fi
 
 if [ -z "$MODEL_ROUTER_URL" ]; then
-  warn "MODEL_ROUTER_URL not set in the GUEST environment. This kit routes OpenCode \
-at an EXTERNAL service and needs its URL. The spec ships a default \
-(http://host.docker.internal:8080); if you see this, the env did not reach the \
-guest. Set it in the guest, e.g. the kit's environment block or \
-'acq exec <sbx> -- env MODEL_ROUTER_URL=https://<app>.app.cloud.gov model-router-toggle on'. \
-NOTE: a host-shell 'export MODEL_ROUTER_URL=...' does NOT reach the sandbox. \
+  # Auto-detect the host alias for whichever sandbox backend is active. Each
+  # backend injects a DIFFERENT name for "the host from inside the guest":
+  #   microsandbox -> host.microsandbox.internal   (seen in /etc/hosts)
+  #   podman       -> host.containers.internal
+  #   Docker       -> host.docker.internal
+  # Prefer whichever RESOLVES, so a host-run service is reachable without the
+  # caller knowing the backend. (A non-host target like cloud.gov is set
+  # explicitly via MODEL_ROUTER_URL and skips this.)
+  for _h in host.microsandbox.internal host.containers.internal host.docker.internal; do
+    if getent hosts "$_h" >/dev/null 2>&1; then
+      MODEL_ROUTER_URL="http://${_h}:${MODEL_ROUTER_PORT}"
+      note "auto-detected host alias ${_h}; MODEL_ROUTER_URL=${MODEL_ROUTER_URL}"
+      break
+    fi
+  done
+fi
+
+if [ -z "$MODEL_ROUTER_URL" ]; then
+  warn "MODEL_ROUTER_URL not set and no host alias resolved \
+(tried host.microsandbox.internal / host.containers.internal / host.docker.internal). \
+This kit routes OpenCode at an EXTERNAL service and needs its URL. Set it in the \
+GUEST, e.g. 'acq exec <sbx> -- env MODEL_ROUTER_URL=http://<host-or-app>:${MODEL_ROUTER_PORT} \
+model-router-toggle on' (a host-shell export does NOT reach the sandbox). \
 Leaving OpenCode on the direct gateway."
   exit 0
 fi

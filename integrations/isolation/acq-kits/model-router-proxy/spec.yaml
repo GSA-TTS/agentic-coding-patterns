@@ -61,21 +61,21 @@ files:
       Startup: fetch the stdlib toggle CLI at a pinned SHA, install it on PATH,
       and flip OpenCode's usai baseURL to the external MODEL_ROUTER_URL/v1.
 
-# The kit's startup script runs INSIDE the sandbox, so MODEL_ROUTER_URL must be
-# present in the GUEST environment — a host-shell `export MODEL_ROUTER_URL=…`
-# does NOT reach it (host and guest are different environments). This block
-# injects a DEFAULT into the guest so the common dev case works out of the box.
-# It is a non-secret URL, so it belongs here (not the credential path).
+# MODEL_ROUTER_URL selects the external service. By DEFAULT it is left UNSET so
+# the install script AUTO-DETECTS the host alias for whichever backend is active
+# (they differ: microsandbox -> host.microsandbox.internal, podman ->
+# host.containers.internal, Docker -> host.docker.internal) and targets a
+# host-run service on $MODEL_ROUTER_PORT (default 8080). Do NOT hardcode one
+# alias here — it would override detection and break the other backends.
 #
-# Override per sandbox by changing this value, or at runtime with
+# To point at a NON-host target (e.g. cloud.gov), set it explicitly — in a guest
+# env (uncomment below) or at runtime:
 #   acq exec <sbx> -- env MODEL_ROUTER_URL=https://<app>.app.cloud.gov \
 #     model-router-toggle --harness opencode on
-# and restarting the OpenCode session.
-environment:
-  # Default: a model-router-service running on the DEVELOPER'S HOST, reachable
-  # from the sandbox via the Docker host bridge. For a deployed service, change
-  # this to https://<app>.app.cloud.gov AND add that host to the sandbox egress.
-  MODEL_ROUTER_URL: "http://host.docker.internal:8080"
+# (a host-shell `export MODEL_ROUTER_URL=…` does NOT reach the guest), then
+# restart the OpenCode session.
+# environment:
+#   MODEL_ROUTER_URL: "https://model-router.app.cloud.gov"
 
 commands:
   # Startup phase, as the agent user. Runs AFTER usai-provider's merge (both are

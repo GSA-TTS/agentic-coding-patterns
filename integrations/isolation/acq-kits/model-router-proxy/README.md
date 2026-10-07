@@ -30,16 +30,25 @@ sandbox. The external service being down is non-fatal too (the toggle warns; set
 `MODEL_ROUTER_REQUIRE_READY=1` to instead stay direct until the service answers
 `/readyz`).
 
-## Required config
+## Config
 
 | Var | Required | Meaning |
 |-----|----------|---------|
-| `MODEL_ROUTER_URL` | **yes** (has a dev default) | External service base URL. The spec ships a default of `http://host.docker.internal:8080` (a service on the developer's host, via the Docker bridge). Change it to `https://<app>.app.cloud.gov` for a deployed service. |
+| `MODEL_ROUTER_URL` | no (auto-detected for host targets) | External service base URL. If unset, the install script **auto-detects the backend's host alias** and targets a host-run service on `MODEL_ROUTER_PORT`. Set it explicitly for a non-host target, e.g. `https://<app>.app.cloud.gov`. |
+| `MODEL_ROUTER_PORT` | no | Port of a host-run service (default `8080`); used only by auto-detect. |
 
-> **It must be in the GUEST environment, not your host shell.** The install
-> script runs inside the sandbox, so a host-shell `export MODEL_ROUTER_URL=…`
-> does **not** reach it. The kit's `environment:` block injects the default into
-> the guest. To override per sandbox, change that block, or set it at runtime:
+**Host-alias auto-detect.** The alias for "the host, from inside the guest"
+differs by sandbox backend, so the kit does **not** hardcode one. When
+`MODEL_ROUTER_URL` is unset it tries, in order, the first that resolves:
+
+| Backend | Host alias |
+|---------|-----------|
+| microsandbox (acq `local`/msb) | `host.microsandbox.internal` |
+| podman | `host.containers.internal` |
+| Docker | `host.docker.internal` |
+
+> **For a non-host target (cloud.gov), set `MODEL_ROUTER_URL` in the GUEST, not
+> your host shell** — a host-shell `export` does not reach the sandbox:
 > ```bash
 > acq exec <sbx> -- env MODEL_ROUTER_URL=https://<app>.app.cloud.gov \
 >   model-router-toggle --harness opencode on
@@ -56,11 +65,10 @@ handles TLS and auth to USAi on its side.
 |-----|-----|
 | `usai-provider` | owns the OpenCode `usai` provider block this kit flips |
 
-Reaching the external service from the sandbox is **deployment-specific**: a
-host-run service on Docker-based acq is reachable at `host.docker.internal`
-(loopback bridge, no egress entry needed); a cloud.gov service needs that app's
-host added to the sandbox egress (via your project's egress kit). It is not
-hardcoded here.
+Reaching the external service from the sandbox is **deployment-specific** and
+handled above: a host-run service is reached via the backend's auto-detected host
+alias (loopback bridge, no egress entry needed); a cloud.gov service needs that
+app's host added to the sandbox egress (via your project's egress kit).
 
 ## Controls (installed on PATH)
 
@@ -77,7 +85,8 @@ model-router-toggle on              # resume routing
 
 | Var | Default | Meaning |
 |-----|---------|---------|
-| `MODEL_ROUTER_URL` | `http://host.docker.internal:8080` | external service base URL (guest env; spec default) |
+| `MODEL_ROUTER_URL` | *(auto-detect host alias)* | external service base URL; set explicitly for cloud.gov |
+| `MODEL_ROUTER_PORT` | `8080` | host-run service port used by auto-detect |
 | `MODEL_ROUTER_SERVICE_REPO` | `btylerburton/model-router-service` | source repo (for the toggle code) |
 | `MODEL_ROUTER_SERVICE_REF` | pinned SHA | commit to fetch the toggle code from |
 | `MODEL_ROUTER_REQUIRE_READY` | `0` | `1` = only flip routing if the service answers `/readyz` |
