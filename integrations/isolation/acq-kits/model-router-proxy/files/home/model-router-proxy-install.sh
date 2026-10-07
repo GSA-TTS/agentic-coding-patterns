@@ -30,7 +30,7 @@ set -eu
 
 # --- Pins / config (overridable via env) ------------------------------------
 SERVICE_REPO="${MODEL_ROUTER_SERVICE_REPO:-btylerburton/model-router-service}"
-SERVICE_REF="${MODEL_ROUTER_SERVICE_REF:-e0fad9608a0fd6309b6bcea95ab51190ca5255c2}"
+SERVICE_REF="${MODEL_ROUTER_SERVICE_REF:-8bb1bd4a9c55f917906361686e150dd7e13fd28a}"
 # REQUIRED: the external model-router-service base URL (NO default host — this is
 # the whole point of the external shape). Examples:
 #   http://host.docker.internal:8080   (service on your laptop, Docker-based acq)
@@ -118,9 +118,13 @@ fi
 # --- 2. Install the model-router-toggle shim on PATH -------------------------
 TOGGLE_BIN="$HOME_DIR/.local/bin/model-router-toggle"
 mkdir -p "$HOME_DIR/.local/bin"
+# Pin OPENCODE_GLOBAL_CONFIG so the toggle edits the kit-merged global config at
+# the known in-sandbox path, independent of how $HOME resolves for whatever user
+# runs the shim later (a bare `model-router-toggle` from any shell still works).
 cat > "$TOGGLE_BIN" <<EOF
 #!/bin/sh
 exec env PYTHONPATH="$APP_DIR:\${PYTHONPATH:-}" \\
+  OPENCODE_GLOBAL_CONFIG="\${OPENCODE_GLOBAL_CONFIG:-$HOME_DIR/.config/opencode/opencode.jsonc}" \\
   python3 -m model_router_service.toggle "\$@"
 EOF
 chmod +x "$TOGGLE_BIN"
@@ -139,7 +143,9 @@ fi
 # model-router-toggle edits the agent-side global opencode.jsonc (merge, not
 # clobber), saves the original, and is idempotent. OpenCode reads baseURL at
 # init, so a session started AFTER this routes; the agentContext says so.
-if MODEL_ROUTER_URL="$MODEL_ROUTER_URL" "$TOGGLE_BIN" --harness opencode on >>"$LOG" 2>&1; then
+if MODEL_ROUTER_URL="$MODEL_ROUTER_URL" \
+   OPENCODE_GLOBAL_CONFIG="$HOME_DIR/.config/opencode/opencode.jsonc" \
+   "$TOGGLE_BIN" --harness opencode on >>"$LOG" 2>&1; then
   note "OpenCode routed via the external service (${MODEL_ROUTER_URL%/}/v1)"
 else
   warn "could not flip OpenCode baseURL (see $LOG); run 'model-router-toggle on' manually"
