@@ -1,8 +1,9 @@
 # spec.yaml — model-router-proxy (acq mixin kit, hybrid/v1)
 #
 # WHAT: route OpenCode through the model-router so every prompt auto-switches to
-# the best model (graded reasoning scorer; optional LLM judge). This is the
-# request-path, AUTO-SWITCHING counterpart to the advisory `model-router` MCP kit.
+# the best model (graded reasoning scorer; optional LLM judge). OpenCode's usai
+# provider is pointed (transparently) at the model-router-service, which rewrites
+# the model per request and forwards to USAi.
 #
 # TWO MODES (MODEL_ROUTER_MODE, default in-sandbox):
 #   in-sandbox (DEFAULT): run the full service on 127.0.0.1 INSIDE the sandbox,

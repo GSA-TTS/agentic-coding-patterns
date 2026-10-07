@@ -2,9 +2,10 @@
 
 Routes OpenCode's `usai` provider through the **model-router** so **every prompt
 is auto-switched** to the best model (graded reasoning score; optional LLM
-judge), streaming preserved. This is the request-path, **auto-switching**
-counterpart to the advisory [`model-router`](../model-router/) MCP kit (which
-only *recommends* a model).
+judge), streaming preserved. The proxy sits transparently in the request path:
+OpenCode's `baseURL` points at the [model-router-service](https://github.com/btylerburton/model-router-service),
+which rewrites the model per request and forwards to USAi. See the design
+[proposal](docs/proposal.md).
 
 ## Two modes (`MODEL_ROUTER_MODE`, default `in-sandbox`)
 

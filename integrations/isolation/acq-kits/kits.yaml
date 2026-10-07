@@ -155,47 +155,15 @@ kits:
       bootstrap step. Model-provider config (USAi models.json) is deliberately
       deferred — no emitter exists yet to populate it — and will land in a
       follow-up alongside a real pi USAi-catalog emitter. Model-provider egress
-      is the usai-provider kit's job, not this one.
-
-  model-router:
-    backends: [sbx, msb]
-    parity: |
-      Opt-in mixin that ships a small, dependency-free stdio MCP server
-      (files/home/model-router/*.py — Python standard library only) and
-      registers it with OpenCode so the agent gets one tool, model_select,
-      which suggests the smallest/cheapest available model satisfying a
-      request's demands (reasoning/context/modality) or abstains. Written
-      entirely in the neutral vocabulary with no backend shortcut or extras: a
-      single startup-phase script (files/home/model-router-install.sh)
-      self-tests the scorer and deep-merges one mcp.model-router entry into
-      OpenCode's global config (preserving all other keys and MCP servers,
-      like usai-provider's merge), then copies the companion skill into the
-      skills dir. Both backends run the identical step. Publishes NO ports
-      (the server speaks stdio to its OpenCode host) and declares NO egress —
-      the decision engine is a local deterministic scorer, NOT the proprietary
-      TypeSafe/Jev API the jev-skill-router reference uses, so it needs no paid
-      API and no network at runtime (see
-      docs/decisions/0001-local-scorer-not-proprietary-api.md). Fails soft
-      (missing python3 / unparseable config / scorer error → no suggestion,
-      sandbox stays up). Model-provider config + the live model list are the
-      separate usai-provider kit's job; this kit only routes among available
-      models. Supports an OPT-IN adapter mode (MODEL_ROUTER_ADAPTER_URL) that
-      forwards decisions to a central shared decision server — either the
-      bundled open-source HTTP scorer (http_server.py) or an operator-owned
-      TypeSafe/Jev shim — falling back to the local scorer on any failure; see
-      docs/central-server.md and docs/decisions/0003-central-shared-server.md.
-      Adapter mode is the only path that makes a network call, and requires the
-      operator to allow-list the central host via a companion mixin (the kit
-      itself still declares no egress).
+       is the usai-provider kit's job, not this one.
 
   model-router-proxy:
     backends: [sbx, msb]
     parity: |
       Mixin that routes OpenCode's usai provider through the model-router so
       every prompt auto-switches to the best model (graded reasoning scorer;
-      optional LLM judge). Request-path, auto-switching counterpart to the
-      advisory model-router MCP kit. Two MODES (MODEL_ROUTER_MODE, default
-      in-sandbox). in-sandbox: a single startup script
+      optional LLM judge) — transparently, in the request path. Two MODES
+      (MODEL_ROUTER_MODE, default in-sandbox). in-sandbox: a single startup script
       (files/home/model-router-proxy-install.sh) fetches the full service at a
       PINNED SHA (public GitHub tarball via codeload), installs its deps
       wheels-only (--only-binary=:all:) into one --target dir, runs it on
