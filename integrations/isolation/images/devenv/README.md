@@ -57,6 +57,19 @@ regardless of the lock:
   is keyed on the devenv version).
 - `devenv up -d` works; `devenv processes down` may time out and SIGKILL the
   process group without stopping the service's children.
+- `.devenv/` lives in the project root, so in a sandbox it is part of the
+  workspace and persists with it. Under `--clone` the workspace is inside the
+  sandbox, and a recreate discards `.devenv/state` along with any service data
+  it holds (a Postgres database, for example).
+- Once a repo moves to 2.x modules, built-in services (Postgres, Redis, and
+  others) pick the next free port when their base port is taken. Set
+  `strict_ports: true` in `devenv.yaml` when a kit publishes or another tool
+  expects a fixed port, so a conflict fails instead of silently moving the
+  service.
+- SecretSpec is opt-in (`secretspec.enable` in `devenv.yaml`, or
+  `SECRETSPEC_PROVIDER`/`SECRETSPEC_PROFILE`). On missing secrets it prompts
+  only when stdin is a terminal, which an agent's PTY can be; otherwise it
+  fails.
 
 Everything else is a kit's job:
 
