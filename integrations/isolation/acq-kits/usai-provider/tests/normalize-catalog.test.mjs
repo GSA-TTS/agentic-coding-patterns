@@ -77,6 +77,41 @@ test("normalizeCatalog throws a clear error when the source has no models[] arra
   assert.throws(() => normalizeCatalog(null), /models\[\]/)
 })
 
+test("normalizeCatalog rejects malformed model records with actionable errors", () => {
+  const cases = [
+    [[null], /models\[0\] must be an object \(got null\)/],
+    [["gpt"], /models\[0\] must be an object \(got "gpt"\)/],
+    [[{}], /models\[0\]\.id must be a non-empty string \(got undefined\)/],
+    [[{ id: "" }], /models\[0\]\.id must be a non-empty string \(got ""\)/],
+    [[{ id: 123 }], /models\[0\]\.id must be a non-empty string \(got 123\)/],
+    [[{ id: "model", contextWindow: -5 }], /models\[0\]\.contextWindow must be a positive integer/],
+    [[{ id: "model", contextWindow: 1.5 }], /models\[0\]\.contextWindow must be a positive integer/],
+    [[{ id: "model", contextWindow: Infinity }], /models\[0\]\.contextWindow must be a positive integer/],
+    [[{ id: "model", contextWindow: null }], /models\[0\]\.contextWindow must be a positive integer/],
+    [[{ id: "model", maxOutputTokens: 0 }], /models\[0\]\.maxOutputTokens must be a positive integer/],
+    [[{ id: "model", maxOutputTokens: 2.5 }], /models\[0\]\.maxOutputTokens must be a positive integer/],
+    [[{ id: "model", maxOutputTokens: "64000" }], /models\[0\]\.maxOutputTokens must be a positive integer/],
+    [[{ id: "model", cost: null }], /models\[0\]\.cost must be an object \(got null\)/],
+    [[{ id: "model", cost: "free" }], /models\[0\]\.cost must be an object \(got "free"\)/],
+    [[{ id: "model", cost: [] }], /models\[0\]\.cost must be an object \(got \[\]\)/],
+    [[{ id: "model", cost: { input: -1 } }], /models\[0\]\.cost\.input must be a non-negative finite number/],
+    [[{ id: "model", cost: { output: Infinity } }], /models\[0\]\.cost\.output must be a non-negative finite number/],
+  ]
+
+  for (const [models, expected] of cases) {
+    assert.throws(() => normalizeCatalog({ models }), expected)
+  }
+})
+
+test("normalizeCatalog accepts omitted optional metadata, zero prices, and unknown cost keys", () => {
+  assert.deepEqual(normalizeCatalog({ models: [{ id: "bare" }] }).models, [{ id: "bare" }])
+  assert.deepEqual(normalizeCatalog({ models: [] }).models, [])
+  assert.deepEqual(
+    normalizeCatalog({ models: [{ id: "free", cost: { input: 0, unknown: "ignored" } }] }).models,
+    [{ id: "free", cost: { input: 0 } }],
+  )
+})
+
 test("CLI: reads --source and writes --out, producing valid JSON matching normalizeCatalog", async () => {
   const { execFile } = await import("node:child_process")
   const { promisify } = await import("node:util")

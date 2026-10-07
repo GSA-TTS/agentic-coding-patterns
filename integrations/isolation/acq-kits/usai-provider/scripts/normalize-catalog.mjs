@@ -83,21 +83,56 @@ const PROVIDER_ID = "usai"
  * @param {object} model - one entry from the source catalog's `models[]`
  * @returns {{id: string, contextWindow?: number, maxOutputTokens?: number, cost?: object}}
  */
-function normalizeModel(model) {
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+}
+
+function describe(value) {
+  return value === undefined ? "undefined" : JSON.stringify(value)
+}
+
+function requirePositiveInteger(value, name) {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`${name} must be a positive integer`)
+  }
+}
+
+function requireNonNegativeFiniteNumber(value, name) {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`${name} must be a non-negative finite number`)
+  }
+}
+
+function normalizeModel(model, index) {
+  const prefix = `models[${index}]`
+  if (!isPlainObject(model)) {
+    throw new Error(`${prefix} must be an object (got ${describe(model)})`)
+  }
+  if (typeof model.id !== "string" || model.id.length === 0) {
+    throw new Error(`${prefix}.id must be a non-empty string (got ${describe(model.id)})`)
+  }
+
   const out = { id: model.id }
-  if (typeof model.contextWindow === "number") {
+  if (model.contextWindow !== undefined) {
+    requirePositiveInteger(model.contextWindow, `${prefix}.contextWindow`)
     out.contextWindow = model.contextWindow
   }
-  if (typeof model.maxOutputTokens === "number") {
+  if (model.maxOutputTokens !== undefined) {
+    requirePositiveInteger(model.maxOutputTokens, `${prefix}.maxOutputTokens`)
     out.maxOutputTokens = model.maxOutputTokens
   }
-  if (model.cost && typeof model.cost === "object") {
+  if (model.cost !== undefined) {
+    if (!isPlainObject(model.cost)) {
+      throw new Error(`${prefix}.cost must be an object (got ${describe(model.cost)})`)
+    }
+
     // Pass through unchanged — see the per-million-token decision above.
     // Only copy the scalar keys the source schema defines, so an unexpected
     // extra key on the source can't leak into the neutral output unnoticed.
     const cost = {}
     for (const key of ["input", "output", "cacheRead", "cacheWrite"]) {
-      if (typeof model.cost[key] === "number") {
+      if (model.cost[key] !== undefined) {
+        requireNonNegativeFiniteNumber(model.cost[key], `${prefix}.cost.${key}`)
         cost[key] = model.cost[key]
       }
     }
