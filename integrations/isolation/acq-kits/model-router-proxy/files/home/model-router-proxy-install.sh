@@ -1,55 +1,60 @@
 #!/bin/sh
-# model-router-proxy-install.sh — point OpenCode at an EXTERNAL model-router
-# service so every prompt auto-routes to the best model.
+# model-router-proxy-install.sh — route OpenCode through the model-router so
+# every prompt auto-switches to the best model. Two MODES (default in-sandbox):
 #
-# WHAT IT DOES (startup phase, idempotent, fail-soft):
-#   1. Fetch ONLY the harness-toggle code (a few stdlib-only Python modules) from
-#      the model-router-service repo at a PINNED SHA (public GitHub tarball via
-#      codeload). No server, no deps, no background process runs in the sandbox.
-#   2. Install the `model-router-toggle` CLI on PATH.
-#   3. Flip OpenCode's usai baseURL -> $MODEL_ROUTER_URL/v1 via that CLI
-#      (merge-not-clobber; idempotent; saves the original so `off` restores it).
-#      When MODEL_ROUTER_URL is unset, AUTO-DETECT the backend's host alias
-#      (host.microsandbox.internal / host.containers.internal / host.docker.internal)
-#      so a host-run service is reachable without the caller knowing the backend.
+#   MODE=in-sandbox (DEFAULT): fetch the FULL service at a pinned SHA, install
+#     its deps wheels-only into one --target dir, run it on 127.0.0.1 INSIDE the
+#     sandbox (reusing the usai-provider USAI_API_KEY + the sandbox Zscaler CA),
+#     wait for /readyz, then flip OpenCode's baseURL to the loopback service.
+#     This is the shape that WORKS TODAY: USAi (api.gsa.usai.gov) is only
+#     reachable from inside the GSA network / behind Zscaler, and the sandbox is
+#     already there — so the decision service must run here, not on cloud.gov.
+#     OpenCode->service is pure loopback (no host boundary, no VM-NAT, no proxy).
 #
-# WHY EXTERNAL: calling the decision service in-process per prompt was only ever a
-# POC shape. The service now runs where you deploy it — your localhost during dev
-# or a cloud.gov app in a real environment — and this kit simply ROUTES OpenCode
-# at that URL. The service URL is REQUIRED config (MODEL_ROUTER_URL); nothing is
-# hardcoded and no service is started here.
+#   MODE=external (opt-in): do NOT run a server. Fetch only the stdlib toggle,
+#     and flip OpenCode's baseURL to $MODEL_ROUTER_URL/v1 (a cloud.gov app, or a
+#     host-run service via the backend host alias). Use this once USAi is
+#     reachable from wherever the service is deployed. See
+#     docs/decisions/0001-in-sandbox-mode-default-cloudgov-parked.md.
 #
-# FAIL-SOFT: a missing MODEL_ROUTER_URL, a failed toggle-code fetch, or any error
-# leaves OpenCode on the DIRECT USAi gateway and exits 0 — never a dead sandbox.
-# The service being down is likewise non-fatal: the toggle warns, and if you want
-# a hard fallback leave MODEL_ROUTER_REQUIRE_READY unset (default) so routing is
-# still flipped on and the service can come up later.
+# FAIL-SOFT everywhere: any failure (no python3, no key, fetch/dep/boot failure,
+# service never ready, no resolvable external URL) leaves OpenCode on the DIRECT
+# USAi gateway and exits 0 — never a dead sandbox.
 #
-# SECURITY: no secret is created or read here. The target service authenticates
-# the upstream itself (it holds ROUTER_UPSTREAM_API_KEY where it is deployed).
-# This kit only edits a baseURL in the agent-side OpenCode config.
+# SECURITY: no secret is created here. in-sandbox reuses the injected
+# USAI_API_KEY and the sandbox's own CA trust (the zscaler-ca-certificate kit
+# put the proxy root in the system store), binds LOOPBACK only (not exposed
+# outside the sandbox). external holds no key (the remote service does).
 
 set -eu
 
 # --- Pins / config (overridable via env) ------------------------------------
 SERVICE_REPO="${MODEL_ROUTER_SERVICE_REPO:-btylerburton/model-router-service}"
-SERVICE_REF="${MODEL_ROUTER_SERVICE_REF:-8bb1bd4a9c55f917906361686e150dd7e13fd28a}"
-# REQUIRED: the external model-router-service base URL. If unset, the script
-# AUTO-DETECTS the host alias for the active sandbox backend (they differ:
-# microsandbox -> host.microsandbox.internal, podman -> host.containers.internal,
-# Docker -> host.docker.internal) and uses it with $MODEL_ROUTER_PORT. Set it
-# explicitly for a non-host target (e.g. https://model-router.app.cloud.gov).
+SERVICE_REF="${MODEL_ROUTER_SERVICE_REF:-a821611c6192d21e682fb7146e93b5e5d00ed143}"
+MODE="${MODEL_ROUTER_MODE:-in-sandbox}"      # in-sandbox (default) | external
+PORT="${MODEL_ROUTER_PORT:-8080}"
+JUDGE_MODEL="${MODEL_ROUTER_JUDGE_MODEL:-claude_4_5_haiku}"
+DEFAULT_MODEL="${MODEL_ROUTER_DEFAULT_MODEL:-claude_4_5_sonnet}"
+UPSTREAM_BASE_URL="${MODEL_ROUTER_UPSTREAM_BASE_URL:-https://api.gsa.usai.gov/api/v1}"
+# external mode only: the remote service base URL (auto-detected host alias if
+# unset — see the external branch below).
 MODEL_ROUTER_URL="${MODEL_ROUTER_URL:-}"
-MODEL_ROUTER_PORT="${MODEL_ROUTER_PORT:-8080}"
-# If "1", only flip routing when the service answers /readyz (else leave direct).
 REQUIRE_READY="${MODEL_ROUTER_REQUIRE_READY:-0}"
 
 HOME_DIR="${HOME:-/home/agent}"
-# Only the toggle CLI needs to live in-sandbox; it is pure stdlib (no pip).
-APP_DIR="$HOME_DIR/.local/share/model-router/toggle-src"
+APP_DIR="$HOME_DIR/model-router-service"
+# One flat deps dir via `pip install --target` (NOT --prefix): on this
+# Debian/py3.14 image a --prefix install landed under
+# ~/.local/local/lib/python3.14/dist-packages (a `local/` subdir AND dist- not
+# site-packages), so a computed site-packages PYTHONPATH missed it and
+# `import uvicorn` failed. --target is deterministic: everything is right there.
+DEPS_DIR="$HOME_DIR/.local/share/model-router/deps"
 STATE_DIR="$HOME_DIR/.local/state/model-router-proxy"
 LOG="$STATE_DIR/install.log"
-mkdir -p "$STATE_DIR" "$APP_DIR"
+SRV_LOG="$STATE_DIR/service.log"
+PIDF="$STATE_DIR/service.pid"
+OPENCODE_CFG="$HOME_DIR/.config/opencode/opencode.jsonc"
+mkdir -p "$STATE_DIR" "$DEPS_DIR"
 : > "$LOG"
 
 note() { echo "model-router-proxy: $*"; }
@@ -57,120 +62,166 @@ warn() { echo "model-router-proxy: $*" >&2; }
 
 # --- Preflight ---------------------------------------------------------------
 if ! command -v python3 >/dev/null 2>&1; then
-  warn "python3 not found; cannot install the toggle this boot (OpenCode stays on the direct gateway)"
+  warn "python3 not found; cannot set up routing this boot (OpenCode stays on the direct gateway)"
   exit 0
 fi
 
-if [ -z "$MODEL_ROUTER_URL" ]; then
-  # Auto-detect the host alias for whichever sandbox backend is active. Each
-  # backend injects a DIFFERENT name for "the host from inside the guest":
-  #   microsandbox -> host.microsandbox.internal   (seen in /etc/hosts)
-  #   podman       -> host.containers.internal
-  #   Docker       -> host.docker.internal
-  # Prefer whichever RESOLVES, so a host-run service is reachable without the
-  # caller knowing the backend. (A non-host target like cloud.gov is set
-  # explicitly via MODEL_ROUTER_URL and skips this.)
-  for _h in host.microsandbox.internal host.containers.internal host.docker.internal; do
-    if getent hosts "$_h" >/dev/null 2>&1; then
-      MODEL_ROUTER_URL="http://${_h}:${MODEL_ROUTER_PORT}"
-      note "auto-detected host alias ${_h}; MODEL_ROUTER_URL=${MODEL_ROUTER_URL}"
-      break
-    fi
-  done
-fi
-
-if [ -z "$MODEL_ROUTER_URL" ]; then
-  warn "MODEL_ROUTER_URL not set and no host alias resolved \
-(tried host.microsandbox.internal / host.containers.internal / host.docker.internal). \
-This kit routes OpenCode at an EXTERNAL service and needs its URL. Set it in the \
-GUEST, e.g. 'acq exec <sbx> -- env MODEL_ROUTER_URL=http://<host-or-app>:${MODEL_ROUTER_PORT} \
-model-router-toggle on' (a host-shell export does NOT reach the sandbox). \
-Leaving OpenCode on the direct gateway."
-  exit 0
-fi
-
-# --- 1. Fetch ONLY the toggle code at the pinned SHA (idempotent, ref-aware) --
-# We pull the toggle.py + adapters/ modules (stdlib-only) from the service repo.
-# Re-fetch when the pinned ref changes so a repin actually updates the sandbox.
+# --- Fetch the service repo at the pinned SHA (idempotent, ref-aware) --------
+# Both modes fetch the repo (external needs only the stdlib toggle; in-sandbox
+# needs the whole service). Re-fetch when the pinned ref changes.
 STAMP="$APP_DIR/.model-router-ref"
-TOGGLE_MOD="$APP_DIR/model_router_service/toggle.py"
 need_fetch=1
-if [ -f "$TOGGLE_MOD" ] && [ -f "$STAMP" ] \
+if [ -f "$APP_DIR/src/model_router_service/__main__.py" ] && [ -f "$STAMP" ] \
    && [ "$(cat "$STAMP" 2>/dev/null)" = "$SERVICE_REF" ]; then
   need_fetch=0
-  note "toggle code $SERVICE_REF already present; skipping fetch"
+  note "service $SERVICE_REF already present; skipping fetch"
 fi
 if [ "$need_fetch" -eq 1 ]; then
-  note "fetching toggle code from $SERVICE_REPO@$SERVICE_REF"
+  note "fetching $SERVICE_REPO@$SERVICE_REF"
   TARBALL="https://codeload.github.com/$SERVICE_REPO/tar.gz/$SERVICE_REF"
   TMP="$STATE_DIR/src.tar.gz"
   if ! curl -fsSL "$TARBALL" -o "$TMP" >>"$LOG" 2>&1; then
-    warn "could not fetch the toggle tarball (see $LOG); OpenCode stays on the direct gateway"
+    warn "could not fetch the service tarball (see $LOG); OpenCode stays on the direct gateway"
     exit 0
   fi
-  rm -rf "$APP_DIR" && mkdir -p "$APP_DIR/model_router_service/adapters"
-  TMPX="$STATE_DIR/src"
-  rm -rf "$TMPX" && mkdir -p "$TMPX"
-  if ! tar -xzf "$TMP" -C "$TMPX" --strip-components=1 >>"$LOG" 2>&1; then
-    warn "could not extract the toggle tarball (see $LOG); staying on the direct gateway"
+  rm -rf "$APP_DIR" && mkdir -p "$APP_DIR"
+  if ! tar -xzf "$TMP" -C "$APP_DIR" --strip-components=1 >>"$LOG" 2>&1; then
+    warn "could not extract the service tarball (see $LOG); staying on the direct gateway"
     exit 0
   fi
-  SRCPKG="$TMPX/src/model_router_service"
-  # Copy only the stdlib-only toggle surface; a minimal package __init__ keeps it
-  # importable without dragging in app.py/httpx/pydantic (server-only deps).
-  cp "$SRCPKG/toggle.py" "$APP_DIR/model_router_service/" 2>>"$LOG" || true
-  cp "$SRCPKG/adapters/__init__.py" "$SRCPKG/adapters/opencode.py" \
-     "$SRCPKG/adapters/openai_env.py" "$APP_DIR/model_router_service/adapters/" 2>>"$LOG" || true
-  printf '"""minimal package shim for the model-router toggle (no server deps)."""\n' \
-     > "$APP_DIR/model_router_service/__init__.py"
-  rm -rf "$TMP" "$TMPX"
-  if [ ! -f "$TOGGLE_MOD" ]; then
-    warn "toggle code not found after extract (see $LOG); staying on the direct gateway"
-    exit 0
-  fi
+  rm -f "$TMP"
   echo "$SERVICE_REF" > "$STAMP"
 fi
 
-# Preflight: the toggle must import (stdlib only, so this is just a sanity gate).
-if ! PYTHONPATH="$APP_DIR" python3 -c 'import model_router_service.toggle' >>"$LOG" 2>&1; then
-  warn "toggle code not importable (see $LOG); staying on the direct gateway"
+# PYTHONPATH that makes the service package + installed deps importable. One
+# deps dir, no guessing.
+PP="$APP_DIR/src:$DEPS_DIR"
+
+# --- Install the model-router-toggle + feedback shims on PATH ----------------
+# Pin OPENCODE_GLOBAL_CONFIG so the toggle edits the kit-merged global config at
+# the known path regardless of how $HOME resolves for the invoking user.
+mkdir -p "$HOME_DIR/.local/bin"
+cat > "$HOME_DIR/.local/bin/model-router-toggle" <<EOF
+#!/bin/sh
+exec env PYTHONPATH="$PP:\${PYTHONPATH:-}" \\
+  OPENCODE_GLOBAL_CONFIG="\${OPENCODE_GLOBAL_CONFIG:-$OPENCODE_CFG}" \\
+  python3 -m model_router_service.toggle "\$@"
+EOF
+chmod +x "$HOME_DIR/.local/bin/model-router-toggle"
+cat > "$HOME_DIR/.local/bin/model-router" <<EOF
+#!/bin/sh
+exec env PYTHONPATH="$PP:\${PYTHONPATH:-}" python3 -m model_router_service.cli "\$@"
+EOF
+chmod +x "$HOME_DIR/.local/bin/model-router"
+TOGGLE_BIN="$HOME_DIR/.local/bin/model-router-toggle"
+
+# =============================================================================
+# EXTERNAL MODE — flip baseURL at a remote service; run NO server here.
+# =============================================================================
+if [ "$MODE" = "external" ]; then
+  if [ -z "$MODEL_ROUTER_URL" ]; then
+    # auto-detect the backend's host alias for a host-run service
+    for _h in host.microsandbox.internal host.containers.internal host.docker.internal; do
+      if getent hosts "$_h" >/dev/null 2>&1; then
+        MODEL_ROUTER_URL="http://${_h}:${PORT}"
+        note "external: auto-detected host alias ${_h}; MODEL_ROUTER_URL=${MODEL_ROUTER_URL}"
+        break
+      fi
+    done
+  fi
+  if [ -z "$MODEL_ROUTER_URL" ]; then
+    warn "external mode but no MODEL_ROUTER_URL and no host alias resolved; \
+staying on the direct gateway. Set MODEL_ROUTER_URL in the guest to a reachable \
+service (e.g. a cloud.gov app)."
+    exit 0
+  fi
+  if [ "$REQUIRE_READY" = "1" ] && ! curl -fsS "${MODEL_ROUTER_URL%/}/readyz" >/dev/null 2>&1; then
+    warn "external: $MODEL_ROUTER_URL/readyz not reachable and REQUIRE_READY=1; staying direct"
+    exit 0
+  fi
+  if MODEL_ROUTER_URL="$MODEL_ROUTER_URL" OPENCODE_GLOBAL_CONFIG="$OPENCODE_CFG" \
+       "$TOGGLE_BIN" --harness opencode on >>"$LOG" 2>&1; then
+    note "external: OpenCode routed via ${MODEL_ROUTER_URL%/}/v1"
+  else
+    warn "external: could not flip OpenCode baseURL (see $LOG); run 'model-router-toggle on' manually"
+  fi
   exit 0
 fi
 
-# --- 2. Install the model-router-toggle shim on PATH -------------------------
-TOGGLE_BIN="$HOME_DIR/.local/bin/model-router-toggle"
-mkdir -p "$HOME_DIR/.local/bin"
-# Pin OPENCODE_GLOBAL_CONFIG so the toggle edits the kit-merged global config at
-# the known in-sandbox path, independent of how $HOME resolves for whatever user
-# runs the shim later (a bare `model-router-toggle` from any shell still works).
-cat > "$TOGGLE_BIN" <<EOF
-#!/bin/sh
-exec env PYTHONPATH="$APP_DIR:\${PYTHONPATH:-}" \\
-  OPENCODE_GLOBAL_CONFIG="\${OPENCODE_GLOBAL_CONFIG:-$HOME_DIR/.config/opencode/opencode.jsonc}" \\
-  python3 -m model_router_service.toggle "\$@"
-EOF
-chmod +x "$TOGGLE_BIN"
-
-# --- 3. (Optional) require the external service be ready before flipping ------
-if [ "$REQUIRE_READY" = "1" ]; then
-  if ! curl -fsS "${MODEL_ROUTER_URL%/}/readyz" >/dev/null 2>&1; then
-    warn "MODEL_ROUTER_REQUIRE_READY=1 but $MODEL_ROUTER_URL/readyz not reachable; \
-leaving OpenCode on the direct gateway"
-    exit 0
-  fi
-  note "external service ready at $MODEL_ROUTER_URL"
+# =============================================================================
+# IN-SANDBOX MODE (default) — run the service on 127.0.0.1 in the VM.
+# =============================================================================
+if [ -z "${USAI_API_KEY:-}" ]; then
+  warn "in-sandbox mode needs USAI_API_KEY (is the usai-provider kit applied?); \
+staying on the direct gateway"
+  exit 0
 fi
 
-# --- 4. Flip OpenCode's baseURL to the external service ----------------------
-# model-router-toggle edits the agent-side global opencode.jsonc (merge, not
-# clobber), saves the original, and is idempotent. OpenCode reads baseURL at
-# init, so a session started AFTER this routes; the agentContext says so.
-if MODEL_ROUTER_URL="$MODEL_ROUTER_URL" \
-   OPENCODE_GLOBAL_CONFIG="$HOME_DIR/.config/opencode/opencode.jsonc" \
-   "$TOGGLE_BIN" --harness opencode on >>"$LOG" 2>&1; then
-  note "OpenCode routed via the external service (${MODEL_ROUTER_URL%/}/v1)"
+# Install deps WHEELS-ONLY into one --target dir. --only-binary=:all: fails fast
+# with a clear message if no prebuilt wheel exists for this Python/arch, instead
+# of a from-source Rust build of pydantic-core (needs a C/Rust toolchain the
+# image lacks — the "linker cc not found" failure). Bounded ranges in the
+# service's requirements.txt let pip pick a version that HAS a wheel.
+if [ -f "$APP_DIR/requirements.txt" ]; then
+  note "installing service deps to $DEPS_DIR (wheels only, --target)"
+  if ! python3 -m pip install --quiet --only-binary=:all: --target "$DEPS_DIR" \
+        -r "$APP_DIR/requirements.txt" >>"$LOG" 2>&1; then
+    warn "could not install service deps as wheels for $(python3 -V 2>&1) (see $LOG); \
+staying on the direct gateway. Likely no prebuilt wheel for this Python/arch."
+    exit 0
+  fi
+fi
+
+# Preflight: deps must IMPORT before launch, so a layout problem fails HERE with
+# a clear message instead of a silent dead background process.
+if ! PYTHONPATH="$PP" python3 -c 'import uvicorn, fastapi, httpx, pydantic, pydantic_settings' >>"$LOG" 2>&1; then
+  warn "service deps not importable from $DEPS_DIR after install (see $LOG); staying on the direct gateway"
+  exit 0
+fi
+
+# Launch the service in the background (idempotent — reuse a live one).
+if curl -fsS "http://127.0.0.1:$PORT/readyz" >/dev/null 2>&1; then
+  note "service already serving on 127.0.0.1:$PORT"
 else
-  warn "could not flip OpenCode baseURL (see $LOG); run 'model-router-toggle on' manually"
+  note "starting service on 127.0.0.1:$PORT (judge off by default; scorer only)"
+  # setsid env VAR=… python3: wrapping in `env` guarantees the DETACHED process
+  # inherits PYTHONPATH + the ROUTER_* config (an inline `VAR=… setsid …` can
+  # drop them across the session detach). Reuse USAI_API_KEY + sandbox CA trust
+  # (no ROUTER_CA_BUNDLE — the zscaler-ca-certificate kit put the root in the
+  # system store).
+  setsid env \
+    ROUTER_UPSTREAM_BASE_URL="$UPSTREAM_BASE_URL" \
+    ROUTER_UPSTREAM_API_KEY="$USAI_API_KEY" \
+    ROUTER_JUDGE_MODEL="$JUDGE_MODEL" \
+    ROUTER_DEFAULT_MODEL="$DEFAULT_MODEL" \
+    ROUTER_HOST="127.0.0.1" ROUTER_PORT="$PORT" \
+    MODEL_ROUTER_DECISION_LOG="$STATE_DIR/decisions.jsonl" \
+    MODEL_ROUTER_FEEDBACK="$STATE_DIR/feedback.jsonl" \
+    MODEL_ROUTER_TUNING="$STATE_DIR/tuning.json" \
+    PYTHONPATH="$PP" \
+    python3 -m model_router_service >"$SRV_LOG" 2>&1 &
+  echo $! > "$PIDF"
+
+  i=0
+  until curl -fsS "http://127.0.0.1:$PORT/readyz" >/dev/null 2>&1; do
+    i=$((i+1))
+    [ "$i" -ge 45 ] && break
+    sleep 1
+  done
+  if ! curl -fsS "http://127.0.0.1:$PORT/readyz" >/dev/null 2>&1; then
+    warn "service did not become ready within 45s (see $SRV_LOG); leaving OpenCode on the direct gateway"
+    exit 0
+  fi
+  note "service ready on 127.0.0.1:$PORT"
+fi
+
+# Flip OpenCode's baseURL to the loopback service. OpenCode reads baseURL at
+# init, so a session started AFTER this routes; the agentContext says so.
+if MODEL_ROUTER_URL="http://127.0.0.1:$PORT" OPENCODE_GLOBAL_CONFIG="$OPENCODE_CFG" \
+     "$TOGGLE_BIN" --harness opencode on >>"$LOG" 2>&1; then
+  note "OpenCode routed via the in-sandbox service (http://127.0.0.1:$PORT/v1)"
+else
+  warn "could not flip OpenCode baseURL (see $LOG); the service is up — run 'model-router-toggle on' manually"
 fi
 
 exit 0

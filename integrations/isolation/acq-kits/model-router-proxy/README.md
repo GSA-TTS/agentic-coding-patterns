@@ -1,74 +1,66 @@
 # model-router-proxy (acq mixin kit)
 
-Points OpenCode's `usai` provider at an **external** model-router service so
-**every prompt is auto-routed** to the best model (graded reasoning score;
-optional LLM judge), with streaming preserved. This is the request-path,
-**auto-switching** counterpart to the advisory [`model-router`](../model-router/)
-MCP kit (which only *recommends* a model).
+Routes OpenCode's `usai` provider through the **model-router** so **every prompt
+is auto-switched** to the best model (graded reasoning score; optional LLM
+judge), streaming preserved. This is the request-path, **auto-switching**
+counterpart to the advisory [`model-router`](../model-router/) MCP kit (which
+only *recommends* a model).
 
-> **External service shape.** The model-router-service runs **where you deploy
-> it** — your localhost during dev (reachable from the sandbox via the host
-> bridge) or a **cloud.gov** app in a real environment. This kit does **not** run
-> a server in the sandbox: it fetches only the stdlib `model-router-toggle` CLI
-> and flips OpenCode's `baseURL` to `MODEL_ROUTER_URL/v1`. See the design
-> proposal in
-> [`../model-router/docs/proposals/model-router-proxy-kit.md`](../model-router/docs/proposals/model-router-proxy-kit.md).
+## Two modes (`MODEL_ROUTER_MODE`, default `in-sandbox`)
+
+| Mode | What runs | When to use |
+|------|-----------|-------------|
+| **`in-sandbox`** (default) | the **full service on `127.0.0.1` inside the sandbox**, then flips OpenCode's `baseURL` to it | **now** — USAi (`api.gsa.usai.gov`) is only reachable from inside the GSA network / behind Zscaler, and the sandbox is already there. OpenCode→service is pure loopback. |
+| **`external`** | **no server**; flips `baseURL` to a remote `MODEL_ROUTER_URL` (cloud.gov app, or a host-run service via the backend host alias) | **later** — once USAi is reachable from wherever the service is deployed. |
+
+> **Why in-sandbox is the default:** a cloud.gov deploy of the service *starts*
+> but cannot reach USAi from cloud.gov egress (verified: `/models` → `000`,
+> `/readyz` → `candidates:0`). The decision service must run where USAi is
+> reachable — inside the GSA network, i.e. the sandbox. See
+> [`docs/decisions/0001-in-sandbox-mode-default-cloudgov-parked.md`](docs/decisions/0001-in-sandbox-mode-default-cloudgov-parked.md).
 
 ## What it does (startup, idempotent, fail-soft)
 
-1. **Fetch** only the stdlib toggle modules (`toggle.py` + `adapters/`) from
-   [`btylerburton/model-router-service`](https://github.com/btylerburton/model-router-service)
-   at a pinned SHA (public GitHub tarball via `codeload`). No pip install, no
-   server, no background process.
-2. **Install** the `model-router-toggle` CLI on PATH.
-3. **Flip** OpenCode's `usai` `baseURL` → `MODEL_ROUTER_URL/v1` via that CLI
-   (merge-not-clobber; idempotent; saves the original so `off` restores it).
+**in-sandbox mode (default):**
+1. **Fetch** [`btylerburton/model-router-service`](https://github.com/btylerburton/model-router-service)
+   at a pinned SHA (public GitHub tarball via `codeload`).
+2. **Install** its deps **wheels-only** (`--only-binary=:all:`) into one flat
+   `--target` dir — no source build (avoids the Python 3.14/aarch64
+   no-wheel/no-compiler failure), deterministic import path.
+3. **Run** the service in the background on `127.0.0.1:8080`, reusing the
+   **usai-provider** `USAI_API_KEY` and the sandbox's **Zscaler CA** trust (the
+   `zscaler-ca-certificate` kit put the root in the system store — no
+   `ROUTER_CA_BUNDLE` needed). Wait for `/readyz`.
+4. **Flip** OpenCode's `usai` `baseURL` → `http://127.0.0.1:8080/v1` via the
+   installed `model-router-toggle` CLI.
 
-**Fail-soft:** missing `python3`, a missing `MODEL_ROUTER_URL`, or a failed fetch
-all leave OpenCode on the **direct USAi gateway** and exit 0 — never a dead
-sandbox. The external service being down is non-fatal too (the toggle warns; set
-`MODEL_ROUTER_REQUIRE_READY=1` to instead stay direct until the service answers
-`/readyz`).
+**external mode:** skip the server; auto-detect the backend host alias (or use
+`MODEL_ROUTER_URL`) and flip `baseURL` to it.
 
-## Config
-
-| Var | Required | Meaning |
-|-----|----------|---------|
-| `MODEL_ROUTER_URL` | no (auto-detected for host targets) | External service base URL. If unset, the install script **auto-detects the backend's host alias** and targets a host-run service on `MODEL_ROUTER_PORT`. Set it explicitly for a non-host target, e.g. `https://<app>.app.cloud.gov`. |
-| `MODEL_ROUTER_PORT` | no | Port of a host-run service (default `8080`); used only by auto-detect. |
-
-**Host-alias auto-detect.** The alias for "the host, from inside the guest"
-differs by sandbox backend, so the kit does **not** hardcode one. When
-`MODEL_ROUTER_URL` is unset it tries, in order, the first that resolves:
-
-| Backend | Host alias |
-|---------|-----------|
-| microsandbox (acq `local`/msb) | `host.microsandbox.internal` |
-| podman | `host.containers.internal` |
-| Docker | `host.docker.internal` |
-
-> **For a non-host target (cloud.gov), set `MODEL_ROUTER_URL` in the GUEST, not
-> your host shell** — a host-shell `export` does not reach the sandbox:
-> ```bash
-> acq exec <sbx> -- env MODEL_ROUTER_URL=https://<app>.app.cloud.gov \
->   model-router-toggle --harness opencode on
-> # then restart the OpenCode session
-> ```
-
-The service holds its **own** upstream key where it is deployed, so this kit
-needs neither `USAI_API_KEY` nor the Zscaler CA in the sandbox — the **service**
-handles TLS and auth to USAi on its side.
+**Fail-soft (both modes):** missing `python3`/`USAI_API_KEY`, a failed
+fetch/dep-install, or a service that never becomes ready all leave OpenCode on
+the **direct USAi gateway** and exit 0 — never a dead sandbox.
 
 ## Compose with
 
 | Kit | Why |
 |-----|-----|
-| `usai-provider` | owns the OpenCode `usai` provider block this kit flips |
+| `usai-provider` | owns the OpenCode `usai` provider block this kit flips; supplies `USAI_API_KEY` |
+| `zscaler-ca-certificate` | puts the Zscaler root in the sandbox trust store so the in-sandbox service can reach USAi over inspected TLS |
 
-Reaching the external service from the sandbox is **deployment-specific** and
-handled above: a host-run service is reached via the backend's auto-detected host
-alias (loopback bridge, no egress entry needed); a cloud.gov service needs that
-app's host added to the sandbox egress (via your project's egress kit).
+Apply all three for in-sandbox mode.
+
+## Config (env)
+
+| Var | Default | Meaning |
+|-----|---------|---------|
+| `MODEL_ROUTER_MODE` | `in-sandbox` | `in-sandbox` \| `external` |
+| `MODEL_ROUTER_PORT` | `8080` | loopback port (in-sandbox) / host-run port (external) |
+| `MODEL_ROUTER_JUDGE_MODEL` | `claude_4_5_haiku` | cheap ranking model (judge is off by default) |
+| `MODEL_ROUTER_DEFAULT_MODEL` | `claude_4_5_sonnet` | fail-open landing model |
+| `MODEL_ROUTER_SERVICE_REF` | pinned SHA | service commit to fetch |
+| `MODEL_ROUTER_URL` | *(external only)* | remote service URL; auto-detects a host alias if unset |
+| `MODEL_ROUTER_REQUIRE_READY` | `0` | external: `1` = only flip if the remote `/readyz` answers |
 
 ## Controls (installed on PATH)
 
@@ -76,41 +68,33 @@ app's host added to the sandbox egress (via your project's egress kit).
 model-router-toggle status          # routing ON/OFF + service /readyz
 model-router-toggle off             # stop routing (restart OpenCode session to apply)
 model-router-toggle on              # resume routing
+model-router feedback --last --model claude_4_8_opus   # correct a bad route
+model-router recalibrate            # re-tune reasoning thresholds from feedback
 ```
 
 > OpenCode reads `baseURL` at provider init, so a routing change needs a session
 > restart (the toggle prints this).
 
-## Pins / overrides (env)
-
-| Var | Default | Meaning |
-|-----|---------|---------|
-| `MODEL_ROUTER_URL` | *(auto-detect host alias)* | external service base URL; set explicitly for cloud.gov |
-| `MODEL_ROUTER_PORT` | `8080` | host-run service port used by auto-detect |
-| `MODEL_ROUTER_SERVICE_REPO` | `btylerburton/model-router-service` | source repo (for the toggle code) |
-| `MODEL_ROUTER_SERVICE_REF` | pinned SHA | commit to fetch the toggle code from |
-| `MODEL_ROUTER_REQUIRE_READY` | `0` | `1` = only flip routing if the service answers `/readyz` |
-
 ## Logs (in-sandbox)
 
 ```
-~/.local/state/model-router-proxy/install.log      # fetch/flip steps
+~/.local/state/model-router-proxy/install.log      # fetch/install/flip steps
+~/.local/state/model-router-proxy/service.log      # the service's own stdout
+~/.local/state/model-router-proxy/decisions.jsonl  # one line per routed turn
 ```
-
-(The decision log and the proxy's own stdout live wherever the **service** runs —
-on your host or on cloud.gov — not in the sandbox.)
 
 ## Verifying
 
 ```bash
 ./scripts/verify              # offline: schema/registry + install-script guards
-RUN_ACQ=1 MODEL_ROUTER_URL=... ./scripts/verify    # live: create a sandbox, assert baseURL flipped
+RUN_ACQ=1 ./scripts/verify    # live: create a sandbox, assert in-sandbox service up + baseURL flipped
 ```
 
 ## Backend parity
 
-Written in the neutral `hybrid/v1` vocabulary (`files` + a single startup
-`command`), no backend shortcut. Both `sbx` and `msb` drop the install script and
-run the identical fetch → install-CLI → flip step. No published port (no server).
-The egress allow-list (`codeload.github.com`, `api.github.com`) is emitted per
-backend from `caps.network.allow`.
+Neutral `hybrid/v1` (`files` + one startup `command`), no backend shortcut. Both
+`sbx` and `msb` run the identical step. No published port (loopback only in
+in-sandbox mode; no server in external mode). Egress allow-list:
+`codeload.github.com` + `api.github.com` (fetch), `pypi.org` +
+`files.pythonhosted.org` (deps, in-sandbox), `api.gsa.usai.gov` (the service's
+upstream, in-sandbox).

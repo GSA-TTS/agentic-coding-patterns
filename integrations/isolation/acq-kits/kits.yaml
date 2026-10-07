@@ -191,24 +191,26 @@ kits:
   model-router-proxy:
     backends: [sbx, msb]
     parity: |
-      Mixin that points OpenCode's usai baseURL at an EXTERNAL model-router
-      service, so every prompt auto-switches to the best model (graded reasoning
-      scorer; optional LLM judge). This is the request-path, auto-switching
-      counterpart to the advisory model-router MCP kit. The service runs where
-      you deploy it — the developer's localhost (reachable via the host bridge)
-      or a cloud.gov app — NOT in the sandbox. A single startup-phase script
-      (files/home/model-router-proxy-install.sh) fetches only the stdlib
-      model-router-toggle CLI from the service repo at a PINNED SHA (public
-      GitHub tarball via codeload), installs it on PATH, and flips OpenCode's
-      baseURL to MODEL_ROUTER_URL/v1. No pip install, no server, no background
-      process in-sandbox. Both backends run the identical step. Publishes NO
-      ports. Egress allow-list: codeload.github.com + api.github.com (fetch the
-      toggle code only). When MODEL_ROUTER_URL is unset the install script
-      AUTO-DETECTS the backend's host alias (host.microsandbox.internal /
-      host.containers.internal / host.docker.internal) to reach a host-run
-      service on MODEL_ROUTER_PORT; set MODEL_ROUTER_URL in the guest for a
-      non-host target (e.g. a cloud.gov app URL). The external service holds its
-      own upstream key and handles TLS to USAi, so this kit needs neither
-      USAI_API_KEY nor the Zscaler CA in-sandbox.
-      Fail-soft: no python3, no resolvable host/URL, or a failed fetch leave
-      OpenCode on the direct USAi gateway and exit 0. Compose with usai-provider.
+      Mixin that routes OpenCode's usai provider through the model-router so
+      every prompt auto-switches to the best model (graded reasoning scorer;
+      optional LLM judge). Request-path, auto-switching counterpart to the
+      advisory model-router MCP kit. Two MODES (MODEL_ROUTER_MODE, default
+      in-sandbox). in-sandbox: a single startup script
+      (files/home/model-router-proxy-install.sh) fetches the full service at a
+      PINNED SHA (public GitHub tarball via codeload), installs its deps
+      wheels-only (--only-binary=:all:) into one --target dir, runs it on
+      127.0.0.1 reusing the usai-provider USAI_API_KEY + the sandbox Zscaler CA
+      (no new secret, no ROUTER_CA_BUNDLE), waits for /readyz, then flips
+      OpenCode's baseURL to the loopback service via the model-router-toggle CLI.
+      This is the shape that works while USAi (api.gsa.usai.gov) is only
+      reachable inside the GSA network (a cloud.gov deploy can't reach it).
+      external mode runs no server and flips baseURL to a remote MODEL_ROUTER_URL
+      (auto-detecting the backend host alias host.microsandbox.internal /
+      host.containers.internal / host.docker.internal for a host-run service).
+      Both backends run the identical step. Publishes NO ports (loopback only).
+      Egress allow-list: codeload.github.com + api.github.com (fetch), pypi.org +
+      files.pythonhosted.org (deps, in-sandbox), api.gsa.usai.gov (upstream,
+      in-sandbox). Fail-soft: no python3/key, failed fetch/deps/boot, or a
+      service that never readies leave OpenCode on the direct USAi gateway and
+      exit 0. Compose with usai-provider (and zscaler-ca-certificate for
+      in-sandbox). See docs/decisions/0001-in-sandbox-mode-default-cloudgov-parked.md.
