@@ -30,7 +30,7 @@ set -eu
 
 # --- Pins / config (overridable via env) ------------------------------------
 SERVICE_REPO="${MODEL_ROUTER_SERVICE_REPO:-btylerburton/model-router-service}"
-SERVICE_REF="${MODEL_ROUTER_SERVICE_REF:-2e6457ef98fb98491408713e60182d4587abc092}"
+SERVICE_REF="${MODEL_ROUTER_SERVICE_REF:-a415e999e531bc5e66ce2bbaa26e946f2775aa1d}"
 MODE="${MODEL_ROUTER_MODE:-in-sandbox}"      # in-sandbox (default) | external
 PORT="${MODEL_ROUTER_PORT:-8080}"
 JUDGE_MODEL="${MODEL_ROUTER_JUDGE_MODEL:-claude_4_5_haiku}"
@@ -216,8 +216,12 @@ else
 fi
 
 # Flip OpenCode's baseURL to the loopback service. OpenCode reads baseURL at
-# init, so a session started AFTER this routes; the agentContext says so.
+# init, so a session started AFTER this routes; the agentContext says so. The
+# toggle records an auditable ON/OFF line to $STATE_DIR/toggle-log.jsonl, and the
+# session-start acknowledgement (A3) is emitted via `model-router-toggle ack`
+# (suppressible with MODEL_ROUTER_ACK=off for log-only).
 if MODEL_ROUTER_URL="http://127.0.0.1:$PORT" OPENCODE_GLOBAL_CONFIG="$OPENCODE_CFG" \
+   MODEL_ROUTER_TOGGLE_LOG="$STATE_DIR/toggle-log.jsonl" \
      "$TOGGLE_BIN" --harness opencode on >>"$LOG" 2>&1; then
   note "OpenCode routed via the in-sandbox service (http://127.0.0.1:$PORT/v1)"
 else
