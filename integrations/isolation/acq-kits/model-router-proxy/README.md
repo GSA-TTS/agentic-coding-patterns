@@ -34,7 +34,17 @@ sandbox. The external service being down is non-fatal too (the toggle warns; set
 
 | Var | Required | Meaning |
 |-----|----------|---------|
-| `MODEL_ROUTER_URL` | **yes** | External service base URL — **no default host**. e.g. `http://host.docker.internal:8080` (service on your laptop) or `https://<app>.app.cloud.gov` (cloud.gov) |
+| `MODEL_ROUTER_URL` | **yes** (has a dev default) | External service base URL. The spec ships a default of `http://host.docker.internal:8080` (a service on the developer's host, via the Docker bridge). Change it to `https://<app>.app.cloud.gov` for a deployed service. |
+
+> **It must be in the GUEST environment, not your host shell.** The install
+> script runs inside the sandbox, so a host-shell `export MODEL_ROUTER_URL=…`
+> does **not** reach it. The kit's `environment:` block injects the default into
+> the guest. To override per sandbox, change that block, or set it at runtime:
+> ```bash
+> acq exec <sbx> -- env MODEL_ROUTER_URL=https://<app>.app.cloud.gov \
+>   model-router-toggle --harness opencode on
+> # then restart the OpenCode session
+> ```
 
 The service holds its **own** upstream key where it is deployed, so this kit
 needs neither `USAI_API_KEY` nor the Zscaler CA in the sandbox — the **service**
@@ -67,7 +77,7 @@ model-router-toggle on              # resume routing
 
 | Var | Default | Meaning |
 |-----|---------|---------|
-| `MODEL_ROUTER_URL` | *(required)* | external service base URL |
+| `MODEL_ROUTER_URL` | `http://host.docker.internal:8080` | external service base URL (guest env; spec default) |
 | `MODEL_ROUTER_SERVICE_REPO` | `btylerburton/model-router-service` | source repo (for the toggle code) |
 | `MODEL_ROUTER_SERVICE_REF` | pinned SHA | commit to fetch the toggle code from |
 | `MODEL_ROUTER_REQUIRE_READY` | `0` | `1` = only flip routing if the service answers `/readyz` |

@@ -61,6 +61,22 @@ files:
       Startup: fetch the stdlib toggle CLI at a pinned SHA, install it on PATH,
       and flip OpenCode's usai baseURL to the external MODEL_ROUTER_URL/v1.
 
+# The kit's startup script runs INSIDE the sandbox, so MODEL_ROUTER_URL must be
+# present in the GUEST environment — a host-shell `export MODEL_ROUTER_URL=…`
+# does NOT reach it (host and guest are different environments). This block
+# injects a DEFAULT into the guest so the common dev case works out of the box.
+# It is a non-secret URL, so it belongs here (not the credential path).
+#
+# Override per sandbox by changing this value, or at runtime with
+#   acq exec <sbx> -- env MODEL_ROUTER_URL=https://<app>.app.cloud.gov \
+#     model-router-toggle --harness opencode on
+# and restarting the OpenCode session.
+environment:
+  # Default: a model-router-service running on the DEVELOPER'S HOST, reachable
+  # from the sandbox via the Docker host bridge. For a deployed service, change
+  # this to https://<app>.app.cloud.gov AND add that host to the sandbox egress.
+  MODEL_ROUTER_URL: "http://host.docker.internal:8080"
+
 commands:
   # Startup phase, as the agent user. Runs AFTER usai-provider's merge (both are
   # startup/user 1000; acq preserves file-drop-before-startup ordering). Idempotent

@@ -57,8 +57,12 @@ if ! command -v python3 >/dev/null 2>&1; then
 fi
 
 if [ -z "$MODEL_ROUTER_URL" ]; then
-  warn "MODEL_ROUTER_URL not set; this kit routes OpenCode at an EXTERNAL service \
-and needs its URL (e.g. http://host.docker.internal:8080 or https://<app>.app.cloud.gov). \
+  warn "MODEL_ROUTER_URL not set in the GUEST environment. This kit routes OpenCode \
+at an EXTERNAL service and needs its URL. The spec ships a default \
+(http://host.docker.internal:8080); if you see this, the env did not reach the \
+guest. Set it in the guest, e.g. the kit's environment block or \
+'acq exec <sbx> -- env MODEL_ROUTER_URL=https://<app>.app.cloud.gov model-router-toggle on'. \
+NOTE: a host-shell 'export MODEL_ROUTER_URL=...' does NOT reach the sandbox. \
 Leaving OpenCode on the direct gateway."
   exit 0
 fi

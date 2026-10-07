@@ -203,8 +203,10 @@ kits:
       baseURL to MODEL_ROUTER_URL/v1. No pip install, no server, no background
       process in-sandbox. Both backends run the identical step. Publishes NO
       ports. Egress allow-list: codeload.github.com + api.github.com (fetch the
-      toggle code only). MODEL_ROUTER_URL is REQUIRED (no default host); the
-      external service holds its own upstream key and handles TLS to USAi, so
-      this kit needs neither USAI_API_KEY nor the Zscaler CA in-sandbox.
+      toggle code only). MODEL_ROUTER_URL is supplied to the GUEST environment
+      via the kit's environment block (default http://host.docker.internal:8080
+      for a host-run service; override to a cloud.gov app URL). The external
+      service holds its own upstream key and handles TLS to USAi, so this kit
+      needs neither USAI_API_KEY nor the Zscaler CA in-sandbox.
       Fail-soft: missing python3/MODEL_ROUTER_URL or a failed fetch leave
       OpenCode on the direct USAi gateway and exit 0. Compose with usai-provider.
