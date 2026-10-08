@@ -32,7 +32,7 @@ set -eu
 
 # --- Pins / config (overridable via env) ------------------------------------
 SERVICE_REPO="${MODEL_ROUTER_SERVICE_REPO:-btylerburton/model-router-service}"
-SERVICE_REF="${MODEL_ROUTER_SERVICE_REF:-a415e999e531bc5e66ce2bbaa26e946f2775aa1d}"
+SERVICE_REF="${MODEL_ROUTER_SERVICE_REF:-b5a1c9115721bce427f800594aa74a13fe21ea90}"
 MODE="${MODEL_ROUTER_MODE:-in-sandbox}"      # in-sandbox (default) | external
 PORT="${MODEL_ROUTER_PORT:-8080}"
 JUDGE_MODEL="${MODEL_ROUTER_JUDGE_MODEL:-claude_4_5_haiku}"
@@ -107,6 +107,8 @@ cat > "$HOME_DIR/.local/bin/model-router-toggle" <<EOF
 #!/bin/sh
 exec env PYTHONPATH="$PP:\${PYTHONPATH:-}" \\
   OPENCODE_GLOBAL_CONFIG="\${OPENCODE_GLOBAL_CONFIG:-$OPENCODE_CFG}" \\
+  MODEL_ROUTER_PREF="\${MODEL_ROUTER_PREF:-$HOME_DIR/.model-router/pref.json}" \\
+  MODEL_ROUTER_TOGGLE_LOG="\${MODEL_ROUTER_TOGGLE_LOG:-$STATE_DIR/toggle-log.jsonl}" \\
   python3 -m model_router_service.toggle "\$@"
 EOF
 chmod +x "$HOME_DIR/.local/bin/model-router-toggle"
@@ -217,13 +219,25 @@ else
   note "service ready on 127.0.0.1:$PORT"
 fi
 
-# Flip OpenCode's baseURL to the loopback service. OpenCode reads baseURL at
-# init, so a session started AFTER this routes; the agentContext says so. The
-# toggle records an auditable ON/OFF line to $STATE_DIR/toggle-log.jsonl, and the
-# session-start acknowledgement (A3) is emitted via `model-router-toggle ack`
+# Flip OpenCode's baseURL to the loopback service — UNLESS the user has turned
+# routing OFF and that preference is sticky. OpenCode reads baseURL at session
+# init, so a toggle only takes effect on the next session/boot; without honoring
+# a persisted preference here, every boot would re-flip routing ON and
+# `model-router-toggle off` could never survive a restart (the bug this fixes).
+# Default (no preference recorded) is ON — routing is the point of the kit.
+PREF_FILE="$HOME_DIR/.model-router/pref.json"
+DESIRED="$(MODEL_ROUTER_PREF="$PREF_FILE" "$TOGGLE_BIN" --harness opencode pref 2>/dev/null || echo on)"
+if [ "$DESIRED" = "off" ]; then
+  note "routing left OFF per saved user preference (model-router-toggle on to re-enable). Service is running on 127.0.0.1:$PORT."
+  exit 0
+fi
+
+# The toggle records an auditable ON/OFF line to $STATE_DIR/toggle-log.jsonl, and
+# the session-start acknowledgement (A3) is emitted via `model-router-toggle ack`
 # (suppressible with MODEL_ROUTER_ACK=off for log-only).
 if MODEL_ROUTER_URL="http://127.0.0.1:$PORT" OPENCODE_GLOBAL_CONFIG="$OPENCODE_CFG" \
    MODEL_ROUTER_TOGGLE_LOG="$STATE_DIR/toggle-log.jsonl" \
+   MODEL_ROUTER_PREF="$PREF_FILE" \
      "$TOGGLE_BIN" --harness opencode on >>"$LOG" 2>&1; then
   note "OpenCode routed via the in-sandbox service (http://127.0.0.1:$PORT/v1)"
 else

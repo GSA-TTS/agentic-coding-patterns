@@ -31,6 +31,15 @@ the service couldn't reach USAi (TLS/CA — apply `zscaler-ca-certificate`).
 URL it started with. **Start a new OpenCode session** for a toggle to take
 effect. `model-router-toggle status` shows what the *next* session will use.
 
+### `off` is sticky — it survives restarts
+
+`model-router-toggle off` persists a preference (`~/.model-router/pref.json`).
+The kit's startup script reads it on every boot and **skips re-enabling routing**
+while the preference is `off`. (This fixes an earlier bug where every restart
+re-flipped routing ON, so `off` could never take hold.) The service still runs
+in the background, so `model-router-toggle on` re-enables routing instantly for
+the next session. `status` shows the saved preference under `pref:`.
+
 ### Mid-session on/off (platform limitation, not a kit bug)
 
 A true mid-session global toggle is **not currently possible from this kit**:

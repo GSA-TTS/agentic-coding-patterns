@@ -119,11 +119,11 @@ agentContext: |
 
   Controls (installed on PATH):
   - `model-router-toggle status` — routing ON/OFF, the service's reachability,
-    and the last recorded toggle (audit trail)
-  - `model-router-toggle off` / `on` — stop/start routing. NOTE: OpenCode reads
-    `baseURL` at session init, so a toggle takes effect on the **next** session,
-    not mid-session (a true mid-session switch needs OpenCode/harness support —
-    see TROUBLESHOOTING).
+    the last recorded toggle, and the saved preference the kit applies at boot
+  - `model-router-toggle off` / `on` — stop/start routing. This is **sticky**:
+    `off` persists across sandbox restarts (the kit's startup honors it and will
+    NOT re-enable routing until `on`). NOTE: OpenCode reads `baseURL` at session
+    init, so the change takes effect on the **next** session, not mid-session.
   - **Per-turn override (works mid-session):** send `x-model-router-bypass: 1`
     with an explicit `model` to pin that one request and skip routing.
   - `model-router feedback --last --model <id>` then `model-router recalibrate` —
