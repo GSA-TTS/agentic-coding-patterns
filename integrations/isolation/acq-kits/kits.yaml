@@ -172,9 +172,10 @@ kits:
       OpenCode's baseURL to the loopback service via the model-router-toggle CLI.
       This is the shape that works while USAi (api.gsa.usai.gov) is only
       reachable inside the GSA network (a cloud.gov deploy can't reach it).
-      external mode runs no server and flips baseURL to a remote MODEL_ROUTER_URL
-      (auto-detecting the backend host alias host.microsandbox.internal /
-      host.containers.internal / host.docker.internal for a host-run service).
+      A MODE=external code path exists (flip baseURL to a remote service) but is
+      EXPERIMENTAL and UNSUPPORTED — no working target today (cloud.gov can't
+      reach USAi; host-run is unreachable over the microsandbox VM-NAT) and it is
+      not end-to-end verified; see the kit README "Known blockers".
       Both backends run the identical step. Publishes NO ports (loopback only).
       Egress allow-list: codeload.github.com + api.github.com (fetch), pypi.org +
       files.pythonhosted.org (deps, in-sandbox), api.gsa.usai.gov (upstream,

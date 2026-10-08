@@ -13,9 +13,10 @@
 #     / behind Zscaler, and the sandbox is already there — so the decision service
 #     must run here, not on cloud.gov. See
 #     docs/decisions/0001-in-sandbox-mode-default-cloudgov-parked.md.
-#   external (opt-in): run NO server; flip baseURL to a remote MODEL_ROUTER_URL
-#     (a cloud.gov app, or a host-run service via the backend host alias). Use
-#     once USAi is reachable from wherever the service is deployed.
+#   external (EXPERIMENTAL, UNSUPPORTED): run NO server; flip baseURL to a remote
+#     MODEL_ROUTER_URL. No working target today (cloud.gov can't reach USAi;
+#     host-run is unreachable over the microsandbox VM-NAT) and not end-to-end
+#     verified — see the kit README "Known blockers". Do not rely on it yet.
 #
 # COMPOSES WITH: usai-provider (owns the usai block this kit flips; supplies
 # USAI_API_KEY) and zscaler-ca-certificate (puts the proxy root in the sandbox
@@ -38,8 +39,9 @@ description: >
   streaming preserved. Default MODE=in-sandbox runs the service on 127.0.0.1
   inside the sandbox (reusing the usai-provider USAI_API_KEY + the sandbox
   Zscaler CA) and flips the usai baseURL to it — the shape that works while USAi
-  is only reachable inside the GSA network. MODE=external instead flips baseURL
-  to a remote service (cloud.gov/host). Fail-soft: any problem leaves OpenCode on
+  is only reachable inside the GSA network. A MODE=external code path exists but
+  is experimental/unsupported (no working target yet — see the kit README).
+  Fail-soft: any problem leaves OpenCode on
   the direct gateway. Compose with usai-provider (and zscaler-ca-certificate for
   in-sandbox).
 

@@ -11,11 +11,13 @@
 #     already there — so the decision service must run here, not on cloud.gov.
 #     OpenCode->service is pure loopback (no host boundary, no VM-NAT, no proxy).
 #
-#   MODE=external (opt-in): do NOT run a server. Fetch only the stdlib toggle,
-#     and flip OpenCode's baseURL to $MODEL_ROUTER_URL/v1 (a cloud.gov app, or a
-#     host-run service via the backend host alias). Use this once USAi is
-#     reachable from wherever the service is deployed. See
-#     docs/decisions/0001-in-sandbox-mode-default-cloudgov-parked.md.
+#   MODE=external (EXPERIMENTAL, UNSUPPORTED): do NOT run a server. Fetch only the
+#     stdlib toggle, and flip OpenCode's baseURL to $MODEL_ROUTER_URL/v1 (a
+#     cloud.gov app, or a host-run service via the backend host alias). This path
+#     exists but has NO WORKING TARGET today and is not end-to-end verified:
+#     cloud.gov cannot reach USAi (ADR 0001), and a host-run service is
+#     unreachable over the microsandbox VM-NAT. Do not rely on it until an
+#     external target is reachable. See the kit README "Known blockers".
 #
 # FAIL-SOFT everywhere: any failure (no python3, no key, fetch/dep/boot failure,
 # service never ready, no resolvable external URL) leaves OpenCode on the DIRECT

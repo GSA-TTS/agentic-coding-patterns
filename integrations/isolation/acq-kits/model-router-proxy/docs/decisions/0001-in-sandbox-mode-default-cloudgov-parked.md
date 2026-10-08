@@ -38,10 +38,14 @@ it on `127.0.0.1` inside the sandbox VM (reusing the usai-provider
 the host-boundary wrinkles (VM-NAT empty reply, missing bridge alias, the egress
 HTTP proxy / `no_proxy` scope) apply.
 
-Keep **external mode as an opt-in** (`MODEL_ROUTER_MODE=external` +
-`MODEL_ROUTER_URL`) so that when USAi becomes reachable from cloud.gov (or an
-internal GSA-network host is available to all sandboxes), switching back is a
-mode flag — not a rewrite.
+Keep the **external mode code path** (`MODEL_ROUTER_MODE=external` +
+`MODEL_ROUTER_URL`) as a scaffold for the future, but treat it as
+**EXPERIMENTAL and UNSUPPORTED**: it has no working target today (cloud.gov can't
+reach USAi; a host-run service is unreachable over the microsandbox VM-NAT) and
+is not end-to-end verified. It is retained so that when a target becomes
+reachable, promoting it is a mode flag + a verification pass — not a rewrite.
+The known blockers and the promotion trigger are tracked in the kit README
+("Known blockers") and the proposal roadmap.
 
 The LLM judge stays **off by default**, so the in-sandbox service runs the
 sub-millisecond deterministic scorer with no per-prompt USAi round-trip — which

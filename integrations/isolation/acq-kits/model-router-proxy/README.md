@@ -7,18 +7,41 @@ OpenCode's `baseURL` points at the [model-router-service](https://github.com/bty
 which rewrites the model per request and forwards to USAi. See the design
 [proposal](docs/proposal.md).
 
-## Two modes (`MODEL_ROUTER_MODE`, default `in-sandbox`)
+## Mode (`MODEL_ROUTER_MODE`)
 
-| Mode | What runs | When to use |
-|------|-----------|-------------|
-| **`in-sandbox`** (default) | the **full service on `127.0.0.1` inside the sandbox**, then flips OpenCode's `baseURL` to it | **now** — USAi (`api.gsa.usai.gov`) is only reachable from inside the GSA network / behind Zscaler, and the sandbox is already there. OpenCode→service is pure loopback. |
-| **`external`** | **no server**; flips `baseURL` to a remote `MODEL_ROUTER_URL` (cloud.gov app, or a host-run service via the backend host alias) | **later** — once USAi is reachable from wherever the service is deployed. |
+**`in-sandbox` (default, the supported mode):** runs the full service on
+`127.0.0.1` inside the sandbox, then flips OpenCode's `baseURL` to it. USAi
+(`api.gsa.usai.gov`) is reachable only from inside the GSA network / behind
+Zscaler, and the sandbox is already there, so the decision service runs here;
+OpenCode→service is pure loopback. This is the mode that is live-verified.
 
-> **Why in-sandbox is the default:** a cloud.gov deploy of the service *starts*
-> but cannot reach USAi from cloud.gov egress (verified: `/models` → `000`,
-> `/readyz` → `candidates:0`). The decision service must run where USAi is
-> reachable — inside the GSA network, i.e. the sandbox. See
+> `MODEL_ROUTER_MODE=external` also exists in the code (flip `baseURL` to a
+> remote service instead of running one in-sandbox) but is **experimental and
+> not yet supported** — see "Known blockers" below. Do not rely on it yet.
+
+> **Why in-sandbox:** a cloud.gov deploy of the service *starts* but cannot reach
+> USAi from cloud.gov egress (verified: `/models` → `000`, `/readyz` →
+> `candidates:0`). The decision service must run where USAi is reachable — inside
+> the GSA network, i.e. the sandbox. See
 > [`docs/decisions/0001-in-sandbox-mode-default-cloudgov-parked.md`](docs/decisions/0001-in-sandbox-mode-default-cloudgov-parked.md).
+
+## Known blockers (external mode / shared deployment)
+
+External mode has **no working target today** and is unverified end-to-end:
+
+- **cloud.gov cannot reach USAi.** USAi is GSA-network-only; a cloud.gov-hosted
+  service starts but every upstream call fails (`candidates:0`). Blocks the
+  cloud.gov external target. (ADR 0001.)
+- **Host-run service is unreachable from the microsandbox backend.** acq's
+  `local`/microsandbox backend is VM-isolated; a service bound on the developer's
+  host returned an *empty reply* over the VM-NAT interface even from the host, and
+  there is no Docker-style bridge that behaves reliably. Blocks the host-run
+  external target.
+- **No end-to-end test exercises external mode.** The flip mechanism (the toggle)
+  is tested, but `MODE=external` flipping to a reachable remote and round-tripping
+  a request has never been validated.
+
+Until at least one external target is reachable, use the default in-sandbox mode.
 
 ## What it does (startup, idempotent, fail-soft)
 
@@ -35,7 +58,7 @@ which rewrites the model per request and forwards to USAi. See the design
 4. **Flip** OpenCode's `usai` `baseURL` → `http://127.0.0.1:8080/v1` via the
    installed `model-router-toggle` CLI.
 
-**external mode:** skip the server; auto-detect the backend host alias (or use
+**external mode (experimental, unsupported):** skip the server; auto-detect the backend host alias (or use
 `MODEL_ROUTER_URL`) and flip `baseURL` to it.
 
 **Fail-soft (both modes):** missing `python3`/`USAI_API_KEY`, a failed
@@ -55,7 +78,7 @@ Apply all three for in-sandbox mode.
 
 | Var | Default | Meaning |
 |-----|---------|---------|
-| `MODEL_ROUTER_MODE` | `in-sandbox` | `in-sandbox` \| `external` |
+| `MODEL_ROUTER_MODE` | `in-sandbox` | `in-sandbox` (supported) \| `external` (experimental, unsupported — see Known blockers) |
 | `MODEL_ROUTER_PORT` | `8080` | loopback port (in-sandbox) / host-run port (external) |
 | `MODEL_ROUTER_JUDGE_MODEL` | `claude_4_5_haiku` | cheap ranking model (judge is off by default) |
 | `MODEL_ROUTER_DEFAULT_MODEL` | `claude_4_5_sonnet` | fail-open landing model |
