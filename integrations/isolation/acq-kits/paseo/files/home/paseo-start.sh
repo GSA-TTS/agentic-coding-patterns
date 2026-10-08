@@ -38,6 +38,138 @@
 
 set -eu
 
+# Reconcile a lock left behind by a sandbox restore/migration. This runs only in
+# this startup process, never from the daemon's respawn loop. A lock is eligible
+# only when its timestamp predates the current kernel boot and its PID is the
+# Paseo-owned supervisor-entrypoint, not merely any live process.
+reconcile_preboot_lock() {
+  _lock="${PASEO_HOME_DIR:-${PASEO_HOME:-$HOME/.paseo}}/paseo.pid"
+  _log="${STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/paseo}/paseo-start.log"
+  _proc_root=/proc
+  _btime=""
+  _pid=""
+  _started=""
+  _started_epoch=""
+
+  mkdir -p "$(dirname "$_log")" 2>/dev/null || true
+
+  [ -f "$_lock" ] || return 0
+  _btime="$(awk '$1 == "btime" { print $2; exit }' "$_proc_root/stat" 2>/dev/null || true)"
+  if [ "${PASEO_START_RECONCILE_TEST:-}" = 1 ]; then
+    _proc_root="${PASEO_PROC_ROOT:-$_proc_root}"
+    _btime="${PASEO_KERNEL_BOOT_TIME:-$_btime}"
+  fi
+  if ! case "$_btime" in ''|*[!0-9]*) false ;; *) true ;; esac; then
+    echo "paseo: pre-boot lock check: kernel boot time unavailable; leaving $_lock untouched" >>"$_log" 2>/dev/null || true
+    return 1
+  fi
+
+  # Node parses the lock's JSON and normalizes ISO or numeric startedAt values.
+  # It emits one tab-separated record and rejects extra/malformed fields.
+  _lock_record="$(node -e '
+    const fs = require("fs");
+    try {
+      const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      const pid = Number(value.pid);
+      const started = value.startedAt;
+      const epoch = typeof started === "number" ? started : Date.parse(String(started)) / 1000;
+      if (!Number.isInteger(pid) || pid <= 1 || !Number.isFinite(epoch)) process.exit(2);
+      process.stdout.write(`${pid}\t${Math.floor(epoch)}\n`);
+    } catch { process.exit(2); }
+  ' "$_lock" 2>/dev/null || true)"
+  _tab="$(printf '\t')"
+  _pid="${_lock_record%%$_tab*}"
+  _started="${_lock_record#*$_tab}"
+  case "$_pid" in
+    ''|*[!0-9]*)
+      echo "paseo: pre-boot lock check: malformed or ambiguous lock $_lock; leaving it untouched" >>"$_log" 2>/dev/null || true
+      return 1 ;;
+  esac
+  case "$_started" in
+    ''|*[!0-9]*)
+      echo "paseo: pre-boot lock check: malformed or ambiguous lock $_lock; leaving it untouched" >>"$_log" 2>/dev/null || true
+      return 1 ;;
+  esac
+  _started_epoch="$_started"
+  if [ "$_started_epoch" -ge "$_btime" ] 2>/dev/null; then
+    return 0
+  fi
+
+  _cmdline="$(tr '\0' ' ' <"$_proc_root/$_pid/cmdline" 2>/dev/null || true)"
+  _start_ticks="$(awk '{ print $22 }' "$_proc_root/$_pid/stat" 2>/dev/null || true)"
+  _uid="$(awk '/^Uid:/ { print $2; exit }' "$_proc_root/$_pid/status" 2>/dev/null || true)"
+  _self_uid="$(id -u)"
+  case "$_cmdline" in
+    *supervisor-entrypoint.js*)
+      case "$_start_ticks" in
+        ''|*[!0-9]*)
+          echo "paseo: pre-boot lock check: PID $_pid has unreadable process identity; leaving $_lock untouched" >>"$_log" 2>/dev/null || true
+          return 1 ;;
+      esac
+      if [ "$_uid" != "$_self_uid" ]; then
+        echo "paseo: pre-boot lock check: PID $_pid has unexpected owner; leaving $_lock untouched" >>"$_log" 2>/dev/null || true
+        return 1
+      fi ;;
+    '')
+      echo "paseo: pre-boot lock check: PID $_pid is not live; leaving $_lock for Paseo to reclaim" >>"$_log" 2>/dev/null || true
+      return 0 ;;
+    *)
+      echo "paseo: pre-boot lock check: PID $_pid is live but is not the Paseo supervisor; leaving $_lock untouched" >>"$_log" 2>/dev/null || true
+      return 1 ;;
+  esac
+
+  _tree_pids="$_pid"
+  _pending="$_pid"
+  while [ -n "$_pending" ]; do
+    _children=""
+    for _parent in $_pending; do
+      _children="$_children $(pgrep -P "$_parent" 2>/dev/null || true)"
+    done
+    _pending=""
+    for _child in $_children; do
+      case " $_tree_pids " in *" $_child "*) ;; *) _tree_pids="$_tree_pids $_child"; _pending="$_pending $_child" ;; esac
+    done
+  done
+
+  echo "paseo: pre-boot lock check: stopping restored Paseo supervisor PID $_pid" >>"$_log" 2>/dev/null || true
+  _check_start_ticks="$(awk '{ print $22 }' "$_proc_root/$_pid/stat" 2>/dev/null || true)"
+  _check_cmdline="$(tr '\0' ' ' <"$_proc_root/$_pid/cmdline" 2>/dev/null || true)"
+  [ "$_check_start_ticks" = "$_start_ticks" ] && [ "$_check_cmdline" = "$_cmdline" ] || {
+    echo "paseo: pre-boot lock check: supervisor identity changed before stop; leaving $_lock untouched" >>"$_log" 2>/dev/null || true
+    return 1
+  }
+  kill -TERM "$_pid" 2>/dev/null || {
+    echo "paseo: pre-boot lock check: could not stop PID $_pid; leaving $_lock untouched" >>"$_log" 2>/dev/null || true
+    return 1
+  }
+  _deadline=$(( $(date +%s) + 20 ))
+  while :; do
+    _tree_live=""
+    for _tree_pid in $_tree_pids; do
+      [ -e "$_proc_root/$_tree_pid" ] && _tree_live=yes
+    done
+    [ -z "$_tree_live" ] && [ ! -f "$_lock" ] && {
+      echo "paseo: pre-boot lock check: restored supervisor stopped and lock released" >>"$_log" 2>/dev/null || true
+      return 0
+    }
+    if [ "$(date +%s)" -ge "$_deadline" ]; then
+      echo "paseo: pre-boot lock check: timeout waiting for PID $_pid and $_lock; leaving lock untouched" >>"$_log" 2>/dev/null || true
+      return 1
+    fi
+    sleep 1
+  done
+}
+
+# Test-only entry point used by the kit regression suite. It is deliberately
+# checked before installation and daemon startup, so it cannot affect a sandbox.
+if [ "${PASEO_START_RECONCILE_TEST:-}" = 1 ]; then
+  PASEO_HOME_DIR="${PASEO_HOME:-$HOME/.paseo}"
+  STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/paseo"
+  mkdir -p "$STATE_DIR"
+  reconcile_preboot_lock
+  exit $?
+fi
+
 # Daemon bind. Keep in sync with the kit spec's publishedPorts guest port (6767)
 # and PASEO_LISTEN env. We derive the port from PASEO_LISTEN so a single override
 # moves both the bind and the health probe. The default is 0.0.0.0 (all guest
@@ -194,6 +326,11 @@ if ! node "$HOME/paseo-assert-daemon-config.mjs" --paseo-home "$PASEO_HOME_DIR" 
 fi
 release_config_lock
 if [ -z "$config_ok" ]; then
+  exit 0
+fi
+
+if ! reconcile_preboot_lock; then
+  echo "paseo: pre-boot lock reconciliation did not complete; not starting a second daemon" >&2
   exit 0
 fi
 

@@ -49,7 +49,13 @@ CLI restart cannot run.
 - The kit no longer passes removed Paseo 0.9 flags.
 - The daemon still comes up automatically on sandbox start and remains supervised.
 - `paseo daemon status` and config tooling report the same listen/web UI/relay
-  settings that the sandbox uses at runtime.
+  settings that the sandbox uses at runtime. On a restored or migrated sandbox,
+  the lock can retain a `startedAt` timestamp from before the current kernel
+  boot even while the daemon process tree remains healthy. During startup only,
+  the kit detects that condition, verifies the lock PID is Paseo's own supervisor,
+  and performs a bounded graceful stop so the outer supervisor can write a fresh
+  lock. Ambiguous, malformed, post-boot, or unreconciled locks are left intact;
+  the startup script logs the reason and does not start a second daemon.
 - The `0.0.0.0:6767` bind remains explicit, preserving msb create-time port
   reachability.
 - Future Paseo version bumps must verify both the version pin and daemon command
