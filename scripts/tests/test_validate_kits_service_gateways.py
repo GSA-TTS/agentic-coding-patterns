@@ -330,6 +330,68 @@ class TestServiceGatewaysValidator:
         assert any("must be a relative kit-local" in e for e in errors), errors
         assert any("privileged: true" in e for e in errors), errors
 
+    @pytest.mark.parametrize("value", ["true", '"true"', '"YES"', '"On"', '"y"'])
+    def test_rejects_compose_truthy_privileged_values(self, tmp_path, value):
+        validate_kit = _load_validate_kit()
+        kit = _write_kit(
+            tmp_path / "privileged",
+            "schemaVersion: hybrid/v1\n"
+            "kind: mixin\n"
+            "name: privileged\n"
+            "displayName: Privileged\n"
+            "description: d\n"
+            "serviceGateways:\n"
+            "  - name: demo-gateway\n"
+            "    runtime:\n"
+            "      compose:\n"
+            "        files: [compose.yaml]\n"
+            "        service: gateway\n"
+            "    interface:\n"
+            "      protocol: http\n"
+            "      port: 8080\n"
+            "    expose:\n"
+            "      env:\n"
+            "        WEB_GATEWAY_URL: url\n",
+            "services:\n"
+            "  gateway:\n"
+            "    image: ghcr.io/example/gateway:1.0.0\n"
+            "    expose: [8080]\n"
+            f"    privileged: {value}\n",
+        )
+        errors, _warnings = validate_kit(kit, _load_schema())
+        assert any("privileged: true" in error for error in errors), errors
+
+    @pytest.mark.parametrize("value", ["${PRIVILEGED}", "$PRIVILEGED"])
+    def test_rejects_interpolated_privileged_values(self, tmp_path, value):
+        validate_kit = _load_validate_kit()
+        kit = _write_kit(
+            tmp_path / "interpolated-privileged",
+            "schemaVersion: hybrid/v1\n"
+            "kind: mixin\n"
+            "name: interpolated-privileged\n"
+            "displayName: Interpolated Privileged\n"
+            "description: d\n"
+            "serviceGateways:\n"
+            "  - name: demo-gateway\n"
+            "    runtime:\n"
+            "      compose:\n"
+            "        files: [compose.yaml]\n"
+            "        service: gateway\n"
+            "    interface:\n"
+            "      protocol: http\n"
+            "      port: 8080\n"
+            "    expose:\n"
+            "      env:\n"
+            "        WEB_GATEWAY_URL: url\n",
+            "services:\n"
+            "  gateway:\n"
+            "    image: ghcr.io/example/gateway:1.0.0\n"
+            "    expose: [8080]\n"
+            f"    privileged: {value}\n",
+        )
+        errors, _warnings = validate_kit(kit, _load_schema())
+        assert any("privileged with Compose interpolation" in error for error in errors), errors
+
     @pytest.mark.parametrize(
         ("compose_yaml", "expected"),
         [
@@ -384,8 +446,10 @@ class TestServiceGatewaysValidator:
             ("    volumes: ['/var/run/docker.sock:/var/run/docker.sock']\n", "Docker socket"),
             ("    volumes: ['/:/host:ro']\n", "host path mount"),
             ("    volumes: ['${HOST_ROOT:-/}:/host:ro']\n", "Compose interpolation"),
+            ("    volumes: ['$HOME:/host:ro']\n", "Compose interpolation"),
             ("    network_mode: host\n", "network_mode: host"),
             ("    network_mode: ${GW_NETWORK_MODE:-host}\n", "Compose interpolation"),
+            ("    pid: $PIDMODE\n", "Compose interpolation"),
             ("    pid: host\n", "pid: host"),
             ("    userns_mode: host\n", "userns_mode: host"),
             ("    ipc: host\n", "ipc: host"),
@@ -393,6 +457,10 @@ class TestServiceGatewaysValidator:
             ("    cap_add: [SYS_ADMIN]\n", "cap_add"),
             ("    security_opt: ['apparmor:unconfined']\n", "security_opt"),
             ("    devices: ['/dev/kvm:/dev/kvm']\n", "devices"),
+            ("    device_cgroup_rules: ['b 7:* rmw']\n", "device_cgroup_rules"),
+            ("    device_cgroup_rules: $DEVICE_RULES\n", "device_cgroup_rules with Compose interpolation"),
+            ("    group_add: ['0']\n", "group_add"),
+            ("    group_add: $SUPPLEMENTARY_GROUPS\n", "group_add with Compose interpolation"),
             ("    build: .\n", "build"),
         ],
     )
@@ -421,6 +489,66 @@ class TestServiceGatewaysValidator:
         )
         errors, _warnings = validate_kit(kit, _load_schema())
         assert any(expected in e for e in errors), errors
+
+    def test_allows_compose_escaped_dollar_in_volume_source(self, tmp_path):
+        validate_kit = _load_validate_kit()
+        kit = _write_kit(
+            tmp_path / "escaped-dollar",
+            "schemaVersion: hybrid/v1\n"
+            "kind: mixin\n"
+            "name: escaped-dollar\n"
+            "displayName: Escaped Dollar\n"
+            "description: d\n"
+            "serviceGateways:\n"
+            "  - name: demo-gateway\n"
+            "    runtime:\n"
+            "      compose:\n"
+            "        files: [compose.yaml]\n"
+            "        service: gateway\n"
+            "    interface:\n"
+            "      protocol: http\n"
+            "      port: 8080\n"
+            "    expose:\n"
+            "      env:\n"
+            "        WEB_GATEWAY_URL: url\n",
+            "services:\n"
+            "  gateway:\n"
+            "    image: ghcr.io/example/gateway:1.0.0\n"
+            "    expose: [8080]\n"
+            "    volumes: ['$$HOME:/container:ro']\n",
+        )
+        errors, _warnings = validate_kit(kit, _load_schema())
+        assert errors == [], errors
+
+    def test_allows_compose_escaped_braced_dollar_in_volume_source(self, tmp_path):
+        validate_kit = _load_validate_kit()
+        kit = _write_kit(
+            tmp_path / "escaped-braced-dollar",
+            "schemaVersion: hybrid/v1\n"
+            "kind: mixin\n"
+            "name: escaped-braced-dollar\n"
+            "displayName: Escaped Braced Dollar\n"
+            "description: d\n"
+            "serviceGateways:\n"
+            "  - name: demo-gateway\n"
+            "    runtime:\n"
+            "      compose:\n"
+            "        files: [compose.yaml]\n"
+            "        service: gateway\n"
+            "    interface:\n"
+            "      protocol: http\n"
+            "      port: 8080\n"
+            "    expose:\n"
+            "      env:\n"
+            "        WEB_GATEWAY_URL: url\n",
+            "services:\n"
+            "  gateway:\n"
+            "    image: ghcr.io/example/gateway:1.0.0\n"
+            "    expose: [8080]\n"
+            "    volumes: ['$${HOME}:/container:ro']\n",
+        )
+        errors, _warnings = validate_kit(kit, _load_schema())
+        assert errors == [], errors
 
     @pytest.mark.parametrize(
         ("compose_yaml", "expected"),
