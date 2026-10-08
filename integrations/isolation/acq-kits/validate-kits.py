@@ -110,6 +110,12 @@ _COMPOSE_SERVICE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 # serviceGateways[].interface.protocol values (mirrors the schema enum).
 _GATEWAY_PROTOCOLS = {"http", "https", "tcp"}
 
+# Compose accepts these case-insensitive string values wherever it accepts a
+# boolean. Treat every truthy spelling as privileged rather than relying on
+# PyYAML's representation of the source value.
+_COMPOSE_TRUE = frozenset({"true", "yes", "on", "y"})
+_COMPOSE_VAR_RE = re.compile(r"\$[A-Za-z_][A-Za-z0-9_]*")
+
 # Docker/OCI image references without an explicit tag or digest, or with the
 # floating latest tag, should be reviewed. This is a warning rather than a schema
 # error because private registries and local development tags vary.
@@ -225,12 +231,20 @@ def _volume_source(value: object) -> str | None:
 def _has_compose_interpolation(value: object) -> bool:
     """True when a Compose field uses env interpolation that validation cannot resolve."""
     if isinstance(value, str):
-        return "${" in value
+        # Compose treats $$ as a literal dollar sign. Remove escaped dollars
+        # before detecting either braced (${VAR}) or bare ($VAR) interpolation.
+        unescaped = value.replace("$$", "")
+        return "${" in unescaped or _COMPOSE_VAR_RE.search(unescaped) is not None
     if isinstance(value, list):
         return any(_has_compose_interpolation(item) for item in value)
     if isinstance(value, dict):
         return any(_has_compose_interpolation(item) for item in value.values())
     return False
+
+
+def _is_compose_true(value: object) -> bool:
+    """True when Compose will coerce a boolean field to true."""
+    return value is True or (isinstance(value, str) and value.strip().lower() in _COMPOSE_TRUE)
 
 
 def _compose_file_reference_errors(compose_doc: object) -> list[str]:
@@ -265,8 +279,10 @@ def _compose_escape_errors(compose_doc: object, compose_path: Path, kit_dir: Pat
         if not isinstance(service, dict):
             continue
         prefix = f"Compose service {service_name!r}"
-        if service.get("privileged") is True:
+        if _is_compose_true(service.get("privileged")):
             errors.append(f"{prefix} declares privileged: true")
+        elif _has_compose_interpolation(service.get("privileged")):
+            errors.append(f"{prefix} declares privileged with Compose interpolation; validation cannot prove it safe")
         if "build" in service:
             errors.append(f"{prefix} declares build; service gateways must use prebuilt reviewed images")
         for key in ("network_mode", "pid", "ipc", "userns_mode", "cgroup"):
@@ -283,6 +299,16 @@ def _compose_escape_errors(compose_doc: object, compose_path: Path, kit_dir: Pat
             errors.append(f"{prefix} declares devices; host device passthrough is outside serviceGateways v1")
         if _has_compose_interpolation(service.get("devices")):
             errors.append(f"{prefix} declares devices with Compose interpolation; validation cannot prove it safe")
+        if service.get("device_cgroup_rules"):
+            errors.append(f"{prefix} declares device_cgroup_rules; device access rules are outside serviceGateways v1")
+        if _has_compose_interpolation(service.get("device_cgroup_rules")):
+            errors.append(
+                f"{prefix} declares device_cgroup_rules with Compose interpolation; validation cannot prove it safe"
+            )
+        if service.get("group_add"):
+            errors.append(f"{prefix} declares group_add; supplementary host groups are outside serviceGateways v1")
+        if _has_compose_interpolation(service.get("group_add")):
+            errors.append(f"{prefix} declares group_add with Compose interpolation; validation cannot prove it safe")
         if _has_compose_interpolation(service.get("build")):
             errors.append(f"{prefix} declares build with Compose interpolation; validation cannot prove it safe")
         for opt in _as_list(service.get("security_opt")):
