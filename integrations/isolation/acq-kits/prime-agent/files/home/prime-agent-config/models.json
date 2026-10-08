@@ -234,16 +234,6 @@
             "input": 0.24,
             "output": 0.97
           }
-        },
-        {
-          "id": "cohere_english_v3",
-          "name": "Cohere English v3",
-          "contextWindow": 128000,
-          "maxTokens": 4000,
-          "cost": {
-            "input": 0.0375,
-            "output": 0.15
-          }
         }
       ]
     }

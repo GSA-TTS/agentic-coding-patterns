@@ -64,17 +64,25 @@ const log = (...parts) => {
 };
 
 function parseDefaultIpv4Route(routeTable) {
+  let selected = { iface: '', gateway: '', metric: Number.POSITIVE_INFINITY };
   for (const line of routeTable.trim().split('\n').slice(1)) {
     const fields = line.trim().split(/\s+/);
-    if (fields[1] !== '00000000' || !fields[2]) continue;
+    const flags = Number.parseInt(fields[3], 16);
+    const metric = Number.parseInt(fields[6], 10);
+    if (fields[1] !== '00000000' || !fields[2] || !Number.isFinite(flags) || !(flags & 0x1)
+      || !Number.isFinite(metric) || metric >= selected.metric) continue;
     const hex = fields[2].match(/../g);
     if (!hex) continue;
-    return {
+    const gateway = hex.reverse().map((part) => Number.parseInt(part, 16)).join('.');
+    selected = {
       iface: fields[0],
-      gateway: hex.reverse().map((part) => Number.parseInt(part, 16)).join('.'),
+      // Point-to-point default routes encode no peer gateway as 0.0.0.0. It
+      // cannot be a TCP client address, so omit it from the allowlist.
+      gateway: gateway === '0.0.0.0' ? '' : gateway,
+      metric,
     };
   }
-  return { iface: '', gateway: '' };
+  return { iface: selected.iface, gateway: selected.gateway };
 }
 
 function defaultIpv4Route() {
@@ -91,11 +99,10 @@ function defaultIpv4Route() {
  * guest interface only. `internal` is Node's own flag for loopback, which the
  * daemon already owns; binding it here would collide with the daemon.
  */
-function publishableAddresses() {
-  const route = defaultIpv4Route();
+function publishableAddresses(route = defaultIpv4Route(), interfaces = os.networkInterfaces()) {
   if (!route.iface) return [];
   const found = [];
-  for (const [name, entries] of Object.entries(os.networkInterfaces())) {
+  for (const [name, entries] of Object.entries(interfaces)) {
     if (name !== route.iface) continue;
     for (const entry of entries ?? []) {
       if (!entry || entry.internal) continue;
@@ -123,8 +130,8 @@ function normalizePeerAddress(address) {
   return normalized.startsWith('::ffff:') ? normalized.slice('::ffff:'.length) : normalized;
 }
 
-function allowedPeerAddresses() {
-  const configured = (process.env.OPENDESIGN_RELAY_ALLOWED_PEERS ?? '')
+function allowedPeerAddresses(route = defaultIpv4Route(), configuredValue = process.env.OPENDESIGN_RELAY_ALLOWED_PEERS ?? '') {
+  const configured = configuredValue
     .split(',')
     .map((value) => normalizePeerAddress(value))
     .filter(Boolean);
@@ -132,9 +139,13 @@ function allowedPeerAddresses() {
     '127.0.0.1',
     '::1',
     '0:0:0:0:0:0:0:1',
-    defaultIpv4Route().gateway,
+    route.gateway,
     ...configured,
   ].filter(Boolean));
+}
+
+function isAllowedPeer(address, peers = allowedPeerAddresses()) {
+  return peers.has(normalizePeerAddress(address));
 }
 
 function assertEqual(actual, expected, label) {
@@ -143,19 +154,45 @@ function assertEqual(actual, expected, label) {
   }
 }
 
+function assert(condition, label) {
+  if (!condition) throw new Error(label);
+}
+
 if (SELF_TEST) {
   assertEqual(normalizePeerAddress('::ffff:127.0.0.1'), '127.0.0.1', 'IPv4-mapped loopback');
   assertEqual(normalizePeerAddress('[::1]'), '::1', 'bracketed IPv6 loopback');
-  const route = parseDefaultIpv4Route('Iface\tDestination\tGateway\tFlags\neth0\t00000000\t0141A8C0\t0003\n');
+  const route = parseDefaultIpv4Route('Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\neth0\t00000000\t0141A8C0\t0003\t0\t0\t100\n');
   assertEqual(route.iface, 'eth0', 'default route interface');
   assertEqual(route.gateway, '192.168.65.1', 'default route gateway');
+  const pointToPoint = parseDefaultIpv4Route('Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\nppp0\t00000000\t00000000\t0003\t0\t0\t100\n');
+  assertEqual(pointToPoint.gateway, '', 'point-to-point route has no gateway peer');
+  const noRoute = parseDefaultIpv4Route('Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\n');
+  assertEqual(noRoute.iface, '', 'missing default route has no interface');
+  assertEqual(noRoute.gateway, '', 'missing default route has no gateway');
+  const multipleRoutes = parseDefaultIpv4Route('Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\neth0\t00000000\t0141A8C0\t0003\t0\t0\t100\neth1\t00000000\t0164A8C0\t0003\t0\t0\t10\neth2\t00000000\t012CA8C0\t0000\t0\t0\t1\n');
+  assertEqual(multipleRoutes.iface, 'eth1', 'lowest-metric active default route is selected');
+  assertEqual(multipleRoutes.gateway, '192.168.100.1', 'selected route gateway is decoded');
+  const peers = allowedPeerAddresses(route, ' 192.0.2.44, [::1], ::ffff:192.0.2.45 ');
+  assert(isAllowedPeer('192.168.65.1', peers), 'default gateway peer is allowed');
+  assert(isAllowedPeer('::ffff:192.0.2.45', peers), 'configured IPv4-mapped peer is normalized and allowed');
+  assert(!isAllowedPeer('192.168.65.42', peers), 'non-forwarder peer is denied');
+  assert(!allowedPeerAddresses(pointToPoint).has('0.0.0.0'), 'unspecified gateway is not allowed');
+  assertEqual(publishableAddresses(noRoute, { eth0: [{ address: '192.168.65.2', family: 'IPv4', internal: false }] }).length, 0, 'no route binds no addresses');
+  const addresses = publishableAddresses(route, {
+    eth0: [
+      { address: '192.168.65.2', family: 'IPv4', internal: false },
+      { address: 'fe80::1', family: 'IPv6', internal: false },
+    ],
+    eth1: [{ address: '192.168.66.2', family: 'IPv4', internal: false }],
+  });
+  assertEqual(addresses.join(','), '192.168.65.2', 'only the default-route interface is published');
   console.log('relay self-test passed');
   process.exit(0);
 }
 
 function relayConnection(client) {
   const peer = normalizePeerAddress(client.remoteAddress);
-  if (!allowedPeerAddresses().has(peer)) {
+  if (!isAllowedPeer(peer)) {
     if (!warnedDeniedPeers.has(peer)) {
       warnedDeniedPeers.add(peer);
       log(`denying non-forwarder peer ${peer || '(unknown)'}`);

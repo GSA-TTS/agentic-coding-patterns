@@ -99,9 +99,9 @@ elif command -v node >/dev/null 2>&1; then
     bad "opendesign-relay.mjs has syntax errors"
   fi
   if node "$RELAY" --self-test >/dev/null 2>&1; then
-    ok "opendesign-relay.mjs peer and route helpers pass self-test"
+    ok "opendesign-relay.mjs route, peer gate, and bind-selection self-tests pass"
   else
-    bad "opendesign-relay.mjs peer and route helpers fail self-test"
+    bad "opendesign-relay.mjs route, peer gate, or bind-selection self-test fails"
   fi
 else
   skip "opendesign-relay.mjs not syntax-checked (node not on PATH)"
@@ -159,12 +159,16 @@ case "$relay_src" in
   *) bad "relay does not skip loopback interfaces" ;;
 esac
 case "$relay_src" in
-  *'defaultIpv4Route'*'Object.entries(os.networkInterfaces())'*'name !== route.iface'*) ok "relay binds only the default-route guest interface" ;;
+  *'publishableAddresses(route = defaultIpv4Route(), interfaces = os.networkInterfaces())'*'Object.entries(interfaces)'*'name !== route.iface'*) ok "relay binds only the default-route guest interface" ;;
   *) bad "relay can bind non-default guest interfaces" ;;
 esac
 case "$relay_src" in
-  *'OPENDESIGN_RELAY_ALLOWED_PEERS'*'defaultIpv4Route().gateway'*'allowedPeerAddresses'*) ok "relay restricts client peers to loopback/default gateway plus explicit overrides" ;;
+  *'OPENDESIGN_RELAY_ALLOWED_PEERS'*'allowedPeerAddresses(route = defaultIpv4Route()'*'route.gateway'*'isAllowedPeer(peer)'*) ok "relay restricts client peers to loopback/default gateway plus explicit overrides" ;;
   *) bad "relay does not restrict client peers before forwarding" ;;
+esac
+case "$relay_src" in
+  *'metric >= selected.metric'*) ok "relay selects the lowest-metric active default route" ;;
+  *) bad "relay does not select the lowest-metric active default route" ;;
 esac
 # OpenDesign rewrites HOME/XDG_CONFIG_HOME for agent children (OD_SANDBOX_MODE),
 # so OpenCode needs an absolute config path or it silently falls back to its own
@@ -389,12 +393,12 @@ if [ -n "$opencode_config" ]; then
 else
   bad "daemon process does not carry OPENCODE_CONFIG; OpenDesign runs will not reach USAi"
 fi
-if [ "$(in_acq 'grep -q "api.gsa.usai.gov" "${OPENCODE_CONFIG:-$HOME/.config/opencode/opencode.jsonc}" 2>/dev/null && echo yes')" = "yes" ]; then
+if [ "$(acq exec "$SBX_NAME" -- env "OPENCODE_CONFIG_PATH=$opencode_config" sh -c 'test -r "$OPENCODE_CONFIG_PATH" && grep -q "api.gsa.usai.gov" "$OPENCODE_CONFIG_PATH" && echo yes' </dev/null 2>/dev/null || true)" = "yes" ]; then
   ok "the named OpenCode config points at the USAi gateway"
 else
-  skip "named OpenCode config does not mention api.gsa.usai.gov (usai-provider may not be paired)"
+  skip "the daemon-named OpenCode config is unreadable or does not mention api.gsa.usai.gov (usai-provider may not be paired)"
 fi
-usai_models="$(in_acq 'OPENCODE_CONFIG="${OPENCODE_CONFIG:-$HOME/.config/opencode/opencode.jsonc}" HOME="$OD_DATA_DIR/sandbox/agent-home" XDG_CONFIG_HOME="$OD_DATA_DIR/sandbox/config" XDG_DATA_HOME="$OD_DATA_DIR/sandbox/config/data" XDG_CACHE_HOME="$OD_DATA_DIR/sandbox/cache" timeout 60 opencode models 2>/dev/null | grep -c "^usai/"')"
+usai_models="$(acq exec "$SBX_NAME" -- env "OPENCODE_CONFIG_PATH=$opencode_config" sh -c 'OPENCODE_CONFIG="$OPENCODE_CONFIG_PATH" HOME="$OD_DATA_DIR/sandbox/agent-home" XDG_CONFIG_HOME="$OD_DATA_DIR/sandbox/config" XDG_DATA_HOME="$OD_DATA_DIR/sandbox/config/data" XDG_CACHE_HOME="$OD_DATA_DIR/sandbox/cache" timeout 60 opencode models 2>/dev/null | grep -c "^usai/"' </dev/null 2>/dev/null || true)"
 if [ "${usai_models:-0}" -gt 0 ] 2>/dev/null; then
   ok "OpenCode resolves $usai_models usai/* models under OpenDesign's sandbox-mode env"
 else
@@ -429,8 +433,9 @@ if [ -n "$host_url" ]; then
   # guarded by requireLocalDaemonRequest. They returned 403 whenever the daemon
   # observed a non-loopback peer through create-time port publishing.
   rollout_body="$WORK/od-next-rollout.json"
-  rollout_code="$(curl -s -o "$rollout_body" -w '%{http_code}' --max-time 30 \
-    -H "Origin: $host_url" "$host_url/api/strategies/od-next/rollout" 2>/dev/null || true)"
+  rollout_code="$(curl -s -o "$rollout_body" -w '%{http_code}' --max-time 30 -X POST \
+    -H "Origin: $host_url" -H 'Content-Type: application/json' --data '{}' \
+    "$host_url/api/strategies/od-next/rollout" 2>/dev/null || true)"
   if [ "$rollout_code" = "200" ]; then
     ok "OD Next rollout route is reachable from the host browser path (HTTP 200)"
   else
