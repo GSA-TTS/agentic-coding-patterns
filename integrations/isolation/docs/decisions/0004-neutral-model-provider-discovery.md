@@ -468,19 +468,34 @@ sequenceDiagram
     participant RO as /var/lib/acq/host (:ro)
     participant AGENT as agent (injectable)
     participant ORCH as models orchestrator
+    participant NORM as provider normalizer (from :ro)
     participant CAT as catalog.json (guest-local rw)
     end
 
+    note over ACQ,HSTATE: create time
     ACQ->>KIT: fetch pinned kit (static facts + normalizer + snapshot)
     ACQ->>ACQ: validate facts host-side (providerId slug/uniqueness, env-var-ownership, SSRF, schema)
     ACQ->>HSTATE: write validated facts + staged code
     ACQ->>RO: mount HSTATE read-only
-    AGENT-->>RO: sudo tee providers/evil.json (FAILS: read-only mount)
-    ACQ->>RO: invoke orchestrator from :ro path (restart-safe)
-    ORCH->>ORCH: bounded fetch (helper holds credential, timeout + size cap + host check)
-    RO->>ORCH: run normalizer on fetched bytes (no network, NO credential, bounded)
+
+    note over ACQ,CAT: sandbox startup (kit order: provider kits, then orchestrator, then harness kits)
+    ACQ->>+ORCH: run startup phase (orchestrator kit)
+    ORCH->>RO: glob models/providers/*/facts.json
+    RO-->>ORCH: facts.json (modelsUrl, keyEnv, timeout, caps)
+    ORCH->>ORCH: bounded fetch to modelsUrl (helper holds credential, timeout, size cap, host check)
+    ORCH->>+NORM: normalizer --source fetched --out neutral (no network, NO credential, bounded)
+    NORM-->>-ORCH: neutral catalog file (or non-zero / timeout / oversize)
+    ORCH->>ORCH: validate output against neutral catalog schema
+    alt fetch, normalizer or schema validation failed
+        ORCH->>RO: read that provider's vendored snapshot
+        RO-->>ORCH: snapshot bytes
+    end
     ORCH->>CAT: write per-sandbox catalog (rw, never shared)
-    Note over ACQ,RO: acq trusts only host-authoritative read-only inputs and the catalog stays guest-local (never cross sandbox)
+    deactivate ORCH
+
+    note over AGENT,RO: at any later point
+    AGENT-->>RO: sudo tee providers/evil.json (FAILS: read-only mount)
+    Note over ACQ,CAT: acq trusts only host-authoritative read-only inputs, and the catalog stays guest-local and never crosses sandboxes
 ```
 
 ## Consequences
@@ -657,6 +672,20 @@ sequenceDiagram
 - `goose-server` ADR 0004 (pending — GSA-TTS/agentic-coding-patterns#415) — the
   harness-adapter open questions this ADR's Layer 3 boundary answers for the
   model-config slice.
+- Provider credential operations (pending — GSA-TTS/agentic-coding-patterns#486,
+  consumed by GSA-TTS/agentic-coding-quickstart#566) — a constrained,
+  **static-metadata** extension of this ADR's facts model, declaring a canonical
+  credential and a low-impact authenticated diagnostic endpoint so `acq` can
+  check and replace a provider credential without provider-specific code. It
+  deliberately adds no provider-kit executable health-check hook, because that
+  would hand provider-shipped code a credential and so widen exactly the
+  boundary [Layer 2](#layer-2--the-models-orchestrator-kit-neutral) narrows.
+  Two notes for whoever reconciles the two shapes: the diagnostic endpoint and
+  this ADR's `modelsUrl` are the same URL on the same artifact, so one should
+  reference the other rather than restate it; and the credential environment
+  variable is currently recorded in three places (this ADR's `keyEnv`, that
+  proposal's `credential.keyEnv`, and the model catalog's `gateway.apiKeyEnv`),
+  which the schema work should collapse to one authority.
 - Quickstart [issue #506](https://github.com/GSA-TTS/agentic-coding-quickstart/issues/506)
   (closed, fixed by [PR #512](https://github.com/GSA-TTS/agentic-coding-quickstart/pull/512))
   — the startup-ordering race flagged above (`acq run` did not wait
