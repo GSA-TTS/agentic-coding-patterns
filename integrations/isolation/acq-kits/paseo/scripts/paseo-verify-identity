@@ -40,9 +40,26 @@ set -uo pipefail
 SBX="${1:-}"
 [ -n "$SBX" ] || { echo "usage: $0 <sandbox-name>" >&2; exit 2; }
 
-CONTAINER_PORT="${CONTAINER_PORT:-6767}"
+if [ "${CONTAINER_PORT+x}" = x ]; then
+  CONTAINER_PORT="$CONTAINER_PORT"
+else
+  CONTAINER_PORT=6767
+fi
 HEALTH_GRACE="${HEALTH_GRACE:-30}"
 ORPHAN_SLACK="${ORPHAN_SLACK:-120}"
+
+# Keep the override unambiguous: Bash printf treats leading-zero values as octal,
+# while /proc/net/tcp needs a valid decimal TCP port.
+valid_port() {
+  case "${1:-}" in ''|0|0*|*[!0-9]*) return 1 ;; esac
+  [ "${#1}" -le 5 ] && [ "$1" -le 65535 ]
+}
+
+if ! valid_port "$CONTAINER_PORT"; then
+  echo "FATAL: CONTAINER_PORT must be a decimal port from 1 through 65535 (got: ${CONTAINER_PORT:-<empty>})" >&2
+  exit 2
+fi
+GUEST_HEX="$(printf '%04X' "$CONTAINER_PORT")"
 
 pass=0
 fail=0
@@ -50,7 +67,6 @@ warns=0
 ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass+1)); }
 bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail+1)); }
 warn() { printf '  \033[33mWARN\033[0m %s\n' "$1"; warns=$((warns+1)); }
-skip() { printf '  \033[33mSKIP\033[0m %s\n' "$1"; }
 note() { printf '       %s\n' "$1"; }
 info() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 
@@ -199,8 +215,10 @@ info "3. Sandbox Identity via acq exec"
 # interpolation); the guest port arrives as $1.
 SBX_RAW="$(acq exec "$SBX" -- sh -lc '
   p="$1"
-  printf "SERVER_ID=%s\n"  "$(cat "$HOME/.paseo/server-id" 2>/dev/null)"
-  printf "DAEMON_PID=%s\n" "$(sed -n "s/.*\"pid\":\([0-9]*\).*/\1/p" "$HOME/.paseo/paseo.pid" 2>/dev/null)"
+  # Each record must stay on one line. server-id is guest-writable, so an
+  # embedded newline must not forge a later KEY=value record for the host parser.
+  printf "SERVER_ID=%s\n"  "$(cat "$HOME/.paseo/server-id" 2>/dev/null | tr -d "\n")"
+  printf "DAEMON_PID=%s\n" "$(sed -n "s/.*\"pid\":\([0-9]*\).*/\1/p" "$HOME/.paseo/paseo.pid" 2>/dev/null | head -1)"
   printf "VM_UPTIME=%s\n"  "$(cut -d. -f1 /proc/uptime 2>/dev/null)"
   printf "BIND=%s\n"       "$(awk "\$4==\"0A\" {print \$2}" /proc/net/tcp 2>/dev/null | tr "\n" " ")"
   printf "HEALTH=%s\n"     "$(curl -sS --max-time 5 "http://127.0.0.1:$p/api/health" 2>&1 | tr -d "\n")"
@@ -227,6 +245,8 @@ note "0100007F = 127.0.0.1 (loopback-only; create-time publish cannot reach it)"
 
 if [ -z "$SBX_SERVER_ID" ]; then
   bad "could not read ~/.paseo/server-id in the guest"
+elif ! printf '%s\n' "$SBX_SERVER_ID" | grep -Eq '^srv_[A-Za-z0-9_-]+$'; then
+  bad "guest server-id is malformed; refusing to use it for an identity verdict"
 else
   ok "guest reports server-id $SBX_SERVER_ID"
 fi
@@ -235,13 +255,14 @@ case "$SBX_HEALTH" in
   *)                 bad "guest daemon is not healthy: ${SBX_HEALTH:-<no answer>}" ;;
 esac
 # Guard the loopback-only bind for the ACTUAL guest port, not a fixed 1A6F.
-GUEST_HEX="$(printf '%04X' "$CONTAINER_PORT" 2>/dev/null || echo '1A6F')"
 case "$SBX_BIND" in
   *"0100007F:$GUEST_HEX"*)
     bad "guest daemon is bound to 127.0.0.1 only; create-time -p dials the guest network IP"
     note "this kit sets PASEO_LISTEN=0.0.0.0:$CONTAINER_PORT — see TROUBLESHOOTING.md" ;;
   *"00000000:$GUEST_HEX"*)
     ok "guest daemon is bound to 0.0.0.0:$CONTAINER_PORT" ;;
+  *)
+    bad "guest bind for :$GUEST_HEX not found in /proc/net/tcp (got: ${SBX_BIND:-<none>})" ;;
 esac
 
 # Orphan cross-check: a forwarder OLDER than the sandbox it serves is a leak.
