@@ -31,11 +31,11 @@ WORK="$(mktemp -d "${TMPDIR:-/tmp}/git-ssh-sign-verify.XXXXXX")"
 CREATE_LOG="$WORK/sbx-create.log"
 KEEP="${KEEP:-0}"
 
-pass=0
-fail=0
-ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass+1)); }
-bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail+1)); }
-info() { printf '\n\033[1m%s\033[0m\n' "$1"; }
+# Shared verdict contract (ok / bad / unver / skip / warn + verify_verdict).
+# Sourced rather than redefined here so a future fix to the contract cannot
+# leave this kit's copy behind.
+. "$KIT_DIR/../verify-report.sh"
+verify_reset
 
 cleanup() {
   if [ "$KEEP" = "1" ]; then
@@ -59,8 +59,7 @@ echo "  sbx version: $(sbx version 2>/dev/null | grep -oE 'v?[0-9]+\.[0-9]+(\.[0
 if ssh-add -L >/dev/null 2>&1; then
   ok "host SSH agent has a key loaded (signing can succeed)"
 else
-  echo "  NOTE: no key in the host SSH agent. The kit installs fine, but signing" >&2
-  echo "        will fail until you run: ssh-add ~/.ssh/id_ed25519" >&2
+  unver "host SSH agent has no key loaded — signing cannot be exercised (run: ssh-add ~/.ssh/id_ed25519)"
 fi
 
 info "1. sbx kit validate"
@@ -102,12 +101,10 @@ if [ "$(in_sbx 'ssh-add -L >/dev/null 2>&1 && echo yes')" = "yes" ]; then
   ')
   [ "$out" = "SIGNED" ] && ok "commit was signed and verified" || bad "commit not signed (got: ${out:-none})"
 else
-  echo "  SKIP: no key in the forwarded SSH agent inside the sandbox." >&2
-  echo "        Load one on the host (ssh-add) and re-run for the full check." >&2
+  # This is the kit's whole purpose. Reporting it as anything other than
+  # UNVERIFIED would let the script claim the signing path works when it was
+  # never exercised.
+  unver "end-to-end signed commit — no key in the forwarded SSH agent (load one with ssh-add, then re-run)"
 fi
 
-info "Summary"
-printf '  %d passed, %d failed\n' "$pass" "$fail"
-[ "$fail" -eq 0 ] && printf '  \033[32mAll checks passed.\033[0m\n' || printf '  \033[31mSome checks failed — see notes above.\033[0m\n'
-
-[ "$fail" -eq 0 ]
+verify_verdict "Summary"
