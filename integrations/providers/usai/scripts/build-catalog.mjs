@@ -203,38 +203,76 @@ function extractModelTokens(id) {
   return { family, version: versionParts, variant }
 }
 
+// Does an id carry the `lite` qualifier as its own token? Substring testing is
+// wrong here: it would see "lite" inside an unrelated word. `flash-lite` is a
+// DIFFERENT model from `flash`, with different limits and pricing.
+function hasLiteToken(normalizedId) {
+  return /(^|[.\-/])lite([.\-]|$)/.test(normalizedId)
+}
+
+// PRECISION GUARD. Scoring alone cannot be trusted to reject a wrong candidate:
+// it ranks whatever it is given and the best of a bad field still wins. These
+// are the agreements a candidate MUST satisfy to be considered at all, because
+// disagreeing on any of them means it is a DIFFERENT model:
+//
+//   family       claude is not gpt
+//   tier/variant haiku is not opus is not sonnet; flash is not pro
+//   major.minor  4.5 is not 5 and is not 4.8
+//   lite         flash-lite is not flash
+//
+// Rationale for failing closed: enriching a model with a different model's
+// numbers is worse than having none, because the fields come out populated and
+// plausible, so a completeness check ("every model has a price") passes while
+// the values are wrong. A gateway model absent from the enrichment source must
+// end up visibly unenriched, never silently mis-enriched.
+function isPreciseMatch(usaiTokens, catalogTokens, usaiNorm, catalogNorm) {
+  if (usaiTokens.family !== catalogTokens.family) return false
+  if ((usaiTokens.variant || "") !== (catalogTokens.variant || "")) return false
+  if (hasLiteToken(usaiNorm) !== hasLiteToken(catalogNorm)) return false
+  // Compare major and minor positionally. Both absent is agreement (a bare
+  // family id on both sides); one absent is not.
+  if (usaiTokens.version[0] !== catalogTokens.version[0]) return false
+  if (usaiTokens.version[1] !== catalogTokens.version[1]) return false
+  return true
+}
+
 function findModelsDevMatch(usaiId, catalog) {
   const usaiTokens = extractModelTokens(usaiId)
   const usaiNorm = normalizeModelId(usaiId)
-  const usaiHasLite = /lite/.test(usaiNorm)
   let bestMatch = null
   let bestScore = -Infinity
   for (const [catalogId, data] of Object.entries(catalog)) {
     const catalogTokens = extractModelTokens(catalogId)
     const catalogNorm = normalizeModelId(catalogId)
-    if (usaiTokens.family !== catalogTokens.family) continue
+    // The guard decides ELIGIBILITY; the score below only ranks the candidates
+    // that already agree on identity (e.g. picking `us.` over `eu.` regional
+    // duplicates of the same model).
+    if (!isPreciseMatch(usaiTokens, catalogTokens, usaiNorm, catalogNorm)) continue
+    // Every surviving candidate already agrees on family, tier, major.minor and
+    // lite, so the old variant / lite / version-equality terms would score the
+    // same for all of them and are gone. What remains genuinely discriminates
+    // between duplicate listings OF THE SAME MODEL.
     let score = 10
-    if (usaiTokens.variant && usaiTokens.variant === catalogTokens.variant) score += 50
-    const catalogHasLite = /lite/.test(catalogNorm)
-    if (usaiHasLite !== catalogHasLite) score -= 40
-    const versionMatch = usaiTokens.version.every((v, i) => catalogTokens.version[i] === v)
-    if (versionMatch && usaiTokens.version.length > 0) {
-      score += 30
-      if (catalogTokens.version.length === usaiTokens.version.length) score += 3
-    }
+    // Prefer the plainest generation: `claude-opus-5` over a dated SKU like
+    // `claude-opus-5-20260101`, whose extra version component the guard allows.
+    if (catalogTokens.version.length === usaiTokens.version.length) score += 3
+    // A modality-specific sibling (…-tts, …-vision) is not the chat model.
     for (const suffix of ["tts", "image", "audio", "vision", "embed", "embedding", "search", "realtime"]) {
       const re = new RegExp(`(^|[.\\-/])${suffix}([.\\-]|$)`)
       if (re.test(catalogNorm) && !re.test(usaiNorm)) score -= 60
     }
-    for (const v of ["pro", "codex", "mini", "nano", "max"]) {
+    // Size/profile qualifiers the tier token does not cover.
+    for (const v of ["codex", "mini", "nano", "max"]) {
       const re = new RegExp(`(^|[.\\-/])${v}([.\\-]|$)`)
       if (re.test(catalogNorm) && !re.test(usaiNorm)) score -= 20
     }
+    // Regional duplicates of one model: prefer the unprefixed or us/global
+    // listing, since USAi serves from a US deployment.
     if (/^(eu|au)\./.test(catalogId)) score -= 15
     else if (/^(us|global)\./.test(catalogId)) score += 2
     else if (/^[a-z]{2}\./.test(catalogId)) score += 1
     else score += 3
-    if (normalizeModelId(catalogId).startsWith(normalizeModelId(usaiId).slice(0, 10))) score += 5
+    if (catalogNorm.startsWith(usaiNorm.slice(0, 10))) score += 5
     if (score > bestScore) {
       bestScore = score
       bestMatch = { id: catalogId, data }
@@ -594,6 +632,23 @@ function reportExclusions(excluded) {
   }
 }
 
+// A model the precision guard could not match is NOT a silent condition. Its
+// limits fall back to generic defaults and its cost is absent, so the catalog
+// entry looks complete while carrying no derived pricing at all. Say so, by id,
+// and make the fallback visible — "could not enrich" has to be distinguishable
+// from "enriched", or a reviewer cannot tell a generic 128000/8192 from a real
+// measurement.
+function reportUnenriched(unenriched, enrichmentAttempted) {
+  if (!enrichmentAttempted || unenriched.length === 0) return
+  process.stderr.write(
+    `  UNENRICHED (${unenriched.length}): no models.dev entry agreed on family, tier and major.minor;\n` +
+      `  limits fall back to ${FALLBACK_LIMITS.context}/${FALLBACK_LIMITS.output} and cost is ABSENT:\n`,
+  )
+  for (const id of unenriched) {
+    process.stderr.write(`    ${id}\n`)
+  }
+}
+
 function shapeFromFeeds(usaiList, modelsDevCatalog) {
   // Chat models only, preserve incoming list order but group by vendor display
   // order for a stable catalog.
@@ -623,6 +678,7 @@ function shapeFromFeeds(usaiList, modelsDevCatalog) {
 
   const vendorOrder = []
   const models = []
+  const unenriched = []
   for (const p of parsed) {
     if (!vendorOrder.includes(p.vendor)) vendorOrder.push(p.vendor)
     const model = { id: p.id, vendor: p.vendor, name: p.name }
@@ -630,10 +686,12 @@ function shapeFromFeeds(usaiList, modelsDevCatalog) {
     let output = Number.isInteger(p.raw.max_output_tokens) ? p.raw.max_output_tokens : null
     let baseCost = null
     let above = null
+    let matched = false
     if (modelsDevCatalog) {
       for (const { models: providerModels } of providerModelMaps(p.vendor, modelsDevCatalog)) {
         const match = findModelsDevMatch(p.id, providerModels)
         if (match?.data) {
+          matched = true
           if (match.data.limit) {
             context = context || match.data.limit.context || null
             output = output || match.data.limit.output || null
@@ -644,6 +702,9 @@ function shapeFromFeeds(usaiList, modelsDevCatalog) {
           break
         }
       }
+      // The feed itself may carry limits even when enrichment finds nothing;
+      // only a model with no derived data at all is reported as unenriched.
+      if (!matched) unenriched.push(p.id)
     }
     model.contextWindow = normalizeLimit(context, FALLBACK_LIMITS.context)
     model.maxOutputTokens = normalizeLimit(output, FALLBACK_LIMITS.output)
@@ -651,6 +712,7 @@ function shapeFromFeeds(usaiList, modelsDevCatalog) {
     if (above) model.costAbove200kContext = above
     models.push(model)
   }
+  reportUnenriched(unenriched, Boolean(modelsDevCatalog))
   return { models, vendorOrder }
 }
 
