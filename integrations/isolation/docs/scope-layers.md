@@ -208,8 +208,8 @@ global layer does.
 
 | Need | Mechanism |
 |------|-----------|
-| Aliases, prompt, shell functions | `files/home/.rc.d/NN-name.sh` drop-ins. Neither the image nor the global layer sources `~/.rc.d`, so one kit must wire the loop: the team kit if it does (the reference implementation's does), otherwise the personal kit. Either way, an append-if-absent startup step adds `case $- in *i*) for f in "$HOME"/.rc.d/*.sh; do [ -r "$f" ] && . "$f"; done ;; esac` to `~/.bashrc`, skipped when a line there already sources `~/.rc.d`. Only one layer should wire it, or drop-ins run twice. |
-| Your working shell | An `exec zsh` line in a `99-` drop-in, so it sorts last. The loop's interactive guard (`case $- in *i*)`) is required, or the drop-in hijacks scripted `bash -lc` runs. zsh does not read `~/.bashrc`: give `~/.zshrc` its own loop with a second append-if-absent step, and make the `exec` line skip when it is already in zsh (`[ -z "${ZSH_VERSION:-}" ]`), or zsh sourcing it through that loop re-execs forever. |
+| Aliases, prompt, shell functions | `files/home/.rc.d/NN-name.sh` drop-ins. `acq` writes `~/.profile` so that every bash login shell sources `~/.rc.d/*.sh` in lexical order, on both backends, so a kit only delivers drop-ins. Never add a loop of your own: a kit that also appends one to `~/.bashrc` makes every drop-in run twice. The loop has no interactive guard, so drop-ins also run in scripted `bash -lc` runs: keep them POSIX and safe without a terminal, and wrap interactive-only lines in `case $- in *i*) ... esac`. A non-login bash (typing `bash` at a prompt) sources none. |
+| Your working shell | An `exec zsh` line in a `99-` drop-in, so it sorts last. Wrap it in `case $- in *i*)`, or it hijacks scripted `bash -lc` runs. The `acq` loop runs only in bash: give `~/.zshrc` its own loop with an append-if-absent startup step, and make the `exec` line skip when it is already in zsh (`[ -z "${ZSH_VERSION:-}" ]`), or zsh sourcing it through that loop re-execs forever. |
 | Terminfo for your terminal | Ship the *source* (`infocmp -x`) and compile it in a startup step (`tic -x`) |
 | Git preferences | One startup command per key, or ship a file and add it with `include.path` |
 | Overriding a team setting | `environment` (last wins) or a later file at the same path (last wins) — deliberately, and only for settings the team marks as personal |
@@ -367,6 +367,10 @@ date.
   stops the rest of that kit's apply: the files placed before it stay, but
   the kit's `environment` is not recorded and its `commands[]` do not run. The
   create output names the file ("could not place kit file").
+- **The `~/.rc.d` loop.** `acq` writes the loop into `~/.profile` only when
+  that file is missing, empty, or already its own. An image that ships its own
+  `~/.profile` keeps it, and drop-ins then load only if that file sources
+  `~/.rc.d`. Check with `acq exec <sandbox> -- cat ~/.profile`.
 - **`ACQ_EXTRA_KITS` and `acq configure`.** `acq configure` stores default
   extra kits as `extra_kits:` in `~/.config/acq/config.yaml`.
   - `extra_kits:` takes only catalog names (`openchamber`, `paseo`,
