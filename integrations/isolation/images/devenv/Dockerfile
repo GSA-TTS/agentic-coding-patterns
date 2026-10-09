@@ -5,9 +5,11 @@
 ARG BASE_IMAGE=docker/sandbox-templates:shell-docker
 FROM ${BASE_IMAGE}
 
-# devenv/direnv nixpkgs pin (nixos-25.05). Bump this and VERSION together —
-# unpinned `nixpkgs#…` tracks unstable HEAD and drifts per build.
-ARG NIXPKGS_REV=ac62194c3917d5f474c1a844b6fd6da2db95077d
+# devenv/direnv nixpkgs pin (nixos-26.05 → devenv 2.1.2). Bump this and
+# VERSION together — unpinned `nixpkgs#…` tracks unstable HEAD and drifts per
+# build. The devenv major is part of the image contract: a major change here
+# is a major VERSION bump.
+ARG NIXPKGS_REV=0d9e9b832d03ac387417e16ce1febf73b2e631e1
 
 # Checksum pin for the installer script below (release assets are mutable);
 # bump together with the installer version.
