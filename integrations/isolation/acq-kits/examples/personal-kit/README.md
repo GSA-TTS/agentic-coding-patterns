@@ -66,15 +66,15 @@ the team kit's README says a personal kit may.
 |-----------------|------------|--------------|
 | `caps.network.allow` | `example.net` (an IANA-reserved example domain no other layer allows, so `scripts/verify` can observe it) | the hosts your own tools need, or nothing |
 | `files[]` | `.rc.d/50-example.sh` (one alias), `personal/tui.jsonc` (OpenCode TUI theme) | your drop-ins and personal config files (one `files[]` record per file) |
-| `commands[]` | wire `~/.rc.d/*.sh` into interactive bash; `git config --global alias.st status` | keep the first; replace the second with your own idempotent steps |
+| `commands[]` | `git config --global alias.st status` | your own idempotent steps |
 | `environment` | `OPENCODE_TUI_CONFIG` → your `tui.jsonc` (this overrides a team `tui.jsonc`; keep it only if the team kit's README allows that, and `scripts/verify` skips its checks once you remove it) | more non-secret personal settings |
 
 ## What to put where
 
 | You want | Do this |
 |----------|---------|
-| Aliases, prompt, shell functions | A `files/home/.rc.d/NN-name.sh` drop-in plus its `files[]` record. Interactive shells source them in lexical order; scripted `bash -lc` runs never do. Keep them POSIX. |
-| zsh as your working shell | An `exec zsh` line in a `99-` drop-in, so it sorts last, guarded so it never swallows a `bash -ic '...'` command string (`BASH_EXECUTION_STRING`) and never re-fires in a `bash` you start from zsh (see `files/home/.rc.d/50-example.sh`), plus a startup step that gives `~/.zshrc` its own `~/.rc.d` loop (append-if-absent, like the bash one) |
+| Aliases, prompt, shell functions | A `files/home/.rc.d/NN-name.sh` drop-in plus its `files[]` record. `acq`'s `~/.profile` sources them in lexical order in every bash login shell, scripted `bash -lc` runs included, so add no loop of your own. Keep them POSIX and safe without a terminal; wrap interactive-only lines in `case $- in *i*) ... esac`. |
+| zsh as your working shell | An `exec zsh` line in a `99-` drop-in, so it sorts last, guarded so it runs only in an interactive shell on a terminal, never swallows a `bash -lic '...'` command string (`BASH_EXECUTION_STRING`), and never re-fires in a `bash` you start from zsh (see `files/home/.rc.d/50-example.sh`), plus a startup step that gives `~/.zshrc` its own `~/.rc.d` loop (commented example in `spec.yaml`), since `acq`'s loop runs only in bash |
 | Terminfo for your terminal | Ship the source (`infocmp -x`) and compile it in a startup step (`tic -x`); the commented example in `spec.yaml` shows how |
 | Git preferences | One startup step per key, or ship `files/home/personal/gitconfig` and register it once with `include.path`; read its keys back with `git config --global --includes KEY`. A per-remote identity goes in a fragment behind `includeIf "hasconfig:remote.*.url:…"` (commented example in `spec.yaml`) |
 | An OpenCode theme or keybinds | Edit `files/home/personal/tui.jsonc` |
@@ -106,10 +106,10 @@ KEEP=1 ./scripts/verify                   # keep the sandbox and work dir for in
 It validates both kits, then creates a throwaway sandbox through `acq`, which
 applies the pinned built-in bundle plus, via `ACQ_EXTRA_KITS`, the team kit and
 then this kit. It asserts that the global and team layers are intact under your
-kit, that every live value above landed, that the drop-in is sourced by
-interactive bash, that this kit's `~/.rc.d` loop is inert in a non-interactive
-shell (skipped when another layer wired the loop),
-and that both kits' variables, files, and egress hosts coexist. When you point
+kit, that every live value above landed, that a bash login shell sources the
+drop-in exactly once (twice means some layer added its own `~/.rc.d` loop),
+that a scripted `bash -lc` still runs its command, and that both kits'
+variables, files, and egress hosts coexist. When you point
 `TEAM_KIT` at your team's kit, also set the `TEAM_*` variables
 (`TEAM_CONFIG`, `TEAM_CONVENTIONS`, `TEAM_GIT_KEY`, `TEAM_GIT_VALUE`,
 `TEAM_EGRESS_HOST`) to what it ships, and `UNLISTED_EGRESS_HOST` if your team

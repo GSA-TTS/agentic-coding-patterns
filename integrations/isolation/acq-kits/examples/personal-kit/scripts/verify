@@ -12,9 +12,8 @@
 #   2. the team layer is intact under this kit (its env var, conventions,
 #      startup command, and egress host all survive);
 #   3. every live extension-point value in spec.yaml landed (so both kits'
-#      environment and files[] coexist), the shell drop-in is sourced by
-#      interactive bash, and the ~/.rc.d loop is guarded against
-#      non-interactive shells;
+#      environment and files[] coexist), a bash login shell sources the shell
+#      drop-in exactly once, and a scripted bash -lc still runs;
 #   4. caps.network.allow is the union of both kits' hosts.
 # The per-field rules themselves (last wins, append order) are asserted by
 # the team-kit template's verify against a competing fixture.
@@ -240,30 +239,29 @@ if [ "$settled" = 1 ]; then
 else
   bad "startup command did not run"
 fi
-# The drop-in must be live in an interactive shell, and the ~/.rc.d loop must
-# be inert in a non-interactive one: that guard is what keeps an `exec zsh`
-# drop-in from swallowing scripted `bash -lc` runs. The guard is checked by
-# running this kit's own loop line (the one after its marker comment) in a
-# non-interactive bash, because `bash -lc` alone never reaches the loop on
-# images whose ~/.bashrc returns early for non-interactive shells. A loop
-# another layer wired may span several lines, so it is reported as skipped
-# rather than guessed at.
-# Last line only: ~/.bashrc or a drop-in may print its own output first.
-if [ "$(in_sbx "bash -ic 'alias $PERSONAL_ALIAS >/dev/null 2>&1 && echo y' 2>/dev/null" | tail -n1)" = "y" ]; then
-  ok "drop-in sourced by interactive bash (alias $PERSONAL_ALIAS)"
+# acq's ~/.profile sources ~/.rc.d in every bash login shell. The drop-in must
+# be sourced there exactly once: twice means some layer added its own loop
+# (a ~/.bashrc append, the pre-v4 practice), which `acq`'s ~/.profile then
+# runs as well. Counted from bash's trace of its `. FILE` lines, so the check
+# works whatever the drop-in contains. Last line only for the alias probe:
+# ~/.bashrc or a drop-in may print its own output first.
+if [ "$(in_sbx "bash -lic 'alias $PERSONAL_ALIAS >/dev/null 2>&1 && echo y' 2>/dev/null" | tail -n1)" = "y" ]; then
+  ok "drop-in sourced by a bash login shell (alias $PERSONAL_ALIAS)"
 else
-  bad "drop-in not sourced by interactive bash (is the ~/.rc.d loop in ~/.bashrc?)"
+  bad "drop-in not sourced by a bash login shell (does ~/.profile run the ~/.rc.d loop?)"
 fi
-guard="$(in_sbx "loop=\$(grep -A1 -F '# ~/.rc.d drop-ins (personal kit' \"\$HOME/.bashrc\" | sed -n 2p)
-if [ -z \"\$loop\" ]; then grep -Eqs '^[^#]*\\.rc\\.d' \"\$HOME/.bashrc\" && echo other || echo none; exit 0; fi
-bash -c \"\$loop
-alias $PERSONAL_ALIAS >/dev/null 2>&1 && echo y || echo n\"")"
-case "$guard" in
-  n) ok "the ~/.rc.d loop is guarded (inert in a non-interactive shell)" ;;
-  other) skip "the ~/.rc.d loop was wired by another layer; its guard is that layer's to check" ;;
-  none) bad "no ~/.rc.d loop in ~/.bashrc" ;;
-  *) bad "the ~/.rc.d loop runs in non-interactive shells (unguarded; fix the layer that wired it) or the probe failed ('${guard:-<empty>}')" ;;
+sourced="$(in_sbx "bash -lixc : 2>&1 >/dev/null | grep -cE '^[+]+ (\\.|source) $PERSONAL_DROPIN\$'")"
+case "$sourced" in
+  1) ok "drop-in sourced exactly once per login shell" ;;
+  *) bad "drop-in sourced ${sourced:-?} times per login shell (expected 1; a layer adds its own ~/.rc.d loop, see TROUBLESHOOTING.md)" ;;
 esac
+# Drop-ins also run in scripted login shells, so one that execs another shell
+# without its guards would swallow the script.
+if [ "$(in_sbx "bash -lc 'echo ran' 2>/dev/null" | tail -n1)" = "ran" ]; then
+  ok "a scripted bash -lc still runs its command"
+else
+  bad "a scripted bash -lc did not run its command (a drop-in exec'd another shell?)"
+fi
 
 info "6. Egress union (docs/scope-layers.md)"
 # environment and files[] coexistence is already covered: sections 4 and 5

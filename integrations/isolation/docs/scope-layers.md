@@ -412,8 +412,7 @@ future teammates inherit the *why*, not just the YAML.
   `scripts/verify` asserts, together with the composition rules in the table
   above.
 - [`../acq-kits/examples/personal-kit/`](../acq-kits/examples/personal-kit/)
-  is the same for the personal layer: shell drop-ins with the `~/.rc.d` loop
-  wired, a git preference, and an OpenCode TUI theme through
+  is the same for the personal layer: a shell drop-in, a git preference, and an OpenCode TUI theme through
   `OPENCODE_TUI_CONFIG`. Its `scripts/verify` stacks it on a team kit (the
   team-kit template by default) and asserts the three-layer stack: the global
   and team layers survive under it, and both kits' values coexist.

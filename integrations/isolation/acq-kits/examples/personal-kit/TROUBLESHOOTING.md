@@ -49,26 +49,39 @@ README allows it.
 
 ## Aliases or prompt missing in the shell
 
-The drop-ins are sourced only by **interactive** shells, and only once the
-startup step has added the `~/.rc.d` loop to `~/.bashrc`. Check both:
+`acq`'s `~/.profile` sources the drop-ins, so only bash **login** shells see
+them: `acq shell` and `bash -l`, not a plain `bash` typed at a prompt. Check
+that the loop is there and the drop-in landed:
 
 ```bash
-acq exec <sandbox> -- sh -c 'grep -n rc.d ~/.bashrc; ls ~/.rc.d'
+acq exec <sandbox> -- sh -c 'cat ~/.profile; ls ~/.rc.d'
 ```
 
-A drop-in present in `files/` but absent from `~/.rc.d` has no `files[]`
-record (see "Backend differences" in the pattern doc). If you switched to zsh, zsh
-does not read `~/.bashrc`; give `~/.zshrc` its own loop.
+`acq` writes that loop only when `~/.profile` is missing, empty, or its own; an
+image that ships its own `~/.profile` must source `~/.rc.d` itself. A drop-in
+present in `files/` but absent from `~/.rc.d` has no `files[]` record (see
+"Backend differences" in the pattern doc). If you switched to zsh, `acq`'s loop
+runs only in bash; give `~/.zshrc` its own loop.
+
+## Drop-ins run twice
+
+Some layer still appends its own `~/.rc.d` loop to `~/.bashrc`, and `acq`'s
+`~/.profile` sources `~/.bashrc` before running its own loop. Find it and
+remove that kit's startup step; `acq` already wires the directory:
+
+```bash
+acq exec <sandbox> -- sh -c 'grep -n rc.d ~/.bashrc'
+```
 
 ## A scripted command hangs or runs in the wrong shell
 
-A drop-in that runs `exec zsh` replaced a shell it should not have. Keep that
-line in a `99-` drop-in, keep the loop's interactive guard
-(`case $- in *i*) ... esac`) so `bash -lc` scripts never reach it, and guard
-the `exec` on `BASH_EXECUTION_STRING` being empty: `bash -ic '...'` is
-interactive, with or without a terminal, and bash sets that variable whenever
-it runs a command string. The example in `files/home/.rc.d/50-example.sh`
-carries all the guards.
+A drop-in that runs `exec zsh` replaced a shell it should not have. `acq`'s
+loop sources drop-ins in scripted `bash -lc` runs too, so the line needs its
+own guards: keep it in a `99-` drop-in, wrap it in `case $- in *i*) ... esac`,
+require a terminal (`[ -t 0 ]`), and require `BASH_EXECUTION_STRING` to be
+empty: bash sets that variable whenever it runs a command string, so
+`bash -lic '...'` still runs its command. The example in
+`files/home/.rc.d/50-example.sh` carries all the guards.
 
 ## Files landed, but the env var and startup effects are missing (msb)
 
