@@ -13,13 +13,13 @@
 # no supervisor loop.
 #
 # SEQUENCING NOTE (per a completed consensus vote): this kit is being shipped
-# AHEAD of the in-flight prime-agent kit (patterns epic #368) specifically to
-# validate the unprivileged/agent-owned/startup-only pattern on a materially
-# simpler target — pi's own installer needs no native-module postinstall step
-# and no Python runtime, so there is no "install phase vs. startup phase,
-# because a failed native build must not crash sandbox create" tension the way
-# there is for openchamber's better-sqlite3 dependency. prime-agent's own
-# heavier kernel-bootstrap complexity is deliberately deferred, not abandoned.
+# AHEAD of the in-flight prime-agent kit specifically to validate the
+# unprivileged/agent-owned/startup-only pattern on a materially simpler target —
+# pi's own installer needs no native-module postinstall step and no Python
+# runtime, so there is no "install phase vs. startup phase, because a failed
+# native build must not crash sandbox create" tension the way there is for
+# openchamber's better-sqlite3 dependency. prime-agent's own heavier
+# kernel-bootstrap complexity is deliberately deferred, not abandoned.
 #
 # WHAT pi-coding-agent IS: a TUI, not a web UI — like prime-agent (contrast
 # openchamber / paseo, which each publish a browser-UI port). Publishes NO
