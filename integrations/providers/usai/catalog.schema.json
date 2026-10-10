@@ -87,7 +87,10 @@
         "properties": {
           "id": {
             "type": "string",
-            "description": "Model identifier as used by the gateway (e.g. claude_4_8_opus)."
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[^\\u0000-\\u0020\\u007F\\\"\\\\]+$",
+            "description": "Model identifier as used by the gateway (e.g. claude_4_8_opus). Whitespace, control characters, quotes, and backslashes are not allowed; provider separators such as / and : remain valid. Emitters still serialize it because validation is defense in depth, not the escaping control."
           },
           "vendor": {
             "type": "string",
@@ -95,7 +98,10 @@
           },
           "name": {
             "type": "string",
-            "description": "Human-readable display name."
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
+            "description": "Human-readable display name. Control characters are not allowed; punctuation and Unicode display text remain valid. Emitters serialize this value independently."
           },
           "contextWindow": {
             "type": "integer",
