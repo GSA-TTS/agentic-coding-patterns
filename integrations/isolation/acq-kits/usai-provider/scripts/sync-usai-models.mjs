@@ -5,6 +5,8 @@ import path from "node:path"
 import process from "node:process"
 import { fileURLToPath } from "node:url"
 
+import { parseJsonc } from "../files/home/usai-config/merge-global-config.mjs"
+
 // Anchor all default paths at the kit root (this file lives in <kit>/scripts/),
 // so the script works regardless of the caller's working directory.
 const KIT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
@@ -690,8 +692,15 @@ function renderModelBlock(models, eol) {
     // Generate display name
     const displayName = generateDisplayName(model.id)
 
-    lines.push(`        "${model.id}": {`)
-    lines.push(`          "name": "${displayName}",`)
+    // SERIALIZE, NEVER INTERPOLATE, a feed-derived string. `model.id` arrives
+    // from the gateway verbatim and `displayName` is derived from it, so a `"`
+    // in an id would close its own JSON string on BOTH of these lines and could
+    // add sibling keys to a config an AI coding agent then obeys. Today that
+    // happens to produce a corrupt file rather than a clean injection — the two
+    // lines mangle each other — but relying on a double fault to be safe is not
+    // a control, and it stops holding the moment either line changes.
+    lines.push(`        ${JSON.stringify(model.id)}: {`)
+    lines.push(`          "name": ${JSON.stringify(displayName)},`)
 
     const hasCost = model.cost && Object.keys(model.cost).length > 0
 
@@ -798,7 +807,15 @@ export function updateTemplate(templateText, payload, modelsDevCatalog = {}) {
     .map(parseModel)
     .filter((model) => model.id)
     .filter(isAllowedModel)
-    .sort((a, b) => a.id.localeCompare(b.id))
+
+  const modelIds = new Set()
+  for (const model of models) {
+    if (modelIds.has(model.id)) {
+      throw new Error(`USAI model payload contains duplicate id ${JSON.stringify(model.id)}`)
+    }
+    modelIds.add(model.id)
+  }
+  models.sort((a, b) => a.id.localeCompare(b.id))
 
   // Enrich with models.dev metadata if catalog provided
   if (Object.keys(modelsDevCatalog).length > 0) {
@@ -834,6 +851,34 @@ export function updateTemplate(templateText, payload, modelsDevCatalog = {}) {
     updatedTemplate,
     models,
   }
+}
+
+// Validate the COMPLETE artifact before check/write. Validating only the model
+// fragment would miss an unbalanced escape that closes the models/provider
+// objects and adds a top-level key. Use the kit's production JSONC parser —
+// never eval/vm.runInNewContext on feed-influenced text.
+export function validateGeneratedConfig(text) {
+  let parsed
+  try {
+    parsed = parseJsonc(text)
+  } catch (error) {
+    throw new Error(`Generated opencode.jsonc is not valid JSONC: ${error.message}`)
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Generated opencode.jsonc must contain a top-level object")
+  }
+  const expectedKeys = new Set([
+    "$schema", "enabled_providers", "provider", "model", "small_model",
+    "agent", "compaction", "instructions", "permission", "watcher",
+  ])
+  const unexpected = Object.keys(parsed).filter((key) => !expectedKeys.has(key))
+  if (unexpected.length) {
+    throw new Error(`Generated opencode.jsonc has unexpected top-level key(s): ${unexpected.join(", ")}`)
+  }
+  if (!parsed.provider?.usai?.models || typeof parsed.provider.usai.models !== "object") {
+    throw new Error("Generated opencode.jsonc is missing provider.usai.models")
+  }
+  return parsed
 }
 
 async function loadPayload(args) {
@@ -883,6 +928,7 @@ async function main() {
   ])
 
   const { updatedTemplate, models } = updateTemplate(templateText, payload, modelsDevCatalog)
+  validateGeneratedConfig(updatedTemplate)
 
   // Log enrichment results
   const enriched = models.filter((m) => m.modelsDevId)

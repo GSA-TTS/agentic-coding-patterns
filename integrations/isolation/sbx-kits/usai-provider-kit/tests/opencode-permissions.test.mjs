@@ -1,20 +1,10 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
-import vm from "node:vm"
+
+import { parseJsonc } from "../files/home/usai-config/merge-global-config.mjs"
 
 const templatePath = new URL("../files/home/usai-config/opencode.jsonc", import.meta.url)
-
-/**
- * Parse the JSONC config into an object (JSONC is a subset of JS object literal
- * syntax, so a sandboxed eval is sufficient and matches the approach in
- * sync-usai-models.test.mjs).
- */
-function parseJsonc(text) {
-  const sandbox = {}
-  vm.runInNewContext("result = " + text, sandbox)
-  return sandbox.result
-}
 
 /**
  * Resolve a command against an OpenCode-style permission map, using the SAME

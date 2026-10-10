@@ -674,6 +674,20 @@ function validateCost(cost, where, errors) {
   }
 }
 
+function validateStringFromSchema(value, propertySchema, where, errors) {
+  assert(typeof value === "string", `${where} must be string`, errors)
+  if (typeof value !== "string") return
+  if (Number.isInteger(propertySchema.minLength)) {
+    assert([...value].length >= propertySchema.minLength, `${where} must not be empty`, errors)
+  }
+  if (Number.isInteger(propertySchema.maxLength)) {
+    assert([...value].length <= propertySchema.maxLength, `${where} exceeds ${propertySchema.maxLength} characters`, errors)
+  }
+  if (typeof propertySchema.pattern === "string") {
+    assert(new RegExp(propertySchema.pattern).test(value), `${where} does not match its schema pattern`, errors)
+  }
+}
+
 function validateCatalog(catalog, schema) {
   const errors = []
   assert(catalog && typeof catalog === "object" && !Array.isArray(catalog), "catalog must be an object", errors)
@@ -706,10 +720,15 @@ function validateCatalog(catalog, schema) {
   assert(Array.isArray(catalog.vendors), "vendors must be an array", errors)
   if (Array.isArray(catalog.vendors)) {
     const vendorAllowed = new Set(["key", "label", "order", "usaiBackend"])
+    const vendorKeysSeen = new Set()
     for (const [idx, v] of catalog.vendors.entries()) {
       for (const k of Object.keys(v)) assert(vendorAllowed.has(k), `vendors[${idx}]: disallowed key "${k}"`, errors)
       for (const r of ["key", "label", "order", "usaiBackend"]) assert(r in v, `vendors[${idx}]: missing "${r}"`, errors)
       assert(typeof v.key === "string", `vendors[${idx}].key must be string`, errors)
+      if (typeof v.key === "string") {
+        assert(!vendorKeysSeen.has(v.key), `vendors[${idx}].key duplicates "${v.key}"`, errors)
+        vendorKeysSeen.add(v.key)
+      }
       assert(Number.isInteger(v.order), `vendors[${idx}].order must be integer`, errors)
     }
   }
@@ -722,11 +741,17 @@ function validateCatalog(catalog, schema) {
       "cost", "costAbove200kContext", "reasoning", "inputModalities",
     ])
     const vendorKeys = new Set((catalog.vendors || []).map((v) => v.key))
+    const modelProperties = schema.properties.models.items.properties
+    const modelIds = new Set()
     for (const [idx, m] of catalog.models.entries()) {
       for (const k of Object.keys(m)) assert(modelAllowed.has(k), `models[${idx}]: disallowed key "${k}"`, errors)
       for (const r of ["id", "vendor", "name"]) assert(r in m, `models[${idx}]: missing "${r}"`, errors)
-      assert(typeof m.id === "string", `models[${idx}].id must be string`, errors)
-      assert(typeof m.name === "string", `models[${idx}].name must be string`, errors)
+      validateStringFromSchema(m.id, modelProperties.id, `models[${idx}].id`, errors)
+      validateStringFromSchema(m.name, modelProperties.name, `models[${idx}].name`, errors)
+      if (typeof m.id === "string") {
+        assert(!modelIds.has(m.id), `models[${idx}].id duplicates "${m.id}"`, errors)
+        modelIds.add(m.id)
+      }
       assert(vendorKeys.has(m.vendor), `models[${idx}].vendor "${m.vendor}" not in vendors[]`, errors)
       if ("contextWindow" in m) assert(Number.isInteger(m.contextWindow), `models[${idx}].contextWindow must be integer`, errors)
       if ("maxOutputTokens" in m) assert(Number.isInteger(m.maxOutputTokens), `models[${idx}].maxOutputTokens must be integer`, errors)
@@ -917,6 +942,7 @@ function describeDrift(existing, fresh) {
 async function main() {
   const args = parseArgs(process.argv.slice(2))
   const outPath = args.opts["--out"] || DEFAULT_OUT
+  const schemaPath = args.opts["--schema"] || DEFAULT_SCHEMA
   const catalog = await buildCatalog(args)
   const serialized = serialize(catalog)
 
@@ -932,6 +958,10 @@ async function main() {
       existing = JSON.parse(existingRaw)
     } catch {
       throw new Error(`catalog.json at ${outPath} is not valid JSON; regenerate it`)
+    }
+    const existingErrors = validateCatalog(existing, JSON.parse(await readFile(schemaPath, "utf8")))
+    if (existingErrors.length) {
+      throw new Error(`catalog.json at ${outPath} is invalid:\n  - ${existingErrors.join("\n  - ")}`)
     }
     const drift = describeDrift(substantive(existing), substantive(catalog))
     if (drift.length) {

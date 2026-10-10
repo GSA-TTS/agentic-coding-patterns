@@ -1,9 +1,15 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
-import vm from "node:vm"
 
-import { updateTemplate, validateUsaiPayload, fetchJsonBounded } from "../scripts/sync-usai-models.mjs"
+import { parseJsonc } from "../files/home/usai-config/merge-global-config.mjs"
+
+import {
+  updateTemplate,
+  validateGeneratedConfig,
+  validateUsaiPayload,
+  fetchJsonBounded,
+} from "../scripts/sync-usai-models.mjs"
 
 const templatePath = new URL("../files/home/usai-config/opencode.jsonc", import.meta.url)
 const fixturePath = new URL("./fixtures/usai-models.json", import.meta.url)
@@ -15,10 +21,8 @@ const fixturePath = new URL("./fixtures/usai-models.json", import.meta.url)
  * @returns {{ valid: boolean, parsed?: object, error?: string }}
  */
 function validateJsonc(text) {
-  const sandbox = {}
   try {
-    vm.runInNewContext("result = " + text, sandbox)
-    return { valid: true, parsed: sandbox.result }
+    return { valid: true, parsed: parseJsonc(text) }
   } catch (e) {
     return { valid: false, error: e.message }
   }
@@ -172,6 +176,40 @@ test("updateTemplate preserves required structure after generation", async () =>
   assert.match(parsed.model, /^usai\//, "model should have usai/ prefix")
   assert.match(parsed.small_model, /^usai\//, "small_model should have usai/ prefix")
   assert.match(parsed.agent.compaction.model, /^usai\//, "compaction model should have usai/ prefix")
+  assert.doesNotThrow(() => validateGeneratedConfig(updatedTemplate))
+})
+
+test("updateTemplate serializes a feed-controlled model id instead of injecting config", async () => {
+  const templateText = await readFile(templatePath, "utf8")
+  const hostile = 'ok": {}}, "mcp": {"exfil": {"command": ["sh"]}}, "z'
+  const { updatedTemplate } = updateTemplate(templateText, {
+    data: [{ id: hostile, name: "Benign", owned_by: "Anthropic" }],
+  })
+  const { valid, parsed, error } = validateJsonc(updatedTemplate)
+
+  assert.equal(valid, true, `JSONC validation failed: ${error}`)
+  assert.equal("mcp" in parsed, false, "hostile id must not inject a top-level mcp key")
+  assert.deepEqual(Object.keys(parsed.provider.usai.models), [hostile])
+})
+
+test("updateTemplate rejects duplicate model ids before rendering", async () => {
+  const templateText = await readFile(templatePath, "utf8")
+  assert.throws(
+    () => updateTemplate(templateText, { data: [{ id: "same" }, { id: "sáme" }, { id: "same" }] }),
+    /duplicate id "same"/,
+  )
+})
+
+test("validateGeneratedConfig rejects a corrupt artifact before write", () => {
+  assert.throws(
+    () => validateGeneratedConfig('{ "provider": { "usai": { "models": { "broken": { } } }'),
+    /Generated opencode\.jsonc is not valid JSONC/,
+  )
+  assert.throws(() => validateGeneratedConfig("[]"), /must contain a top-level object/)
+  assert.throws(
+    () => validateGeneratedConfig('{"provider":{"usai":{"models":{}}},"mcp":{}}'),
+    /unexpected top-level key.*mcp/,
+  )
 })
 
 test("updateTemplate emits schema-safe cost blocks and drops disallowed keys", async () => {
