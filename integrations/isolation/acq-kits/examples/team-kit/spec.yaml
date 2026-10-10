@@ -1,0 +1,104 @@
+# spec.yaml — team-kit: a TEMPLATE for a team's own acq mixin kit (hybrid/v1).
+#
+# Not applied by acq. Copy this directory into a repo your team owns, rename
+# BOTH the directory and `name:` below, replace every value marked REPLACE,
+# and grow it. Teammates apply it through env.sh (see README.md). The rules
+# the comments below summarize live in the pattern doc,
+# integrations/isolation/docs/scope-layers.md in agentic-coding-patterns.
+#
+# Two parser rules for this whole file (pattern doc, "Check against your acq"):
+# never put a comment after a value in a command or a top-level field (put it
+# on its own line), and avoid `#` in environment values.
+#
+# Every extension point ships ONE live, harmless value, which scripts/verify
+# asserts. Commented YAML is never schema-checked, so a template made of
+# comments would rot silently.
+schemaVersion: "hybrid/v1"
+kind: mixin
+# REPLACE name (kebab-case, equal to the directory name), displayName, and
+# description.
+name: team-kit
+displayName: Team kit (template)
+description: >
+  Starting point for a team scope-layer kit: team conventions and agent
+  settings wired through the OpenCode config tier, plus one live value per
+  extension point (egress, files, startup command, environment) to replace.
+
+# --- Egress your team's tools need -------------------------------------------
+# Hosts beyond the global layer. Lists UNION across kits; egress is fixed at
+# sandbox creation, so recreate after changing it.
+caps:
+  network:
+    allow:
+      # REPLACE with your team's hosts (VCS, package mirrors, MCP servers):
+      #   - git.example.gov       # team VCS over HTTPS
+      #   - mcp.example.gov:443   # team MCP server
+      # The live value is an IANA-reserved example domain that no global kit
+      # allows, so scripts/verify can prove this entry took effect. Keep your
+      # replacement off the global list for the same reason.
+      - example.org
+
+# --- Files -------------------------------------------------------------------
+# List EVERY payload under files/ with its in-guest absolute path, and never
+# ship an empty file (msb places only listed, non-empty files). Files are
+# whole-file and LAST WINS by path across kits, so never ship a file another
+# layer or the image owns (~/.bashrc, ~/.gitconfig).
+files:
+  - path: /home/agent/team-config/opencode.jsonc
+    mode: "0644"
+    source: files/home/team-config/opencode.jsonc
+    description: Team OpenCode settings (read via OPENCODE_CONFIG below)
+  - path: /home/agent/team-config/team-conventions.md
+    mode: "0644"
+    source: files/home/team-config/team-conventions.md
+    description: Team instructions (registered in opencode.jsonc `instructions`) — REPLACE the content
+  # Shared skills live under files/home/.agents/skills/<name>/, named so they
+  # cannot collide with the global playbook kit's skills (README, "Writing a
+  # skill"). This placeholder stands in for them; add one files[] record per
+  # skill file, and when you delete the placeholder, delete this record too:
+  #   - path: /home/agent/.agents/skills/my-skill/SKILL.md
+  #     mode: "0644"
+  #     source: files/home/.agents/skills/my-skill/SKILL.md
+  - path: /home/agent/.agents/skills/.gitkeep
+    mode: "0644"
+    source: files/home/.agents/skills/.gitkeep
+    description: Placeholder (non-empty) that creates the team skills directory
+
+# --- Commands ----------------------------------------------------------------
+# Commands APPEND across kits, in application order; `startup` re-runs at every
+# sandbox start, so keep each step idempotent. ALWAYS set `user:` ("1000" for
+# the agent user). Write argv as a block list (one `- arg` per line) or one
+# `- |` block scalar, never `[a, b]`. No installs: bake tools into the image.
+commands:
+  # Live value: a harmless, idempotent git preference (first push of a new
+  # branch otherwise fails with "no upstream branch" in a disposable clone).
+  # Keep it or REPLACE it; verify asserts it ran AFTER a lower kit's command.
+  - phase: startup
+    user: "1000"
+    description: Auto-create the upstream on first push
+    command:
+      - git
+      - config
+      - --global
+      - push.autoSetupRemote
+      - "true"
+
+# --- Environment -------------------------------------------------------------
+# Non-secret, single-line strings only; secrets go through `acq secret set`.
+# LAST WINS by name across kits, so a single-valued variable has one owner in
+# the stack. No `~` expansion: write /home/agent/... OPENCODE_CONFIG gives the
+# settings tier global -> team -> repo (docs/decisions/ explains the choice).
+# Say in your README which variables a personal kit may override.
+environment:
+  OPENCODE_CONFIG: /home/agent/team-config/opencode.jsonc
+
+# --- agentContext ------------------------------------------------------------
+# Markdown surfaced to the agent, on sbx only. This template routes team
+# instructions through OpenCode's `instructions` mechanism instead; do not use
+# both for the same content or the agent reads it twice.
+# agentContext: |
+#   ## Your team
+#   One or two operational paragraphs.
+
+# No backend_shortcuts or backend_extras. If you add one, record it under
+# "Backend parity" in README.md.
