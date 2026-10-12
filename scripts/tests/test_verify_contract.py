@@ -6,10 +6,9 @@ function of a coverage record, not a failure counter — this distinguishes "we
 checked and it passed" from "nothing ran" and from "we could not check this
 part." These tests keep that contract in force as kits adopt it.
 
-NOTHING IN CI RUNS THESE SHELL SCRIPTS. They need a live sandbox, which this
-repo's CI cannot create, and the repo has no shellcheck hook. So the contract
-is enforced here, statically, by reading them as text — otherwise the next
-verify script added would quietly ship without the five-state verdict.
+CI does not run the kit verify scripts because they need a live sandbox. These
+tests execute the shared reporting library in an isolated shell and statically
+check that converted scripts use it.
 
 MIGRATION STATE: the conversion is deliberately staged. `UNCONVERTED` lists the
 kits still on the old pattern. Each test asserts the contract for converted kits
@@ -21,6 +20,8 @@ the list fails, and a listed kit that silently reverts fails too.
 from __future__ import annotations
 
 import re
+import shlex
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -81,21 +82,30 @@ def test_shared_library_exists_and_defines_the_five_states():
         assert fn in text, f"{LIB.name} does not define {fn}"
 
 
-def test_library_verdict_degrades_on_unverified_and_on_zero_checks():
-    """The two branches that distinguish this from the old verdict.
+@pytest.mark.parametrize(
+    ("reporters", "expected"),
+    [
+        pytest.param([], 3, id="zero-activity"),
+        pytest.param(["ok"], 0, id="pass"),
+        pytest.param(["bad"], 1, id="failure"),
+        pytest.param(["ok", "unver"], 3, id="pass-and-unverified"),
+        pytest.param(["skip"], 3, id="skip-only"),
+        pytest.param(["ok", "skip", "warn"], 0, id="pass-skip-and-warn"),
+    ],
+)
+def test_library_verdict_contract(reporters: list[str], expected: int):
+    commands = [f". {shlex.quote(str(LIB))}", "verify_reset"]
+    commands.extend(f'{reporter} "contract fixture"' for reporter in reporters)
+    commands.append('verify_verdict "Contract fixture"')
 
-    Asserted structurally rather than by running the shell, so the test stays
-    hermetic: if either branch is deleted, the library silently becomes the
-    two-state verdict again and every caller regresses at once.
-    """
-    text = LIB.read_text(encoding="utf-8")
-    assert re.search(r'\[\s*"\$pass"\s+-eq\s+0\s*\]', text), (
-        "verify_verdict no longer has a zero-checks-ran branch — a run that executed nothing would report a pass"
+    result = subprocess.run(
+        ["sh", "-c", "\n".join(commands)],
+        capture_output=True,
+        text=True,
+        check=False,
     )
-    assert re.search(r'\[\s*"\$unverified"\s+-gt\s+0\s*\]', text), (
-        'verify_verdict no longer degrades on unverified checks — "could not check" would be reported as a pass'
-    )
-    assert "return 3" in text, "verify_verdict no longer has a distinct could-not-check exit code"
+
+    assert result.returncode == expected, result.stdout + result.stderr
 
 
 def test_every_kit_is_classified():
@@ -144,8 +154,11 @@ def test_unconverted_allowlist_is_accurate():
 @pytest.mark.parametrize("kit", sorted(_converted()))
 def test_converted_kit_sources_the_shared_library(kit: str):
     text = _converted()[kit].read_text(encoding="utf-8")
-    assert "verify-report.sh" in text, f"{kit}/scripts/verify does not source lib/verify-report.sh"
-    assert "verify_reset" in text, (
+    commands = [line.strip() for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
+    source = any(re.match(r"^\.\s+", line) and "verify-report.sh" in line for line in commands)
+    reset = re.search(r"^\s*verify_reset\s*(?:#.*)?$", text, re.MULTILINE)
+    assert source, f"{kit}/scripts/verify does not source verify-report.sh"
+    assert reset, (
         f"{kit}/scripts/verify sources the library but never calls verify_reset, so its counters are unset"
     )
 
@@ -183,8 +196,8 @@ def test_converted_kit_reports_every_gate(kit: str):
     that replaced only the first would leave the others reporting nothing.
     """
     text = _converted()[kit].read_text(encoding="utf-8")
-    verdicts = text.count("verify_verdict")
-    assert verdicts >= 1, f"{kit}/scripts/verify never calls verify_verdict"
+    verdicts = re.findall(r"^\s*verify_verdict(?:\s|$)", text, re.MULTILINE)
+    assert verdicts, f"{kit}/scripts/verify never calls verify_verdict"
 
     # A gate that prints a summary header but reaches no verdict is a gate whose
     # result is discarded.

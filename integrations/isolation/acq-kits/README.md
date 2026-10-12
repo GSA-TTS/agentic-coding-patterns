@@ -101,10 +101,8 @@ The five reporters: `ok` / `bad` are the ran-and-passed / ran-and-failed cases;
 `unver` is **could not check** (missing tool, absent credential, no network) and
 degrades the verdict to `3`; `skip` is *not applicable in this configuration*
 (e.g. a backend-specific check on the other backend) and does **not** degrade
-it; `warn` is advisory. The `unver` / `skip` distinction is load-bearing —
-collapsing the two is how a verify script ends up claiming coverage it does not
-have.
+it; `warn` is advisory.
 
-`scripts/tests/test_verify_contract.py` enforces this statically, because CI
-cannot run these scripts (they need a live sandbox). Its `UNCONVERTED` set lists
-kits not yet migrated; it must reach empty.
+`scripts/tests/test_verify_contract.py` executes the shared verdict contract and
+statically checks converted scripts. Its `UNCONVERTED` set lists kits not yet
+migrated; it must reach empty.

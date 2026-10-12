@@ -21,10 +21,8 @@
 #   warn  "<note>"               advisory only; a documented fallback was taken.
 #                                Counted and reported; does not degrade.
 #
-# The distinction that matters is `unver` vs `skip`: "we could not look" is a
-# degraded run and must not be reported as a pass, whereas "this does not apply
-# here" is a complete run of a smaller set. Collapsing the two is how a verify
-# script ends up claiming coverage it does not have.
+# `unver` degrades the verdict because a check could not run. `skip` records a
+# check that does not apply to the current configuration and does not degrade it.
 #
 # EXIT CODES (verify_verdict)
 #
