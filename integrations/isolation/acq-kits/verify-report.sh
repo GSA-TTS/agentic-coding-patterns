@@ -38,7 +38,8 @@
 #
 # USAGE
 #
-#   . "$(dirname "$0")/../../lib/verify-report.sh"
+#   KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+#   . "$KIT_DIR/../verify-report.sh"
 #   verify_reset                      # initialize the counters
 #   info "1. Something"
 #   ok "it worked"

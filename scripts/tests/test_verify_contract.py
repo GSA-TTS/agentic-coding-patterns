@@ -61,9 +61,7 @@ CONVERTED = {
 
 # The old two-state verdict. Its absence is the thing being enforced.
 LEGACY_VERDICT = re.compile(r'\[\s*"\$fail"\s+-eq\s+0\s*\]')
-SHARED_REPORTER_SOURCE = re.compile(
-    r'^\s*\.\s+"\$KIT_DIR/\.\./verify-report\.sh"\s*(?:#.*)?$', re.MULTILINE
-)
+SHARED_REPORTER_SOURCE = re.compile(r'^\s*\.\s+"\$KIT_DIR/\.\./verify-report\.sh"\s*(?:#.*)?$', re.MULTILINE)
 
 
 def _verify_scripts() -> dict[str, Path]:
@@ -159,16 +157,12 @@ def test_unconverted_allowlist_is_accurate():
 def test_converted_kit_sources_the_shared_library(kit: str):
     text = _converted()[kit].read_text(encoding="utf-8")
     reset = re.search(r"^\s*verify_reset\s*(?:#.*)?$", text, re.MULTILINE)
-    assert SHARED_REPORTER_SOURCE.search(text), (
-        f'{kit}/scripts/verify does not source "$KIT_DIR/../verify-report.sh"'
-    )
-    assert reset, (
-        f"{kit}/scripts/verify sources the library but never calls verify_reset, so its counters are unset"
-    )
+    assert SHARED_REPORTER_SOURCE.search(text), f'{kit}/scripts/verify does not source "$KIT_DIR/../verify-report.sh"'
+    assert reset, f"{kit}/scripts/verify sources the library but never calls verify_reset, so its counters are unset"
 
 
 def test_shared_library_source_must_be_the_command_operand():
-    text = '. other.sh # verify-report.sh\n'
+    text = ". other.sh # verify-report.sh\n"
     assert not SHARED_REPORTER_SOURCE.search(text)
 
 
