@@ -1,12 +1,15 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { readFile } from "node:fs/promises"
+import { mkdtemp, readFile, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import path from "node:path"
 
 import { parseJsonc } from "../files/home/usai-config/merge-global-config.mjs"
 
 import {
   updateTemplate,
   validateGeneratedConfig,
+  writeValidatedConfig,
   validateUsaiPayload,
   fetchJsonBounded,
 } from "../scripts/sync-usai-models.mjs"
@@ -16,7 +19,7 @@ const fixturePath = new URL("./fixtures/usai-models.json", import.meta.url)
 
 /**
  * Validates that text is syntactically valid JSONC (JSON with comments and trailing commas).
- * Uses JS eval in a sandbox since JSONC is a subset of JS object literal syntax.
+ * Uses the same JSONC parser as the production writer.
  * @param {string} text - JSONC text to validate
  * @returns {{ valid: boolean, parsed?: object, error?: string }}
  */
@@ -176,7 +179,7 @@ test("updateTemplate preserves required structure after generation", async () =>
   assert.match(parsed.model, /^usai\//, "model should have usai/ prefix")
   assert.match(parsed.small_model, /^usai\//, "small_model should have usai/ prefix")
   assert.match(parsed.agent.compaction.model, /^usai\//, "compaction model should have usai/ prefix")
-  assert.doesNotThrow(() => validateGeneratedConfig(updatedTemplate))
+  assert.doesNotThrow(() => validateGeneratedConfig(templateText, updatedTemplate))
 })
 
 test("updateTemplate serializes a feed-controlled model id instead of injecting config", async () => {
@@ -201,15 +204,37 @@ test("updateTemplate rejects duplicate model ids before rendering", async () => 
 })
 
 test("validateGeneratedConfig rejects a corrupt artifact before write", () => {
+  const source = '{"provider":{"usai":{"models":{}}},"model":"usai/a","small_model":"usai/a","agent":{"compaction":{"model":"usai/a"}}}'
   assert.throws(
-    () => validateGeneratedConfig('{ "provider": { "usai": { "models": { "broken": { } } }'),
+    () => validateGeneratedConfig(source, '{ "provider": { "usai": { "models": { "broken": { } } }'),
     /Generated opencode\.jsonc is not valid JSONC/,
   )
-  assert.throws(() => validateGeneratedConfig("[]"), /must contain a top-level object/)
+  assert.throws(() => validateGeneratedConfig(source, "[]"), /must contain a top-level object/)
   assert.throws(
-    () => validateGeneratedConfig('{"provider":{"usai":{"models":{}}},"mcp":{}}'),
-    /unexpected top-level key.*mcp/,
+    () => validateGeneratedConfig(source, source.replace(/}$/, ',"mcp":{}}')),
+    /outside generator-owned paths/,
   )
+})
+
+test("validateGeneratedConfig preserves intentional future top-level config", () => {
+  const source = '{"provider":{"usai":{"models":{"old":{}}}},"model":"usai/old","small_model":"usai/old","agent":{"compaction":{"model":"usai/old"}},"mcp":{"docs":{"type":"remote"}}}'
+  const generated = source.replace('"old":{}', '"new":{}').replaceAll('usai/old', 'usai/new')
+  assert.doesNotThrow(() => validateGeneratedConfig(source, generated))
+})
+
+test("writeValidatedConfig atomically replaces only validated content", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "usai-write-"))
+  const target = path.join(dir, "opencode.jsonc")
+  const source = await readFile(templatePath, "utf8")
+  const fixture = JSON.parse(await readFile(fixturePath, "utf8"))
+  const { updatedTemplate } = updateTemplate(source, fixture)
+  await writeFile(target, source)
+
+  await writeValidatedConfig(target, source, updatedTemplate)
+  assert.equal(await readFile(target, "utf8"), updatedTemplate)
+
+  await assert.rejects(() => writeValidatedConfig(target, source, '{"provider":'), /not valid JSONC/)
+  assert.equal(await readFile(target, "utf8"), updatedTemplate, "failed validation must not truncate target")
 })
 
 test("updateTemplate emits schema-safe cost blocks and drops disallowed keys", async () => {
@@ -533,6 +558,23 @@ test("validateUsaiPayload rejects malformed payloads", () => {
   assert.throws(() => validateUsaiPayload({ data: [] }), /empty/)
   // No usable identifier on any entry
   assert.throws(() => validateUsaiPayload([{ foo: "bar" }]), /id\/model_id\/name/)
+})
+
+test("validateUsaiPayload bounds model count and feed-controlled strings", () => {
+  assert.throws(() => validateUsaiPayload({ data: Array.from({ length: 1001 }, (_, i) => ({ id: `m${i}` })) }), /exceeds limit 1000/)
+  assert.throws(() => validateUsaiPayload({ data: ["not-an-object"] }), /must be an object/)
+  assert.throws(() => validateUsaiPayload({ data: [{ id: "a".repeat(129) }] }), /exceeds 128/)
+  assert.throws(() => validateUsaiPayload({ data: [{ id: "ok", name: "a".repeat(257) }] }), /exceeds 256/)
+  assert.throws(() => validateUsaiPayload({ data: [{ id: "line\nbreak" }] }), /control character/)
+})
+
+test("updateTemplate rejects non-finite and negative enrichment costs", async () => {
+  const templateText = await readFile(templatePath, "utf8")
+  const payload = { data: [{ id: "claude_4_5_haiku", owned_by: "anthropic" }] }
+  for (const value of [Number.POSITIVE_INFINITY, Number.NaN, -1]) {
+    const catalog = { "amazon-bedrock": { models: { "claude_4_5_haiku": { limit: {}, cost: { input: value } } } } }
+    assert.throws(() => updateTemplate(templateText, payload, catalog), /finite non-negative number/)
+  }
 })
 
 // --- fetchJsonBounded network hardening (Issue #138) ---

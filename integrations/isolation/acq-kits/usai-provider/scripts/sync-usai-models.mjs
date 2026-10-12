@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { mkdir, readFile, writeFile } from "node:fs/promises"
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises"
 import path from "node:path"
 import process from "node:process"
 import { fileURLToPath } from "node:url"
@@ -13,6 +13,9 @@ const KIT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 
 const GENERATED_START = "// BEGIN GENERATED USAI MODELS"
 const GENERATED_END = "// END GENERATED USAI MODELS"
+const MAX_MODELS = 1000
+const MAX_MODEL_ID_LENGTH = 128
+const MAX_MODEL_NAME_LENGTH = 256
 
 // Vendor ordering and labels for grouped output
 const VENDOR_CONFIG = {
@@ -138,6 +141,38 @@ function parseModel(rawModel) {
     contextWindow: rawModel.context_window || rawModel.contextWindow || rawModel.context || null,
     maxOutputTokens: rawModel.max_output_tokens || rawModel.maxOutputTokens || rawModel.output || null,
   }
+}
+
+function validateFeedString(value, where, maxLength) {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`${where} must be a non-empty string`)
+  }
+  if ([...value].length > maxLength) {
+    throw new Error(`${where} exceeds ${maxLength} characters`)
+  }
+  if (/[\u0000-\u001F\u007F]/u.test(value)) {
+    throw new Error(`${where} contains a control character`)
+  }
+}
+
+function validateFeedEntries(list) {
+  if (list.length > MAX_MODELS) {
+    throw new Error(`USAi payload invalid: ${list.length} models exceeds limit ${MAX_MODELS}`)
+  }
+  list.forEach((entry, index) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(`USAi payload invalid: models[${index}] must be an object`)
+    }
+    const id = entry.id ?? entry.model_id ?? entry.name
+    if (id === undefined || id === null || id === "") {
+      throw new Error(`USAi payload invalid: models[${index}] has no id/model_id/name field`)
+    }
+    validateFeedString(id, `models[${index}].id`, MAX_MODEL_ID_LENGTH)
+    if (entry.name !== undefined) validateFeedString(entry.name, `models[${index}].name`, MAX_MODEL_NAME_LENGTH)
+    if (entry.display_name !== undefined) {
+      validateFeedString(entry.display_name, `models[${index}].display_name`, MAX_MODEL_NAME_LENGTH)
+    }
+  })
 }
 
 // Models the gateway serves that cannot be prompted, keyed to the reason.
@@ -453,6 +488,7 @@ function validateUsaiPayload(payload) {
   if (list.length === 0) {
     throw new Error("USAi payload invalid: model list is empty")
   }
+  validateFeedEntries(list)
   const hasUsableId = list.some(
     (m) => m && typeof m === "object" && (m.id || m.model_id || m.name),
   )
@@ -525,12 +561,21 @@ function normalizeCost(cost) {
   if (!cost || typeof cost !== "object") return null
   const out = {}
   for (const key of COST_SCALAR_KEYS) {
-    if (typeof cost[key] === "number") out[key] = cost[key]
+    if (cost[key] === undefined) continue
+    if (!Number.isFinite(cost[key]) || cost[key] < 0) {
+      throw new Error(`models.dev cost.${key} must be a finite non-negative number`)
+    }
+    out[key] = cost[key]
   }
   if (cost.context_over_200k && typeof cost.context_over_200k === "object") {
     const over = {}
     for (const key of COST_SCALAR_KEYS) {
-      if (typeof cost.context_over_200k[key] === "number") over[key] = cost.context_over_200k[key]
+      const value = cost.context_over_200k[key]
+      if (value === undefined) continue
+      if (!Number.isFinite(value) || value < 0) {
+        throw new Error(`models.dev cost.context_over_200k.${key} must be a finite non-negative number`)
+      }
+      over[key] = value
     }
     if (typeof over.input === "number" && typeof over.output === "number") {
       out.context_over_200k = over
@@ -802,6 +847,7 @@ export function updateTemplate(templateText, payload, modelsDevCatalog = {}) {
       : Array.isArray(payload.models)
         ? payload.models
         : []
+  validateFeedEntries(rawModels)
 
   let models = rawModels
     .map(parseModel)
@@ -857,28 +903,53 @@ export function updateTemplate(templateText, payload, modelsDevCatalog = {}) {
 // fragment would miss an unbalanced escape that closes the models/provider
 // objects and adds a top-level key. Use the kit's production JSONC parser —
 // never eval/vm.runInNewContext on feed-influenced text.
-export function validateGeneratedConfig(text) {
+function copyJson(value) {
+  return JSON.parse(JSON.stringify(value))
+}
+
+function maskGeneratorOwnedPaths(config, source) {
+  config.provider.usai.models = copyJson(source.provider.usai.models)
+  config.model = source.model
+  config.small_model = source.small_model
+  if (config.agent?.compaction && source.agent?.compaction) {
+    config.agent.compaction.model = source.agent.compaction.model
+  }
+  return config
+}
+
+export function validateGeneratedConfig(sourceText, generatedText) {
+  let source
   let parsed
   try {
-    parsed = parseJsonc(text)
+    source = parseJsonc(sourceText)
+    parsed = parseJsonc(generatedText)
   } catch (error) {
     throw new Error(`Generated opencode.jsonc is not valid JSONC: ${error.message}`)
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error("Generated opencode.jsonc must contain a top-level object")
   }
-  const expectedKeys = new Set([
-    "$schema", "enabled_providers", "provider", "model", "small_model",
-    "agent", "compaction", "instructions", "permission", "watcher",
-  ])
-  const unexpected = Object.keys(parsed).filter((key) => !expectedKeys.has(key))
-  if (unexpected.length) {
-    throw new Error(`Generated opencode.jsonc has unexpected top-level key(s): ${unexpected.join(", ")}`)
-  }
-  if (!parsed.provider?.usai?.models || typeof parsed.provider.usai.models !== "object") {
+  if (!source.provider?.usai?.models || !parsed.provider?.usai?.models || typeof parsed.provider.usai.models !== "object") {
     throw new Error("Generated opencode.jsonc is missing provider.usai.models")
   }
+  const masked = maskGeneratorOwnedPaths(copyJson(parsed), source)
+  if (JSON.stringify(masked) !== JSON.stringify(source)) {
+    throw new Error("Generated opencode.jsonc changed configuration outside generator-owned paths")
+  }
   return parsed
+}
+
+export async function writeValidatedConfig(targetPath, sourceText, generatedText) {
+  const tempPath = `${targetPath}.tmp-${process.pid}-${Date.now()}`
+  try {
+    await writeFile(tempPath, generatedText, { flag: "wx" })
+    const persisted = await readFile(tempPath, "utf8")
+    validateGeneratedConfig(sourceText, persisted)
+    await rename(tempPath, targetPath)
+  } catch (error) {
+    await unlink(tempPath).catch(() => {})
+    throw error
+  }
 }
 
 async function loadPayload(args) {
@@ -928,7 +999,7 @@ async function main() {
   ])
 
   const { updatedTemplate, models } = updateTemplate(templateText, payload, modelsDevCatalog)
-  validateGeneratedConfig(updatedTemplate)
+  validateGeneratedConfig(templateText, updatedTemplate)
 
   // Log enrichment results
   const enriched = models.filter((m) => m.modelsDevId)
@@ -937,7 +1008,13 @@ async function main() {
     process.stdout.write(`Enriched ${enriched.length} models from models.dev\n`)
   }
   if (notEnriched.length > 0) {
-    process.stdout.write(`Using fallback limits for ${notEnriched.length} models: ${notEnriched.map((m) => m.id).join(", ")}\n`)
+    const fallbackIds = notEnriched
+      .filter((m) => !Number.isInteger(m.raw?.context_window) || !Number.isInteger(m.raw?.max_output_tokens))
+      .map((m) => m.id)
+    process.stdout.write(`No models.dev pricing for ${notEnriched.length} models: ${notEnriched.map((m) => m.id).join(", ")}\n`)
+    if (fallbackIds.length > 0) {
+      process.stdout.write(`Using one or more fallback limits for ${fallbackIds.length} models: ${fallbackIds.join(", ")}\n`)
+    }
   }
 
   if (checkOnly) {
@@ -947,12 +1024,12 @@ async function main() {
     return
   }
 
-  await writeFile(templatePath, updatedTemplate)
+  await writeValidatedConfig(templatePath, templateText, updatedTemplate)
 
   if (writeSnapshot) {
     const snapshotPath = path.join(KIT_ROOT, "tests/output/latest-opencode.jsonc")
     await mkdir(path.dirname(snapshotPath), { recursive: true })
-    await writeFile(snapshotPath, updatedTemplate)
+    await writeValidatedConfig(snapshotPath, templateText, updatedTemplate)
   }
 
   process.stdout.write(`Updated ${templatePath} with ${models.length} models\n`)

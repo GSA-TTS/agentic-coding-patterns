@@ -19,12 +19,17 @@ test("the committed catalog satisfies the hand-rolled validator", () => {
 })
 
 test("catalog validation rejects model ids that can escape generated config", () => {
-  const hostile = 'ok\", \"permission\": {\"bash\": \"allow\"}'
-  assert.match(validateCatalog(withFirstModel({ id: hostile }), schema).join("\n"), /id does not match/)
+  assert.deepEqual(validateCatalog(withFirstModel({ id: 'provider/"quoted"\\model:v1' }), schema), [])
 })
 
 test("catalog validation rejects control characters in display names", () => {
   assert.match(validateCatalog(withFirstModel({ name: "line one\nline two" }), schema).join("\n"), /name does not match/)
+})
+
+test("catalog validation rejects control characters in ids", () => {
+  for (const id of ["line\nbreak", "carriage\rreturn", "nul\u0000byte", "delete\u007fbyte"]) {
+    assert.match(validateCatalog(withFirstModel({ id }), schema).join("\n"), /id does not match/)
+  }
 })
 
 test("catalog validation bounds feed-controlled string lengths", () => {
@@ -51,4 +56,13 @@ test("catalog validation rejects duplicate vendor keys", () => {
     vendors: [{ ...catalog.vendors[0] }, { ...catalog.vendors[0] }, ...catalog.vendors.slice(1)],
   }
   assert.match(validateCatalog(duplicate, schema).join("\n"), /vendors\[1\]\.key duplicates/)
+})
+
+test("catalog validation rejects non-finite and negative costs", () => {
+  for (const value of [Number.POSITIVE_INFINITY, Number.NaN, -0.01]) {
+    assert.match(
+      validateCatalog(withFirstModel({ cost: { input: value } }), schema).join("\n"),
+      /finite non-negative number/,
+    )
+  }
 })

@@ -271,14 +271,24 @@ function normalizeCostFromModelsDev(cost) {
   if (!cost || typeof cost !== "object") return { cost: null, costAbove200kContext: null }
   const out = {}
   for (const [camel, snake] of COST_MAP) {
-    if (typeof cost[snake] === "number") out[camel] = cost[snake]
+    const value = cost[snake]
+    if (value === undefined) continue
+    if (!Number.isFinite(value) || value < 0) {
+      throw new Error(`models.dev cost.${snake} must be a finite non-negative number`)
+    }
+    out[camel] = value
   }
   let above = null
   const over = cost.context_over_200k
   if (over && typeof over === "object") {
     const o = {}
     for (const [camel, snake] of COST_MAP) {
-      if (typeof over[snake] === "number") o[camel] = over[snake]
+      const value = over[snake]
+      if (value === undefined) continue
+      if (!Number.isFinite(value) || value < 0) {
+        throw new Error(`models.dev cost.context_over_200k.${snake} must be a finite non-negative number`)
+      }
+      o[camel] = value
     }
     if (typeof o.input === "number" && typeof o.output === "number") above = o
   }
@@ -670,7 +680,7 @@ function validateCost(cost, where, errors) {
   const allowed = new Set(["input", "output", "cacheRead", "cacheWrite"])
   for (const [k, v] of Object.entries(cost)) {
     assert(allowed.has(k), `${where}: cost has disallowed key "${k}"`, errors)
-    assert(typeof v === "number", `${where}: cost.${k} must be a number`, errors)
+    assert(Number.isFinite(v) && v >= 0, `${where}: cost.${k} must be a finite non-negative number`, errors)
   }
 }
 
