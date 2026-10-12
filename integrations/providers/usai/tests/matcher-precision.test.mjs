@@ -93,6 +93,13 @@ test("an id absent from the source matches NOTHING rather than the nearest sibli
   }
 })
 
+test("profile-qualified models do not match their base siblings", () => {
+  const catalog = catalogOf("gpt-5.2-codex", "gpt-5.2-max")
+  assert.equal(findModelsDevMatch("gpt-5.2", catalog), null)
+  assert.equal(findModelsDevMatch("gpt-5.2-codex", catalog)?.id, "gpt-5.2-codex")
+  assert.equal(findModelsDevMatch("gpt-5.2-max", catalog)?.id, "gpt-5.2-max")
+})
+
 test("an empty enrichment source yields no match, not a throw", () => {
   assert.equal(findModelsDevMatch("claude_4_5_haiku", {}), null)
 })

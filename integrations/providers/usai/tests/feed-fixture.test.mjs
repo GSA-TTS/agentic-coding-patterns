@@ -12,7 +12,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { test } from "node:test"
 
-import { nonChatReason, shapeFromFeeds } from "../scripts/build-catalog.mjs"
+import { nonChatReason, reportUnenriched, shapeFromFeeds } from "../scripts/build-catalog.mjs"
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURES = path.join(HERE, "fixtures")
@@ -81,4 +81,23 @@ test("a NEW underscore-delimited embedding id is excluded by the pattern", () =>
 
   assert.equal(ids.includes("titan_embed_text_v2"), false)
   assert.equal(ids.includes("cohere_embed_v4"), false)
+})
+
+test("unenriched reporting distinguishes feed limits from hardcoded fallbacks", () => {
+  const writes = []
+  const original = process.stderr.write
+  process.stderr.write = (chunk) => { writes.push(String(chunk)); return true }
+  try {
+    reportUnenriched([
+      { id: "feed-limits", fallbacks: [] },
+      { id: "fallback-limits", fallbacks: ["context", "output"] },
+    ], true)
+    reportUnenriched([{ id: "suppressed", fallbacks: ["context"] }], false)
+  } finally {
+    process.stderr.write = original
+  }
+  const output = writes.join("")
+  assert.match(output, /feed-limits; USAi feed limits retained/)
+  assert.match(output, /fallback-limits; fallback context\+output limit\(s\) used/)
+  assert.doesNotMatch(output, /suppressed/)
 })

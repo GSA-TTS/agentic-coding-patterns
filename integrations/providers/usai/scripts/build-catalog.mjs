@@ -210,6 +210,12 @@ function hasLiteToken(normalizedId) {
   return /(^|[.\-/])lite([.\-]|$)/.test(normalizedId)
 }
 
+const PROFILE_TOKENS = ["codex", "mini", "nano", "max"]
+
+function hasProfileToken(normalizedId, token) {
+  return new RegExp(`(^|[.\\-/])${token}([.\\-]|$)`).test(normalizedId)
+}
+
 // PRECISION GUARD. Scoring alone cannot be trusted to reject a wrong candidate:
 // it ranks whatever it is given and the best of a bad field still wins. These
 // are the agreements a candidate MUST satisfy to be considered at all, because
@@ -229,6 +235,9 @@ function isPreciseMatch(usaiTokens, catalogTokens, usaiNorm, catalogNorm) {
   if (usaiTokens.family !== catalogTokens.family) return false
   if ((usaiTokens.variant || "") !== (catalogTokens.variant || "")) return false
   if (hasLiteToken(usaiNorm) !== hasLiteToken(catalogNorm)) return false
+  for (const token of PROFILE_TOKENS) {
+    if (hasProfileToken(usaiNorm, token) !== hasProfileToken(catalogNorm, token)) return false
+  }
   // Compare major and minor positionally. Both absent is agreement (a bare
   // family id on both sides); one absent is not.
   if (usaiTokens.version[0] !== catalogTokens.version[0]) return false
@@ -260,11 +269,6 @@ function findModelsDevMatch(usaiId, catalog) {
     for (const suffix of ["tts", "image", "audio", "vision", "embed", "embedding", "search", "realtime"]) {
       const re = new RegExp(`(^|[.\\-/])${suffix}([.\\-]|$)`)
       if (re.test(catalogNorm) && !re.test(usaiNorm)) score -= 60
-    }
-    // Size/profile qualifiers the tier token does not cover.
-    for (const v of ["codex", "mini", "nano", "max"]) {
-      const re = new RegExp(`(^|[.\\-/])${v}([.\\-]|$)`)
-      if (re.test(catalogNorm) && !re.test(usaiNorm)) score -= 20
     }
     // Regional duplicates of one model: prefer the unprefixed or us/global
     // listing, since USAi serves from a US deployment.
@@ -638,14 +642,14 @@ function reportExclusions(excluded) {
 // and make the fallback visible — "could not enrich" has to be distinguishable
 // from "enriched", or a reviewer cannot tell a generic 128000/8192 from a real
 // measurement.
-function reportUnenriched(unenriched, enrichmentAttempted) {
+export function reportUnenriched(unenriched, enrichmentAttempted) {
   if (!enrichmentAttempted || unenriched.length === 0) return
-  process.stderr.write(
-    `  UNENRICHED (${unenriched.length}): no models.dev entry agreed on family, tier and major.minor;\n` +
-      `  limits fall back to ${FALLBACK_LIMITS.context}/${FALLBACK_LIMITS.output} and cost is ABSENT:\n`,
-  )
-  for (const id of unenriched) {
-    process.stderr.write(`    ${id}\n`)
+  process.stderr.write(`  UNENRICHED (${unenriched.length}): no precise models.dev match; cost is ABSENT:\n`)
+  for (const item of unenriched) {
+    const suffix = item.fallbacks.length
+      ? `; fallback ${item.fallbacks.join("+")} limit(s) used`
+      : "; USAi feed limits retained"
+    process.stderr.write(`    ${item.id}${suffix}\n`)
   }
 }
 
@@ -704,7 +708,12 @@ function shapeFromFeeds(usaiList, modelsDevCatalog) {
       }
       // The feed itself may carry limits even when enrichment finds nothing;
       // only a model with no derived data at all is reported as unenriched.
-      if (!matched) unenriched.push(p.id)
+      if (!matched) {
+        const fallbacks = []
+        if (!(Number.isInteger(context) && context > 0)) fallbacks.push("context")
+        if (!(Number.isInteger(output) && output > 0)) fallbacks.push("output")
+        unenriched.push({ id: p.id, fallbacks })
+      }
     }
     model.contextWindow = normalizeLimit(context, FALLBACK_LIMITS.context)
     model.maxOutputTokens = normalizeLimit(output, FALLBACK_LIMITS.output)
