@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import re
 import shlex
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -60,6 +61,9 @@ CONVERTED = {
 
 # The old two-state verdict. Its absence is the thing being enforced.
 LEGACY_VERDICT = re.compile(r'\[\s*"\$fail"\s+-eq\s+0\s*\]')
+SHARED_REPORTER_SOURCE = re.compile(
+    r'^\s*\.\s+"\$KIT_DIR/\.\./verify-report\.sh"\s*(?:#.*)?$', re.MULTILINE
+)
 
 
 def _verify_scripts() -> dict[str, Path]:
@@ -154,13 +158,42 @@ def test_unconverted_allowlist_is_accurate():
 @pytest.mark.parametrize("kit", sorted(_converted()))
 def test_converted_kit_sources_the_shared_library(kit: str):
     text = _converted()[kit].read_text(encoding="utf-8")
-    commands = [line.strip() for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
-    source = any(re.match(r"^\.\s+", line) and "verify-report.sh" in line for line in commands)
     reset = re.search(r"^\s*verify_reset\s*(?:#.*)?$", text, re.MULTILINE)
-    assert source, f"{kit}/scripts/verify does not source verify-report.sh"
+    assert SHARED_REPORTER_SOURCE.search(text), (
+        f'{kit}/scripts/verify does not source "$KIT_DIR/../verify-report.sh"'
+    )
     assert reset, (
         f"{kit}/scripts/verify sources the library but never calls verify_reset, so its counters are unset"
     )
+
+
+def test_shared_library_source_must_be_the_command_operand():
+    text = '. other.sh # verify-report.sh\n'
+    assert not SHARED_REPORTER_SOURCE.search(text)
+
+
+@pytest.mark.parametrize("kit", sorted(_converted()))
+def test_missing_sbx_is_unverified(kit: str, tmp_path: Path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for command in ("dirname", "mktemp", "rm"):
+        executable = shutil.which(command)
+        assert executable, f"test prerequisite missing: {command}"
+        (bin_dir / command).symlink_to(executable)
+
+    bash = shutil.which("bash")
+    assert bash, "test prerequisite missing: bash"
+    result = subprocess.run(
+        [bash, str(_converted()[kit])],
+        env={"PATH": str(bin_dir)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "UNVERIFIED" in result.stdout
+    assert "sbx not on PATH" in result.stdout
 
 
 @pytest.mark.parametrize("kit", sorted(_converted()))
@@ -176,11 +209,10 @@ def test_converted_kit_has_no_legacy_two_state_verdict(kit: str):
 
 @pytest.mark.parametrize("kit", sorted(_converted()))
 def test_converted_kit_does_not_shadow_the_shared_reporters(kit: str):
-    """A local redefinition silently restores the old behaviour.
+    """Shared reporter functions must remain the active implementations.
 
-    A kit could source the library and then define its own `ok()`/`skip()` that
-    increments nothing — passing every other test here while behaving exactly as
-    before.
+    Local `ok()`/`skip()` definitions bypass the shared coverage counters and
+    invalidate the verdict contract.
     """
     text = _converted()[kit].read_text(encoding="utf-8")
     for fn in ("ok", "bad", "unver", "skip", "warn", "info"):
@@ -210,10 +242,10 @@ def test_converted_kit_reports_every_gate(kit: str):
 
 
 def test_no_silent_skip_remains_in_converted_kits():
-    """A bare `echo "  SKIP..."` or `NOTE:` increments no counter.
+    """Skip and unverified outcomes must update the coverage record.
 
-    That is how a skipped check became indistinguishable from a passing one. In a
-    converted kit these must be `skip`/`unver` calls instead.
+    Bare `echo "  SKIP..."` and `NOTE:` messages bypass the shared counters;
+    converted kits use `skip` or `unver` instead.
     """
     offenders: list[str] = []
     for kit, path in sorted(_converted().items()):

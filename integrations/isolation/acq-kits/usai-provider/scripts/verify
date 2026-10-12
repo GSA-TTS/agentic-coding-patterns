@@ -59,8 +59,9 @@ in_sbx() { sbx exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true; }
 
 info "0. Preconditions"
 if ! command -v sbx >/dev/null 2>&1; then
-  echo "  sbx not on PATH. Install sbx >= 0.34.0 and retry." >&2
-  exit 1
+  unver "sbx not on PATH — install sbx >= 0.34.0 and retry"
+  verify_verdict "Summary"
+  exit $?
 fi
 echo "  sbx version: $(sbx version 2>/dev/null | grep -oE 'v?[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1)"
 [ -f "$KIT_DIR/spec.yaml" ] && ok "kit spec.yaml present" || { bad "spec.yaml missing"; exit 1; }
