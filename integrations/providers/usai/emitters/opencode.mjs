@@ -88,6 +88,12 @@ function jsonNumber(value, where) {
   return JSON.stringify(value)
 }
 
+function jsonNonNegativeNumber(value, where) {
+  const rendered = jsonNumber(value, where)
+  if (value < 0) throw new TypeError(`emitOpenCodeBlockFromCatalog: ${where} must be non-negative`)
+  return rendered
+}
+
 // Render one cost tier object (base cost) as multi-line JSON entries, in the
 // canonical key order the file uses: input, output, cache_read, cache_write,
 // then the compact context_over_200k line last (when present).
@@ -95,10 +101,10 @@ function renderCost(model) {
   const lines = []
   const cost = model.cost || {}
   const parts = []
-  if ("input" in cost) parts.push([`"input"`, jsonNumber(cost.input, "cost.input")])
-  if ("output" in cost) parts.push([`"output"`, jsonNumber(cost.output, "cost.output")])
-  if ("cacheRead" in cost) parts.push([`"cache_read"`, jsonNumber(cost.cacheRead, "cost.cacheRead")])
-  if ("cacheWrite" in cost) parts.push([`"cache_write"`, jsonNumber(cost.cacheWrite, "cost.cacheWrite")])
+  if ("input" in cost) parts.push([`"input"`, jsonNonNegativeNumber(cost.input, "cost.input")])
+  if ("output" in cost) parts.push([`"output"`, jsonNonNegativeNumber(cost.output, "cost.output")])
+  if ("cacheRead" in cost) parts.push([`"cache_read"`, jsonNonNegativeNumber(cost.cacheRead, "cost.cacheRead")])
+  if ("cacheWrite" in cost) parts.push([`"cache_write"`, jsonNonNegativeNumber(cost.cacheWrite, "cost.cacheWrite")])
 
   // context_over_200k is rendered as a compact one-line object, always LAST.
   const above = model.costAbove200kContext
@@ -106,10 +112,10 @@ function renderCost(model) {
   if (above && typeof above === "object") {
     const inner = []
     const w = "costAbove200kContext"
-    if ("input" in above) inner.push(`"input":${jsonNumber(above.input, `${w}.input`)}`)
-    if ("output" in above) inner.push(`"output":${jsonNumber(above.output, `${w}.output`)}`)
-    if ("cacheRead" in above) inner.push(`"cache_read":${jsonNumber(above.cacheRead, `${w}.cacheRead`)}`)
-    if ("cacheWrite" in above) inner.push(`"cache_write":${jsonNumber(above.cacheWrite, `${w}.cacheWrite`)}`)
+    if ("input" in above) inner.push(`"input":${jsonNonNegativeNumber(above.input, `${w}.input`)}`)
+    if ("output" in above) inner.push(`"output":${jsonNonNegativeNumber(above.output, `${w}.output`)}`)
+    if ("cacheRead" in above) inner.push(`"cache_read":${jsonNonNegativeNumber(above.cacheRead, `${w}.cacheRead`)}`)
+    if ("cacheWrite" in above) inner.push(`"cache_write":${jsonNonNegativeNumber(above.cacheWrite, `${w}.cacheWrite`)}`)
     aboveLine = `"context_over_200k": {${inner.join(",")}}`
   }
 

@@ -1,6 +1,6 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { mkdtemp, readFile, writeFile } from "node:fs/promises"
+import { lstat, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 
@@ -10,6 +10,7 @@ import {
   updateTemplate,
   validateGeneratedConfig,
   writeValidatedConfig,
+  describeModelProvenance,
   validateUsaiPayload,
   fetchJsonBounded,
 } from "../scripts/sync-usai-models.mjs"
@@ -235,6 +236,25 @@ test("writeValidatedConfig atomically replaces only validated content", async ()
 
   await assert.rejects(() => writeValidatedConfig(target, source, '{"provider":'), /not valid JSONC/)
   assert.equal(await readFile(target, "utf8"), updatedTemplate, "failed validation must not truncate target")
+})
+
+test("writeValidatedConfig preserves a symlink target", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "usai-symlink-"))
+  const real = path.join(dir, "canonical.jsonc")
+  const link = path.join(dir, "legacy.jsonc")
+  const source = await readFile(templatePath, "utf8")
+  const fixture = JSON.parse(await readFile(fixturePath, "utf8"))
+  const { updatedTemplate } = updateTemplate(source, fixture)
+  await writeFile(real, source)
+  await symlink(real, link)
+  await writeValidatedConfig(link, source, updatedTemplate)
+  assert.equal((await lstat(link)).isSymbolicLink(), true)
+  assert.equal(await readFile(real, "utf8"), updatedTemplate)
+})
+
+test("validateGeneratedConfig rejects an array model map", () => {
+  const source = '{"provider":{"usai":{"models":{}}},"model":"usai/a","small_model":"usai/a","agent":{"compaction":{"model":"usai/a"}}}'
+  assert.throws(() => validateGeneratedConfig(source, source.replace('"models":{}', '"models":[]')), /missing provider\.usai\.models/)
 })
 
 test("updateTemplate emits schema-safe cost blocks and drops disallowed keys", async () => {
@@ -575,6 +595,21 @@ test("updateTemplate rejects non-finite and negative enrichment costs", async ()
     const catalog = { "amazon-bedrock": { models: { "claude_4_5_haiku": { limit: {}, cost: { input: value } } } } }
     assert.throws(() => updateTemplate(templateText, payload, catalog), /finite non-negative number/)
   }
+})
+
+test("describeModelProvenance separates pricing and each limit source", () => {
+  const models = [
+    { id: "priced", cost: { input: 1 }, raw: { context_window: 10, max_output_tokens: 2 } },
+    { id: "feed-limits", cost: null, raw: { context_window: 10, max_output_tokens: 2 } },
+    { id: "bad-feed-limits", cost: null, raw: { context_window: 0, max_output_tokens: -1 } },
+    { id: "missing-output", cost: { input: 1 }, raw: { context_window: 10 } },
+  ]
+  assert.deepEqual(describeModelProvenance(models), [
+    "Pricing available for 2 models: priced, missing-output",
+    "No pricing available for 2 models: feed-limits, bad-feed-limits",
+    "Using fallback context limit for 1 models: bad-feed-limits",
+    "Using fallback output limit for 2 models: bad-feed-limits, missing-output",
+  ])
 })
 
 // --- fetchJsonBounded network hardening (Issue #138) ---

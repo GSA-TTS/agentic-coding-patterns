@@ -82,3 +82,9 @@ test("a NEW underscore-delimited embedding id is excluded by the pattern", () =>
   assert.equal(ids.includes("titan_embed_text_v2"), false)
   assert.equal(ids.includes("cohere_embed_v4"), false)
 })
+
+test("shapeFromFeeds rejects oversized and malformed feed entries", () => {
+  assert.throws(() => shapeFromFeeds(Array.from({ length: 1001 }, (_, i) => ({ id: `m${i}` })), null), /exceeds limit/)
+  assert.throws(() => shapeFromFeeds([null], null), /must be an object/)
+  assert.throws(() => shapeFromFeeds([{ id: "a".repeat(129) }], null), /out of bounds/)
+})

@@ -156,6 +156,14 @@ test("unquoted numeric positions reject strings and non-finite values", () => {
       /must be a finite number/,
     )
   }
+  assert.throws(
+    () => emitOpenCodeBlockFromCatalog(minimalCatalog({ id: "benign", name: "Benign", cost: { input: -1 } })),
+    /must be non-negative/,
+  )
+  assert.throws(
+    () => emitOpenCodeBlockFromCatalog(minimalCatalog({ id: "benign", name: "Benign", costAbove200kContext: { input: -1 } })),
+    /must be non-negative/,
+  )
 })
 
 test("duplicate ids and multiline vendor labels are refused", () => {

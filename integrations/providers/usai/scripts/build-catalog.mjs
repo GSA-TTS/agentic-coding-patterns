@@ -88,6 +88,7 @@ const MODELS_DEV_URL = "https://models.dev/api.json"
 // size, and shape-validate before trusting third-party content.
 const FETCH_TIMEOUT_MS = 15000
 const MAX_RESPONSE_BYTES = 10 * 1024 * 1024 // 10 MiB
+const MAX_MODELS = 1000
 
 const FALLBACK_LIMITS = { context: 128000, output: 8192 }
 
@@ -449,8 +450,16 @@ function extractUsaiList(payload) {
         : null
   if (!list) throw new Error("USAi payload invalid: expected an array or { data | models: [] }")
   if (list.length === 0) throw new Error("USAi payload invalid: model list is empty")
-  const hasUsableId = list.some((m) => m && typeof m === "object" && (m.id || m.model_id || m.name))
-  if (!hasUsableId) throw new Error("USAi payload invalid: no entries have an id/model_id/name field")
+  if (list.length > MAX_MODELS) throw new Error(`USAI payload invalid: ${list.length} models exceeds limit ${MAX_MODELS}`)
+  list.forEach((m, index) => {
+    if (!m || typeof m !== "object" || Array.isArray(m)) throw new Error(`USAI payload invalid: models[${index}] must be an object`)
+    const id = m.id ?? m.model_id ?? m.name
+    if (typeof id !== "string" || id.length === 0) throw new Error(`USAI payload invalid: models[${index}] has no string id/model_id/name`)
+    if ([...id].length > 128 || /[\u0000-\u001F\u007F]/u.test(id)) throw new Error(`USAI payload invalid: models[${index}].id is out of bounds`)
+    if (m.name !== undefined && (typeof m.name !== "string" || [...m.name].length > 256 || /[\u0000-\u001F\u007F]/u.test(m.name))) {
+      throw new Error(`USAI payload invalid: models[${index}].name is out of bounds`)
+    }
+  })
   return list
 }
 
@@ -605,6 +614,7 @@ function reportExclusions(excluded) {
 }
 
 function shapeFromFeeds(usaiList, modelsDevCatalog) {
+  usaiList = extractUsaiList(usaiList)
   // Chat models only, preserve incoming list order but group by vendor display
   // order for a stable catalog.
   const excluded = []

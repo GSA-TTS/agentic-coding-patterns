@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises"
+import { mkdir, readFile, realpath, rename, unlink, writeFile } from "node:fs/promises"
 import path from "node:path"
 import process from "node:process"
 import { fileURLToPath } from "node:url"
@@ -600,6 +600,10 @@ function normalizeLimit(value, fallback) {
   return Number.isInteger(value) && value > 0 ? value : fallback
 }
 
+function hasPositiveLimit(...values) {
+  return values.some((value) => Number.isInteger(value) && value > 0)
+}
+
 /**
  * Enrich USAI models with limits + pricing from models.dev, sourcing each
  * vendor from the backend USAi actually routes it through.
@@ -651,6 +655,19 @@ function enrichModelsFromCatalog(models, catalog) {
       modelsDevProvider: null,
     }
   })
+}
+
+export function describeModelProvenance(models) {
+  const lines = []
+  const priced = models.filter((m) => m.cost && Object.keys(m.cost).length > 0)
+  const unpriced = models.filter((m) => !m.cost || Object.keys(m.cost).length === 0)
+  const fallbackContext = models.filter((m) => !hasPositiveLimit(m.raw?.context_window, m.raw?.contextWindow, m.raw?.context))
+  const fallbackOutput = models.filter((m) => !hasPositiveLimit(m.raw?.max_output_tokens, m.raw?.maxOutputTokens, m.raw?.output))
+  if (priced.length) lines.push(`Pricing available for ${priced.length} models: ${priced.map((m) => m.id).join(", ")}`)
+  if (unpriced.length) lines.push(`No pricing available for ${unpriced.length} models: ${unpriced.map((m) => m.id).join(", ")}`)
+  if (fallbackContext.length) lines.push(`Using fallback context limit for ${fallbackContext.length} models: ${fallbackContext.map((m) => m.id).join(", ")}`)
+  if (fallbackOutput.length) lines.push(`Using fallback output limit for ${fallbackOutput.length} models: ${fallbackOutput.map((m) => m.id).join(", ")}`)
+  return lines
 }
 
 // -----------------------------------------------------------------------------
@@ -929,7 +946,7 @@ export function validateGeneratedConfig(sourceText, generatedText) {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error("Generated opencode.jsonc must contain a top-level object")
   }
-  if (!source.provider?.usai?.models || !parsed.provider?.usai?.models || typeof parsed.provider.usai.models !== "object") {
+  if (!source.provider?.usai?.models || !parsed.provider?.usai?.models || typeof parsed.provider.usai.models !== "object" || Array.isArray(parsed.provider.usai.models)) {
     throw new Error("Generated opencode.jsonc is missing provider.usai.models")
   }
   const masked = maskGeneratorOwnedPaths(copyJson(parsed), source)
@@ -940,12 +957,13 @@ export function validateGeneratedConfig(sourceText, generatedText) {
 }
 
 export async function writeValidatedConfig(targetPath, sourceText, generatedText) {
-  const tempPath = `${targetPath}.tmp-${process.pid}-${Date.now()}`
+  const writePath = await realpath(targetPath).catch(() => targetPath)
+  const tempPath = `${writePath}.tmp-${process.pid}-${Date.now()}`
   try {
     await writeFile(tempPath, generatedText, { flag: "wx" })
     const persisted = await readFile(tempPath, "utf8")
     validateGeneratedConfig(sourceText, persisted)
-    await rename(tempPath, targetPath)
+    await rename(tempPath, writePath)
   } catch (error) {
     await unlink(tempPath).catch(() => {})
     throw error
@@ -1001,21 +1019,7 @@ async function main() {
   const { updatedTemplate, models } = updateTemplate(templateText, payload, modelsDevCatalog)
   validateGeneratedConfig(templateText, updatedTemplate)
 
-  // Log enrichment results
-  const enriched = models.filter((m) => m.modelsDevId)
-  const notEnriched = models.filter((m) => !m.modelsDevId)
-  if (enriched.length > 0) {
-    process.stdout.write(`Enriched ${enriched.length} models from models.dev\n`)
-  }
-  if (notEnriched.length > 0) {
-    const fallbackIds = notEnriched
-      .filter((m) => !Number.isInteger(m.raw?.context_window) || !Number.isInteger(m.raw?.max_output_tokens))
-      .map((m) => m.id)
-    process.stdout.write(`No models.dev pricing for ${notEnriched.length} models: ${notEnriched.map((m) => m.id).join(", ")}\n`)
-    if (fallbackIds.length > 0) {
-      process.stdout.write(`Using one or more fallback limits for ${fallbackIds.length} models: ${fallbackIds.join(", ")}\n`)
-    }
-  }
+  for (const line of describeModelProvenance(models)) process.stdout.write(`${line}\n`)
 
   if (checkOnly) {
     if (templateText !== updatedTemplate) {
