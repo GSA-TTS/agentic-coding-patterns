@@ -1,6 +1,6 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { lstat, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises"
+import { chmod, lstat, mkdtemp, readFile, stat, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 
@@ -250,6 +250,18 @@ test("writeValidatedConfig preserves a symlink target", async () => {
   await writeValidatedConfig(link, source, updatedTemplate)
   assert.equal((await lstat(link)).isSymbolicLink(), true)
   assert.equal(await readFile(real, "utf8"), updatedTemplate)
+})
+
+test("writeValidatedConfig preserves restrictive target permissions", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "usai-mode-"))
+  const target = path.join(dir, "opencode.jsonc")
+  const source = await readFile(templatePath, "utf8")
+  const fixture = JSON.parse(await readFile(fixturePath, "utf8"))
+  const { updatedTemplate } = updateTemplate(source, fixture)
+  await writeFile(target, source)
+  await chmod(target, 0o600)
+  await writeValidatedConfig(target, source, updatedTemplate)
+  assert.equal((await stat(target)).mode & 0o777, 0o600)
 })
 
 test("validateGeneratedConfig rejects an array model map", () => {
@@ -626,6 +638,24 @@ test("updateTemplate records models.dev limit provenance", async () => {
   assert.equal(models[0].contextSource, "models.dev")
   assert.equal(models[0].outputSource, "models.dev")
   assert.deepEqual(describeModelProvenance(models), ["Pricing available for 1 models: claude_4_5_haiku"])
+})
+
+test("updateTemplate records fallback provenance without models.dev", async () => {
+  const source = await readFile(templatePath, "utf8")
+  const { models } = updateTemplate(source, { data: [{ id: "claude_4_5_haiku" }] }, {})
+  assert.equal(models[0].contextSource, "fallback")
+  assert.equal(models[0].outputSource, "fallback")
+})
+
+test("invalid truthy feed limits do not block valid models.dev limits", async () => {
+  const source = await readFile(templatePath, "utf8")
+  const payload = { data: [{ id: "claude_4_5_haiku", context_window: -1, max_output_tokens: "invalid" }] }
+  const catalog = { "amazon-bedrock": { models: { "claude_4_5_haiku": { limit: { context: 200000, output: 64000 } } } } }
+  const { models } = updateTemplate(source, payload, catalog)
+  assert.equal(models[0].contextWindow, 200000)
+  assert.equal(models[0].maxOutputTokens, 64000)
+  assert.equal(models[0].contextSource, "models.dev")
+  assert.equal(models[0].outputSource, "models.dev")
 })
 
 // --- fetchJsonBounded network hardening (Issue #138) ---

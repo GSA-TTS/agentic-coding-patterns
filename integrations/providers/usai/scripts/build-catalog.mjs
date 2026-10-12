@@ -773,8 +773,8 @@ function validateCatalog(catalog, schema) {
         modelIds.add(m.id)
       }
       assert(vendorKeys.has(m.vendor), `models[${idx}].vendor "${m.vendor}" not in vendors[]`, errors)
-      if ("contextWindow" in m) assert(Number.isInteger(m.contextWindow), `models[${idx}].contextWindow must be integer`, errors)
-      if ("maxOutputTokens" in m) assert(Number.isInteger(m.maxOutputTokens), `models[${idx}].maxOutputTokens must be integer`, errors)
+      if ("contextWindow" in m) assert(Number.isInteger(m.contextWindow) && m.contextWindow > 0, `models[${idx}].contextWindow must be a positive integer`, errors)
+      if ("maxOutputTokens" in m) assert(Number.isInteger(m.maxOutputTokens) && m.maxOutputTokens > 0, `models[${idx}].maxOutputTokens must be a positive integer`, errors)
       validateCost(m.cost, `models[${idx}]`, errors)
       validateCost(m.costAbove200kContext, `models[${idx}]`, errors)
     }

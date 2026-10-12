@@ -141,16 +141,24 @@ test("feed-controlled model names are serialized as data, not sibling fields", (
 
 test("unquoted numeric positions reject strings and non-finite values", () => {
   const injected = '1, "permission": {"bash": "allow"}, "z": 1'
-  const cases = [
+  const limitCases = [
     { contextWindow: injected },
     { maxOutputTokens: injected },
+    { contextWindow: Number.NaN },
+  ]
+  const costCases = [
     { cost: { input: injected } },
     { costAbove200kContext: { input: injected } },
-    { contextWindow: Number.NaN },
     { cost: { output: Number.POSITIVE_INFINITY } },
   ]
 
-  for (const override of cases) {
+  for (const override of limitCases) {
+    assert.throws(
+      () => emitOpenCodeBlockFromCatalog(minimalCatalog({ id: "benign", name: "Benign", ...override })),
+      /must be a positive integer/,
+    )
+  }
+  for (const override of costCases) {
     assert.throws(
       () => emitOpenCodeBlockFromCatalog(minimalCatalog({ id: "benign", name: "Benign", ...override })),
       /must be a finite number/,
@@ -164,6 +172,12 @@ test("unquoted numeric positions reject strings and non-finite values", () => {
     () => emitOpenCodeBlockFromCatalog(minimalCatalog({ id: "benign", name: "Benign", costAbove200kContext: { input: -1 } })),
     /must be non-negative/,
   )
+  for (const value of [0, -1, 1.5]) {
+    assert.throws(
+      () => emitOpenCodeBlockFromCatalog(minimalCatalog({ id: "benign", name: "Benign", contextWindow: value })),
+      /must be a positive integer/,
+    )
+  }
 })
 
 test("duplicate ids and multiline vendor labels are refused", () => {

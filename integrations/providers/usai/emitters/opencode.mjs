@@ -88,6 +88,13 @@ function jsonNumber(value, where) {
   return JSON.stringify(value)
 }
 
+function jsonPositiveInteger(value, where) {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new TypeError(`emitOpenCodeBlockFromCatalog: ${where} must be a positive integer`)
+  }
+  return JSON.stringify(value)
+}
+
 function jsonNonNegativeNumber(value, where) {
   const rendered = jsonNumber(value, where)
   if (value < 0) throw new TypeError(`emitOpenCodeBlockFromCatalog: ${where} must be non-negative`)
@@ -142,8 +149,8 @@ function renderModel(model, trailingComma) {
   lines.push(`${INDENT_MODEL}${jsonString(model.id, "model.id")}: {`)
   lines.push(`${INDENT_2}"name": ${jsonString(model.name, `${where}.name`)},`)
   lines.push(`${INDENT_2}"limit": {`)
-  lines.push(`${INDENT_3}"context": ${jsonNumber(model.contextWindow, `${where}.contextWindow`)},`)
-  lines.push(`${INDENT_3}"output": ${jsonNumber(model.maxOutputTokens, `${where}.maxOutputTokens`)}`)
+  lines.push(`${INDENT_3}"context": ${jsonPositiveInteger(model.contextWindow, `${where}.contextWindow`)},`)
+  lines.push(`${INDENT_3}"output": ${jsonPositiveInteger(model.maxOutputTokens, `${where}.maxOutputTokens`)}`)
   lines.push(`${INDENT_2}},`)
   lines.push(`${INDENT_2}"cost": {`)
   lines.push(...renderCost(model))

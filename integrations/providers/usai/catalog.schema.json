@@ -105,10 +105,12 @@
           },
           "contextWindow": {
             "type": "integer",
+            "minimum": 1,
             "description": "Maximum input context window in tokens (opencode limit.context)."
           },
           "maxOutputTokens": {
             "type": "integer",
+            "minimum": 1,
             "description": "Maximum output tokens per response (opencode limit.output)."
           },
           "cost": {

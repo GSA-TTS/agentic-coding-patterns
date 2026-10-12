@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { mkdir, readFile, realpath, rename, unlink, writeFile } from "node:fs/promises"
+import { mkdir, readFile, realpath, rename, stat, unlink, writeFile } from "node:fs/promises"
 import path from "node:path"
 import process from "node:process"
 import { fileURLToPath } from "node:url"
@@ -626,21 +626,23 @@ function enrichModelsFromCatalog(models, catalog) {
       }
     }
 
-    if (match && match.data.limit) {
-      const feedContext = hasPositiveLimit(model.contextWindow)
-      const feedOutput = hasPositiveLimit(model.maxOutputTokens)
-      const matchedContext = hasPositiveLimit(match.data.limit.context)
-      const matchedOutput = hasPositiveLimit(match.data.limit.output)
+    const feedContext = hasPositiveLimit(model.contextWindow)
+    const feedOutput = hasPositiveLimit(model.maxOutputTokens)
+    const matchedContext = hasPositiveLimit(match?.data?.limit?.context)
+    const matchedOutput = hasPositiveLimit(match?.data?.limit?.output)
+    if (match) {
       return {
         ...model,
-        contextWindow: normalizeLimit(
-          model.contextWindow || match.data.limit.context,
-          FALLBACK_LIMITS.context,
-        ),
-        maxOutputTokens: normalizeLimit(
-          model.maxOutputTokens || match.data.limit.output,
-          FALLBACK_LIMITS.output,
-        ),
+        contextWindow: feedContext
+          ? model.contextWindow
+          : matchedContext
+            ? match.data.limit.context
+            : FALLBACK_LIMITS.context,
+        maxOutputTokens: feedOutput
+          ? model.maxOutputTokens
+          : matchedOutput
+            ? match.data.limit.output
+            : FALLBACK_LIMITS.output,
         toolCall: match.data.tool_call,
         reasoning: match.data.reasoning,
         cost: normalizeCost(match.data.cost),
@@ -654,13 +656,13 @@ function enrichModelsFromCatalog(models, catalog) {
     // No match found - use fallbacks (no pricing available)
     return {
       ...model,
-      contextWindow: normalizeLimit(model.contextWindow, FALLBACK_LIMITS.context),
-      maxOutputTokens: normalizeLimit(model.maxOutputTokens, FALLBACK_LIMITS.output),
+      contextWindow: feedContext ? model.contextWindow : FALLBACK_LIMITS.context,
+      maxOutputTokens: feedOutput ? model.maxOutputTokens : FALLBACK_LIMITS.output,
       cost: null,
       modelsDevId: null,
       modelsDevProvider: null,
-      contextSource: hasPositiveLimit(model.contextWindow) ? "usai" : "fallback",
-      outputSource: hasPositiveLimit(model.maxOutputTokens) ? "usai" : "fallback",
+      contextSource: feedContext ? "usai" : "fallback",
+      outputSource: feedOutput ? "usai" : "fallback",
     }
   })
 }
@@ -888,10 +890,9 @@ export function updateTemplate(templateText, payload, modelsDevCatalog = {}) {
   }
   models.sort((a, b) => a.id.localeCompare(b.id))
 
-  // Enrich with models.dev metadata if catalog provided
-  if (Object.keys(modelsDevCatalog).length > 0) {
-    models = enrichModelsFromCatalog(models, modelsDevCatalog)
-  }
+  // Always normalize limits and record provenance. An empty catalog means no
+  // models.dev match, not "skip normalization".
+  models = enrichModelsFromCatalog(models, modelsDevCatalog)
 
   const updatedBlock = renderModelBlock(models, eol)
   let updatedTemplate = replaceBetween(templateText, GENERATED_START, GENERATED_END, updatedBlock, eol)
@@ -967,8 +968,9 @@ export function validateGeneratedConfig(sourceText, generatedText) {
 export async function writeValidatedConfig(targetPath, sourceText, generatedText) {
   const writePath = await realpath(targetPath).catch(() => targetPath)
   const tempPath = `${writePath}.tmp-${process.pid}-${Date.now()}`
+  const mode = await stat(writePath).then((info) => info.mode & 0o777).catch(() => 0o600)
   try {
-    await writeFile(tempPath, generatedText, { flag: "wx" })
+    await writeFile(tempPath, generatedText, { flag: "wx", mode })
     const persisted = await readFile(tempPath, "utf8")
     validateGeneratedConfig(sourceText, persisted)
     await rename(tempPath, writePath)

@@ -66,3 +66,10 @@ test("catalog validation rejects non-finite and negative costs", () => {
     )
   }
 })
+
+test("catalog validation rejects non-positive and fractional limits", () => {
+  for (const value of [0, -1, 1.5]) {
+    assert.match(validateCatalog(withFirstModel({ contextWindow: value }), schema).join("\n"), /positive integer/)
+    assert.match(validateCatalog(withFirstModel({ maxOutputTokens: value }), schema).join("\n"), /positive integer/)
+  }
+})
