@@ -88,3 +88,15 @@ test("shapeFromFeeds rejects oversized and malformed feed entries", () => {
   assert.throws(() => shapeFromFeeds([null], null), /must be an object/)
   assert.throws(() => shapeFromFeeds([{ id: "a".repeat(129) }], null), /out of bounds/)
 })
+
+test("shapeFromFeeds prefers valid models.dev limits over invalid truthy feed limits", () => {
+  const feed = [{ id: "claude_4_5_haiku", owned_by: "anthropic", context_window: -1, max_output_tokens: "invalid" }]
+  const modelsDev = {
+    "amazon-bedrock": {
+      models: { "claude_4_5_haiku": { limit: { context: 200000, output: 64000 } } },
+    },
+  }
+  const { models } = shapeFromFeeds(feed, modelsDev)
+  assert.equal(models[0].contextWindow, 200000)
+  assert.equal(models[0].maxOutputTokens, 64000)
+})

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { mkdir, readFile, realpath, rename, stat, unlink, writeFile } from "node:fs/promises"
+import { chmod, mkdir, readFile, realpath, rename, stat, unlink, writeFile } from "node:fs/promises"
 import path from "node:path"
 import process from "node:process"
 import { fileURLToPath } from "node:url"
@@ -671,12 +671,14 @@ export function describeModelProvenance(models) {
   const lines = []
   const priced = models.filter((m) => m.cost && Object.keys(m.cost).length > 0)
   const unpriced = models.filter((m) => !m.cost || Object.keys(m.cost).length === 0)
-  const fallbackContext = models.filter((m) => m.contextSource === "fallback")
-  const fallbackOutput = models.filter((m) => m.outputSource === "fallback")
   if (priced.length) lines.push(`Pricing available for ${priced.length} models: ${priced.map((m) => m.id).join(", ")}`)
   if (unpriced.length) lines.push(`No pricing available for ${unpriced.length} models: ${unpriced.map((m) => m.id).join(", ")}`)
-  if (fallbackContext.length) lines.push(`Using fallback context limit for ${fallbackContext.length} models: ${fallbackContext.map((m) => m.id).join(", ")}`)
-  if (fallbackOutput.length) lines.push(`Using fallback output limit for ${fallbackOutput.length} models: ${fallbackOutput.map((m) => m.id).join(", ")}`)
+  for (const source of ["usai", "models.dev", "fallback"]) {
+    const context = models.filter((m) => m.contextSource === source)
+    const output = models.filter((m) => m.outputSource === source)
+    if (context.length) lines.push(`Context limit from ${source} for ${context.length} models: ${context.map((m) => m.id).join(", ")}`)
+    if (output.length) lines.push(`Output limit from ${source} for ${output.length} models: ${output.map((m) => m.id).join(", ")}`)
+  }
   return lines
 }
 
@@ -971,6 +973,7 @@ export async function writeValidatedConfig(targetPath, sourceText, generatedText
   const mode = await stat(writePath).then((info) => info.mode & 0o777).catch(() => 0o600)
   try {
     await writeFile(tempPath, generatedText, { flag: "wx", mode })
+    await chmod(tempPath, mode)
     const persisted = await readFile(tempPath, "utf8")
     validateGeneratedConfig(sourceText, persisted)
     await rename(tempPath, writePath)

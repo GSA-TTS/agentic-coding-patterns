@@ -646,8 +646,8 @@ function shapeFromFeeds(usaiList, modelsDevCatalog) {
   for (const p of parsed) {
     if (!vendorOrder.includes(p.vendor)) vendorOrder.push(p.vendor)
     const model = { id: p.id, vendor: p.vendor, name: p.name }
-    let context = Number.isInteger(p.raw.context_window) ? p.raw.context_window : null
-    let output = Number.isInteger(p.raw.max_output_tokens) ? p.raw.max_output_tokens : null
+    let context = Number.isInteger(p.raw.context_window) && p.raw.context_window > 0 ? p.raw.context_window : null
+    let output = Number.isInteger(p.raw.max_output_tokens) && p.raw.max_output_tokens > 0 ? p.raw.max_output_tokens : null
     let baseCost = null
     let above = null
     if (modelsDevCatalog) {
@@ -655,8 +655,10 @@ function shapeFromFeeds(usaiList, modelsDevCatalog) {
         const match = findModelsDevMatch(p.id, providerModels)
         if (match?.data) {
           if (match.data.limit) {
-            context = context || match.data.limit.context || null
-            output = output || match.data.limit.output || null
+            const matchedContext = match.data.limit.context
+            const matchedOutput = match.data.limit.output
+            if (!context && Number.isInteger(matchedContext) && matchedContext > 0) context = matchedContext
+            if (!output && Number.isInteger(matchedOutput) && matchedOutput > 0) output = matchedOutput
           }
           const norm = normalizeCostFromModelsDev(match.data.cost)
           baseCost = norm.cost

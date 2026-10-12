@@ -252,16 +252,21 @@ test("writeValidatedConfig preserves a symlink target", async () => {
   assert.equal(await readFile(real, "utf8"), updatedTemplate)
 })
 
-test("writeValidatedConfig preserves restrictive target permissions", async () => {
+test("writeValidatedConfig preserves target permissions under a restrictive umask", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "usai-mode-"))
   const target = path.join(dir, "opencode.jsonc")
   const source = await readFile(templatePath, "utf8")
   const fixture = JSON.parse(await readFile(fixturePath, "utf8"))
   const { updatedTemplate } = updateTemplate(source, fixture)
   await writeFile(target, source)
-  await chmod(target, 0o600)
-  await writeValidatedConfig(target, source, updatedTemplate)
-  assert.equal((await stat(target)).mode & 0o777, 0o600)
+  await chmod(target, 0o640)
+  const previous = process.umask(0o077)
+  try {
+    await writeValidatedConfig(target, source, updatedTemplate)
+  } finally {
+    process.umask(previous)
+  }
+  assert.equal((await stat(target)).mode & 0o777, 0o640)
 })
 
 test("validateGeneratedConfig rejects an array model map", () => {
@@ -619,8 +624,12 @@ test("describeModelProvenance separates pricing and each limit source", () => {
   assert.deepEqual(describeModelProvenance(models), [
     "Pricing available for 2 models: priced, mixed",
     "No pricing available for 2 models: feed-limits, hardcoded",
-    "Using fallback context limit for 1 models: hardcoded",
-    "Using fallback output limit for 2 models: hardcoded, mixed",
+    "Context limit from usai for 1 models: feed-limits",
+    "Output limit from usai for 1 models: feed-limits",
+    "Context limit from models.dev for 2 models: priced, mixed",
+    "Output limit from models.dev for 1 models: priced",
+    "Context limit from fallback for 1 models: hardcoded",
+    "Output limit from fallback for 2 models: hardcoded, mixed",
   ])
 })
 
@@ -637,7 +646,11 @@ test("updateTemplate records models.dev limit provenance", async () => {
   const { models } = updateTemplate(source, payload, catalog)
   assert.equal(models[0].contextSource, "models.dev")
   assert.equal(models[0].outputSource, "models.dev")
-  assert.deepEqual(describeModelProvenance(models), ["Pricing available for 1 models: claude_4_5_haiku"])
+  assert.deepEqual(describeModelProvenance(models), [
+    "Pricing available for 1 models: claude_4_5_haiku",
+    "Context limit from models.dev for 1 models: claude_4_5_haiku",
+    "Output limit from models.dev for 1 models: claude_4_5_haiku",
+  ])
 })
 
 test("updateTemplate records fallback provenance without models.dev", async () => {
