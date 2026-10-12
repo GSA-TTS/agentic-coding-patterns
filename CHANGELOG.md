@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.13.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.12.1...v1.13.0) (2026-10-12)
+
+
+### Features
+
+* **devenv-image:** move to nixos-26.05 (devenv 2.1.2), VERSION 2.0.0 ([#480](https://github.com/GSA-TTS/agentic-coding-patterns/issues/480)) ([e042f14](https://github.com/GSA-TTS/agentic-coding-patterns/commit/e042f14c056da7936839f5b7e83ef1ce506befda))
+* **isolation:** add personal-kit template for the scope-layers pattern ([8c9e84a](https://github.com/GSA-TTS/agentic-coding-patterns/commit/8c9e84aa6a1281dee8cb9d1d1476499d9420f43e))
+* **isolation:** add the scope-layers pattern and a team-kit template ([#441](https://github.com/GSA-TTS/agentic-coding-patterns/issues/441)) ([35ea9b0](https://github.com/GSA-TTS/agentic-coding-patterns/commit/35ea9b0b27e38b4531c7d638cf1323a68fe6680e))
+* **isolation:** validate kit templates under acq-kits/examples/ ([#476](https://github.com/GSA-TTS/agentic-coding-patterns/issues/476)) ([3aeae67](https://github.com/GSA-TTS/agentic-coding-patterns/commit/3aeae676e7310cb368dc4dfbfdcf3131ad8da8a4))
+* **patterns:** add paseo kit identity gate for a stale host forwarder ([#453](https://github.com/GSA-TTS/agentic-coding-patterns/issues/453)) ([35306d9](https://github.com/GSA-TTS/agentic-coding-patterns/commit/35306d98571cad6695e46243c6ec160fc5e76224))
+* **usai-provider:** normalize and vendor USAi model catalog ([#436](https://github.com/GSA-TTS/agentic-coding-patterns/issues/436)) ([665373d](https://github.com/GSA-TTS/agentic-coding-patterns/commit/665373d79214fd459f02bad444cd08dfaa486b70))
+
+
+### Bug Fixes
+
+* **usai-catalog:** serialize feed data before config emission ([800ba7e](https://github.com/GSA-TTS/agentic-coding-patterns/commit/800ba7ede6759e6bc5e24e161b1e8197f14f504c))
+
 ## [1.12.1](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.12.0...v1.12.1) (2026-10-06)
 
 
