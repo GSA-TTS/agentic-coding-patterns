@@ -627,6 +627,10 @@ function enrichModelsFromCatalog(models, catalog) {
     }
 
     if (match && match.data.limit) {
+      const feedContext = hasPositiveLimit(model.contextWindow)
+      const feedOutput = hasPositiveLimit(model.maxOutputTokens)
+      const matchedContext = hasPositiveLimit(match.data.limit.context)
+      const matchedOutput = hasPositiveLimit(match.data.limit.output)
       return {
         ...model,
         contextWindow: normalizeLimit(
@@ -642,6 +646,8 @@ function enrichModelsFromCatalog(models, catalog) {
         cost: normalizeCost(match.data.cost),
         modelsDevId: match.id,
         modelsDevProvider: matchedProvider,
+        contextSource: feedContext ? "usai" : matchedContext ? "models.dev" : "fallback",
+        outputSource: feedOutput ? "usai" : matchedOutput ? "models.dev" : "fallback",
       }
     }
 
@@ -653,6 +659,8 @@ function enrichModelsFromCatalog(models, catalog) {
       cost: null,
       modelsDevId: null,
       modelsDevProvider: null,
+      contextSource: hasPositiveLimit(model.contextWindow) ? "usai" : "fallback",
+      outputSource: hasPositiveLimit(model.maxOutputTokens) ? "usai" : "fallback",
     }
   })
 }
@@ -661,8 +669,8 @@ export function describeModelProvenance(models) {
   const lines = []
   const priced = models.filter((m) => m.cost && Object.keys(m.cost).length > 0)
   const unpriced = models.filter((m) => !m.cost || Object.keys(m.cost).length === 0)
-  const fallbackContext = models.filter((m) => !hasPositiveLimit(m.raw?.context_window, m.raw?.contextWindow, m.raw?.context))
-  const fallbackOutput = models.filter((m) => !hasPositiveLimit(m.raw?.max_output_tokens, m.raw?.maxOutputTokens, m.raw?.output))
+  const fallbackContext = models.filter((m) => m.contextSource === "fallback")
+  const fallbackOutput = models.filter((m) => m.outputSource === "fallback")
   if (priced.length) lines.push(`Pricing available for ${priced.length} models: ${priced.map((m) => m.id).join(", ")}`)
   if (unpriced.length) lines.push(`No pricing available for ${unpriced.length} models: ${unpriced.map((m) => m.id).join(", ")}`)
   if (fallbackContext.length) lines.push(`Using fallback context limit for ${fallbackContext.length} models: ${fallbackContext.map((m) => m.id).join(", ")}`)

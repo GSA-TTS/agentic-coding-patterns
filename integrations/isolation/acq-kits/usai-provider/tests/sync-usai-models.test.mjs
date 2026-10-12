@@ -599,17 +599,33 @@ test("updateTemplate rejects non-finite and negative enrichment costs", async ()
 
 test("describeModelProvenance separates pricing and each limit source", () => {
   const models = [
-    { id: "priced", cost: { input: 1 }, raw: { context_window: 10, max_output_tokens: 2 } },
-    { id: "feed-limits", cost: null, raw: { context_window: 10, max_output_tokens: 2 } },
-    { id: "bad-feed-limits", cost: null, raw: { context_window: 0, max_output_tokens: -1 } },
-    { id: "missing-output", cost: { input: 1 }, raw: { context_window: 10 } },
+    { id: "priced", cost: { input: 1 }, contextSource: "models.dev", outputSource: "models.dev" },
+    { id: "feed-limits", cost: null, contextSource: "usai", outputSource: "usai" },
+    { id: "hardcoded", cost: null, contextSource: "fallback", outputSource: "fallback" },
+    { id: "mixed", cost: { input: 1 }, contextSource: "models.dev", outputSource: "fallback" },
   ]
   assert.deepEqual(describeModelProvenance(models), [
-    "Pricing available for 2 models: priced, missing-output",
-    "No pricing available for 2 models: feed-limits, bad-feed-limits",
-    "Using fallback context limit for 1 models: bad-feed-limits",
-    "Using fallback output limit for 2 models: bad-feed-limits, missing-output",
+    "Pricing available for 2 models: priced, mixed",
+    "No pricing available for 2 models: feed-limits, hardcoded",
+    "Using fallback context limit for 1 models: hardcoded",
+    "Using fallback output limit for 2 models: hardcoded, mixed",
   ])
+})
+
+test("updateTemplate records models.dev limit provenance", async () => {
+  const source = await readFile(templatePath, "utf8")
+  const payload = { data: [{ id: "claude_4_5_haiku", owned_by: "anthropic" }] }
+  const catalog = {
+    "amazon-bedrock": {
+      models: {
+        "claude_4_5_haiku": { limit: { context: 200000, output: 64000 }, cost: { input: 1 } },
+      },
+    },
+  }
+  const { models } = updateTemplate(source, payload, catalog)
+  assert.equal(models[0].contextSource, "models.dev")
+  assert.equal(models[0].outputSource, "models.dev")
+  assert.deepEqual(describeModelProvenance(models), ["Pricing available for 1 models: claude_4_5_haiku"])
 })
 
 // --- fetchJsonBounded network hardening (Issue #138) ---

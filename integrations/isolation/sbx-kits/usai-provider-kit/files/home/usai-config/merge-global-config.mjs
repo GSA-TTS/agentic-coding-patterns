@@ -136,7 +136,14 @@ export function stripJsonc(text) {
     if (ch === ",") {
       let nextIndex = i + 1
       while (/\s/.test(out[nextIndex] ?? "")) nextIndex++
-      if (out[nextIndex] === "}" || out[nextIndex] === "]") continue
+      if (out[nextIndex] === "}" || out[nextIndex] === "]") {
+        let previousIndex = plain.length - 1
+        while (/\s/.test(plain[previousIndex] ?? "")) previousIndex--
+        // A trailing comma is valid only after a completed value. Keep commas
+        // after an opener, separator, or colon so malformed `{,}`, `[1,,]`,
+        // and `{"a":,}` remain malformed and JSON.parse rejects them.
+        if (previousIndex >= 0 && !"{[,:".includes(plain[previousIndex])) continue
+      }
     }
     plain += ch
   }

@@ -51,6 +51,12 @@ test("parseJsonc rejects duplicate properties at every object depth", () => {
   assert.throws(() => parseJsonc('{"models":{"same":{},"same":{}}}'), /Duplicate JSON property/)
 })
 
+test("parseJsonc rejects leading and repeated commas", () => {
+  for (const malformed of ["{,}", "[,]", '{"a":1,,}', "[1,,]", '{"a":,}']) {
+    assert.throws(() => parseJsonc(malformed), SyntaxError)
+  }
+})
+
 test("parseJsonc parses the shipped kit config", async () => {
   const text = await readFile(kitConfigPath, "utf8")
   const cfg = parseJsonc(text)
