@@ -221,4 +221,103 @@ export function emitOpenCodeBlockFromCatalog(catalog) {
   return lines.join("\n")
 }
 
+/**
+ * Map neutral catalog defaults to OpenCode configuration values.
+ * Values are prefixed with "usai/" per OpenCode provider model namespace convention.
+ *
+ * @param {object} catalog parsed catalog.json
+ * @returns {object} OpenCode formatted defaults { model, small_model, compaction }
+ */
+export function emitOpenCodeDefaults(catalog) {
+  if (!catalog || typeof catalog !== "object") {
+    throw new TypeError("emitOpenCodeDefaults: catalog must be an object")
+  }
+  if (!catalog.defaults || typeof catalog.defaults !== "object" || Array.isArray(catalog.defaults)) {
+    throw new TypeError("emitOpenCodeDefaults: catalog.defaults must be an object")
+  }
+  const { primary, small, compaction } = catalog.defaults
+  if (typeof primary !== "string" || primary.length === 0) {
+    throw new TypeError("emitOpenCodeDefaults: defaults.primary must be a non-empty string")
+  }
+  if (typeof small !== "string" || small.length === 0) {
+    throw new TypeError("emitOpenCodeDefaults: defaults.small must be a non-empty string")
+  }
+  if (compaction !== undefined && (typeof compaction !== "string" || compaction.length === 0)) {
+    throw new TypeError("emitOpenCodeDefaults: defaults.compaction must be a non-empty string when present")
+  }
+
+  // Ensure chosen default IDs do not contain characters that could break out of JSON strings
+  // or trigger unexpected template expansions
+  const SAFE_ID_RE = /^[A-Za-z0-9_.:-]+$/
+  if (!SAFE_ID_RE.test(primary)) {
+    throw new TypeError(`emitOpenCodeDefaults: defaults.primary contains invalid characters: "${primary}"`)
+  }
+  if (!SAFE_ID_RE.test(small)) {
+    throw new TypeError(`emitOpenCodeDefaults: defaults.small contains invalid characters: "${small}"`)
+  }
+  if (compaction && !SAFE_ID_RE.test(compaction)) {
+    throw new TypeError(`emitOpenCodeDefaults: defaults.compaction contains invalid characters: "${compaction}"`)
+  }
+
+  return {
+    model: `usai/${primary}`,
+    small_model: `usai/${small}`,
+    compaction: compaction ? `usai/${compaction}` : null,
+  }
+}
+
+/**
+ * Patch an existing opencode.jsonc template text with both the models block
+ * and the default model selections from the catalog.
+ *
+ * @param {string} templateText raw opencode.jsonc text
+ * @param {object} catalog parsed catalog.json
+ * @returns {string} updated opencode.jsonc text
+ */
+export function patchOpenCodeConfig(templateText, catalog) {
+  if (typeof templateText !== "string") {
+    throw new TypeError("patchOpenCodeConfig: templateText must be a string")
+  }
+  const defaults = emitOpenCodeDefaults(catalog)
+  const modelsBlock = emitOpenCodeBlockFromCatalog(catalog)
+
+  // 1. Replace generated models block
+  const beginIdx = templateText.indexOf(BEGIN_MARKER)
+  const endIdx = templateText.indexOf(END_MARKER)
+  if (beginIdx === -1 || endIdx === -1 || endIdx <= beginIdx) {
+    throw new Error("patchOpenCodeConfig: BEGIN/END GENERATED USAI MODELS markers not found in template")
+  }
+
+  const beforeMarker = templateText.slice(0, beginIdx)
+  const afterMarker = templateText.slice(endIdx + END_MARKER.length)
+
+  let updated = `${beforeMarker}${modelsBlock.trim()}${afterMarker}`
+
+  // 2. Replace top-level model and small_model
+  // Anchor to line start to avoid matching comments, and use function replacements to avoid `$` issues
+  const modelPattern = /^([ \t]*"model"[ \t]*:[ \t]*")([^"]*)(")/m
+  if (!modelPattern.test(updated)) {
+    throw new Error("patchOpenCodeConfig: Could not find top-level 'model' in template")
+  }
+  updated = updated.replace(modelPattern, (_m, p1, _p2, p3) => `${p1}${defaults.model}${p3}`)
+
+  const smallModelPattern = /^([ \t]*"small_model"[ \t]*:[ \t]*")([^"]*)(")/m
+  if (!smallModelPattern.test(updated)) {
+    throw new Error("patchOpenCodeConfig: Could not find top-level 'small_model' in template")
+  }
+  updated = updated.replace(smallModelPattern, (_m, p1, _p2, p3) => `${p1}${defaults.small_model}${p3}`)
+
+  // 3. Replace agent.compaction.model if present in defaults and template
+  // Scoped strictly within "agent": { ... "compaction": { ... "model": "..." } }
+  // to avoid matching across closing braces
+  if (defaults.compaction) {
+    const compactionPattern = /("agent"\s*:\s*\{[^{}]*?"compaction"\s*:\s*\{[^{}]*?"model"\s*:\s*")([^"]*)(")/
+    if (compactionPattern.test(updated)) {
+      updated = updated.replace(compactionPattern, (_m, p1, _p2, p3) => `${p1}${defaults.compaction}${p3}`)
+    }
+  }
+
+  return updated
+}
+
 export default emitOpenCodeBlockFromCatalog

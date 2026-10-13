@@ -20,7 +20,11 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { test } from "node:test"
 
-import { emitOpenCodeBlockFromCatalog } from "../emitters/opencode.mjs"
+import {
+  emitOpenCodeBlockFromCatalog,
+  emitOpenCodeDefaults,
+  patchOpenCodeConfig,
+} from "../emitters/opencode.mjs"
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const USAI_DIR = path.resolve(HERE, "..")
@@ -192,4 +196,92 @@ test("duplicate ids and multiline vendor labels are refused", () => {
   const duplicateVendor = minimalCatalog({ id: "benign", name: "Benign" })
   duplicateVendor.vendors.push({ ...duplicateVendor.vendors[0] })
   assert.throws(() => emitOpenCodeBlockFromCatalog(duplicateVendor), /duplicate vendor key/)
+})
+
+for (const { label, file } of SHIPPED_CONFIGS) {
+  test(`patchOpenCodeConfig reproduces the ${label} shipped opencode.jsonc byte-for-byte`, () => {
+    const originalText = readFileSync(file, "utf8")
+    const catalog = JSON.parse(readFileSync(CATALOG_JSON, "utf8"))
+    const patched = patchOpenCodeConfig(originalText, catalog)
+
+    if (patched !== originalText) {
+      // eslint-disable-next-line no-console
+      console.error(`[${label} patchOpenCodeConfig mismatch]\n${firstMismatchReport(originalText, patched)}`)
+    }
+    assert.strictEqual(
+      patched,
+      originalText,
+      `patchOpenCodeConfig does not reproduce ${label} opencode.jsonc byte-for-byte`,
+    )
+  })
+}
+
+test("emitOpenCodeDefaults maps neutral catalog defaults to usai/ prefixed roles", () => {
+  const catalog = JSON.parse(readFileSync(CATALOG_JSON, "utf8"))
+  const defaults = emitOpenCodeDefaults(catalog)
+  assert.deepEqual(defaults, {
+    model: "usai/claude-sonnet-5",
+    small_model: "usai/claude_4_5_haiku",
+    compaction: "usai/gpt-5.6-terra",
+  })
+})
+
+test("emitOpenCodeDefaults rejects malformed defaults or invalid characters", () => {
+  assert.throws(() => emitOpenCodeDefaults(null), /must be an object/)
+  assert.throws(() => emitOpenCodeDefaults({ defaults: null }), /must be an object/)
+  assert.throws(() => emitOpenCodeDefaults({ defaults: { small: "haiku" } }), /defaults.primary must be/)
+  assert.throws(() => emitOpenCodeDefaults({ defaults: { primary: "sonnet", small: "" } }), /defaults.small must be/)
+  for (const bad of ['sonnet", "permission": {}', "model\\escape", "model{env:VAR}", "model}"]) {
+    assert.throws(
+      () => emitOpenCodeDefaults({ defaults: { primary: bad, small: "haiku" } }),
+      /invalid characters/,
+    )
+  }
+})
+
+test("patchOpenCodeConfig safely handles $ in model ids without string replacement expansion", () => {
+  const originalText = readFileSync(SHIPPED_CONFIGS[0].file, "utf8")
+  const catalog = JSON.parse(readFileSync(CATALOG_JSON, "utf8"))
+  // Add a test model and set as default to check replacement function
+  const testCat = {
+    ...catalog,
+    models: [
+      {
+        id: "model_with_dollar",
+        vendor: "anthropic",
+        name: "Dollar Model",
+        contextWindow: 1000,
+        maxOutputTokens: 100,
+      },
+      ...catalog.models,
+    ],
+    defaults: {
+      primary: "model_with_dollar",
+      small: "claude_4_5_haiku",
+    },
+  }
+  const patched = patchOpenCodeConfig(originalText, testCat)
+  assert.ok(patched.includes('"model": "usai/model_with_dollar"'))
+})
+
+test("patchOpenCodeConfig does not cross object braces if agent.compaction is missing", () => {
+  // A template without agent.compaction.model
+  const template = `
+{
+  "provider": { "usai": { "models": {
+// BEGIN GENERATED USAI MODELS
+// END GENERATED USAI MODELS
+  } } },
+  "model": "usai/old-model",
+  "small_model": "usai/old-small",
+  "compaction": { "auto": true },
+  "instructions": "important instructions"
+}
+`
+  const catalog = JSON.parse(readFileSync(CATALOG_JSON, "utf8"))
+  const patched = patchOpenCodeConfig(template, catalog)
+  // Ensure "instructions" was not wiped out by runaway regex
+  assert.ok(patched.includes('"instructions": "important instructions"'))
+  assert.ok(patched.includes('"compaction": { "auto": true }'))
+  assert.ok(patched.includes('"model": "usai/claude-sonnet-5"'))
 })
