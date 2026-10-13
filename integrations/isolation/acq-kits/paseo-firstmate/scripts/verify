@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Offline and optional live validation for the paseo-firstmate ACQ mixin.
+
+set -uo pipefail
+
+KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+REPO_ROOT="$(cd "$KIT_DIR/../../../.." && pwd)"
+VALIDATOR="$REPO_ROOT/integrations/isolation/acq-kits/validate-kits.py"
+pass=0
+fail=0
+
+ok() { printf '  PASS %s\n' "$1"; pass=$((pass + 1)); }
+bad() { printf '  FAIL %s\n' "$1"; fail=$((fail + 1)); }
+skip() { printf '  SKIP %s\n' "$1"; }
+
+[ -f "$KIT_DIR/spec.yaml" ] && ok "spec.yaml present" || bad "spec.yaml missing"
+[ -x "$KIT_DIR/files/home/paseo-firstmate-start.sh" ] && ok "startup script executable" || bad "startup script is not executable"
+
+if command -v python3 >/dev/null 2>&1 && python3 -c 'import jsonschema, yaml' >/dev/null 2>&1; then
+  if python3 "$VALIDATOR" --root "$REPO_ROOT"; then
+    ok "neutral kit validation passes"
+  else
+    bad "neutral kit validation failed"
+  fi
+else
+  skip "neutral kit validation needs python3, jsonschema, and pyyaml"
+fi
+
+if [ "${RUN_ACQ:-0}" != "1" ]; then
+  skip "live sandbox checks (set RUN_ACQ=1)"
+else
+  if ! command -v acq >/dev/null 2>&1; then
+    bad "RUN_ACQ=1 but acq is not installed"
+  else
+    skip "live plugin check requires a running Paseo-compatible ACQ image"
+  fi
+fi
+
+printf '%s passed, %s failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ]

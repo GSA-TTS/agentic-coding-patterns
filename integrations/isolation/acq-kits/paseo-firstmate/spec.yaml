@@ -1,0 +1,51 @@
+# spec.yaml - paseo-firstmate (neutral acq mixin kit, hybrid/v1)
+#
+# Installs the pinned FirstMate Paseo plugin alongside the Paseo daemon. Apply
+# this kit with the paseo kit; FirstMate uses Paseo's existing browser port and
+# does not publish a second service.
+schemaVersion: "hybrid/v1"
+kind: mixin
+name: paseo-firstmate
+displayName: FirstMate fleet dashboard for Paseo
+description: >
+  Fetches and installs the pinned FirstMate Paseo plugin into the local Paseo
+  daemon. The plugin is trusted, unsandboxed Paseo code and requires a local
+  FirstMate checkout or distro containing its helper scripts.
+
+caps:
+  network:
+    allow:
+      - api.github.com
+      - codeload.github.com
+      - registry.npmjs.org
+
+files:
+  - path: /home/agent/paseo-firstmate-start.sh
+    mode: "0755"
+    source: files/home/paseo-firstmate-start.sh
+    description: Fetch, install, and reload the pinned FirstMate Paseo plugin
+
+commands:
+  - phase: startup
+    user: "1000"
+    background: true
+    description: Install and reload FirstMate without blocking sandbox startup
+    command:
+      - sh
+      - -c
+      - |
+        FIRSTMATE_REF="5e745c7202a4ef1dff859c31be1a365871b8b9c6" \
+        sh /home/agent/paseo-firstmate-start.sh &
+
+agentContext: |
+  ## FirstMate for Paseo
+
+  The optional FirstMate plugin is installed into the local Paseo daemon from
+  the immutable commit `5e745c7202a4ef1dff859c31be1a365871b8b9c6`. It uses the
+  existing Paseo browser endpoint; no additional port is published.
+
+  FirstMate is trusted, unsandboxed Paseo plugin code. Mount a trusted FirstMate
+  checkout into the sandbox, then set its absolute guest path in Settings ->
+  Plugins -> FirstMate -> FirstMate Home. The plugin remains unavailable if its
+  fetch, dependency install, or registration fails; the sandbox itself continues
+  to start.

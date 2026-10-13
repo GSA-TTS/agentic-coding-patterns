@@ -97,6 +97,19 @@ kits:
       ONE port. The daemon runs unsecured (no PASEO_PASSWORD); the sandbox is the
       security boundary and the port is host loopback only.
 
+  paseo-firstmate:
+    backends: [sbx, msb]
+    parity: |
+      Optional companion mixin for paseo. Both backends fetch the same
+      FirstMate repository commit, install its locked Node dependencies with
+      lifecycle scripts disabled, and register the local source with Paseo via
+      the supported plugin install/reload commands. It publishes no port because
+      FirstMate extends the Paseo UI already exposed on port 6767. The startup
+      installer is backend-agnostic and fail-soft: a FirstMate failure is logged
+      without preventing the base Paseo daemon or sandbox from starting. Paseo
+      plugins are trusted, unsandboxed code; the operator must review the pinned
+      source and configured FM_HOME checkout before enabling this mixin.
+
   oci-engine:
     backends: [sbx, msb]
     parity: |
