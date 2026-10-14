@@ -65,15 +65,22 @@ reconcile_preboot_lock() {
   fi
 
   # Node parses the lock's JSON and normalizes ISO or numeric startedAt values.
-  # It emits one tab-separated record and rejects extra/malformed fields.
+  # It emits one tab-separated record and rejects malformed or implausible fields.
   _lock_record="$(node -e '
     const fs = require("fs");
     try {
       const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-      const pid = Number(value.pid);
+      const pid = value.pid;
       const started = value.startedAt;
       const epoch = typeof started === "number" ? started : Date.parse(String(started)) / 1000;
-      if (!Number.isInteger(pid) || pid <= 1 || !Number.isFinite(epoch)) process.exit(2);
+      if (
+        typeof pid !== "number" ||
+        !Number.isInteger(pid) ||
+        pid <= 1 ||
+        !Number.isFinite(epoch) ||
+        epoch <= 0 ||
+        epoch > Date.now() / 1000
+      ) process.exit(2);
       process.stdout.write(`${pid}\t${Math.floor(epoch)}\n`);
     } catch { process.exit(2); }
   ' "$_lock" 2>/dev/null || true)"

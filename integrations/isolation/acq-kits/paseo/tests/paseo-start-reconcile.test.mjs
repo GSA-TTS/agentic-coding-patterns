@@ -77,3 +77,39 @@ test("leaves malformed and ambiguously owned locks untouched", () => {
   assert.match(readFileSync(join(ambiguous.home, "paseo.pid"), "utf8"), /startedAt/);
   assert.match(ambiguous.log, /not the Paseo supervisor/);
 });
+
+test("leaves implausible timestamps and non-numeric PIDs untouched", () => {
+  for (const lock of [
+    { pid: 1234, startedAt: -1 },
+    { pid: 1234, startedAt: Math.floor(Date.now() / 1_000) + 60 },
+    { pid: "1234", startedAt: "1970-01-01T00:00:01Z" },
+  ]) {
+    const root = mkdtempSync(join(tmpdir(), "paseo-reconcile-invalid-lock-"));
+    const home = join(root, "home");
+    const state = join(root, "state");
+    mkdirSync(home);
+    writeFileSync(join(home, "paseo.pid"), JSON.stringify(lock));
+
+    let result;
+    try {
+      result = execFileSync("sh", [startup], {
+        env: {
+          ...process.env,
+          HOME: home,
+          PASEO_HOME: home,
+          XDG_STATE_HOME: state,
+          PASEO_START_RECONCILE_TEST: "1",
+        },
+        encoding: "utf8",
+        stdio: "pipe",
+      });
+    } catch (error) {
+      result = `${error.stdout ?? ""}${error.stderr ?? ""}`;
+    }
+
+    assert.deepEqual(JSON.parse(readFileSync(join(home, "paseo.pid"), "utf8")), lock);
+    const logPath = join(state, "paseo", "paseo-start.log");
+    const log = existsSync(logPath) ? readFileSync(logPath, "utf8") : "";
+    assert.match(`${log}${result}`, /malformed or ambiguous/);
+  }
+});
