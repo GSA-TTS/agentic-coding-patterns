@@ -179,6 +179,13 @@ function normalizeModelId(id) {
   return out.replace(/-+$/, "")
 }
 
+// Token classes shared by the tokenizer and the precision guard. They are
+// defined once so the guard's identity residue cannot drift out of agreement
+// with what the tokenizer consumed — a token recognized here as a family or
+// variant must not also count as identity-bearing remainder.
+const FAMILY_TOKEN = /^(claude|gpt|gemini|llama\d*|cohere|command)$/i
+const VARIANT_TOKEN = /^(opus|sonnet|haiku|pro|flash|mini|nano|maverick)$/i
+
 function extractModelTokens(id) {
   const normalized = normalizeModelId(id)
   const parts = normalized.split("-")
@@ -186,9 +193,9 @@ function extractModelTokens(id) {
   let variant = ""
   const versionParts = []
   for (const part of parts) {
-    if (/^(claude|gpt|gemini|llama\d*|cohere|command)$/i.test(part)) {
+    if (FAMILY_TOKEN.test(part)) {
       family = /^llama/i.test(part) ? "llama" : /^command$/i.test(part) ? "cohere" : part
-    } else if (/^(opus|sonnet|haiku|pro|flash|mini|nano|maverick)$/i.test(part)) {
+    } else if (VARIANT_TOKEN.test(part)) {
       variant = part
     } else if (/^\d+$/.test(part)) {
       versionParts.push(Number.parseInt(part, 10))
@@ -204,6 +211,23 @@ function extractModelTokens(id) {
   return { family, version: versionParts, variant }
 }
 
+// Tokens that carry no model identity, only packaging. Each is a FULL token
+// (the id is split on separators first), so no substring can match by accident.
+// Anything NOT listed here and not a family/variant/version token is treated as
+// identity-bearing — see identityResidue below for why that direction matters.
+const IDENTITY_NOISE = [
+  // Hosting provider / marketplace prefixes: the same model is listed under
+  // several of them (`anthropic.claude-opus-5`, `us.anthropic.claude-opus-5`).
+  /^(anthropic|openai|google|meta|amazon|aws|bedrock|azure|vertex|mistral|ai21|deepseek|microsoft|xai|cohere)$/,
+  // Region / deployment scopes. Ranking still prefers us/global over eu/au.
+  /^(us|eu|au|uk|ca|jp|ap|sa|global|gov|govcloud)$/,
+  // Marketplace revision markers ("…-v1:0") and parameter counts ("17b", "8x7b").
+  /^v\d+(:\d+)?$/,
+  /^\d+(\.\d+)?x?\d*[bmk]$/,
+  // Tuning descriptors that name the same published model.
+  /^(instruct|instructed|it|chat|text)$/,
+]
+
 // Does an id carry the `lite` qualifier as its own token? Substring testing is
 // wrong here: it would see "lite" inside an unrelated word. `flash-lite` is a
 // DIFFERENT model from `flash`, with different limits and pricing.
@@ -211,10 +235,39 @@ function hasLiteToken(normalizedId) {
   return /(^|[.\-/])lite([.\-]|$)/.test(normalizedId)
 }
 
-const PROFILE_TOKENS = ["codex", "mini", "nano", "max"]
+// Every token an id carries that is NOT its family, variant, version, or known
+// packaging noise. This is the identity-bearing remainder.
+//
+// WHY A RESIDUE AND NOT A LIST OF QUALIFIERS. The earlier guard compared a
+// hard-coded set (`codex`, `mini`, `nano`, `max`). That fails OPEN for any
+// qualifier not on the list, which is the whole class of tokens a future
+// gateway id might add: `gpt-5.2-luna` collapsed onto `gpt-5.2`,
+// `claude-opus-5-thinking` onto `claude-opus-5`, and
+// `gemini-2.5-flash-preview` onto `gemini-2.5-flash` — each inheriting a
+// sibling's limits and pricing, the exact defect this guard exists to prevent.
+// Enumerating qualifiers cannot work, because the set is open and owned by the
+// vendors. Enumerating NOISE can, because that set is small, observable in the
+// catalogs we actually read, and safe to be wrong about in the closed
+// direction: an unrecognized noise token only costs a missed enrichment, which
+// is reported as unenriched rather than silently wrong.
+function identityResidue(normalizedId) {
+  const residue = new Set()
+  for (const part of normalizedId.split(/[.\-/:]/)) {
+    if (!part) continue
+    if (FAMILY_TOKEN.test(part) || VARIANT_TOKEN.test(part)) continue
+    if (/^\d+$/.test(part)) continue
+    if (IDENTITY_NOISE.some((re) => re.test(part))) continue
+    residue.add(part)
+  }
+  return residue
+}
 
-function hasProfileToken(normalizedId, token) {
-  return new RegExp(`(^|[.\\-/])${token}([.\\-]|$)`).test(normalizedId)
+function sameIdentityResidue(usaiNorm, catalogNorm) {
+  const a = identityResidue(usaiNorm)
+  const b = identityResidue(catalogNorm)
+  if (a.size !== b.size) return false
+  for (const token of a) if (!b.has(token)) return false
+  return true
 }
 
 // PRECISION GUARD. Scoring alone cannot be trusted to reject a wrong candidate:
@@ -226,6 +279,8 @@ function hasProfileToken(normalizedId, token) {
 //   tier/variant haiku is not opus is not sonnet; flash is not pro
 //   major.minor  4.5 is not 5 and is not 4.8
 //   lite         flash-lite is not flash
+//   residue      every other identity-bearing token must agree, so an
+//                unrecognized qualifier fails CLOSED instead of being ignored
 //
 // Rationale for failing closed: enriching a model with a different model's
 // numbers is worse than having none, because the fields come out populated and
@@ -236,9 +291,7 @@ function isPreciseMatch(usaiTokens, catalogTokens, usaiNorm, catalogNorm) {
   if (usaiTokens.family !== catalogTokens.family) return false
   if ((usaiTokens.variant || "") !== (catalogTokens.variant || "")) return false
   if (hasLiteToken(usaiNorm) !== hasLiteToken(catalogNorm)) return false
-  for (const token of PROFILE_TOKENS) {
-    if (hasProfileToken(usaiNorm, token) !== hasProfileToken(catalogNorm, token)) return false
-  }
+  if (!sameIdentityResidue(usaiNorm, catalogNorm)) return false
   // Compare major and minor positionally. Both absent is agreement (a bare
   // family id on both sides); one absent is not.
   if (usaiTokens.version[0] !== catalogTokens.version[0]) return false

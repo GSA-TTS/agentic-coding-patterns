@@ -100,6 +100,64 @@ test("profile-qualified models do not match their base siblings", () => {
   assert.equal(findModelsDevMatch("gpt-5.2-max", catalog)?.id, "gpt-5.2-max")
 })
 
+// -----------------------------------------------------------------------------
+// UNRECOGNIZED qualifiers. The decisive property: the guard must not depend on
+// knowing a qualifier's name.
+//
+// An earlier version of this guard compared a hard-coded list (`codex`, `mini`,
+// `nano`, `max`). Anything outside that list was invisible to it, so a
+// qualified gateway id collapsed onto its base model and inherited that
+// sibling's limits and pricing — recreating the exact defect the guard exists
+// to prevent, for every qualifier the list did not happen to name.
+//
+// The names below are deliberately INVENTED. A test using a real qualifier
+// would pass the moment someone adds that token to a list, which is the failure
+// mode being guarded against; an invented token can only pass if identity
+// comparison is genuinely closed over unknown input.
+// -----------------------------------------------------------------------------
+
+test("an unrecognized qualifier does not match the bare base model", () => {
+  // Each of these matched its base before identity comparison failed closed.
+  for (const [qualified, base] of [
+    ["gpt-5.2-luna", "gpt-5.2"],
+    ["claude-opus-5-thinking", "claude-opus-5"],
+    ["gemini-2.5-flash-preview", "gemini-2.5-flash"],
+  ]) {
+    assert.equal(findModelsDevMatch(qualified, catalogOf(base)), null, `${qualified} must not match ${base}`)
+  }
+})
+
+test("a bare base model does not match an unrecognized-qualifier entry", () => {
+  // The reverse direction: the wrong-way match is just as damaging, because the
+  // base model is the one most likely to be requested.
+  for (const [base, qualified] of [
+    ["gpt-5.2", "gpt-5.2-luna"],
+    ["claude-opus-5", "claude-opus-5-thinking"],
+  ]) {
+    assert.equal(findModelsDevMatch(base, catalogOf(qualified)), null, `${base} must not match ${qualified}`)
+  }
+})
+
+test("two different unrecognized qualifiers do not match each other", () => {
+  const catalog = catalogOf("gpt-5.2-luna")
+  assert.equal(findModelsDevMatch("gpt-5.2-solstice", catalog), null)
+})
+
+test("an unrecognized qualifier still matches its own exact entry", () => {
+  // Failing closed must not mean failing always: when the source really does
+  // list the qualified model, it has to be found.
+  const catalog = catalogOf("gpt-5.2-luna", "gpt-5.2")
+  assert.equal(findModelsDevMatch("gpt-5.2-luna", catalog)?.id, "gpt-5.2-luna")
+  assert.equal(findModelsDevMatch("gpt-5.2", catalog)?.id, "gpt-5.2")
+})
+
+test("an unrecognized qualifier is not rescued by a provider prefix or region", () => {
+  // Noise normalization must not accidentally strip the qualifier along with
+  // the parts that genuinely carry no identity.
+  const catalog = catalogOf("us.anthropic.claude-opus-5")
+  assert.equal(findModelsDevMatch("claude-opus-5-thinking", catalog), null)
+})
+
 test("an empty enrichment source yields no match, not a throw", () => {
   assert.equal(findModelsDevMatch("claude_4_5_haiku", {}), null)
 })
