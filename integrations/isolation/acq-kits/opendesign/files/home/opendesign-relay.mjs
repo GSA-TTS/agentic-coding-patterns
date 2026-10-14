@@ -70,15 +70,20 @@ function parseDefaultIpv4Route(routeTable) {
     const flags = Number.parseInt(fields[3], 16);
     const metric = Number.parseInt(fields[6], 10);
     if (fields[1] !== '00000000' || !fields[2] || !Number.isFinite(flags) || !(flags & 0x1)
-      || !Number.isFinite(metric) || metric >= selected.metric) continue;
+      || !Number.isFinite(metric) || metric < 0 || !/^[0-9a-fA-F]{8}$/.test(fields[2])) continue;
     const hex = fields[2].match(/../g);
-    if (!hex) continue;
     const gateway = hex.reverse().map((part) => Number.parseInt(part, 16)).join('.');
+    const hasGateway = gateway !== '0.0.0.0';
+    const selectedHasGateway = selected.gateway !== '';
+    // A point-to-point route has no forwarder peer to authorize. Prefer any
+    // gateway-bearing default route over it, then use metric within that class.
+    if ((!hasGateway && selectedHasGateway)
+      || (hasGateway === selectedHasGateway && metric >= selected.metric)) continue;
     selected = {
       iface: fields[0],
       // Point-to-point default routes encode no peer gateway as 0.0.0.0. It
       // cannot be a TCP client address, so omit it from the allowlist.
-      gateway: gateway === '0.0.0.0' ? '' : gateway,
+      gateway: hasGateway ? gateway : '',
       metric,
     };
   }
@@ -172,6 +177,11 @@ if (SELF_TEST) {
   const multipleRoutes = parseDefaultIpv4Route('Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\neth0\t00000000\t0141A8C0\t0003\t0\t0\t100\neth1\t00000000\t0164A8C0\t0003\t0\t0\t10\neth2\t00000000\t012CA8C0\t0000\t0\t0\t1\n');
   assertEqual(multipleRoutes.iface, 'eth1', 'lowest-metric active default route is selected');
   assertEqual(multipleRoutes.gateway, '192.168.100.1', 'selected route gateway is decoded');
+  const pointToPointBeforeGateway = parseDefaultIpv4Route('Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\nppp0\t00000000\t00000000\t0003\t0\t0\t5\neth0\t00000000\t0141A8C0\t0003\t0\t0\t100\n');
+  assertEqual(pointToPointBeforeGateway.iface, 'eth0', 'gateway route is preferred over a lower-metric point-to-point route');
+  assertEqual(pointToPointBeforeGateway.gateway, '192.168.65.1', 'preferred gateway route supplies the forwarder peer');
+  const malformedGateway = parseDefaultIpv4Route('Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\neth0\t00000000\t41A8C0\t0003\t0\t0\t100\n');
+  assertEqual(malformedGateway.iface, '', 'malformed gateway route is rejected');
   const peers = allowedPeerAddresses(route, ' 192.0.2.44, [::1], ::ffff:192.0.2.45 ');
   assert(isAllowedPeer('192.168.65.1', peers), 'default gateway peer is allowed');
   assert(isAllowedPeer('::ffff:192.0.2.45', peers), 'configured IPv4-mapped peer is normalized and allowed');

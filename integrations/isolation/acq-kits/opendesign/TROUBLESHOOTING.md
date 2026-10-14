@@ -251,7 +251,15 @@ daemon, and that OpenCode resolves `usai/*` models under the same rewritten
 environment OpenDesign uses:
 
 ```bash
-acq exec <sandbox> -- sh -c 'tr "\0" "\n" < /proc/$(pgrep -f "apps/daemon/dist/cli.js" | head -n1)/environ | grep OPENCODE_CONFIG'
+acq exec <sandbox> -- sh -c '
+  daemon_pid="$(for p in $(pgrep -f "^[^ ]*node .*apps/daemon/dist/cli\\.js"); do
+    [ -r "/proc/$p/environ" ] || continue
+    got="$(tr "\0" "\n" < "/proc/$p/environ" | sed -n "s/^OD_PORT=//p")"
+    [ "$got" = "17456" ] || continue
+    printf "%s\n" "$p"
+    break
+  done)"
+  [ -n "$daemon_pid" ] && tr "\0" "\n" < "/proc/$daemon_pid/environ" | grep "^OPENCODE_CONFIG="'
 
 acq exec <sandbox> -- sh -c '
   OPENCODE_CONFIG="$HOME/.config/opencode/opencode.jsonc" \
