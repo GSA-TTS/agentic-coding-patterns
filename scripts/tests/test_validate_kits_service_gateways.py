@@ -392,6 +392,43 @@ class TestServiceGatewaysValidator:
         errors, _warnings = validate_kit(kit, _load_schema())
         assert any("privileged with Compose interpolation" in error for error in errors), errors
 
+    @pytest.mark.parametrize("hook_name", ["post_start", "pre_stop"])
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [("true", "privileged: true"), ("$PRIVILEGED", "privileged with Compose interpolation")],
+    )
+    def test_rejects_privileged_lifecycle_hooks(self, tmp_path, hook_name, value, expected):
+        validate_kit = _load_validate_kit()
+        kit = _write_kit(
+            tmp_path / "privileged-hook",
+            "schemaVersion: hybrid/v1\n"
+            "kind: mixin\n"
+            "name: privileged-hook\n"
+            "displayName: Privileged Hook\n"
+            "description: d\n"
+            "serviceGateways:\n"
+            "  - name: demo-gateway\n"
+            "    runtime:\n"
+            "      compose:\n"
+            "        files: [compose.yaml]\n"
+            "        service: gateway\n"
+            "    interface:\n"
+            "      protocol: http\n"
+            "      port: 8080\n"
+            "    expose:\n"
+            "      env:\n"
+            "        WEB_GATEWAY_URL: url\n",
+            "services:\n"
+            "  gateway:\n"
+            "    image: ghcr.io/example/gateway:1.0.0\n"
+            "    expose: [8080]\n"
+            f"    {hook_name}:\n"
+            "      - command: /bin/true\n"
+            f"        privileged: {value}\n",
+        )
+        errors, _warnings = validate_kit(kit, _load_schema())
+        assert any(hook_name in error and expected in error for error in errors), errors
+
     @pytest.mark.parametrize(
         ("compose_yaml", "expected"),
         [
