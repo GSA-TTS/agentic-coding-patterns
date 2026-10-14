@@ -82,18 +82,11 @@ fi
 rm -rf "$AUTH_WORK" >/dev/null 2>&1 || true
 
 AUTH_WORK="$(mktemp -d "${TMPDIR:-/tmp}/cloud-gov-auth.XXXXXX")"
-if HOME="$AUTH_WORK" PATH="$AUTH_PATH" CF_OAUTH_TOKEN="MSB_PLACEHOLDER_TOKEN" sh "$AUTH_SCRIPT" >/dev/null 2>&1; then
-  ok "auth script accepts msb placeholder token"
+MSB_PLACEHOLDER='$'MSB_SECRET_PLACEHOLDER
+if HOME="$AUTH_WORK" PATH="$AUTH_PATH" CF_OAUTH_TOKEN="$MSB_PLACEHOLDER" sh "$AUTH_SCRIPT" >/dev/null 2>&1; then
+  ok "auth script accepts msb guest secret placeholder"
 else
-  bad "auth script rejected msb placeholder token"
-fi
-rm -rf "$AUTH_WORK" >/dev/null 2>&1 || true
-
-AUTH_WORK="$(mktemp -d "${TMPDIR:-/tmp}/cloud-gov-auth.XXXXXX")"
-if HOME="$AUTH_WORK" PATH="$AUTH_PATH" CF_OAUTH_TOKEN="<MSB_PLACEHOLDER>" sh "$AUTH_SCRIPT" >/dev/null 2>&1; then
-  ok "auth script accepts msb bracket placeholder"
-else
-  bad "auth script rejected msb bracket placeholder"
+  bad "auth script rejected msb guest secret placeholder"
 fi
 rm -rf "$AUTH_WORK" >/dev/null 2>&1 || true
 

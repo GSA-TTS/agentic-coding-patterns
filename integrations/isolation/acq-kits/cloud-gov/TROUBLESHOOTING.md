@@ -55,7 +55,7 @@ or no current user.
 
 - **Unexpected token value in the sandbox.** The startup script only accepts
   recognized backend placeholders in `CF_OAUTH_TOKEN`, including sbx/acq forms
-  and the msb placeholder form represented in tests as `MSB_PLACEHOLDER_TOKEN`.
+  and the documented msb guest-secret placeholder prefix.
   If a raw `bearer ...` token, a JWT-looking value, or a value with control
   characters appears in the sandbox, startup fails closed before writing CF CLI
   auth state. Refresh the acq secret from the host and recreate the sandbox. Do

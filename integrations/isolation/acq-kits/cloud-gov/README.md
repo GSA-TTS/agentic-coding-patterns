@@ -88,9 +88,9 @@ cf oauth-token | acq secret set <sandbox-name> cloud-gov --host api.fr.cloud.gov
 The `CF_OAUTH_TOKEN` name is a placeholder binding for backend proxy/secret
 substitution. At startup the kit targets `https://api.fr.cloud.gov` and, when
 that value is present, refuses to continue unless it matches a recognized
-backend-placeholder prefix, including the msb placeholder form represented in
-tests as `MSB_PLACEHOLDER_TOKEN`. The startup guard rejects bearer/JWT-like raw
-token material before anything can be written to the workspace. The stock CF CLI
+backend-placeholder prefix, including the documented msb guest-secret placeholder
+prefix. The startup guard rejects bearer/JWT-like raw token material before
+anything can be written to the workspace. The stock CF CLI
 may parse `AccessToken` locally, so the kit does not write the placeholder into
 CF CLI config or claim authenticated `cf` commands work without live
 verification.

@@ -31,10 +31,10 @@ Create a neutral `cloud-gov` acq mixin kit for sbx and msb that:
    ```
 
 4. Validates any injected `CF_OAUTH_TOKEN` value as a recognized backend
-   placeholder, including the msb placeholder form represented in tests as
-   `MSB_PLACEHOLDER_TOKEN`, and refuses raw token-looking values. The placeholder
-   can be used for direct HTTPS Cloud Foundry API calls that the backend proxy
-   rewrites on the way to `api.fr.cloud.gov`.
+   placeholder, including the documented msb guest-secret placeholder prefix,
+   and refuses raw token-looking values. The placeholder can be used for direct
+   HTTPS Cloud Foundry API calls that the backend proxy rewrites on the way to
+   `api.fr.cloud.gov`.
 
 The kit does not store the real Cloud Foundry OAuth token in `spec.yaml`, files,
 or repository docs. The token remains in the host-side acq secret store and the

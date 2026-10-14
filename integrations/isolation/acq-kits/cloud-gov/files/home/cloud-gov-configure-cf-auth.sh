@@ -12,6 +12,7 @@ mkdir -p "$HOME/.cf"
 chmod 0700 "$HOME/.cf"
 
 if [ -n "${CF_OAUTH_TOKEN:-}" ]; then
+  msb_prefix='$'MSB_
   case "$CF_OAUTH_TOKEN" in
     *[![:print:]]*|*[[:space:]]*)
       log "CF_OAUTH_TOKEN placeholder contains an unsafe character; refusing startup"
@@ -24,7 +25,7 @@ if [ -n "${CF_OAUTH_TOKEN:-}" ]; then
       log "CF_OAUTH_TOKEN looks like raw token material; refusing startup"
       exit 1
       ;;
-    acq_placeholder_?*|sbx-cs-?*|MSB_PLACEHOLDER?*|\<MSB_PLACEHOLDER*\>)
+    acq_placeholder_?*|sbx-cs-?*|"$msb_prefix"?*)
       :
       ;;
     *.*.*)
