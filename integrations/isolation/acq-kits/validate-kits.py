@@ -283,6 +283,17 @@ def _compose_escape_errors(compose_doc: object, compose_path: Path, kit_dir: Pat
             errors.append(f"{prefix} declares privileged: true")
         elif _has_compose_interpolation(service.get("privileged")):
             errors.append(f"{prefix} declares privileged with Compose interpolation; validation cannot prove it safe")
+        for hook_name in ("post_start", "pre_stop"):
+            for hook in _as_list(service.get(hook_name)):
+                if not isinstance(hook, dict):
+                    continue
+                hook_prefix = f"{prefix} {hook_name} hook"
+                if _is_compose_true(hook.get("privileged")):
+                    errors.append(f"{hook_prefix} declares privileged: true")
+                elif _has_compose_interpolation(hook.get("privileged")):
+                    errors.append(
+                        f"{hook_prefix} declares privileged with Compose interpolation; validation cannot prove it safe"
+                    )
         if "build" in service:
             errors.append(f"{prefix} declares build; service gateways must use prebuilt reviewed images")
         for key in ("network_mode", "pid", "ipc", "userns_mode", "cgroup"):
