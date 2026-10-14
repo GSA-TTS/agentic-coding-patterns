@@ -249,3 +249,47 @@ def test_no_silent_skip_remains_in_converted_kits():
     assert not offenders, (
         "converted kits still report skips via bare echo, which increments no counter:\n  " + "\n  ".join(offenders)
     )
+
+
+def _readme_classification(label: str, *, required: bool) -> set[str]:
+    """Kits the acq-kits README lists for one side of the staged migration.
+
+    Scans the whole paragraph after the heading, not just its first sentence, so
+    a later claim in the same paragraph cannot contradict the list unnoticed.
+
+    `required=False` treats a missing section as the empty set. That is the
+    documented end state for the unconverted side: when migration completes the
+    README drops that carve-out, and an absent section then means "no kits",
+    not "the README is malformed".
+    """
+    text = (ACQ_KITS / "README.md").read_text(encoding="utf-8")
+    match = re.search(rf"\*\*{label} kits\*\* — (.*?)(?:\n\n|\Z)", text, re.S)
+    if match is None:
+        assert not required, f"acq-kits/README.md has no '**{label} kits** — ...' paragraph"
+        return set()
+    # Kit names are the backticked tokens that name a real verify script; other
+    # backticked tokens in the paragraph (exit codes, file names) are prose.
+    scripts = _verify_scripts()
+    return {token for token in re.findall(r"`([^`]+)`", match.group(1)) if token in scripts}
+
+
+@pytest.mark.parametrize(
+    ("label", "expected", "required"),
+    [("Converted", CONVERTED, True), ("Unconverted", UNCONVERTED, False)],
+)
+def test_readme_classification_matches_this_suite(label: str, expected: set[str], required: bool):
+    """The README's per-kit split must match the authoritative classification.
+
+    The README documents exit codes `0`/`1`/`3` as the verdict contract, and
+    that contract only holds for converted kits. A README naming the wrong kits
+    tells a caller to trust a `0` from a kit whose `0` does not distinguish
+    "every check passed" from "a check could not run". Deriving both lists from
+    the README paragraph fails a README-only edit and a suite-only edit alike,
+    so the two cannot drift as kits migrate.
+    """
+    documented = _readme_classification(label, required=required)
+    assert documented == expected, (
+        f"acq-kits/README.md lists {label.lower()} kits {sorted(documented)} but this suite "
+        f"classifies {sorted(expected)}. Update the README section when a kit migrates: "
+        f"README-only={sorted(documented - expected)}, suite-only={sorted(expected - documented)}"
+    )
