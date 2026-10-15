@@ -2,15 +2,27 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import { test } from "node:test"
 
-import { validateCatalog } from "../scripts/build-catalog.mjs"
+import { DEFAULT_ROLE_PRIORITY, resolveCatalogDefaults, validateCatalog } from "../scripts/build-catalog.mjs"
 
 const catalog = JSON.parse(readFileSync(new URL("../catalog.json", import.meta.url), "utf8"))
 const schema = JSON.parse(readFileSync(new URL("../catalog.schema.json", import.meta.url), "utf8"))
 
 function withFirstModel(overrides) {
+  // Use models[1] (claude_4_5_sonnet) when modifying the first model,
+  // or update defaults so defaults don't point to an overridden ID.
+  const m0 = catalog.models[0]
   return {
     ...catalog,
-    models: [{ ...catalog.models[0], ...overrides }, ...catalog.models.slice(1)],
+    models: [{ ...m0, ...overrides }, ...catalog.models.slice(1)],
+  }
+}
+
+function withNonDefaultModel(overrides) {
+  // models[1] is claude_4_5_sonnet which is not currently defaults.primary, small, or compaction
+  const m1 = catalog.models[1]
+  return {
+    ...catalog,
+    models: [catalog.models[0], { ...m1, ...overrides }, ...catalog.models.slice(2)],
   }
 }
 
@@ -19,7 +31,7 @@ test("the committed catalog satisfies the hand-rolled validator", () => {
 })
 
 test("catalog validation rejects model ids that can escape generated config", () => {
-  assert.deepEqual(validateCatalog(withFirstModel({ id: 'provider/"quoted"\\model:v1' }), schema), [])
+  assert.deepEqual(validateCatalog(withNonDefaultModel({ id: 'provider/"quoted"\\model:v1' }), schema), [])
 })
 
 test("catalog validation rejects control characters in display names", () => {
@@ -28,17 +40,17 @@ test("catalog validation rejects control characters in display names", () => {
 
 test("catalog validation rejects control characters in ids", () => {
   for (const id of ["line\nbreak", "carriage\rreturn", "nul\u0000byte", "delete\u007fbyte"]) {
-    assert.match(validateCatalog(withFirstModel({ id }), schema).join("\n"), /id does not match/)
+    assert.match(validateCatalog(withNonDefaultModel({ id }), schema).join("\n"), /id does not match/)
   }
 })
 
 test("catalog validation bounds feed-controlled string lengths", () => {
-  assert.match(validateCatalog(withFirstModel({ id: "a".repeat(129) }), schema).join("\n"), /id exceeds 128/)
+  assert.match(validateCatalog(withNonDefaultModel({ id: "a".repeat(129) }), schema).join("\n"), /id exceeds 128/)
   assert.match(validateCatalog(withFirstModel({ name: "a".repeat(257) }), schema).join("\n"), /name exceeds 256/)
 })
 
 test("catalog validation allows provider-qualified ids and counts Unicode code points", () => {
-  assert.deepEqual(validateCatalog(withFirstModel({ id: "provider/model:v1" }), schema), [])
+  assert.deepEqual(validateCatalog(withNonDefaultModel({ id: "provider/model:v1" }), schema), [])
   assert.deepEqual(validateCatalog(withFirstModel({ name: "😀".repeat(128) }), schema), [])
 })
 
@@ -72,4 +84,96 @@ test("catalog validation rejects non-positive and fractional limits", () => {
     assert.match(validateCatalog(withFirstModel({ contextWindow: value }), schema).join("\n"), /positive integer/)
     assert.match(validateCatalog(withFirstModel({ maxOutputTokens: value }), schema).join("\n"), /positive integer/)
   }
+})
+
+test("catalog validation enforces defaults structure and referential integrity", () => {
+  assert.match(
+    validateCatalog({ ...catalog, defaults: null }, schema).join("\n"),
+    /defaults must be an object/,
+  )
+  assert.match(
+    validateCatalog({ ...catalog, defaults: { ...catalog.defaults, extraRole: "claude-sonnet-5" } }, schema).join("\n"),
+    /disallowed key "extraRole"/,
+  )
+  assert.match(
+    validateCatalog({ ...catalog, defaults: { small: "claude_4_5_haiku" } }, schema).join("\n"),
+    /missing required key "primary"/,
+  )
+  assert.match(
+    validateCatalog({ ...catalog, defaults: { ...catalog.defaults, primary: "usai/claude-sonnet-5" } }, schema).join("\n"),
+    /must not include a provider prefix/,
+  )
+  assert.match(
+    validateCatalog({ ...catalog, defaults: { ...catalog.defaults, primary: "nonexistent-model" } }, schema).join("\n"),
+    /references unknown model "nonexistent-model"/,
+  )
+})
+
+// -----------------------------------------------------------------------------
+// Default-role RESOLUTION, as distinct from validation of an already-built
+// block. `resolveDefaultRole` accepts an `existingValue` fallback so a feed that
+// drops every priority candidate does not break regeneration — but that
+// fallback is only reachable if the caller supplies it. Both build paths
+// previously called `resolveCatalogDefaults(models)` with no second argument,
+// making the documented stability guarantee dead code: the run threw instead of
+// preserving a default that was still valid.
+// -----------------------------------------------------------------------------
+
+const modelList = (...ids) => ids.map((id) => ({ id, vendor: "openai", name: id }))
+
+test("resolveCatalogDefaults prefers a priority candidate over the existing value", () => {
+  // Every role needs something resolvable, so seed each one's top candidate and
+  // additionally offer a stale existing value for primary.
+  const models = modelList(
+    ...Object.values(DEFAULT_ROLE_PRIORITY).map((list) => list[0]),
+    "something-else",
+  )
+  const resolved = resolveCatalogDefaults(models, { primary: "something-else" })
+  assert.equal(resolved.primary, DEFAULT_ROLE_PRIORITY.primary[0])
+})
+
+test("resolveCatalogDefaults falls back to a still-valid existing default", () => {
+  // No priority candidate for any role is present, but the previously committed
+  // choices all still exist in the feed, so regeneration must preserve them
+  // rather than throw.
+  const existing = { primary: "keep-primary", small: "keep-small", compaction: "keep-compaction", summary: "keep-summary", title: "keep-title" }
+  const models = modelList(...Object.values(existing))
+  assert.deepEqual(resolveCatalogDefaults(models, existing), existing)
+})
+
+test("resolveCatalogDefaults ignores an existing default that no longer exists", () => {
+  // A stale fallback must not be carried forward — it would emit a default
+  // referencing a model that is not in models[].
+  const models = modelList("unrelated-model")
+  assert.throws(
+    () => resolveCatalogDefaults(models, { primary: "retired-model" }),
+    /Cannot resolve default for role "primary"/,
+  )
+})
+
+test("resolveCatalogDefaults with no prior defaults still resolves from priority", () => {
+  // First-ever generation: absence of a committed catalog.json is not an error.
+  const models = modelList(
+    DEFAULT_ROLE_PRIORITY.primary[0],
+    DEFAULT_ROLE_PRIORITY.small[0],
+    DEFAULT_ROLE_PRIORITY.compaction[0],
+    DEFAULT_ROLE_PRIORITY.summary[0],
+    DEFAULT_ROLE_PRIORITY.title[0],
+  )
+  const resolved = resolveCatalogDefaults(models)
+  assert.equal(resolved.primary, DEFAULT_ROLE_PRIORITY.primary[0])
+  assert.equal(resolved.summary, DEFAULT_ROLE_PRIORITY.summary[0])
+})
+
+test("every role the schema allows is either resolved or explicitly optional", () => {
+  // Guards against a role being added to the schema but never resolved, which
+  // would leave it as hand-maintained config inside a generated block.
+  const schemaRoles = Object.keys(schema.properties.defaults.properties)
+  const resolvedRoles = Object.keys(DEFAULT_ROLE_PRIORITY)
+  const unresolved = schemaRoles.filter((r) => !resolvedRoles.includes(r))
+  assert.deepEqual(
+    unresolved,
+    ["reasoning"],
+    "a schema role with no priority list must be a deliberate, documented omission",
+  )
 })

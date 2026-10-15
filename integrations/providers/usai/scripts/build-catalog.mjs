@@ -755,6 +755,35 @@ function validateCatalog(catalog, schema) {
     }
   }
 
+  // defaults
+  assert(catalog.defaults && typeof catalog.defaults === "object" && !Array.isArray(catalog.defaults), "defaults must be an object", errors)
+  if (catalog.defaults && typeof catalog.defaults === "object" && !Array.isArray(catalog.defaults)) {
+    // Derive the allowed role set from the SCHEMA rather than restating it, so
+    // adding a role cannot leave the validator rejecting what the schema
+    // permits (or accepting what it does not).
+    const defaultsAllowed = new Set(Object.keys(schema.properties.defaults.properties))
+
+    for (const k of Object.keys(catalog.defaults)) {
+      assert(defaultsAllowed.has(k), `defaults: disallowed key "${k}"`, errors)
+    }
+    for (const r of ["primary", "small"]) {
+      assert(r in catalog.defaults, `defaults: missing required key "${r}"`, errors)
+    }
+    const modelIds = new Set((catalog.models || []).map((m) => m.id))
+    const defaultsProperties = schema.properties.defaults.properties
+    for (const [role, id] of Object.entries(catalog.defaults)) {
+      if (defaultsProperties[role]) {
+        validateStringFromSchema(id, defaultsProperties[role], `defaults.${role}`, errors)
+      } else {
+        assert(typeof id === "string", `defaults.${role} must be string`, errors)
+      }
+      if (typeof id === "string") {
+        assert(!id.includes("/"), `defaults.${role} "${id}" must not include a provider prefix`, errors)
+        assert(modelIds.has(id), `defaults.${role} references unknown model "${id}" (not in models[])`, errors)
+      }
+    }
+  }
+
   // models
   assert(Array.isArray(catalog.models), "models must be an array", errors)
   if (Array.isArray(catalog.models)) {
@@ -785,13 +814,58 @@ function validateCatalog(catalog, schema) {
 }
 
 // -----------------------------------------------------------------------------
+// Default role candidates in priority order.
+// Roles represent standard agentic execution tiers:
+//   primary: flagship instruction-following and multi-step reasoning (OpenCode `model`)
+//   small: fast, cost-effective lightweight completions (OpenCode `small_model`)
+//   compaction: context compaction and conversation summarization (OpenCode `agent.compaction.model`)
+//   summary: short recap of a finished exchange (OpenCode `agent.summary.model`)
+//   title: one-line session naming (OpenCode `agent.title.model`)
+//
+// summary and title are modelled because the shipped provider config already
+// pins both, outside the generated block. Leaving them out of the catalog would
+// have kept two of the five role decisions as hand-maintained config that the
+// pipeline reports as regenerated — the split would be incomplete in a way the
+// round-trip test could not see.
+// -----------------------------------------------------------------------------
+const DEFAULT_ROLE_PRIORITY = {
+  primary: ["claude-sonnet-5", "claude_4_5_sonnet", "claude-opus-5", "claude_4_5_opus"],
+  small: ["claude_4_5_haiku", "claude-3-5-haiku"],
+  compaction: ["gpt-5.6-terra", "gpt_5_5_default_v2", "gpt-5.4-latest-guardrails-defaultv2"],
+  summary: ["gpt_5_2_default_v2", "gpt_5_4_default_v2", "gpt-5.6-terra"],
+  title: ["gpt_5_2_default_v2", "gpt_5_4_default_v2", "gpt-5.6-terra"],
+}
+
+function resolveDefaultRole(models, priorityList, existingValue, roleName) {
+  const modelIds = new Set(models.map((m) => m.id))
+  for (const candidate of priorityList) {
+    if (modelIds.has(candidate)) return candidate
+  }
+  if (existingValue && modelIds.has(existingValue)) return existingValue
+  throw new Error(
+    `Cannot resolve default for role "${roleName}": none of the priority candidates ` +
+      `([${priorityList.join(", ")}]) or fallback "${existingValue}" exist in the catalog.`,
+  )
+}
+
+function resolveCatalogDefaults(models, existingDefaults = {}) {
+  const resolved = {}
+  for (const role of Object.keys(DEFAULT_ROLE_PRIORITY)) {
+    resolved[role] = resolveDefaultRole(models, DEFAULT_ROLE_PRIORITY[role], existingDefaults[role], role)
+  }
+  return resolved
+}
+
+
+// -----------------------------------------------------------------------------
 // Deterministic serialization: keys in a fixed order, 2-space indent, trailing
 // newline. Order is stable so the committed catalog.json is reproducible.
 // -----------------------------------------------------------------------------
 const KEY_ORDER = {
-  root: ["schemaVersion", "generatedBy", "sources", "gateway", "vendors", "models"],
+  root: ["schemaVersion", "generatedBy", "sources", "gateway", "vendors", "defaults", "models"],
   gateway: ["host", "baseUrl", "api", "apiKeyEnv"],
   vendor: ["key", "label", "order", "usaiBackend"],
+  defaults: ["primary", "small", "compaction", "summary", "title", "reasoning"],
   model: ["id", "vendor", "name", "contextWindow", "maxOutputTokens", "cost", "costAbove200kContext", "reasoning", "inputModalities"],
   cost: ["input", "output", "cacheRead", "cacheWrite"],
 }
@@ -808,6 +882,7 @@ function orderCatalog(catalog) {
   const out = orderObject(catalog, KEY_ORDER.root)
   if (out.gateway) out.gateway = orderObject(out.gateway, KEY_ORDER.gateway)
   if (Array.isArray(out.vendors)) out.vendors = out.vendors.map((v) => orderObject(v, KEY_ORDER.vendor))
+  if (out.defaults) out.defaults = orderObject(out.defaults, KEY_ORDER.defaults)
   if (Array.isArray(out.models)) {
     out.models = out.models.map((m) => {
       const om = orderObject(m, KEY_ORDER.model)
@@ -856,9 +931,39 @@ function parseArgs(argv) {
   return args
 }
 
+// Read the `defaults` block already committed in catalog.json, so regeneration
+// can fall back to a currently-valid choice when none of the priority
+// candidates survive in the new feed.
+//
+// WHY THIS IS LOADED RATHER THAN PASSED EMPTY. `resolveDefaultRole` accepts an
+// `existingValue` fallback precisely so a feed that drops every priority
+// candidate does not break regeneration — but the fallback is unreachable if
+// the caller never supplies it. Both build paths previously called
+// `resolveCatalogDefaults(models)` with no second argument, so the stability
+// guarantee the function documents could not fire: the run threw instead of
+// preserving a default that is still present in the catalog.
+//
+// Absence is NOT an error. A first-ever generation, or a deliberately removed
+// catalog.json, has no prior defaults to honour; that must fall through to the
+// priority list rather than fail. An unreadable or malformed file is likewise
+// treated as "no prior defaults" — the subsequent resolve either finds a
+// priority candidate or throws with its own, more specific message.
+async function loadExistingDefaults(outPath) {
+  try {
+    const parsed = JSON.parse(await readFile(outPath, "utf8"))
+    const defaults = parsed?.defaults
+    if (defaults && typeof defaults === "object" && !Array.isArray(defaults)) return defaults
+  } catch {
+    // No catalog.json yet, unreadable, or not valid JSON.
+  }
+  return {}
+}
+
 async function buildCatalog(args) {
   const schemaPath = args.opts["--schema"] || DEFAULT_SCHEMA
   const schema = JSON.parse(await readFile(schemaPath, "utf8"))
+  const outPath = args.opts["--out"] || DEFAULT_OUT
+  const existingDefaults = await loadExistingDefaults(outPath)
 
   const modelsUrl = args.opts["--models-url"]
   const noEnrichment = args.flags.has("--no-enrichment")
@@ -877,6 +982,7 @@ async function buildCatalog(args) {
       else throw new Error("models.dev source has unexpected shape (expected provider-keyed object)")
     }
     const { models, vendorOrder } = shapeFromFeeds(usaiList, modelsDevCatalog)
+    const defaults = resolveCatalogDefaults(models, existingDefaults)
     catalog = {
       schemaVersion: SCHEMA_VERSION,
       generatedBy: GENERATED_MARKER,
@@ -886,6 +992,7 @@ async function buildCatalog(args) {
       },
       gateway: buildGateway(),
       vendors: buildVendors(vendorOrder),
+      defaults,
       models,
     }
   } else {
@@ -898,6 +1005,8 @@ async function buildCatalog(args) {
     // Preserve vendor first-appearance order from the block.
     const vendorOrder = []
     for (const m of models) if (!vendorOrder.includes(m.vendor)) vendorOrder.push(m.vendor)
+    const defaults = resolveCatalogDefaults(models, existingDefaults)
+
     catalog = {
       schemaVersion: SCHEMA_VERSION,
       generatedBy: GENERATED_MARKER,
@@ -906,6 +1015,7 @@ async function buildCatalog(args) {
       },
       gateway: buildGateway(),
       vendors: buildVendors(vendorOrder),
+      defaults,
       models,
     }
   }
@@ -944,6 +1054,9 @@ function describeDrift(existing, fresh) {
   }
   if (JSON.stringify(existing?.vendors) !== JSON.stringify(fresh?.vendors)) {
     lines.push("vendors block changed")
+  }
+  if (JSON.stringify(existing?.defaults) !== JSON.stringify(fresh?.defaults)) {
+    lines.push("defaults block changed")
   }
 
   const byId = (list) => new Map((list || []).map((m) => [m.id, m]))
@@ -1003,6 +1116,8 @@ export {
   serialize,
   substantive,
   describeDrift,
+  resolveCatalogDefaults,
+  DEFAULT_ROLE_PRIORITY,
   parseBootstrapModels,
   bootstrapModelsFromBlock,
   shapeFromFeeds,

@@ -35,7 +35,7 @@ test("substantive() strips provenance and keeps rendered content", () => {
   const catalog = loadCatalog()
   const stripped = substantive(catalog)
   assert.equal("sources" in stripped, false, "sources must be excluded")
-  for (const key of ["schemaVersion", "generatedBy", "gateway", "vendors", "models"]) {
+  for (const key of ["schemaVersion", "generatedBy", "gateway", "vendors", "defaults", "models"]) {
     assert.ok(key in stripped, `${key} must be retained`)
   }
 })
@@ -107,6 +107,12 @@ test("gateway and vendor changes ARE drift", () => {
   vendorsChanged.vendors = vendorsChanged.vendors.slice(0, -1)
   assert.deepEqual(describeDrift(substantive(before), substantive(vendorsChanged)), [
     "vendors block changed",
+  ])
+
+  const defaultsChanged = loadCatalog()
+  defaultsChanged.defaults = { ...defaultsChanged.defaults, primary: "claude-opus-5" }
+  assert.deepEqual(describeDrift(substantive(before), substantive(defaultsChanged)), [
+    "defaults block changed",
   ])
 })
 

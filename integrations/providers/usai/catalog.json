@@ -36,6 +36,13 @@
       "usaiBackend": "amazon-bedrock"
     }
   ],
+  "defaults": {
+    "primary": "claude-sonnet-5",
+    "small": "claude_4_5_haiku",
+    "compaction": "gpt-5.6-terra",
+    "summary": "gpt_5_2_default_v2",
+    "title": "gpt_5_2_default_v2"
+  },
   "models": [
     {
       "id": "claude_4_5_haiku",
