@@ -226,7 +226,8 @@ export function emitOpenCodeBlockFromCatalog(catalog) {
  * Values are prefixed with "usai/" per OpenCode provider model namespace convention.
  *
  * @param {object} catalog parsed catalog.json
- * @returns {object} OpenCode formatted defaults { model, small_model, compaction }
+ * @returns {object} OpenCode formatted defaults
+ *   { model, small_model, compaction, summary, title }
  */
 export function emitOpenCodeDefaults(catalog) {
   if (!catalog || typeof catalog !== "object") {
@@ -235,15 +236,12 @@ export function emitOpenCodeDefaults(catalog) {
   if (!catalog.defaults || typeof catalog.defaults !== "object" || Array.isArray(catalog.defaults)) {
     throw new TypeError("emitOpenCodeDefaults: catalog.defaults must be an object")
   }
-  const { primary, small, compaction } = catalog.defaults
+  const { primary, small } = catalog.defaults
   if (typeof primary !== "string" || primary.length === 0) {
     throw new TypeError("emitOpenCodeDefaults: defaults.primary must be a non-empty string")
   }
   if (typeof small !== "string" || small.length === 0) {
     throw new TypeError("emitOpenCodeDefaults: defaults.small must be a non-empty string")
-  }
-  if (compaction !== undefined && (typeof compaction !== "string" || compaction.length === 0)) {
-    throw new TypeError("emitOpenCodeDefaults: defaults.compaction must be a non-empty string when present")
   }
 
   // Ensure chosen default IDs do not contain characters that could break out of JSON strings
@@ -255,15 +253,205 @@ export function emitOpenCodeDefaults(catalog) {
   if (!SAFE_ID_RE.test(small)) {
     throw new TypeError(`emitOpenCodeDefaults: defaults.small contains invalid characters: "${small}"`)
   }
-  if (compaction && !SAFE_ID_RE.test(compaction)) {
-    throw new TypeError(`emitOpenCodeDefaults: defaults.compaction contains invalid characters: "${compaction}"`)
+
+  // Optional `agent.<role>.model` roles. Each is validated the same way as the
+  // required pair, so an invalid id cannot reach the config by being optional.
+  const agentRoles = {}
+  for (const role of ["compaction", "summary", "title"]) {
+    const value = catalog.defaults[role]
+    if (value === undefined) {
+      agentRoles[role] = null
+      continue
+    }
+    if (typeof value !== "string" || value.length === 0) {
+      throw new TypeError(`emitOpenCodeDefaults: defaults.${role} must be a non-empty string when present`)
+    }
+    if (!SAFE_ID_RE.test(value)) {
+      throw new TypeError(`emitOpenCodeDefaults: defaults.${role} contains invalid characters: "${value}"`)
+    }
+    agentRoles[role] = `usai/${value}`
   }
 
   return {
     model: `usai/${primary}`,
     small_model: `usai/${small}`,
-    compaction: compaction ? `usai/${compaction}` : null,
+    ...agentRoles,
   }
+}
+
+// -----------------------------------------------------------------------------
+// JSONC-aware structural scanner.
+//
+// WHY THIS EXISTS INSTEAD OF A REGEX. The default-model keys this emitter has to
+// patch live at known OBJECT PATHS (`model`, `small_model`,
+// `agent.compaction.model`), and a regex cannot express "the value at this
+// path". The previous implementation approximated `agent.compaction.model` with
+//
+//     /("agent"\s*:\s*\{[^{}]*?"compaction"\s*:\s*\{[^{}]*?"model"\s*:\s*")/
+//
+// where `[^{}]*?` forbids any brace between `agent` and `compaction`. That only
+// holds when `compaction` is the FIRST nested object under `agent`. The shipped
+// config happens to satisfy it, but `agent` also carries `summary` and `title`
+// siblings — reorder them and the pattern silently matches nothing, leaving a
+// stale compaction model in a file the pipeline reports as regenerated.
+//
+// The top-level patterns had a related weakness: `/^[ \t]*"model"[ \t]*:/m`
+// matches the FIRST line-anchored `"model"` anywhere in the file, which is a
+// nested `agent.*.model` whenever the `agent` block precedes the top-level keys.
+//
+// This scanner walks the text once, tracking object/array nesting and the
+// current key path, and skipping comments and string contents. It reports the
+// span of the string value at an exact path, so sibling order, nesting depth,
+// and commented-out or in-array decoys cannot affect the result. It does not
+// build a JSON value — patching is textual, to preserve comments and formatting
+// byte-for-byte.
+// -----------------------------------------------------------------------------
+
+// Marker for an array element frame: array indices are not part of any path we
+// patch, so elements are tracked only to keep nesting depth correct.
+const ARRAY_ELEMENT = Symbol("arrayElement")
+
+function skipLineComment(text, i) {
+  while (i < text.length && text[i] !== "\n") i++
+  return i
+}
+
+function skipBlockComment(text, i) {
+  i += 2
+  while (i < text.length && !(text[i] === "*" && text[i + 1] === "/")) i++
+  return i + 2
+}
+
+// Index of the closing quote of the string whose contents start at `start`.
+// Returns -1 on an unterminated string.
+function stringEnd(text, start) {
+  let j = start
+  while (j < text.length) {
+    if (text[j] === "\\") {
+      j += 2
+      continue
+    }
+    if (text[j] === '"') return j
+    j++
+  }
+  return -1
+}
+
+/**
+ * Locate a value at an exact object path in JSONC text.
+ *
+ * @param {string} text JSONC document
+ * @param {string[]} path object keys, outermost first
+ * @param {"value"|"container"} mode `value` returns the {start,end} span of the
+ *   string value at `path`; `container` reports whether an OBJECT exists at
+ *   `path` (used to tell "the template has no such section" apart from "the
+ *   section is there but we failed to patch it")
+ * @returns {{start: number, end: number}|{found: true}|null}
+ */
+function scanJsonc(text, path, mode) {
+  let i = 0
+  const here = []
+  // Whether each open brace/bracket pushed a path segment, so `}`/`]` pops
+  // symmetrically. A brace that is not a keyed value (the document root, or an
+  // object inside an array) contributes no key.
+  const pushedSegment = []
+  const frame = []
+  let pendingKey = null
+  let expectValue = false
+
+  const atPathForKey = (key) => {
+    if (here.length + 1 !== path.length) return false
+    for (let x = 0; x < here.length; x++) if (here[x] !== path[x]) return false
+    return key === path[path.length - 1]
+  }
+  const atPath = () => {
+    if (here.length !== path.length) return false
+    for (let x = 0; x < here.length; x++) if (here[x] !== path[x]) return false
+    return true
+  }
+
+  while (i < text.length) {
+    const c = text[i]
+    if (c === "/" && text[i + 1] === "/") {
+      i = skipLineComment(text, i)
+      continue
+    }
+    if (c === "/" && text[i + 1] === "*") {
+      i = skipBlockComment(text, i)
+      continue
+    }
+    if (c === '"') {
+      const start = i + 1
+      const end = stringEnd(text, start)
+      if (end === -1) return null
+      if (expectValue) {
+        if (mode === "value" && frame[frame.length - 1] === "object" && pendingKey !== null && atPathForKey(pendingKey)) {
+          return { start, end }
+        }
+        expectValue = false
+        pendingKey = null
+      } else if (frame[frame.length - 1] === "object") {
+        pendingKey = text.slice(start, end)
+      }
+      i = end + 1
+      continue
+    }
+    if (c === ":") {
+      expectValue = true
+      i++
+      continue
+    }
+    if (c === "{" || c === "[") {
+      if (expectValue && pendingKey !== null) {
+        here.push(pendingKey)
+        pushedSegment.push(true)
+      } else if (frame[frame.length - 1] === "array") {
+        here.push(ARRAY_ELEMENT)
+        pushedSegment.push(true)
+      } else {
+        pushedSegment.push(false)
+      }
+      frame.push(c === "{" ? "object" : "array")
+      expectValue = false
+      pendingKey = null
+      if (mode === "container" && frame[frame.length - 1] === "object" && atPath()) return { found: true }
+      i++
+      continue
+    }
+    if (c === "}" || c === "]") {
+      frame.pop()
+      if (pushedSegment.pop()) here.pop()
+      expectValue = false
+      pendingKey = null
+      i++
+      continue
+    }
+    if (c === ",") {
+      expectValue = false
+      pendingKey = null
+      i++
+      continue
+    }
+    i++
+  }
+  return null
+}
+
+// Replace the string value at `path`. Throws when the path is absent, because a
+// requested role that cannot be patched must fail loudly rather than leave a
+// stale model behind in a file reported as regenerated.
+function setJsoncStringAtPath(text, path, value, label) {
+  const span = scanJsonc(text, path, "value")
+  if (!span) {
+    throw new Error(
+      `patchOpenCodeConfig: could not locate a string value at ${label} ("${path.join(".")}") in template`,
+    )
+  }
+  return text.slice(0, span.start) + value + text.slice(span.end)
+}
+
+function hasJsoncObjectAtPath(text, path) {
+  return Boolean(scanJsonc(text, path, "container"))
 }
 
 /**
@@ -293,31 +481,24 @@ export function patchOpenCodeConfig(templateText, catalog) {
 
   let updated = `${beforeMarker}${modelsBlock.trim()}${afterMarker}`
 
-  // 2. Replace top-level model and small_model
-  // Anchor to line start to avoid matching comments, and use function replacements to avoid `$` issues
-  const modelPattern = /^([ \t]*"model"[ \t]*:[ \t]*")([^"]*)(")/m
-  if (!modelPattern.test(updated)) {
-    throw new Error("patchOpenCodeConfig: Could not find top-level 'model' in template")
-  }
-  updated = updated.replace(modelPattern, (_m, p1, _p2, p3) => `${p1}${defaults.model}${p3}`)
+  // 2. Top-level roles. Resolved by path, so a nested `agent.*.model` earlier in
+  // the file cannot be mistaken for the top-level key.
+  updated = setJsoncStringAtPath(updated, ["model"], defaults.model, "top-level 'model'")
+  updated = setJsoncStringAtPath(updated, ["small_model"], defaults.small_model, "top-level 'small_model'")
 
-  const smallModelPattern = /^([ \t]*"small_model"[ \t]*:[ \t]*")([^"]*)(")/m
-  if (!smallModelPattern.test(updated)) {
-    throw new Error("patchOpenCodeConfig: Could not find top-level 'small_model' in template")
-  }
-  updated = updated.replace(smallModelPattern, (_m, p1, _p2, p3) => `${p1}${defaults.small_model}${p3}`)
-
-  // 3. Replace agent.compaction.model if present in defaults and template
-  // Scoped strictly within "agent": { ... "compaction": { ... "model": "..." } }
-  // to avoid matching across closing braces
-  if (defaults.compaction) {
-    const compactionPattern = /("agent"\s*:\s*\{[^{}]*?"compaction"\s*:\s*\{[^{}]*?"model"\s*:\s*")([^"]*)(")/
-    if (compactionPattern.test(updated)) {
-      updated = updated.replace(compactionPattern, (_m, p1, _p2, p3) => `${p1}${defaults.compaction}${p3}`)
-    }
+  // 3. agent.<role>.model for each modelled agent role. A template that does
+  // not configure a role at all is legitimate and left alone; a template that
+  // DOES configure it must be patched, so a present-but-unpatchable section is
+  // an error rather than a silent skip.
+  for (const role of ["compaction", "summary", "title"]) {
+    const value = defaults[role]
+    if (!value) continue
+    if (!hasJsoncObjectAtPath(updated, ["agent", role])) continue
+    updated = setJsoncStringAtPath(updated, ["agent", role, "model"], value, `'agent.${role}.model'`)
   }
 
   return updated
 }
+
 
 export default emitOpenCodeBlockFromCatalog

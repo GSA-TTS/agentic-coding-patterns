@@ -77,6 +77,20 @@
           "pattern": "^[A-Za-z0-9_.:-]+$",
           "description": "Cost-effective model for context compaction and conversation summarization."
         },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_.:-]+$",
+          "description": "Model that writes a short recap of a finished exchange."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_.:-]+$",
+          "description": "Model that names a session in one line."
+        },
         "reasoning": {
           "type": "string",
           "minLength": 1,
