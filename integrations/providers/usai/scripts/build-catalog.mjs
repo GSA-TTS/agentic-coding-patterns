@@ -88,6 +88,7 @@ const MODELS_DEV_URL = "https://models.dev/api.json"
 // size, and shape-validate before trusting third-party content.
 const FETCH_TIMEOUT_MS = 15000
 const MAX_RESPONSE_BYTES = 10 * 1024 * 1024 // 10 MiB
+const MAX_MODELS = 1000
 
 const FALLBACK_LIMITS = { context: 128000, output: 8192 }
 
@@ -271,14 +272,24 @@ function normalizeCostFromModelsDev(cost) {
   if (!cost || typeof cost !== "object") return { cost: null, costAbove200kContext: null }
   const out = {}
   for (const [camel, snake] of COST_MAP) {
-    if (typeof cost[snake] === "number") out[camel] = cost[snake]
+    const value = cost[snake]
+    if (value === undefined) continue
+    if (!Number.isFinite(value) || value < 0) {
+      throw new Error(`models.dev cost.${snake} must be a finite non-negative number`)
+    }
+    out[camel] = value
   }
   let above = null
   const over = cost.context_over_200k
   if (over && typeof over === "object") {
     const o = {}
     for (const [camel, snake] of COST_MAP) {
-      if (typeof over[snake] === "number") o[camel] = over[snake]
+      const value = over[snake]
+      if (value === undefined) continue
+      if (!Number.isFinite(value) || value < 0) {
+        throw new Error(`models.dev cost.context_over_200k.${snake} must be a finite non-negative number`)
+      }
+      o[camel] = value
     }
     if (typeof o.input === "number" && typeof o.output === "number") above = o
   }
@@ -439,8 +450,16 @@ function extractUsaiList(payload) {
         : null
   if (!list) throw new Error("USAi payload invalid: expected an array or { data | models: [] }")
   if (list.length === 0) throw new Error("USAi payload invalid: model list is empty")
-  const hasUsableId = list.some((m) => m && typeof m === "object" && (m.id || m.model_id || m.name))
-  if (!hasUsableId) throw new Error("USAi payload invalid: no entries have an id/model_id/name field")
+  if (list.length > MAX_MODELS) throw new Error(`USAI payload invalid: ${list.length} models exceeds limit ${MAX_MODELS}`)
+  list.forEach((m, index) => {
+    if (!m || typeof m !== "object" || Array.isArray(m)) throw new Error(`USAI payload invalid: models[${index}] must be an object`)
+    const id = m.id ?? m.model_id ?? m.name
+    if (typeof id !== "string" || id.length === 0) throw new Error(`USAI payload invalid: models[${index}] has no string id/model_id/name`)
+    if ([...id].length > 128 || /[\u0000-\u001F\u007F]/u.test(id)) throw new Error(`USAI payload invalid: models[${index}].id is out of bounds`)
+    if (m.name !== undefined && (typeof m.name !== "string" || [...m.name].length > 256 || /[\u0000-\u001F\u007F]/u.test(m.name))) {
+      throw new Error(`USAI payload invalid: models[${index}].name is out of bounds`)
+    }
+  })
   return list
 }
 
@@ -595,6 +614,7 @@ function reportExclusions(excluded) {
 }
 
 function shapeFromFeeds(usaiList, modelsDevCatalog) {
+  usaiList = extractUsaiList(usaiList)
   // Chat models only, preserve incoming list order but group by vendor display
   // order for a stable catalog.
   const excluded = []
@@ -626,8 +646,8 @@ function shapeFromFeeds(usaiList, modelsDevCatalog) {
   for (const p of parsed) {
     if (!vendorOrder.includes(p.vendor)) vendorOrder.push(p.vendor)
     const model = { id: p.id, vendor: p.vendor, name: p.name }
-    let context = Number.isInteger(p.raw.context_window) ? p.raw.context_window : null
-    let output = Number.isInteger(p.raw.max_output_tokens) ? p.raw.max_output_tokens : null
+    let context = Number.isInteger(p.raw.context_window) && p.raw.context_window > 0 ? p.raw.context_window : null
+    let output = Number.isInteger(p.raw.max_output_tokens) && p.raw.max_output_tokens > 0 ? p.raw.max_output_tokens : null
     let baseCost = null
     let above = null
     if (modelsDevCatalog) {
@@ -635,8 +655,10 @@ function shapeFromFeeds(usaiList, modelsDevCatalog) {
         const match = findModelsDevMatch(p.id, providerModels)
         if (match?.data) {
           if (match.data.limit) {
-            context = context || match.data.limit.context || null
-            output = output || match.data.limit.output || null
+            const matchedContext = match.data.limit.context
+            const matchedOutput = match.data.limit.output
+            if (!context && Number.isInteger(matchedContext) && matchedContext > 0) context = matchedContext
+            if (!output && Number.isInteger(matchedOutput) && matchedOutput > 0) output = matchedOutput
           }
           const norm = normalizeCostFromModelsDev(match.data.cost)
           baseCost = norm.cost
@@ -670,7 +692,21 @@ function validateCost(cost, where, errors) {
   const allowed = new Set(["input", "output", "cacheRead", "cacheWrite"])
   for (const [k, v] of Object.entries(cost)) {
     assert(allowed.has(k), `${where}: cost has disallowed key "${k}"`, errors)
-    assert(typeof v === "number", `${where}: cost.${k} must be a number`, errors)
+    assert(Number.isFinite(v) && v >= 0, `${where}: cost.${k} must be a finite non-negative number`, errors)
+  }
+}
+
+function validateStringFromSchema(value, propertySchema, where, errors) {
+  assert(typeof value === "string", `${where} must be string`, errors)
+  if (typeof value !== "string") return
+  if (Number.isInteger(propertySchema.minLength)) {
+    assert([...value].length >= propertySchema.minLength, `${where} must not be empty`, errors)
+  }
+  if (Number.isInteger(propertySchema.maxLength)) {
+    assert([...value].length <= propertySchema.maxLength, `${where} exceeds ${propertySchema.maxLength} characters`, errors)
+  }
+  if (typeof propertySchema.pattern === "string") {
+    assert(new RegExp(propertySchema.pattern).test(value), `${where} does not match its schema pattern`, errors)
   }
 }
 
@@ -706,10 +742,15 @@ function validateCatalog(catalog, schema) {
   assert(Array.isArray(catalog.vendors), "vendors must be an array", errors)
   if (Array.isArray(catalog.vendors)) {
     const vendorAllowed = new Set(["key", "label", "order", "usaiBackend"])
+    const vendorKeysSeen = new Set()
     for (const [idx, v] of catalog.vendors.entries()) {
       for (const k of Object.keys(v)) assert(vendorAllowed.has(k), `vendors[${idx}]: disallowed key "${k}"`, errors)
       for (const r of ["key", "label", "order", "usaiBackend"]) assert(r in v, `vendors[${idx}]: missing "${r}"`, errors)
       assert(typeof v.key === "string", `vendors[${idx}].key must be string`, errors)
+      if (typeof v.key === "string") {
+        assert(!vendorKeysSeen.has(v.key), `vendors[${idx}].key duplicates "${v.key}"`, errors)
+        vendorKeysSeen.add(v.key)
+      }
       assert(Number.isInteger(v.order), `vendors[${idx}].order must be integer`, errors)
     }
   }
@@ -722,14 +763,20 @@ function validateCatalog(catalog, schema) {
       "cost", "costAbove200kContext", "reasoning", "inputModalities",
     ])
     const vendorKeys = new Set((catalog.vendors || []).map((v) => v.key))
+    const modelProperties = schema.properties.models.items.properties
+    const modelIds = new Set()
     for (const [idx, m] of catalog.models.entries()) {
       for (const k of Object.keys(m)) assert(modelAllowed.has(k), `models[${idx}]: disallowed key "${k}"`, errors)
       for (const r of ["id", "vendor", "name"]) assert(r in m, `models[${idx}]: missing "${r}"`, errors)
-      assert(typeof m.id === "string", `models[${idx}].id must be string`, errors)
-      assert(typeof m.name === "string", `models[${idx}].name must be string`, errors)
+      validateStringFromSchema(m.id, modelProperties.id, `models[${idx}].id`, errors)
+      validateStringFromSchema(m.name, modelProperties.name, `models[${idx}].name`, errors)
+      if (typeof m.id === "string") {
+        assert(!modelIds.has(m.id), `models[${idx}].id duplicates "${m.id}"`, errors)
+        modelIds.add(m.id)
+      }
       assert(vendorKeys.has(m.vendor), `models[${idx}].vendor "${m.vendor}" not in vendors[]`, errors)
-      if ("contextWindow" in m) assert(Number.isInteger(m.contextWindow), `models[${idx}].contextWindow must be integer`, errors)
-      if ("maxOutputTokens" in m) assert(Number.isInteger(m.maxOutputTokens), `models[${idx}].maxOutputTokens must be integer`, errors)
+      if ("contextWindow" in m) assert(Number.isInteger(m.contextWindow) && m.contextWindow > 0, `models[${idx}].contextWindow must be a positive integer`, errors)
+      if ("maxOutputTokens" in m) assert(Number.isInteger(m.maxOutputTokens) && m.maxOutputTokens > 0, `models[${idx}].maxOutputTokens must be a positive integer`, errors)
       validateCost(m.cost, `models[${idx}]`, errors)
       validateCost(m.costAbove200kContext, `models[${idx}]`, errors)
     }
@@ -917,6 +964,7 @@ function describeDrift(existing, fresh) {
 async function main() {
   const args = parseArgs(process.argv.slice(2))
   const outPath = args.opts["--out"] || DEFAULT_OUT
+  const schemaPath = args.opts["--schema"] || DEFAULT_SCHEMA
   const catalog = await buildCatalog(args)
   const serialized = serialize(catalog)
 
@@ -932,6 +980,10 @@ async function main() {
       existing = JSON.parse(existingRaw)
     } catch {
       throw new Error(`catalog.json at ${outPath} is not valid JSON; regenerate it`)
+    }
+    const existingErrors = validateCatalog(existing, JSON.parse(await readFile(schemaPath, "utf8")))
+    if (existingErrors.length) {
+      throw new Error(`catalog.json at ${outPath} is invalid:\n  - ${existingErrors.join("\n  - ")}`)
     }
     const drift = describeDrift(substantive(existing), substantive(catalog))
     if (drift.length) {

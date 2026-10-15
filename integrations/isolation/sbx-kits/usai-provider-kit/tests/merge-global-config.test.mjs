@@ -39,6 +39,24 @@ test("stripJsonc does not strip // sequences inside string values", () => {
   assert.equal(parsed.b, "/* also not */")
 })
 
+test("stripJsonc does not strip comma-brace text inside string values", () => {
+  const parsed = parseJsonc('{"id":"model,}","array":"value,]",}')
+  assert.equal(parsed.id, "model,}")
+  assert.equal(parsed.array, "value,]")
+})
+
+test("parseJsonc rejects duplicate properties at every object depth", () => {
+  assert.throws(() => parseJsonc('{"permission":{},"permission":{}}'), /Duplicate JSON property/)
+  assert.throws(() => parseJsonc('{"provider":{"usai":{},"usai":{}}}'), /Duplicate JSON property/)
+  assert.throws(() => parseJsonc('{"models":{"same":{},"same":{}}}'), /Duplicate JSON property/)
+})
+
+test("parseJsonc rejects leading and repeated commas", () => {
+  for (const malformed of ["{,}", "[,]", '{"a":1,,}', "[1,,]", '{"a":,}']) {
+    assert.throws(() => parseJsonc(malformed), SyntaxError)
+  }
+})
+
 test("parseJsonc parses the shipped kit config", async () => {
   const text = await readFile(kitConfigPath, "utf8")
   const cfg = parseJsonc(text)
@@ -71,10 +89,6 @@ test("computeOutput: no existing config copies verbatim (comments preserved)", a
   assert.equal(merged, false)
   assert.equal(output, sourceText)
   assert.deepEqual(conflicts, [])
-  // The kit's own opencode.jsonc is a symlink to the acq-kits copy (the two
-  // kits share one file; see integrations/isolation/sbx-kits/usai-provider-kit/README.md
-  // "Shared config with acq-kits"), so the marker text is the shared,
-  // un-suffixed form -- there is no separate "-kit"-suffixed marker anymore.
   assert.match(output, /usai-provider:owns-opencode-config/)
 })
 

@@ -1,0 +1,87 @@
+// Team OpenCode settings — loaded via OPENCODE_CONFIG (set in spec.yaml).
+// This is the TEAM tier: it overrides the global config (where the USAi
+// provider lives) for the keys it sets, and a repo's own opencode.jsonc still
+// wins over it. Prefer keys the global config does not set; do not redeclare
+// the provider.
+//
+// `instructions` below needs OpenCode 1.x: OpenCode 2.x accepts the field but
+// never loads the files it lists ("Check against your acq" in the pattern
+// doc). scripts/verify fails when 2.x is what sandbox sessions run.
+//
+// Deliberately NOT set here:
+//   - model / small_model. The global provider kit owns them and updates its
+//     defaults as the provider's model catalog changes; a team pin overrides
+//     that and can outlive the model it names.
+//   - Any "allow" rule that overrides a global ask or deny. OpenCode uses the
+//     LAST matching rule. On 1.x a rule with the same pattern as a global one
+//     replaces it in place, but a NEW pattern goes after every global rule,
+//     so `"git *": "allow"` here would beat the global `"git push *": "ask"`.
+//   - theme / keybinds / tui. OpenCode drops those top-level keys from
+//     opencode.json(c) on load. TUI settings go in their own tui.jsonc, with
+//     OPENCODE_TUI_CONFIG pointing at it.
+//
+// Gating a team CLI (for example a VCS CLI): keep the global kit's
+// default-allow posture. Reads fall through to its "*": "allow"; add `ask`
+// for anything that posts or opens a merge request, and `deny` for merge and
+// approve, pipeline runs, CI variables, destructive admin commands, and the
+// `api` subcommand's write flags and GraphQL. Any write verb you do not list
+// is allowed: review close, edit/update, delete, label, assign, release, and
+// CI retry/cancel for your CLI, and add a rule for each one you want gated.
+//
+// These rules are a guardrail, not a boundary: `env vcs ...`, a full path to
+// the binary, or a direct HTTP call to the VCS API all get past them. The real
+// control is the scope of the token you set with `acq secret set`; give the
+// sandbox a least-privilege token.
+//
+// Rules match the WHOLE command text, inline bodies and heredocs included,
+// and `*` spans spaces. So:
+//   - write each rule from the exact command prefix ("vcs mr merge *"), never
+//     a loose pattern ("vcs*pipe* delete*" also matches an issue body that
+//     mentions both words, and blocks a legitimate `vcs issue create`);
+//   - pair each rule with its bare form ("vcs pipeline run" and
+//     "vcs pipeline run *"), or the command with no arguments slips past;
+//   - anchor the api flags on the space before them, with one rule for the
+//     first position and one for any later position ("vcs api -f*" and
+//     "vcs api * -f*"); a bare "*-f*" would also deny a read of
+//     `projects/team%2Flogin-frontend`. An explicit `--method GET` is denied
+//     too: leave the method off for reads;
+//   - tell the agent (in team-conventions.md) to pass post bodies from a file
+//     (--body-file, or -d "$(cat /tmp/body.md)"), so body text never reaches
+//     the matcher.
+// Try each rule against a real command before relying on it. Sketch, not a
+// full list:
+//   "permission": { "bash": {
+//     "vcs mr create": "ask",
+//     "vcs mr create *": "ask",
+//     "vcs mr note *": "ask",
+//     "vcs issue create": "ask",
+//     "vcs issue create *": "ask",
+//     "vcs issue note *": "ask",
+//     "vcs mr merge": "deny",
+//     "vcs mr merge *": "deny",
+//     "vcs mr approve": "deny",
+//     "vcs mr approve *": "deny",
+//     "vcs pipeline run": "deny",
+//     "vcs pipeline run *": "deny",
+//     "vcs variable *": "deny",
+//     "vcs repo delete *": "deny",
+//     "vcs api *graphql*": "deny",
+//     "vcs api -X*": "deny",
+//     "vcs api * -X*": "deny",
+//     "vcs api --method*": "deny",
+//     "vcs api * --method*": "deny",
+//     "vcs api -F*": "deny",
+//     "vcs api * -F*": "deny",
+//     "vcs api --field*": "deny",
+//     "vcs api * --field*": "deny",
+//     "vcs api -f*": "deny",
+//     "vcs api * -f*": "deny",
+//     "vcs api --raw-field*": "deny",
+//     "vcs api * --raw-field*": "deny",
+//     "vcs api --input*": "deny",
+//     "vcs api * --input*": "deny"
+//   } }
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": ["/home/agent/team-config/team-conventions.md"]
+}
