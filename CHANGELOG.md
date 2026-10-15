@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.1](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.13.0...v1.13.1) (2026-10-15)
+
+
+### Bug Fixes
+
+* **acq-kits:** give verify scripts a "could not check" verdict state ([#460](https://github.com/GSA-TTS/agentic-coding-patterns/issues/460)) ([306906a](https://github.com/GSA-TTS/agentic-coding-patterns/commit/306906a58602993d79909176171c27fdbf0c295b))
+
 ## [1.13.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.12.1...v1.13.0) (2026-10-12)
 
 
