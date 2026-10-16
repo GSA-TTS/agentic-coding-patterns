@@ -157,7 +157,7 @@ acq secret set -g <service> --host <host> --env <VAR>   # once per machine, host
 | Need | Mechanism |
 |------|-----------|
 | Egress for team hosts (VCS, package mirrors, MCP servers) | `caps.network.allow` (union) |
-| Conventions the agent must follow across the team's repos | A markdown file under `files/`, registered in the agent's instructions path (OpenCode: an `instructions` entry in a team config file). OpenCode 2.x does not load `instructions` files (see [Check against your acq](#check-against-your-acq)). |
+| Conventions the agent must follow across the team's repos | A markdown file under `files/`, registered in the agent's instructions path (OpenCode: an `instructions` entry in a team config file). OpenCode 2.0.0 through 2.0.29 do not load `instructions` files (see [Check against your acq](#check-against-your-acq)). |
 | Team agent settings that override the global defaults | Ship a config file and point the agent's config env var at it (OpenCode: `OPENCODE_CONFIG` in `environment`), giving the tier global → team → repo. Never pin `model` / `small_model` there, and never add an `allow` rule that overrides a global ask or deny (see the gotchas). |
 | Team TUI settings (OpenCode theme, keybinds) | A separate `tui.jsonc`, with `OPENCODE_TUI_CONFIG` pointing at it: OpenCode drops `theme` / `keybinds` / `tui` from `opencode.json(c)` on load. The variable is single-valued, so say in the team README whether a personal kit may override it. |
 | Gating a team CLI (for example the VCS CLI) | Permission rules in the team config, in the same default-allow posture as the global kit: reads fall through to its `"*": "allow"`; `ask` before anything that posts or opens a merge request; `deny` merge and approve, pipeline runs, CI variables, destructive admin commands, and the `api` subcommand's write flags and GraphQL. Any write verb you do not list stays allowed, so review your CLI's close, edit, delete, label, release, and CI retry verbs. Rules match the whole command text, so write each from the exact command prefix and see the gotchas. The team-kit template's `opencode.jsonc` sketches the shape. |
@@ -213,7 +213,7 @@ global layer does.
 | Terminfo for your terminal | Ship the *source* (`infocmp -x`) and compile it in a startup step (`tic -x`) |
 | Git preferences | One startup command per key, or ship a file and add it with `include.path` |
 | Overriding a team setting | `environment` (last wins) or a later file at the same path (last wins) — deliberately, and only for settings the team marks as personal |
-| Your own agent instructions (OpenCode) | A file under `files/`, added through `OPENCODE_CONFIG_CONTENT` in `environment`, for example `{"instructions":["/home/agent/personal/instructions.md"]}`. Do not append to the global rules file: the playbook kit symlinks `~/.config/opencode/AGENTS.md` and `~/.claude/CLAUDE.md` into its managed checkout, so an append edits that checkout. In a local test on OpenCode 1.18, the `instructions` lists combine in order (global, then team through `OPENCODE_CONFIG`, then this one); OpenCode's docs do not say how lists merge, and OpenCode 2.x does not load `instructions` files (see [Check against your acq](#check-against-your-acq)). Put nothing else in it: inline config loads after the repo's own config, so any other key overrides the repo. The variable is single-valued (last kit wins). |
+| Your own agent instructions (OpenCode) | A file under `files/`, added through `OPENCODE_CONFIG_CONTENT` in `environment`, for example `{"instructions":["/home/agent/personal/instructions.md"]}`. Do not append to the global rules file: the playbook kit symlinks `~/.config/opencode/AGENTS.md` and `~/.claude/CLAUDE.md` into its managed checkout, so an append edits that checkout. In a local test on OpenCode 1.18, the `instructions` lists combine in order (global, then team through `OPENCODE_CONFIG`, then this one); OpenCode's docs do not say how lists merge, and OpenCode 2.0.0 through 2.0.29 do not load `instructions` files (see [Check against your acq](#check-against-your-acq)). Put nothing else in it: inline config loads after the repo's own config, so any other key overrides the repo. The variable is single-valued (last kit wins). |
 | Extra egress for your tools | `caps.network.allow` (union) |
 
 ### Neither
@@ -353,18 +353,19 @@ date.
 - **Flow-style argv.** `command: [git, config, --global, alias.st, status]`
   parses as an empty argv, runs nothing, and passes `acq kit validate`. Write
   argv as a block list, one `- arg` per line, or a single `- |` block scalar.
-- **OpenCode 2.x ignores `instructions`.** OpenCode 2.x accepts the
-  `instructions` config field but never loads the files it lists, so team
-  conventions and personal instructions delivered that way silently do not
-  reach the agent. The global `~/.config/opencode/AGENTS.md` still loads.
-  Which OpenCode runs depends on the image. The agent kit installs 2.x, but an
-  image that bakes OpenCode 1.x puts it earlier on `PATH`, so 1.x runs and the
-  files load: `acq`'s own template image for `acq run opencode`
-  (`sandbox-templates:opencode-docker`) and this repo's `devenv-opencode` both
-  do. An image with no OpenCode of its own, such as
-  `sandbox-templates:shell-docker`, runs only the kit's 2.x, and the files
-  are ignored. Check with `acq exec <sandbox> -- opencode --version`; the
-  team-kit template's `scripts/verify` fails when 2.x runs.
+- **OpenCode 2.0.0 through 2.0.29 ignore `instructions`.** Those releases
+  accept the `instructions` config field but never load the files it lists,
+  so team conventions and personal instructions delivered that way silently
+  do not reach the agent. The global `~/.config/opencode/AGENTS.md` still
+  loads. OpenCode 2.0.30 fixed it, and 1.x was never affected. Which OpenCode
+  runs depends on the image. The agent kit installs 2.x, but an image that
+  bakes OpenCode 1.x puts it earlier on `PATH`, so 1.x runs: `acq`'s own
+  template image for `acq run opencode` (`sandbox-templates:opencode-docker`)
+  and this repo's `devenv-opencode` both do. An image with no OpenCode of its
+  own, such as `sandbox-templates:shell-docker`, runs the kit's 2.x, so the
+  files load only if the kit your `acq` applies pins 2.0.30 or later. Check
+  with `acq exec <sandbox> -- opencode --version`; the team-kit template's
+  `scripts/verify` fails when an affected version runs.
 - **Empty files and failed drops (msb).** msb checks each file drop with
   `test -s`, so a zero-byte payload never counts as placed. A failed drop
   stops the rest of that kit's apply: the files placed before it stay, but

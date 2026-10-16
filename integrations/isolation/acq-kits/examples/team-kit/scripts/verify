@@ -10,7 +10,7 @@
 # generated LOWER fixture kit followed by this kit. It then asserts:
 #   1. the global layer is intact (USAi merged into OpenCode's global config);
 #   2. every live extension-point value in spec.yaml landed, and the OpenCode
-#      that sandbox shells run is 1.x (2.x ignores `instructions`);
+#      that sandbox shells run loads `instructions` (2.0.0–2.0.29 do not);
 #   3. the lower fixture itself was applied (its own env var, file, and
 #      startup command landed), so the next checks are not vacuous;
 #   4. the composition-table rows it can observe (environment, files[],
@@ -232,20 +232,24 @@ if printf '%s' "$eff" | grep -q 'team-conventions.md'; then
 else
   bad "team-conventions.md missing from the effective config instructions"
 fi
-# Registered is not read: OpenCode 2.x accepts `instructions` but never loads
-# the files it lists, so the conventions would silently not reach the agent.
-# Check the OpenCode that sandbox shells resolve on PATH: an image that bakes
-# 1.x puts it ahead of the agent kit's 2.x, while an image with no OpenCode of
-# its own (such as sandbox-templates:shell-docker) runs only 2.x, and this
-# fails. Relax it once a 2.x release loads `instructions` files.
+# Registered is not read: OpenCode 2.0.0 through 2.0.29 accept `instructions`
+# but never load the files it lists, so the conventions would silently not
+# reach the agent; 2.0.30 fixed it. Check the OpenCode that sandbox shells
+# resolve on PATH: an image that bakes 1.x puts it ahead of the agent kit's
+# 2.x, while an image with no OpenCode of its own (such as
+# sandbox-templates:shell-docker) runs the kit's 2.x.
 oc_version="$(in_sbx 'opencode --version 2>/dev/null' | tail -n1)"
 oc_version="${oc_version#opencode }"
-oc_major="$(printf '%s\n' "$oc_version" | sed -n 's/^[^0-9]*\([0-9][0-9]*\)\..*/\1/p' | head -n1)"
-case "$oc_major" in
-  "") bad "could not read the OpenCode version in the sandbox ('${oc_version:-no output}')" ;;
-  1) ok "OpenCode $oc_version loads instructions files" ;;
-  *) bad "OpenCode $oc_version ignores the instructions field: team conventions will not reach the agent (pattern doc, Check against your acq)" ;;
-esac
+read -r oc_major oc_minor oc_patch <<EOF
+$(printf '%s\n' "$oc_version" | sed -n 's/^[^0-9]*\([0-9][0-9]*\)\.\([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1 \2 \3/p' | head -n1)
+EOF
+if [ -z "$oc_major" ]; then
+  bad "could not read the OpenCode version in the sandbox ('${oc_version:-no output}')"
+elif [ "$oc_major" = 2 ] && [ "$oc_minor" = 0 ] && [ "$oc_patch" -lt 30 ]; then
+  bad "OpenCode $oc_version ignores the instructions field: team conventions will not reach the agent (pattern doc, Check against your acq)"
+else
+  ok "OpenCode $oc_version loads instructions files"
+fi
 # The file, not the directory: the global playbook kit creates
 # ~/.agents/skills itself, so a directory check would pass without this kit.
 # Once you replace the placeholder with real skills, this skips; add a check
