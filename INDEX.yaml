@@ -69,6 +69,31 @@ patterns:
       - ROI framing without hype
       - value framing
       priority: 55
+  - path: skills/meta/agentic-workflow-design/SKILL.md
+    id: agentic-workflow-design
+    title: Agentic Workflow Design
+    type: skill
+    status: experimental
+    categories:
+    - development
+    - testing
+    - documentation
+    collection: meta
+    routing:
+      task_types:
+      - analyze
+      - orchestrate
+      - plan
+      - review
+      input_artifacts:
+      - documentation
+      output_artifacts:
+      - documentation
+      aliases:
+      - agent workflow architecture
+      - multi-agent pipeline design
+      - orchestration plan
+      priority: 70
   - path: skills/communications/artifact-brief/SKILL.md
     id: artifact-brief
     title: Artifact Brief
@@ -898,6 +923,7 @@ categories:
   - security-scan-review
   - untrusted-input-boundary-review
   development:
+  - agentic-workflow-design
   - general-agent
   - implementation-plan
   - issue-to-merge-request
@@ -921,11 +947,13 @@ categories:
   - security-scan-review
   - untrusted-input-boundary-review
   testing:
+  - agentic-workflow-design
   - issue-to-merge-request
   - qa-round
   - qa-workflow
   - test-generation
   documentation:
+  - agentic-workflow-design
   - compliance-claim-checker
   - documentation-agent
   - documentation-review
@@ -988,6 +1016,7 @@ collections:
   - safe-shell-script-author
   - test-generation
   meta:
+  - agentic-workflow-design
   - example-agentic-session
   - pattern-router
   security:
@@ -1007,6 +1036,7 @@ task_types:
   - accessibility-review
   - agentic-actions-auditor
   - agentic-value-analyst
+  - agentic-workflow-design
   - backdoor-review
   - compliance-claim-checker
   - dependency-analysis
@@ -1042,12 +1072,14 @@ task_types:
   - federal-service-blueprint
   - pattern-router
   orchestrate:
+  - agentic-workflow-design
   - design-artifact
   - issue-to-merge-request
   - pattern-router
   - qa-workflow
   - security-scan-review
   plan:
+  - agentic-workflow-design
   - artifact-brief
   - federal-service-blueprint
   - general-agent
@@ -1065,6 +1097,7 @@ task_types:
   review:
   - accessibility-review
   - agentic-actions-auditor
+  - agentic-workflow-design
   - artifact-qa
   - backdoor-review
   - compliance-claim-checker
@@ -1101,6 +1134,7 @@ output_artifacts:
   - artifact-brief
   documentation:
   - agentic-value-analyst
+  - agentic-workflow-design
   - documentation-agent
   - example-agentic-session
   - federal-service-blueprint
@@ -1168,8 +1202,8 @@ output_artifacts:
   web-prototype:
   - uswds-prototype
 stats:
-  total_patterns: 41
-  skills: 30
+  total_patterns: 42
+  skills: 31
   prompts: 3
   agents: 3
   workflows: 4
