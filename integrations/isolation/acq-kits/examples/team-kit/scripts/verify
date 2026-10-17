@@ -32,6 +32,29 @@
 
 set -uo pipefail
 
+classify_opencode_instructions() {
+  local version="$1" major minor patch
+  version="${version#opencode }"
+  read -r major minor patch <<EOF
+$(printf '%s\n' "$version" | sed -n 's/^[^0-9]*\([0-9][0-9]*\)\.\([0-9][0-9]*\)\.\([0-9][0-9]*\)\([+-].*\)\{0,1\}$/\1 \2 \3/p' | head -n1)
+EOF
+  if [ -z "$major" ]; then
+    printf 'unreadable\n'
+  elif [ "$major" = 2 ] && [ "$minor" = 0 ] && [ "$patch" -lt 30 ]; then
+    printf 'affected\n'
+  else
+    printf 'supported\n'
+  fi
+}
+
+# Offline test seam: exercise the production version parser/classifier without
+# resolving acq, creating temp state, or starting a sandbox.
+if [ "${1:-}" = "--classify-opencode-version" ]; then
+  [ "$#" -eq 2 ] || { echo "usage: $0 --classify-opencode-version VERSION" >&2; exit 2; }
+  classify_opencode_instructions "$2"
+  exit 0
+fi
+
 KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 KIT_NAME="$(basename "$KIT_DIR")"
 SBX_NAME="${KIT_NAME}-verify-$$"
@@ -239,13 +262,11 @@ fi
 # 2.x, while an image with no OpenCode of its own (such as
 # sandbox-templates:shell-docker) runs the kit's 2.x.
 oc_version="$(in_sbx 'opencode --version 2>/dev/null' | tail -n1)"
+oc_support="$(classify_opencode_instructions "$oc_version")"
 oc_version="${oc_version#opencode }"
-read -r oc_major oc_minor oc_patch <<EOF
-$(printf '%s\n' "$oc_version" | sed -n 's/^[^0-9]*\([0-9][0-9]*\)\.\([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1 \2 \3/p' | head -n1)
-EOF
-if [ -z "$oc_major" ]; then
+if [ "$oc_support" = unreadable ]; then
   bad "could not read the OpenCode version in the sandbox ('${oc_version:-no output}')"
-elif [ "$oc_major" = 2 ] && [ "$oc_minor" = 0 ] && [ "$oc_patch" -lt 30 ]; then
+elif [ "$oc_support" = affected ]; then
   bad "OpenCode $oc_version ignores the instructions field: team conventions will not reach the agent (pattern doc, Check against your acq)"
 else
   ok "OpenCode $oc_version loads instructions files"

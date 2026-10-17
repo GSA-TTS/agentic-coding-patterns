@@ -83,8 +83,9 @@ sandbox runs:
 acq exec <sandbox> -- opencode --version
 ```
 
-OpenCode 2.x accepts `instructions` but never loads the files it lists. See
-"Check against your acq" in the pattern doc.
+OpenCode 2.0.0 through 2.0.29 accept `instructions` but never load the files it
+lists. OpenCode 2.0.30 fixed the behavior. See "Check against your acq" in the
+pattern doc.
 
 ## A daemon still uses the old team settings
 
