@@ -183,22 +183,70 @@ function normalizeModelId(id) {
 // defined once so the guard's identity residue cannot drift out of agreement
 // with what the tokenizer consumed — a token recognized here as a family or
 // variant must not also count as identity-bearing remainder.
-const FAMILY_TOKEN = /^(claude|gpt|gemini|llama\d*|cohere|command)$/i
+const FAMILY_TOKEN = /^(claude|gpt|gemini|llama\d*|command)$/i
 const VARIANT_TOKEN = /^(opus|sonnet|haiku|pro|flash|mini|nano|maverick)$/i
+const LEADING_PROVIDER_TOKEN = /^(anthropic|openai|google|meta|amazon|aws|bedrock|azure|vertex|mistral|ai21|deepseek|microsoft|xai|cohere)$/
+const LEADING_REGION_TOKEN = /^(us|eu|au|uk|ca|jp|ap|sa|global|gov|govcloud)$/
+const MARKETPLACE_REVISION_TOKEN = /^v\d+(?::\d+)?$/
+
+// A terminal ISO date is deployment metadata, not part of the model version.
+// Accept the extended and basic ISO forms used by models.dev, but only after a
+// calendar check. A date-shaped but invalid suffix stays on the identity below
+// so it cannot collapse onto an undated model or a different invalid suffix.
+function terminalDateMetadata(normalized) {
+  // Marketplace revisions can follow the date (`...-20251101-v1:0`). Peel the
+  // recognized packaging token only for date parsing, then restore it to the
+  // identity so the ordinary noise filter consumes it.
+  const revision = normalized.match(/(-v\d+(?::\d+)?)$/)?.[1] ?? ""
+  const dateInput = revision ? normalized.slice(0, -revision.length) : normalized
+  const match = dateInput.match(/-(\d{4})(?:-(\d{2})-(\d{2})|(\d{2})(\d{2}))$/)
+  if (!match) return { identity: normalized, date: null, invalidDate: null }
+
+  const year = Number.parseInt(match[1], 10)
+  const month = Number.parseInt(match[2] ?? match[4], 10)
+  const day = Number.parseInt(match[3] ?? match[5], 10)
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
+  const daysInMonth = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+  const valid = month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth[month - 1]
+  if (!valid) return { identity: normalized, date: null, invalidDate: match[0].slice(1) }
+
+  return {
+    identity: `${dateInput.slice(0, match.index)}${revision}`,
+    date: `${match[1]}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+    invalidDate: null,
+  }
+}
 
 function extractModelTokens(id) {
   const normalized = normalizeModelId(id)
-  const parts = normalized.split("-")
+  const dateMetadata = terminalDateMetadata(normalized)
+  // Dots delimit provider/region prefixes (`eu.anthropic.claude`), while
+  // colons stay inside marketplace revision tokens (`v1:0`). Numeric version
+  // dots were already normalized to hyphens by normalizeModelId().
+  const parts = dateMetadata.identity.split("-").flatMap((part) => part.split(/[./]/))
   let family = ""
   let variant = ""
   const versionParts = []
-  for (const part of parts) {
+  const identityParts = []
+  for (const [index, part] of parts.entries()) {
+    if (!family && (LEADING_PROVIDER_TOKEN.test(part) || LEADING_REGION_TOKEN.test(part))) {
+      continue
+    }
     if (FAMILY_TOKEN.test(part)) {
-      family = /^llama/i.test(part) ? "llama" : /^command$/i.test(part) ? "cohere" : part
+      const candidate = /^llama/i.test(part) ? "llama" : /^command$/i.test(part) ? "cohere" : part
+      if (!family) family = candidate
+      else identityParts.push(part)
     } else if (VARIANT_TOKEN.test(part)) {
-      variant = part
-    } else if (/^\d+$/.test(part)) {
-      versionParts.push(Number.parseInt(part, 10))
+      if (!variant) variant = part
+      else identityParts.push(part)
+    } else if (/^\d+$/.test(part) && versionParts.length < 2) {
+      // Compare version tokens as canonical strings: converting an arbitrary
+      // decimal id to Number loses precision above MAX_SAFE_INTEGER.
+      versionParts.push(part.replace(/^0+(?=\d)/, ""))
+    } else if (index === parts.length - 1 && MARKETPLACE_REVISION_TOKEN.test(part)) {
+      continue
+    } else {
+      identityParts.push(part)
     }
   }
   if (!family) {
@@ -208,7 +256,7 @@ function extractModelTokens(id) {
     else if (/llama/i.test(normalized)) family = "llama"
     else if (/cohere|command/i.test(normalized)) family = "cohere"
   }
-  return { family, version: versionParts, variant }
+  return { family, version: versionParts, variant, identityParts, ...dateMetadata }
 }
 
 // Tokens that carry no model identity, only packaging. Each is a FULL token
@@ -216,15 +264,8 @@ function extractModelTokens(id) {
 // Anything NOT listed here and not a family/variant/version token is treated as
 // identity-bearing — see identityResidue below for why that direction matters.
 const IDENTITY_NOISE = [
-  // Hosting provider / marketplace prefixes: the same model is listed under
-  // several of them (`anthropic.claude-opus-5`, `us.anthropic.claude-opus-5`).
-  /^(anthropic|openai|google|meta|amazon|aws|bedrock|azure|vertex|mistral|ai21|deepseek|microsoft|xai|cohere)$/,
-  // Region / deployment scopes. Ranking still prefers us/global over eu/au.
-  /^(us|eu|au|uk|ca|jp|ap|sa|global|gov|govcloud)$/,
-  // Marketplace revision markers ("…-v1:0") and parameter counts ("17b", "8x7b").
-  /^v\d+(:\d+)?$/,
+  // Parameter counts and tuning descriptors name packaging, not identity.
   /^\d+(\.\d+)?x?\d*[bmk]$/,
-  // Tuning descriptors that name the same published model.
   /^(instruct|instructed|it|chat|text)$/,
 ]
 
@@ -250,24 +291,21 @@ function hasLiteToken(normalizedId) {
 // catalogs we actually read, and safe to be wrong about in the closed
 // direction: an unrecognized noise token only costs a missed enrichment, which
 // is reported as unenriched rather than silently wrong.
-function identityResidue(normalizedId) {
-  const residue = new Set()
-  for (const part of normalizedId.split(/[.\-/:]/)) {
+function identityResidue(tokens) {
+  const residue = []
+  for (const part of tokens.identityParts) {
     if (!part) continue
-    if (FAMILY_TOKEN.test(part) || VARIANT_TOKEN.test(part)) continue
-    if (/^\d+$/.test(part)) continue
     if (IDENTITY_NOISE.some((re) => re.test(part))) continue
-    residue.add(part)
+    residue.push(/^\d+$/.test(part) ? part.replace(/^0+(?=\d)/, "") : part)
   }
+  if (tokens.invalidDate) residue.push(tokens.invalidDate)
   return residue
 }
 
-function sameIdentityResidue(usaiNorm, catalogNorm) {
-  const a = identityResidue(usaiNorm)
-  const b = identityResidue(catalogNorm)
-  if (a.size !== b.size) return false
-  for (const token of a) if (!b.has(token)) return false
-  return true
+function sameIdentityResidue(usaiTokens, catalogTokens) {
+  const a = identityResidue(usaiTokens)
+  const b = identityResidue(catalogTokens)
+  return a.length === b.length && a.every((token, index) => token === b[index])
 }
 
 // PRECISION GUARD. Scoring alone cannot be trusted to reject a wrong candidate:
@@ -287,11 +325,14 @@ function sameIdentityResidue(usaiNorm, catalogNorm) {
 // plausible, so a completeness check ("every model has a price") passes while
 // the values are wrong. A gateway model absent from the enrichment source must
 // end up visibly unenriched, never silently mis-enriched.
-function isPreciseMatch(usaiTokens, catalogTokens, usaiNorm, catalogNorm) {
+function isPreciseMatch(usaiTokens, catalogTokens) {
   if (usaiTokens.family !== catalogTokens.family) return false
   if ((usaiTokens.variant || "") !== (catalogTokens.variant || "")) return false
-  if (hasLiteToken(usaiNorm) !== hasLiteToken(catalogNorm)) return false
-  if (!sameIdentityResidue(usaiNorm, catalogNorm)) return false
+  if (hasLiteToken(usaiTokens.identity) !== hasLiteToken(catalogTokens.identity)) return false
+  if (!sameIdentityResidue(usaiTokens, catalogTokens)) return false
+  // A dated gateway deployment names one exact snapshot. An undated deployment
+  // is an alias and may use either an undated entry or a dated snapshot.
+  if (usaiTokens.date && usaiTokens.date !== catalogTokens.date) return false
   // Compare major and minor positionally. Both absent is agreement (a bare
   // family id on both sides); one absent is not.
   if (usaiTokens.version[0] !== catalogTokens.version[0]) return false
@@ -303,27 +344,20 @@ function findModelsDevMatch(usaiId, catalog) {
   const usaiTokens = extractModelTokens(usaiId)
   const usaiNorm = normalizeModelId(usaiId)
   let bestMatch = null
-  let bestScore = -Infinity
+  let bestRank = null
   for (const [catalogId, data] of Object.entries(catalog)) {
     const catalogTokens = extractModelTokens(catalogId)
     const catalogNorm = normalizeModelId(catalogId)
-    // The guard decides ELIGIBILITY; the score below only ranks the candidates
-    // that already agree on identity (e.g. picking `us.` over `eu.` regional
-    // duplicates of the same model).
-    if (!isPreciseMatch(usaiTokens, catalogTokens, usaiNorm, catalogNorm)) continue
-    // Every surviving candidate already agrees on family, tier, major.minor and
-    // lite, so the old variant / lite / version-equality terms would score the
-    // same for all of them and are gone. What remains genuinely discriminates
-    // between duplicate listings OF THE SAME MODEL.
+    // The guard decides ELIGIBILITY; ranking below only orders candidates that
+    // already agree on identity (dated aliases and regional duplicates).
+    if (!isPreciseMatch(usaiTokens, catalogTokens)) continue
+    // Date rank comes before packaging score. Thus an undated identity always
+    // beats its dated aliases; when only dated aliases exist, the latest valid
+    // date wins. The catalog has no explicit alias mapping, so latest-date is
+    // the only deterministic freshness signal available.
+    const undatedRank = catalogTokens.date ? 0 : 1
+    const dateRank = catalogTokens.date ?? ""
     let score = 10
-    // Prefer the plainest generation: `claude-opus-5` over a dated SKU like
-    // `claude-opus-5-20260101`, whose extra version component the guard allows.
-    if (catalogTokens.version.length === usaiTokens.version.length) score += 3
-    // A modality-specific sibling (…-tts, …-vision) is not the chat model.
-    for (const suffix of ["tts", "image", "audio", "vision", "embed", "embedding", "search", "realtime"]) {
-      const re = new RegExp(`(^|[.\\-/])${suffix}([.\\-]|$)`)
-      if (re.test(catalogNorm) && !re.test(usaiNorm)) score -= 60
-    }
     // Regional duplicates of one model: prefer the unprefixed or us/global
     // listing, since USAi serves from a US deployment.
     if (/^(eu|au)\./.test(catalogId)) score -= 15
@@ -331,12 +365,19 @@ function findModelsDevMatch(usaiId, catalog) {
     else if (/^[a-z]{2}\./.test(catalogId)) score += 1
     else score += 3
     if (catalogNorm.startsWith(usaiNorm.slice(0, 10))) score += 5
-    if (score > bestScore) {
-      bestScore = score
+    const rank = [undatedRank, dateRank, score]
+    const isBetter =
+      !bestRank ||
+      rank[0] > bestRank[0] ||
+      (rank[0] === bestRank[0] && rank[1] > bestRank[1]) ||
+      (rank[0] === bestRank[0] && rank[1] === bestRank[1] && rank[2] > bestRank[2]) ||
+      (rank[0] === bestRank[0] && rank[1] === bestRank[1] && rank[2] === bestRank[2] && catalogId < bestMatch.id)
+    if (isBetter) {
+      bestRank = rank
       bestMatch = { id: catalogId, data }
     }
   }
-  return bestMatch && bestScore > 0 ? bestMatch : null
+  return bestMatch
 }
 
 function providerModelMaps(vendor, catalog) {

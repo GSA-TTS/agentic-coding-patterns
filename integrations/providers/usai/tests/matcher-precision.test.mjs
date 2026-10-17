@@ -180,9 +180,100 @@ test("the llama4 glue-split still matches the Bedrock form", () => {
   )
 })
 
+test("a cohere provider prefix and marketplace revision stay packaging noise", () => {
+  const catalog = catalogOf("cohere.command-r-plus-v1:0")
+  assert.equal(findModelsDevMatch("command-r-plus", catalog)?.id, "cohere.command-r-plus-v1:0")
+})
+
+test("a dated Bedrock SKU still matches when v1:0 follows the date", () => {
+  const catalog = catalogOf("anthropic.claude-opus-4-5-20251101-v1:0")
+  assert.equal(
+    findModelsDevMatch("claude_4_5_opus", catalog)?.id,
+    "anthropic.claude-opus-4-5-20251101-v1:0",
+  )
+})
+
+test("provider and revision words are noise only in their packaging positions", () => {
+  assert.equal(findModelsDevMatch("gpt-5", catalogOf("gpt-5-anthropic")), null)
+  assert.equal(findModelsDevMatch("gpt-5-preview", catalogOf("gpt-5-v1:0-preview")), null)
+  assert.equal(findModelsDevMatch("gpt-5", catalogOf("eu.gpt-5"))?.id, "eu.gpt-5")
+  assert.equal(findModelsDevMatch("gpt-5", catalogOf("gpt-5-v1:0"))?.id, "gpt-5-v1:0")
+})
+
 test("a provider-prefixed entry still matches its unprefixed gateway id", () => {
   const catalog = catalogOf("anthropic.claude-opus-5")
   assert.equal(findModelsDevMatch("claude-opus-5", catalog)?.id, "anthropic.claude-opus-5")
+})
+
+test("a dated gpt-4o SKU still matches its undated gateway id", () => {
+  const catalog = catalogOf("gpt-4o-2024-08-06")
+  assert.equal(findModelsDevMatch("gpt-4o", catalog)?.id, "gpt-4o-2024-08-06")
+})
+
+test("a dated gateway id matches only the same calendar date", () => {
+  const catalog = catalogOf("gpt-4o", "gpt-4o-2024-08-06", "gpt-4o-2024-11-20")
+  assert.equal(findModelsDevMatch("gpt-4o-2024-08-06", catalog)?.id, "gpt-4o-2024-08-06")
+  assert.equal(findModelsDevMatch("gpt-4o-2024-08-07", catalog), null)
+})
+
+test("basic and extended forms of the same valid date are equivalent", () => {
+  const catalog = catalogOf("anthropic.claude-3-5-sonnet-20241022")
+  assert.equal(
+    findModelsDevMatch("claude-3-5-sonnet-2024-10-22", catalog)?.id,
+    "anthropic.claude-3-5-sonnet-20241022",
+  )
+})
+
+test("a leap day is accepted only in a leap year", () => {
+  assert.equal(
+    findModelsDevMatch("gpt-4o-2024-02-29", catalogOf("gpt-4o-20240229"))?.id,
+    "gpt-4o-20240229",
+  )
+  assert.equal(findModelsDevMatch("gpt-4o-2025-02-29", catalogOf("gpt-4o-20250228")), null)
+})
+
+test("invalid date-shaped suffixes remain identity-bearing and fail closed", () => {
+  for (const invalid of ["2025-02-29", "2024-13-01", "20240230"]) {
+    const qualified = `claude-3-5-sonnet-${invalid}`
+    assert.equal(findModelsDevMatch(qualified, catalogOf("claude-3-5-sonnet")), null)
+    assert.equal(findModelsDevMatch("claude-3-5-sonnet", catalogOf(qualified)), null)
+    assert.equal(findModelsDevMatch(qualified, catalogOf(qualified))?.id, qualified)
+  }
+})
+
+test("numeric qualifiers beyond major.minor remain ordered identity", () => {
+  for (const [gateway, catalog] of [
+    ["claude-3-5-sonnet-99", "claude-3-5-sonnet"],
+    ["claude-3-5-sonnet-2024023", "claude-3-5-sonnet"],
+    ["claude-3-5-sonnet-202402290", "claude-3-5-sonnet"],
+    ["claude-3-5-sonnet-2024-1-01", "claude-3-5-sonnet-2025-2-02"],
+    ["claude-3-5-sonnet-123", "claude-3-5-sonnet-456"],
+  ]) {
+    assert.equal(findModelsDevMatch(gateway, catalogOf(catalog)), null, `${gateway} must not match ${catalog}`)
+  }
+})
+
+test("large numeric identity tokens compare without Number precision loss", () => {
+  assert.equal(
+    findModelsDevMatch("gpt-5-2-9007199254740992", catalogOf("gpt-5-2-9007199254740993")),
+    null,
+  )
+  assert.equal(
+    findModelsDevMatch("gpt-999999999999999999999-1", catalogOf("gpt-999999999999999999998-1")),
+    null,
+  )
+})
+
+test("unknown identity residue preserves token order and multiplicity", () => {
+  assert.equal(findModelsDevMatch("gpt-5.2-luna", catalogOf("gpt-5.2-luna-luna")), null)
+  assert.equal(findModelsDevMatch("gpt-5.2-luna-solstice", catalogOf("gpt-5.2-solstice-luna")), null)
+  assert.equal(findModelsDevMatch("gpt-5-mini", catalogOf("gpt-5-mini-mini")), null)
+  assert.equal(findModelsDevMatch("gpt-5", catalogOf("gpt-gpt-5")), null)
+})
+
+test("an eu-prefixed entry still matches when it is the only exact-identity candidate", () => {
+  const catalog = catalogOf("eu.anthropic.claude-opus-5")
+  assert.equal(findModelsDevMatch("claude-opus-5", catalog)?.id, "eu.anthropic.claude-opus-5")
 })
 
 test("underscore and dot version spellings are equivalent (gemini-3-7 / gemini-3.7)", () => {
@@ -214,6 +305,24 @@ test("the plain generation is preferred over a dated SKU of the same model", () 
   assert.equal(findModelsDevMatch("claude-opus-5", catalog)?.id, "anthropic.claude-opus-5")
 })
 
+test("an undated entry beats dated aliases in either insertion order", () => {
+  for (const ids of [
+    ["anthropic.claude-opus-5-20260101", "anthropic.claude-opus-5"],
+    ["anthropic.claude-opus-5", "anthropic.claude-opus-5-20260101"],
+  ]) {
+    assert.equal(findModelsDevMatch("claude-opus-5", catalogOf(...ids))?.id, "anthropic.claude-opus-5")
+  }
+})
+
+test("the latest valid dated alias wins in either insertion order", () => {
+  for (const ids of [
+    ["gpt-4o-2024-08-06", "gpt-4o-2024-11-20"],
+    ["gpt-4o-2024-11-20", "gpt-4o-2024-08-06"],
+  ]) {
+    assert.equal(findModelsDevMatch("gpt-4o", catalogOf(...ids))?.id, "gpt-4o-2024-11-20")
+  }
+})
+
 test("a us/global regional listing is preferred over eu/au for the same model", () => {
   const catalog = catalogOf(
     "eu.anthropic.claude-opus-5",
@@ -228,9 +337,13 @@ test("an unprefixed listing beats a regional one for the same model", () => {
   assert.equal(findModelsDevMatch("claude-opus-5", catalog)?.id, "anthropic.claude-opus-5")
 })
 
-test("a modality sibling loses to the chat model even though both pass the guard", () => {
-  const catalog = catalogOf("gemini-2.5-flash", "gemini-2.5-flash-tts")
-  assert.equal(findModelsDevMatch("gemini-2.5-flash", catalog)?.id, "gemini-2.5-flash")
+test("modality qualifiers are identity-bearing and fail closed both ways", () => {
+  assert.equal(findModelsDevMatch("gemini-2.5-flash", catalogOf("gemini-2.5-flash-tts")), null)
+  assert.equal(findModelsDevMatch("gemini-2.5-flash-tts", catalogOf("gemini-2.5-flash")), null)
+  assert.equal(
+    findModelsDevMatch("gemini-2.5-flash-tts", catalogOf("gemini-2.5-flash-tts"))?.id,
+    "gemini-2.5-flash-tts",
+  )
 })
 
 test("the returned payload comes from the entry that was actually selected", () => {
