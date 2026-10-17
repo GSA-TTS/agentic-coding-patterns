@@ -2,8 +2,8 @@
 
 ## Context
 
-OpenCode's upstream repository (`anomalyco/opencode`) now carries git tags
-through `v2.0.22`, and the stable v2 CLI is published to npm under the new
+When this decision was made, OpenCode's upstream repository
+(`anomalyco/opencode`) carried git tags through `v2.0.22`, and the stable v2 CLI is published to npm under the new
 `@opencode/cli` package. The older `opencode-ai` package remains on the legacy
 `1.18.x` line, and the `v2.0.x` git tags still do not have matching GitHub
 Release objects or `opencode-linux-<arch>.tar.gz` release assets.
@@ -25,7 +25,8 @@ platform packages.
 
 ## Decision
 
-Pin this kit to `@opencode/cli`'s current stable 2-series version, `2.0.22`, by
+Pin this kit to a stable 2-series version of `@opencode/cli` (`2.0.22` at the
+time of this decision; the current pin is `OPENCODE_VERSION` in `spec.yaml`) by
 fetching the matching `@opencode/cli-linux-<arch>` npm tarball directly from
 `registry.npmjs.org`, verifying the tarball SHA-256, and extracting
 `package/bin/opencode` without running npm lifecycle scripts. On x64 Linux,
@@ -34,8 +35,7 @@ postinstall selection logic.
 
 ## Consequences
 
-- The kit now installs the most recent available stable 2-series OpenCode CLI
-  while preserving the previous deterministic direct-download/verify/extract
+- The kit installs a pinned stable 2-series OpenCode CLI while preserving the previous deterministic direct-download/verify/extract
   model.
 - The egress allow-list changes from GitHub release hosts to `registry.npmjs.org`.
 - The kit intentionally does not run `npm install -g @opencode/cli`: that wrapper
