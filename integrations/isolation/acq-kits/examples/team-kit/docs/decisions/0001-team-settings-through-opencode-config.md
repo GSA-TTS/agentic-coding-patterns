@@ -25,7 +25,7 @@ that variable; a personal kit does not override it.
 - Settings tier global → team → repo, with no merge script in this kit.
 - `OPENCODE_CONFIG` is single-valued and last-wins across kits, so any later
   kit that sets it hides the team settings without a warning.
-- The conventions reach the agent through OpenCode's `instructions` field,
-  which OpenCode 2.x ignores. On an image whose sandbox shells run 2.x, the
-  team settings still apply but the conventions do not load; `scripts/verify`
-  fails there.
+- The conventions reach the agent through OpenCode's `instructions` field.
+  OpenCode 2.0.0 through 2.0.29 accepted that field but did not load its files;
+  OpenCode 2.0.30 fixed the behavior. On an affected image, the team settings
+  still apply but the conventions do not load; `scripts/verify` fails there.

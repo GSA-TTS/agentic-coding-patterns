@@ -82,8 +82,9 @@ The OpenCode wiring gives the settings tier global → team → repo: the global
 `usai-provider` kit merges into OpenCode's global config path and leaves
 `OPENCODE_CONFIG` free for this layer. The rest of the kit is agent-agnostic.
 The conventions file reaches the agent through OpenCode's `instructions`
-field, which only OpenCode 1.x loads; `scripts/verify` fails when sandbox
-shells run 2.x (see "Check against your acq" in the pattern doc).
+field, which OpenCode 2.0.0 through 2.0.29 ignore; `scripts/verify` fails
+when sandbox shells run one of those (see "Check against your acq" in the
+pattern doc).
 
 ## What it does not carry, on purpose
 
