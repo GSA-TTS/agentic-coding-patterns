@@ -2,7 +2,7 @@
 
 > **Generated file — do not edit by hand.** Run `make generate` (regenerates INDEX.yaml + CATALOG.md). Source of truth is each pattern's `SKILL.md`/`AGENTS.md` frontmatter.
 
-41 patterns — 30 skills, 3 prompts, 3 agents, 4 workflows, 1 lessons.
+42 patterns — 31 skills, 3 prompts, 3 agents, 4 workflows, 1 lessons.
 
 For machine routing use the [`pattern-router`](.agents/skills/meta/pattern-router/SKILL.md) skill + `scripts/route_patterns.py`; this catalog is the human view.
 
@@ -34,6 +34,7 @@ For machine routing use the [`pattern-router`](.agents/skills/meta/pattern-route
 | [`backdoor-review`](skills/backdoor-review/SKILL.md) | skill | experimental | analyze, review | ci-workflow, pull-request-diff, source-code | security-review |
 | [`compliance-claim-checker`](skills/compliance-claim-checker/SKILL.md) | skill | experimental | analyze, review | compliance-claim, documentation, pull-request-diff | security-review |
 | [`dependency-analysis`](skills/dependency-analysis/SKILL.md) | skill | experimental | analyze, review | dependency-manifest, source-code | security-review |
+| [`fips-199-categorization`](skills/fips-199-categorization/SKILL.md) | skill | experimental | analyze, review | compliance-claim, documentation | security-review |
 | [`incident-evidence-review`](skills/incident-evidence-review/SKILL.md) | skill | experimental | analyze, review | documentation, incident-evidence | security-review |
 | [`least-privilege-review`](skills/least-privilege-review/SKILL.md) | skill | experimental | analyze, review | ci-workflow, infrastructure-as-code, source-code | security-review |
 | [`safe-code-review`](prompts/security/safe-code-review/SKILL.md) | prompt | deprecated | analyze, review | pull-request-diff, source-code | security-review |
