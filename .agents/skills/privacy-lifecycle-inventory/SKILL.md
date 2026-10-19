@@ -32,7 +32,7 @@ source_inspiration:
   - url: "https://www.whitehouse.gov/wp-content/uploads/legacy_drupal_files/omb/circulars/A130/a130revised.pdf"
     license: "public-domain"
     intake_record: "PR description"
-  - url: "https://www.archives.gov/files/cui/documents/20161214-Privacy-Act-1974.pdf"
+  - url: "https://www.govinfo.gov/content/pkg/USCODE-2023-title5/pdf/USCODE-2023-title5-partI-chap5-subchapII-sec552a.pdf"
     license: "public-domain"
     intake_record: "PR description"
 portability:
@@ -153,4 +153,4 @@ the authorized privacy and information owners.
 ## References
 
 - [OMB Circular A-130](https://www.whitehouse.gov/wp-content/uploads/legacy_drupal_files/omb/circulars/A130/a130revised.pdf)
-- [Privacy Act of 1974](https://www.archives.gov/files/cui/documents/20161214-Privacy-Act-1974.pdf)
+- [Privacy Act of 1974, 5 USC 552a](https://www.govinfo.gov/content/pkg/USCODE-2023-title5/pdf/USCODE-2023-title5-partI-chap5-subchapII-sec552a.pdf)
