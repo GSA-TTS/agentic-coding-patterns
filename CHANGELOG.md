@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.14.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.13.0...v1.14.0) (2026-10-19)
+
+
+### Features
+
+* **paseo:** bump pinned Paseo CLI to 0.12.0 ([#504](https://github.com/GSA-TTS/agentic-coding-patterns/issues/504)) ([0c5258e](https://github.com/GSA-TTS/agentic-coding-patterns/commit/0c5258e7464c3cf8cf0aee1bf45876247aec72f7))
+
+
+### Bug Fixes
+
+* **acq-kits:** bump opencode kit to OpenCode 2.0.30 ([#499](https://github.com/GSA-TTS/agentic-coding-patterns/issues/499)) ([c9d2281](https://github.com/GSA-TTS/agentic-coding-patterns/commit/c9d228109937bc9b85c7ae83d65578d56a3c3085))
+* **acq-kits:** give verify scripts a "could not check" verdict state ([#460](https://github.com/GSA-TTS/agentic-coding-patterns/issues/460)) ([306906a](https://github.com/GSA-TTS/agentic-coding-patterns/commit/306906a58602993d79909176171c27fdbf0c295b))
+
 ## [1.13.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.12.1...v1.13.0) (2026-10-12)
 
 
