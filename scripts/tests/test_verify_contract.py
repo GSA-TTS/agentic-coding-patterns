@@ -47,6 +47,7 @@ UNCONVERTED = {
     "oci-engine",
     "opencode",
     "openchamber",
+    "opendesign",
     "paseo",
     "pi-coding-agent",
     "zscaler-ca-certificate",

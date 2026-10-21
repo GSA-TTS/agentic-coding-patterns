@@ -9,6 +9,7 @@
   "overrides": {
     "js-yaml": "4.3.2",
     "katex": "0.18.2",
+    "markdown-it": "14.3.3",
     "smol-toml": "1.9.0"
   }
 }
