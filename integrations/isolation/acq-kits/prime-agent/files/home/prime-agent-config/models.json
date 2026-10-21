@@ -7,63 +7,15 @@
       "authHeader": true,
       "models": [
         {
-          "id": "claude_4_5_haiku",
-          "name": "Claude 4.5 Haiku",
-          "contextWindow": 200000,
-          "maxTokens": 64000,
+          "id": "claude-sonnet-5.5",
+          "name": "Claude Sonnet 5.5",
+          "contextWindow": 1000000,
+          "maxTokens": 128000,
           "cost": {
-            "input": 1,
-            "output": 5,
+            "input": 2,
+            "output": 10,
             "cacheRead": 0.1,
-            "cacheWrite": 1.25
-          }
-        },
-        {
-          "id": "claude_4_5_sonnet",
-          "name": "Claude 4.5 Sonnet",
-          "contextWindow": 200000,
-          "maxTokens": 64000,
-          "cost": {
-            "input": 3,
-            "output": 15,
-            "cacheRead": 0.3,
-            "cacheWrite": 3.75
-          }
-        },
-        {
-          "id": "claude_4_6_sonnet",
-          "name": "Claude 4.6 Sonnet",
-          "contextWindow": 1000000,
-          "maxTokens": 128000,
-          "cost": {
-            "input": 3.3,
-            "output": 16.5,
-            "cacheRead": 0.33,
-            "cacheWrite": 4.125
-          }
-        },
-        {
-          "id": "claude_4_7_opus",
-          "name": "Claude 4.7 Opus",
-          "contextWindow": 1000000,
-          "maxTokens": 128000,
-          "cost": {
-            "input": 5,
-            "output": 25,
-            "cacheRead": 0.5,
-            "cacheWrite": 6.25
-          }
-        },
-        {
-          "id": "claude_4_8_opus",
-          "name": "Claude 4.8 Opus",
-          "contextWindow": 1000000,
-          "maxTokens": 128000,
-          "cost": {
-            "input": 5,
-            "output": 25,
-            "cacheRead": 0.5,
-            "cacheWrite": 6.25
+            "cacheWrite": 2.5
           }
         },
         {
@@ -91,36 +43,75 @@
           }
         },
         {
-          "id": "gpt_5_2_default_v2",
-          "name": "GPT 5.2 Default V2",
-          "contextWindow": 400000,
-          "maxTokens": 128000,
-          "cost": {
-            "input": 1.75,
-            "output": 14,
-            "cacheRead": 0.125
-          }
-        },
-        {
-          "id": "gpt_5_4_default_v2",
-          "name": "GPT 5.4 Default V2",
-          "contextWindow": 1050000,
-          "maxTokens": 128000,
-          "cost": {
-            "input": 2.5,
-            "output": 15,
-            "cacheRead": 0.25
-          }
-        },
-        {
-          "id": "gpt_5_5_default_v2",
-          "name": "GPT 5.5 Default V2",
-          "contextWindow": 1050000,
+          "id": "claude_4_8_opus",
+          "name": "Claude 4.8 Opus",
+          "contextWindow": 1000000,
           "maxTokens": 128000,
           "cost": {
             "input": 5,
-            "output": 30,
-            "cacheRead": 0.5
+            "output": 25,
+            "cacheRead": 0.5,
+            "cacheWrite": 6.25
+          }
+        },
+        {
+          "id": "claude_4_7_opus",
+          "name": "Claude 4.7 Opus",
+          "contextWindow": 1000000,
+          "maxTokens": 128000,
+          "cost": {
+            "input": 5,
+            "output": 25,
+            "cacheRead": 0.5,
+            "cacheWrite": 6.25
+          }
+        },
+        {
+          "id": "claude_4_6_sonnet",
+          "name": "Claude 4.6 Sonnet",
+          "contextWindow": 1000000,
+          "maxTokens": 128000,
+          "cost": {
+            "input": 3.3,
+            "output": 16.5,
+            "cacheRead": 0.33,
+            "cacheWrite": 4.125
+          }
+        },
+        {
+          "id": "claude_4_5_haiku",
+          "name": "Claude 4.5 Haiku",
+          "contextWindow": 200000,
+          "maxTokens": 64000,
+          "cost": {
+            "input": 1,
+            "output": 5,
+            "cacheRead": 0.1,
+            "cacheWrite": 1.25
+          }
+        },
+        {
+          "id": "claude_4_5_sonnet",
+          "name": "Claude 4.5 Sonnet",
+          "contextWindow": 200000,
+          "maxTokens": 64000,
+          "cost": {
+            "input": 3,
+            "output": 15,
+            "cacheRead": 0.3,
+            "cacheWrite": 3.75
+          }
+        },
+        {
+          "id": "gpt-6-astra",
+          "name": "GPT 6 Astra",
+          "contextWindow": 1050000,
+          "maxTokens": 128000,
+          "cost": {
+            "input": 10,
+            "output": 50,
+            "cacheRead": 1,
+            "cacheWrite": 12.5
           }
         },
         {
@@ -143,8 +134,8 @@
           "cost": {
             "input": 4,
             "output": 20,
-            "cacheRead": 0.5,
-            "cacheWrite": 6.25
+            "cacheRead": 0.4,
+            "cacheWrite": 5
           }
         },
         {
@@ -160,36 +151,47 @@
           }
         },
         {
-          "id": "gemini-2.5-flash",
-          "name": "Gemini 2.5 Flash",
-          "contextWindow": 1048576,
-          "maxTokens": 65536,
+          "id": "gpt_5_5_default_v2",
+          "name": "GPT 5.5 Default V2",
+          "contextWindow": 1050000,
+          "maxTokens": 128000,
           "cost": {
-            "input": 0.3,
-            "output": 2.5,
-            "cacheRead": 0.03
+            "input": 5,
+            "output": 30,
+            "cacheRead": 0.5
           }
         },
         {
-          "id": "gemini-2.5-flash-lite",
-          "name": "Gemini 2.5 Flash Lite",
-          "contextWindow": 1048576,
-          "maxTokens": 65536,
+          "id": "gpt_5_4_default_v2",
+          "name": "GPT 5.4 Default V2",
+          "contextWindow": 1050000,
+          "maxTokens": 128000,
           "cost": {
-            "input": 0.1,
-            "output": 0.4,
-            "cacheRead": 0.01
+            "input": 2.5,
+            "output": 15,
+            "cacheRead": 0.25
           }
         },
         {
-          "id": "gemini-2.5-pro",
-          "name": "Gemini 2.5 Pro",
+          "id": "gpt_5_2_default_v2",
+          "name": "GPT 5.2 Default V2",
+          "contextWindow": 400000,
+          "maxTokens": 128000,
+          "cost": {
+            "input": 1.75,
+            "output": 14,
+            "cacheRead": 0.175
+          }
+        },
+        {
+          "id": "gemini-3.8-flash",
+          "name": "Gemini 3.8 Flash",
           "contextWindow": 1048576,
           "maxTokens": 65536,
           "cost": {
-            "input": 1.25,
-            "output": 10,
-            "cacheRead": 0.125
+            "input": 0.75,
+            "output": 3.75,
+            "cacheRead": 0.075
           }
         },
         {
@@ -215,14 +217,25 @@
           }
         },
         {
-          "id": "gemini-3.8-flash",
-          "name": "Gemini 3.8 Flash",
+          "id": "gemini-2.5-flash",
+          "name": "Gemini 2.5 Flash",
           "contextWindow": 1048576,
           "maxTokens": 65536,
           "cost": {
-            "input": 0.75,
-            "output": 3.75,
-            "cacheRead": 0.075
+            "input": 0.3,
+            "output": 2.5,
+            "cacheRead": 0.03
+          }
+        },
+        {
+          "id": "gemini-2.5-flash-lite",
+          "name": "Gemini 2.5 Flash Lite",
+          "contextWindow": 1048576,
+          "maxTokens": 65536,
+          "cost": {
+            "input": 0.1,
+            "output": 0.4,
+            "cacheRead": 0.01
           }
         },
         {
