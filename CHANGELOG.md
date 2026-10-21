@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.15.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.14.0...v1.15.0) (2026-10-21)
+
+
+### Features
+
+* **acq-kits:** add OpenDesign browser kit ([#438](https://github.com/GSA-TTS/agentic-coding-patterns/issues/438)) ([83e202f](https://github.com/GSA-TTS/agentic-coding-patterns/commit/83e202f229204a1f65ea819de094ce2586bb7b54))
+* **isolation:** define provider-neutral input contract ([#518](https://github.com/GSA-TTS/agentic-coding-patterns/issues/518)) ([28a8ebd](https://github.com/GSA-TTS/agentic-coding-patterns/commit/28a8ebdd38865a74d1705a0908328c637bb570a8))
+* **usai-catalog:** refresh models and withhold undeployed gateway entries ([#519](https://github.com/GSA-TTS/agentic-coding-patterns/issues/519)) ([03421e0](https://github.com/GSA-TTS/agentic-coding-patterns/commit/03421e0826da507a730279224ad4161fd53e1c9e))
+
+
+### Bug Fixes
+
+* **usai-catalog:** refuse a near-miss instead of enriching from the wrong model ([#484](https://github.com/GSA-TTS/agentic-coding-patterns/issues/484)) ([c3a6dac](https://github.com/GSA-TTS/agentic-coding-patterns/commit/c3a6dacc534eee008efa1a0edb353e7b39a53e63))
+
 ## [1.14.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.13.0...v1.14.0) (2026-10-19)
 
 
