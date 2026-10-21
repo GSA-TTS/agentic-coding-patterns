@@ -10,8 +10,8 @@ last_updated: "2026-10-21"
 
 Provider input bundles let provider kits publish facts, a normalizer, and a
 vendored model snapshot without coupling a consumer to a provider or sandbox
-backend. The host validates and stages these inputs; the backend exposes them on
-a read-only mount.
+backend. The host validates and stages these inputs; the backend materializer
+owns the supplied root, read-only mount, and consumer wiring.
 
 ## Version 2
 
@@ -38,6 +38,13 @@ $ACQ_PROVIDER_INPUT_ROOT/models/providers/<providerId>
 The backend owns the root value. A provider bundle and a consumer must not infer
 or select it from a backend name.
 
+The backend materializer MUST supply the root, enforce the read-only mount,
+reject symlinks in the materialized provider tree, and verify that each
+materialized directory name equals its validated `providerId`. Its offline and
+live backend tests must cover these requirements. This repository deliberately
+does not provide a synthetic consumer or mount implementation; see ADR 0004 for
+the tracked implementation work.
+
 ## Version 1 Migration
 
 `acq-provider-input-bundle/v1` remains accepted. Its `projectedPath` continues
@@ -50,16 +57,39 @@ fixed `projectedPath` or compose the v2 `providerPath` under the supplied root.
 The validation contract retains the same artifact, symlink, credential, URL,
 executable, and strict-JSON checks for both versions.
 
+The released `acq-provider-input-bundle.schema.json` remains the v1 schema with
+its original `$id`. Version 2 uses
+`acq-provider-input-bundle-v2.schema.json` and `$id`
+`acq-provider-input-bundle/v2`. Every host materializer MUST invoke
+`scripts/validate_provider_input_contract.py`; JSON Schema alone cannot enforce
+cross-field agreement, file containment, symlink rejection, or executable-file
+checks.
+
+Materializers validate staged bundles without copying contract logic:
+
+```text
+python3 scripts/validate_provider_input_contract.py \
+  --schema-dir <released-patterns>/integrations/isolation/schemas \
+  --credential-bindings <released-patterns>/integrations/isolation/schemas/provider-credential-bindings.json \
+  --bundle <staged-provider>/provider-input.json
+```
+
+`--schema-dir` and `--credential-bindings` are trusted control-plane inputs.
+They MUST come from the pinned Patterns release and backend-owned credential
+configuration, never from bundle contents or provider-controlled metadata. A
+provider controls only the staged manifest path passed with `--bundle`.
+
 ## Consumer Requirements
 
-- Treat `ACQ_PROVIDER_INPUT_ROOT` as an absolute backend-supplied value.
-- Compose only the validated v2 `providerPath`; do not normalize an arbitrary
-  consumer-provided relative path.
-- Read provider routing and credential-name facts only from the read-only
-  provider directory.
+- Treat an absent required `ACQ_PROVIDER_INPUT_ROOT` or provider directory as
+  **not ready**, never as an empty provider set.
+- Treat a present authoritative root with zero provider directories as a valid,
+  authoritative empty provider set.
+- Treat a rejected bundle as a provisioning failure. Build an empty aggregate
+  only after successful authoritative discovery confirms zero providers.
+- Read provider routing and credential-name facts only from the backend's
+  read-only provider directory.
 - Do not place credential values in the bundle, mount, aggregate catalog, or
   consumer configuration.
-- Fail as not ready when a required provider root or provider directory is
-  absent. Do not interpret absence as an empty provider set.
 
 See ADR 0004 for the trust boundary, validation rules, and rationale.

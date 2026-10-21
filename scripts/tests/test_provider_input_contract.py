@@ -28,7 +28,6 @@ import pytest
 from validate_provider_input_contract import (
     ContractError,
     load_json,
-    provider_input_path,
     validate_bundle,
     validate_catalog,
 )
@@ -40,6 +39,8 @@ FIXTURES_DIR = SCHEMAS_DIR / "fixtures"
 FACTS_SCHEMA_PATH = SCHEMAS_DIR / "acq-provider-facts.schema.json"
 CATALOG_SCHEMA_PATH = SCHEMAS_DIR / "acq-neutral-model-catalog.schema.json"
 BUNDLE_SCHEMA_PATH = SCHEMAS_DIR / "acq-provider-input-bundle.schema.json"
+BUNDLE_V2_SCHEMA_PATH = SCHEMAS_DIR / "acq-provider-input-bundle-v2.schema.json"
+VALIDATOR_PATH = ROOT / "scripts" / "validate_provider_input_contract.py"
 
 
 def _bundle(relative: str) -> dict:
@@ -150,7 +151,7 @@ def acme_snapshot() -> dict:
 
 def test_schemas_are_valid_json_schema_2020_12():
     """Both schema files are self-consistent against draft 2020-12."""
-    for path in [FACTS_SCHEMA_PATH, CATALOG_SCHEMA_PATH, BUNDLE_SCHEMA_PATH]:
+    for path in [FACTS_SCHEMA_PATH, CATALOG_SCHEMA_PATH, BUNDLE_SCHEMA_PATH, BUNDLE_V2_SCHEMA_PATH]:
         schema = _load_schema(path)
         validator_cls = jsonschema.validators.validator_for(schema)
         validator_cls.check_schema(schema)
@@ -172,12 +173,34 @@ def test_v1_bundle_remains_valid():
     )
 
 
+def test_v1_schema_rejects_v2_bundle():
+    """The released v1 schema remains a v1-only public contract."""
+    with pytest.raises(jsonschema.ValidationError):
+        _validate(_bundle("acme-ai/bundle.json"), _load_schema(BUNDLE_SCHEMA_PATH))
+
+
+def test_v2_schema_rejects_v1_bundle():
+    """Version 2 has its own schema identity and rejects legacy fields."""
+    v1_bundle = {
+        "schemaVersion": "acq-provider-input-bundle/v1",
+        "providerId": "acme-ai",
+        "factsPath": "facts.json",
+        "normalizerPath": "normalize.py",
+        "snapshotPath": "snapshot.json",
+        "projectedPath": "/var/lib/acq/host/models/providers/acme-ai",
+        "credentialEnvNames": ["ACME_AI_API_KEY"],
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        _validate(v1_bundle, _load_schema(BUNDLE_V2_SCHEMA_PATH))
+
+
 def test_v2_bundle_path_agrees_with_provider_id():
     """The provider-relative location has one canonical provider-id segment."""
     for fixture_name, provider_id in [("usai", "usai"), ("acme-ai", "acme-ai")]:
         bundle = _bundle(f"{fixture_name}/bundle.json")
         assert bundle["schemaVersion"] == "acq-provider-input-bundle/v2"
         assert bundle["providerPath"] == f"models/providers/{provider_id}"
+        _validate(bundle, _load_schema(BUNDLE_V2_SCHEMA_PATH))
 
 
 @pytest.mark.parametrize(
@@ -189,25 +212,7 @@ def test_v2_bundle_rejects_unsafe_provider_path(provider_path):
     bundle = _bundle("acme-ai/bundle.json")
     bundle["providerPath"] = provider_path
     with pytest.raises(jsonschema.ValidationError):
-        _validate(bundle, _load_schema(BUNDLE_SCHEMA_PATH))
-
-
-def test_consumer_composes_v2_provider_path_under_two_roots():
-    """Backends provide the root; bundles never select a backend-specific location."""
-    bundle = _bundle("acme-ai/bundle.json")
-    assert provider_input_path(bundle, "/var/lib/acq/host") == Path("/var/lib/acq/host/models/providers/acme-ai")
-    assert provider_input_path(bundle, "/srv/acq/state/sandbox-42") == Path(
-        "/srv/acq/state/sandbox-42/models/providers/acme-ai"
-    )
-
-
-def test_consumer_preserves_v1_projected_path():
-    """A v1 bundle retains its released fixed guest path during migration."""
-    bundle = {
-        "schemaVersion": "acq-provider-input-bundle/v1",
-        "projectedPath": "/var/lib/acq/host/models/providers/acme-ai",
-    }
-    assert provider_input_path(bundle, "/ignored/by/v1") == Path("/var/lib/acq/host/models/providers/acme-ai")
+        _validate(bundle, _load_schema(BUNDLE_V2_SCHEMA_PATH))
 
 
 def test_runtime_validator_accepts_v1_bundle(tmp_path):
@@ -223,19 +228,140 @@ def test_runtime_validator_accepts_v1_bundle(tmp_path):
     validate_bundle(bundle_path, {"acme-ai": "ACME_AI_API_KEY"})
 
 
-@pytest.mark.parametrize("root", ["relative/root", "/var/lib/acq/../host"])
-def test_consumer_rejects_unsafe_root(root):
-    """Consumers may only compose beneath a supplied absolute non-traversing root."""
-    with pytest.raises(ContractError, match="provider input root"):
-        provider_input_path(_bundle("acme-ai/bundle.json"), root)
+@pytest.mark.parametrize(
+    "field,value",
+    [("projectedPath", "/var/lib/acq/other/providers/acme-ai"), ("providerPath", "models/providers/other")],
+)
+def test_runtime_validator_rejects_noncanonical_bundle_path(tmp_path, field, value):
+    """The host validator enforces canonical paths that JSON Schema cannot cross-check."""
+    bundle_dir = tmp_path / "provider"
+    shutil.copytree(FIXTURES_DIR / "acme-ai", bundle_dir)
+    bundle_path = bundle_dir / "bundle.json"
+    bundle = json.loads(bundle_path.read_text())
+    if field == "projectedPath":
+        bundle["schemaVersion"] = "acq-provider-input-bundle/v1"
+        bundle["projectedPath"] = value
+        del bundle["providerPath"]
+    else:
+        bundle[field] = value
+    bundle_path.write_text(json.dumps(bundle))
+    with pytest.raises(ContractError):
+        validate_bundle(bundle_path, {"acme-ai": "ACME_AI_API_KEY"})
 
 
-def test_consumer_rejects_provider_path_that_disagrees_with_provider_id():
-    """A consumer does not compose a provider-selected path before validation."""
-    bundle = _bundle("acme-ai/bundle.json")
+def test_runtime_validator_rejects_unknown_bundle_version(tmp_path):
+    """A materializer fails closed rather than guessing an unknown bundle contract."""
+    bundle_dir = tmp_path / "provider"
+    shutil.copytree(FIXTURES_DIR / "acme-ai", bundle_dir)
+    bundle_path = bundle_dir / "bundle.json"
+    bundle = json.loads(bundle_path.read_text())
+    bundle["schemaVersion"] = "acq-provider-input-bundle/v3"
+    bundle_path.write_text(json.dumps(bundle))
+    with pytest.raises(ContractError, match="unsupported bundle schemaVersion"):
+        validate_bundle(bundle_path, {"acme-ai": "ACME_AI_API_KEY"})
+
+
+def test_validator_cli_accepts_explicit_external_bundle(tmp_path):
+    """A host materializer can invoke the released validator outside its checkout."""
+    bundle_dir = tmp_path / "provider"
+    shutil.copytree(FIXTURES_DIR / "acme-ai", bundle_dir)
+    command = [
+        "python3",
+        str(VALIDATOR_PATH),
+        "--schema-dir",
+        str(SCHEMAS_DIR),
+        "--credential-bindings",
+        str(SCHEMAS_DIR / "provider-credential-bindings.json"),
+        "--bundle",
+        str(bundle_dir / "bundle.json"),
+    ]
+
+    result = subprocess.run(command, text=True, capture_output=True, check=False)
+    assert result.returncode == 0, result.stderr
+    assert "validated 1 bundle(s)" in result.stdout
+
+    bundle = json.loads((bundle_dir / "bundle.json").read_text())
     bundle["providerPath"] = "models/providers/other-provider"
-    with pytest.raises(ContractError, match="providerPath"):
-        provider_input_path(bundle, "/var/lib/acq/host")
+    (bundle_dir / "bundle.json").write_text(json.dumps(bundle))
+    result = subprocess.run(command, text=True, capture_output=True, check=False)
+    assert result.returncode == 1
+    assert "providerPath must be models/providers/acme-ai" in result.stderr
+
+
+def test_validator_cli_rejects_duplicate_explicit_provider_ids(tmp_path):
+    """Repeated explicit bundles share one provider-ID uniqueness set."""
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    shutil.copytree(FIXTURES_DIR / "acme-ai", first)
+    shutil.copytree(FIXTURES_DIR / "acme-ai", second)
+    result = subprocess.run(
+        [
+            "python3",
+            str(VALIDATOR_PATH),
+            "--schema-dir",
+            str(SCHEMAS_DIR),
+            "--credential-bindings",
+            str(SCHEMAS_DIR / "provider-credential-bindings.json"),
+            "--bundle",
+            str(first / "bundle.json"),
+            "--bundle",
+            str(second / "bundle.json"),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert "duplicate providerId 'acme-ai'" in result.stderr
+
+
+def test_validator_cli_explicit_mode_skips_repository_discovery(tmp_path):
+    """An explicit external bundle is the complete requested validation set."""
+    bundle_dir = tmp_path / "provider"
+    shutil.copytree(FIXTURES_DIR / "acme-ai", bundle_dir)
+    result = subprocess.run(
+        [
+            "python3",
+            str(VALIDATOR_PATH),
+            "--schema-dir",
+            str(SCHEMAS_DIR),
+            "--credential-bindings",
+            str(SCHEMAS_DIR / "provider-credential-bindings.json"),
+            "--bundle",
+            str(bundle_dir / "bundle.json"),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert "validated 1 bundle(s)" in result.stdout
+
+
+def test_validator_cli_rejects_malformed_credential_bindings(tmp_path):
+    """Backend-owned binding data fails closed with a concise diagnostic."""
+    bundle_dir = tmp_path / "provider"
+    shutil.copytree(FIXTURES_DIR / "acme-ai", bundle_dir)
+    bindings = tmp_path / "bindings.json"
+    bindings.write_text('{"providers": []}')
+    result = subprocess.run(
+        [
+            "python3",
+            str(VALIDATOR_PATH),
+            "--schema-dir",
+            str(SCHEMAS_DIR),
+            "--credential-bindings",
+            str(bindings),
+            "--bundle",
+            str(bundle_dir / "bundle.json"),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert "providers must be an object" in result.stderr
+    assert "Traceback" not in result.stderr
 
 
 # ---------------------------------------------------------------------------
