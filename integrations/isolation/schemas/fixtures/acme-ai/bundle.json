@@ -1,9 +1,9 @@
 {
-  "schemaVersion": "acq-provider-input-bundle/v1",
+  "schemaVersion": "acq-provider-input-bundle/v2",
   "providerId": "acme-ai",
   "factsPath": "facts.json",
   "normalizerPath": "normalize.py",
   "snapshotPath": "snapshot.json",
-  "projectedPath": "/var/lib/acq/host/models/providers/acme-ai",
+  "providerPath": "models/providers/acme-ai",
   "credentialEnvNames": ["ACME_AI_API_KEY"]
 }
