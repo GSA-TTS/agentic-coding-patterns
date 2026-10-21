@@ -1,0 +1,8 @@
+{
+  "availableModels": [
+    {"id": "acme-ultra-v1", "contextWindow": 512000, "maxOutputTokens": 32768, "cost": {"input": 4.0, "output": 20.0}},
+    {"id": "acme-fast-v1", "contextWindow": 128000, "maxOutputTokens": 16384, "cost": {"input": 0.5, "output": 2.0}},
+    {"id": "acme-mini-v1", "contextWindow": 32000, "maxOutputTokens": 4096, "cost": {"input": 0.1, "output": 0.4}}
+  ],
+  "recommendedModels": {"primary": "acme-ultra-v1", "small": "acme-mini-v1"}
+}

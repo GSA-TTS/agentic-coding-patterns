@@ -295,7 +295,7 @@ pre-commit run --all-files
 
 - **gitleaks** — Secret detection (critical for example code)
 - **ruff** — Python linting and formatting with security rules
-- **markdownlint-cli2** — Markdown formatting
+- **markdownlint** — Markdown formatting
 - **Pattern validation** — Frontmatter schema validation
 - **Basic hygiene** — YAML/JSON/TOML validation, trailing whitespace, etc.
 

@@ -1,5 +1,81 @@
 # Changelog
 
+## [1.15.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.14.0...v1.15.0) (2026-10-21)
+
+
+### Features
+
+* **acq-kits:** add OpenDesign browser kit ([#438](https://github.com/GSA-TTS/agentic-coding-patterns/issues/438)) ([83e202f](https://github.com/GSA-TTS/agentic-coding-patterns/commit/83e202f229204a1f65ea819de094ce2586bb7b54))
+* **isolation:** define provider-neutral input contract ([#518](https://github.com/GSA-TTS/agentic-coding-patterns/issues/518)) ([28a8ebd](https://github.com/GSA-TTS/agentic-coding-patterns/commit/28a8ebdd38865a74d1705a0908328c637bb570a8))
+* **usai-catalog:** refresh models and withhold undeployed gateway entries ([#519](https://github.com/GSA-TTS/agentic-coding-patterns/issues/519)) ([03421e0](https://github.com/GSA-TTS/agentic-coding-patterns/commit/03421e0826da507a730279224ad4161fd53e1c9e))
+
+
+### Bug Fixes
+
+* **usai-catalog:** refuse a near-miss instead of enriching from the wrong model ([#484](https://github.com/GSA-TTS/agentic-coding-patterns/issues/484)) ([c3a6dac](https://github.com/GSA-TTS/agentic-coding-patterns/commit/c3a6dacc534eee008efa1a0edb353e7b39a53e63))
+
+## [1.14.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.13.0...v1.14.0) (2026-10-19)
+
+
+### Features
+
+* **paseo:** bump pinned Paseo CLI to 0.12.0 ([#504](https://github.com/GSA-TTS/agentic-coding-patterns/issues/504)) ([0c5258e](https://github.com/GSA-TTS/agentic-coding-patterns/commit/0c5258e7464c3cf8cf0aee1bf45876247aec72f7))
+
+
+### Bug Fixes
+
+* **acq-kits:** bump opencode kit to OpenCode 2.0.30 ([#499](https://github.com/GSA-TTS/agentic-coding-patterns/issues/499)) ([c9d2281](https://github.com/GSA-TTS/agentic-coding-patterns/commit/c9d228109937bc9b85c7ae83d65578d56a3c3085))
+* **acq-kits:** give verify scripts a "could not check" verdict state ([#460](https://github.com/GSA-TTS/agentic-coding-patterns/issues/460)) ([306906a](https://github.com/GSA-TTS/agentic-coding-patterns/commit/306906a58602993d79909176171c27fdbf0c295b))
+
+## [1.13.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.12.1...v1.13.0) (2026-10-12)
+
+
+### Features
+
+* **devenv-image:** move to nixos-26.05 (devenv 2.1.2), VERSION 2.0.0 ([#480](https://github.com/GSA-TTS/agentic-coding-patterns/issues/480)) ([e042f14](https://github.com/GSA-TTS/agentic-coding-patterns/commit/e042f14c056da7936839f5b7e83ef1ce506befda))
+* **isolation:** add personal-kit template for the scope-layers pattern ([8c9e84a](https://github.com/GSA-TTS/agentic-coding-patterns/commit/8c9e84aa6a1281dee8cb9d1d1476499d9420f43e))
+* **isolation:** add the scope-layers pattern and a team-kit template ([#441](https://github.com/GSA-TTS/agentic-coding-patterns/issues/441)) ([35ea9b0](https://github.com/GSA-TTS/agentic-coding-patterns/commit/35ea9b0b27e38b4531c7d638cf1323a68fe6680e))
+* **isolation:** validate kit templates under acq-kits/examples/ ([#476](https://github.com/GSA-TTS/agentic-coding-patterns/issues/476)) ([3aeae67](https://github.com/GSA-TTS/agentic-coding-patterns/commit/3aeae676e7310cb368dc4dfbfdcf3131ad8da8a4))
+* **patterns:** add paseo kit identity gate for a stale host forwarder ([#453](https://github.com/GSA-TTS/agentic-coding-patterns/issues/453)) ([35306d9](https://github.com/GSA-TTS/agentic-coding-patterns/commit/35306d98571cad6695e46243c6ec160fc5e76224))
+* **usai-provider:** normalize and vendor USAi model catalog ([#436](https://github.com/GSA-TTS/agentic-coding-patterns/issues/436)) ([665373d](https://github.com/GSA-TTS/agentic-coding-patterns/commit/665373d79214fd459f02bad444cd08dfaa486b70))
+
+
+### Bug Fixes
+
+* **usai-catalog:** serialize feed data before config emission ([800ba7e](https://github.com/GSA-TTS/agentic-coding-patterns/commit/800ba7ede6759e6bc5e24e161b1e8197f14f504c))
+
+## [1.12.1](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.12.0...v1.12.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* **ci:** clear two new markdownlint-cli transitive CVEs (katex, smol-toml) ([#478](https://github.com/GSA-TTS/agentic-coding-patterns/issues/478)) ([f1913ba](https://github.com/GSA-TTS/agentic-coding-patterns/commit/f1913bae5754f2401a165ed5bc961a0a61f697f7))
+
+## [1.12.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.11.0...v1.12.0) (2026-10-05)
+
+
+### Features
+
+* **acq-kits:** install OpenCode v2 via opencode kit ([#466](https://github.com/GSA-TTS/agentic-coding-patterns/issues/466)) ([dc84c6c](https://github.com/GSA-TTS/agentic-coding-patterns/commit/dc84c6c2d0756447f88931a04c15e5fe438062a6))
+
+
+### Bug Fixes
+
+* **ci:** replace markdownlint-cli2 with markdownlint-cli, drop the shim ([#471](https://github.com/GSA-TTS/agentic-coding-patterns/issues/471)) ([dd22daf](https://github.com/GSA-TTS/agentic-coding-patterns/commit/dd22daffcafe7aa54f9c6074bb95cca51b71c8c1))
+
+## [1.11.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.10.0...v1.11.0) (2026-10-02)
+
+
+### Features
+
+* **acq-kits:** add opencode agent-harness kit (SHA-pinned release binary) ([#455](https://github.com/GSA-TTS/agentic-coding-patterns/issues/455)) ([36038a6](https://github.com/GSA-TTS/agentic-coding-patterns/commit/36038a6d1a7055ae90c775be94bd4d4f3d08805a))
+
+
+### Bug Fixes
+
+* **usai-provider:** drop embedding models from the chat-model catalog ([#462](https://github.com/GSA-TTS/agentic-coding-patterns/issues/462)) ([56500ba](https://github.com/GSA-TTS/agentic-coding-patterns/commit/56500baec328ba26041878d03bab35e2a997e401))
+* **usai-provider:** make the catalog drift check report real drift ([#459](https://github.com/GSA-TTS/agentic-coding-patterns/issues/459)) ([73606d7](https://github.com/GSA-TTS/agentic-coding-patterns/commit/73606d73be670754c33002765de1a2d6ad996c45))
+
 ## [1.10.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.9.0...v1.10.0) (2026-10-02)
 
 

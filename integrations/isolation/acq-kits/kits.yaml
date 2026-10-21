@@ -11,6 +11,24 @@
 schemaVersion: "acq-kits-registry/v1"
 
 kits:
+  opencode:
+    backends: [sbx, msb]
+    parity: |
+      First harness-agent kit in the family (declares the top-level `agent:`
+      block so acq's built-in agent-kit readiness gate can confirm this kit
+      genuinely provides the `opencode` agent token before enabling it).
+      Written entirely in the neutral vocabulary with no backend shortcut or
+      extras: a single install-phase script (files/home/opencode-install.sh)
+      fetches a pinned, SHA-256-verified OpenCode v2 npm platform tarball
+      (direct from registry.npmjs.org, no npm install lifecycle script, NOT
+      nixpkgs — see README.md) and installs it to /usr/local/bin at create time,
+      root, once. Fails soft (agent absent, sandbox stays up) on any availability
+      failure, but fails CLOSED (refuses to install) on a SHA-256 mismatch — see
+      docs/decisions/fail-closed-on-integrity.md, which is a deliberate
+      divergence from every other kit in this family's uniform fail-soft
+      convention. Publishes NO ports (a TUI, not a web UI). Replaces acq's older
+      unpinned MSB fallback (npm install -g opencode-ai).
+
   usai-provider:
     backends: [sbx, msb]
     parity: |
@@ -91,6 +109,26 @@ kits:
       ONE port. The daemon runs unsecured (no PASEO_PASSWORD); the sandbox is the
       security boundary and the port is host loopback only.
 
+  opendesign:
+    backends: [sbx, msb]
+    parity: |
+      Opt-in headless browser design workspace for OpenDesign. Written entirely
+      in the neutral vocabulary with no backend shortcut or extras: the single
+      published container port (7456, serving the OpenDesign daemon/API + web UI)
+      is expressed with the neutral top-level `publishedPorts` list; the 10G
+      persistent OpenDesign data/source volume is expressed with the neutral
+      `volumes` list; and the never-exiting startup supervisor is marked with the
+      neutral `background: true` flag. acq's kit translation maps publishedPorts,
+      volumes, files, environment, and background startup to the active backend's
+      native primitives. The kit installs a pinned OpenDesign source checkout with
+      a kit-managed Node 24 runtime, runs the daemon unsecured
+      (OD_DISABLE_API_AUTH=1), seeds OpenDesign to use the existing `opencode`
+      CLI, and leaves model credentials to acq + the usai-provider kit. The
+      daemon binds guest loopback only and a kit-managed Node relay publishes it
+      on the guest network address, because OpenDesign gates some routes on a
+      loopback peer address; that relay is a plain byte forwarder with no
+      backend-specific assumptions.
+
   oci-engine:
     backends: [sbx, msb]
     parity: |
@@ -126,8 +164,8 @@ kits:
       (prime-agent is a TUI, not a web UI) — unlike openchamber/paseo. SKELETON
       only: the three scripts are placeholders; the real install/CA-bundle/
       kernel logic and the generated model catalog
-      (files/home/prime-agent-config/models.json) land in follow-up work tracked
-      in the patterns repo's prime-agent epic. Model-provider egress is the
+      (files/home/prime-agent-config/models.json) are intentionally deferred to
+      follow-up work for the prime-agent kit. Model-provider egress is the
       usai-provider kit's job, not this one.
 
   pi-coding-agent:
