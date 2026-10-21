@@ -139,7 +139,12 @@ def validate_bundle(
     if credential_bindings is None:
         credential_bindings = load_json(HOST_CREDENTIAL_BINDINGS)["providers"]
     bundle = load_json(bundle_path)
-    schema_name = SUPPORTED_BUNDLE_SCHEMAS.get(bundle.get("schemaVersion"))
+    if not isinstance(bundle, dict):
+        raise ContractError(f"{bundle_path}: bundle root must be an object")
+    schema_version = bundle.get("schemaVersion")
+    if not isinstance(schema_version, str):
+        raise ContractError(f"{bundle_path}: bundle schemaVersion must be a string")
+    schema_name = SUPPORTED_BUNDLE_SCHEMAS.get(schema_version)
     if schema_name is None:
         raise ContractError(f"{bundle_path}: unsupported bundle schemaVersion")
     validate_schema(bundle, schema_name, str(bundle_path), schema_dir)

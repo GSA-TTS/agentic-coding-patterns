@@ -1299,3 +1299,76 @@ def test_fixture_normalizers_are_directly_invocable(tmp_path):
         catalog = load_json(out)
         validate_catalog(catalog, provider_id, str(out))
         assert out.read_bytes() == (fixture_dir / "snapshot.json").read_bytes()
+
+
+# ---------------------------------------------------------------------------
+# validate_bundle — malformed JSON root type guards
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("root_value", [None, [], "string", 42, True])
+def test_runtime_validator_rejects_non_object_root_direct_api(tmp_path, root_value):
+    """Direct validate_bundle raises ContractError for non-object JSON roots."""
+    bundle_path = tmp_path / "bundle.json"
+    bundle_path.write_text(json.dumps(root_value))
+    with pytest.raises(ContractError, match="bundle root must be an object"):
+        validate_bundle(bundle_path, {"acme-ai": "ACME_AI_API_KEY"})
+
+
+@pytest.mark.parametrize("root_value", [None, [], "string", 42, True])
+def test_validator_cli_rejects_non_object_root(tmp_path, root_value):
+    """CLI subprocess exits 1 with no Traceback for non-object JSON roots."""
+    bundle_path = tmp_path / "bundle.json"
+    bundle_path.write_text(json.dumps(root_value))
+    result = subprocess.run(
+        [
+            "python3",
+            str(VALIDATOR_PATH),
+            "--schema-dir",
+            str(SCHEMAS_DIR),
+            "--credential-bindings",
+            str(SCHEMAS_DIR / "provider-credential-bindings.json"),
+            "--bundle",
+            str(bundle_path),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert "Traceback" not in result.stderr
+    assert "bundle root must be an object" in result.stderr
+
+
+@pytest.mark.parametrize("schema_version_value", [None, [], 42, True, {"nested": "object"}])
+def test_runtime_validator_rejects_non_string_schema_version_direct_api(tmp_path, schema_version_value):
+    """Direct validate_bundle raises ContractError for non-string schemaVersion."""
+    bundle_path = tmp_path / "bundle.json"
+    bundle_path.write_text(json.dumps({"schemaVersion": schema_version_value}))
+    with pytest.raises(ContractError, match="bundle schemaVersion must be a string"):
+        validate_bundle(bundle_path, {"acme-ai": "ACME_AI_API_KEY"})
+
+
+@pytest.mark.parametrize("schema_version_value", [None, [], 42, True, {"nested": "object"}])
+def test_validator_cli_rejects_non_string_schema_version(tmp_path, schema_version_value):
+    """CLI subprocess exits 1 with no Traceback for non-string schemaVersion."""
+    bundle_path = tmp_path / "bundle.json"
+    bundle_path.write_text(json.dumps({"schemaVersion": schema_version_value}))
+    result = subprocess.run(
+        [
+            "python3",
+            str(VALIDATOR_PATH),
+            "--schema-dir",
+            str(SCHEMAS_DIR),
+            "--credential-bindings",
+            str(SCHEMAS_DIR / "provider-credential-bindings.json"),
+            "--bundle",
+            str(bundle_path),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert "Traceback" not in result.stderr
+    assert "bundle schemaVersion must be a string" in result.stderr

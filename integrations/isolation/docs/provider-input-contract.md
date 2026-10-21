@@ -71,13 +71,19 @@ Materializers validate staged bundles without copying contract logic:
 python3 scripts/validate_provider_input_contract.py \
   --schema-dir <released-patterns>/integrations/isolation/schemas \
   --credential-bindings <released-patterns>/integrations/isolation/schemas/provider-credential-bindings.json \
-  --bundle <staged-provider>/provider-input.json
+  --bundle <staged-provider-1>/provider-input.json \
+  --bundle <staged-provider-2>/provider-input.json
 ```
+
+**CLI invocation rules:**
+
+- **Repeated `--bundle` flags in ONE invocation** perform set-wide duplicate-provider checking across all candidates. Each distinct `--bundle` invocation with a single flag resets the uniqueness set, so pass every candidate as repeated `--bundle` flags in a single command to catch duplicates.
+- **Zero `--bundle` flags** select repository discovery and validate the shipped fixture and canonical kit bundles. This is discovery mode, not validation of an empty external provider set; see Consumer Requirements.
 
 `--schema-dir` and `--credential-bindings` are trusted control-plane inputs.
 They MUST come from the pinned Patterns release and backend-owned credential
 configuration, never from bundle contents or provider-controlled metadata. A
-provider controls only the staged manifest path passed with `--bundle`.
+provider controls only the staged manifest path(s) passed with `--bundle`.
 
 ## Consumer Requirements
 
