@@ -111,8 +111,43 @@ export function stripJsonc(text) {
     out += ch
   }
 
-  // Remove trailing commas before } or ].
-  return out.replace(/,(\s*[}\]])/g, "$1")
+  // Remove trailing commas before } or ] without touching comma-like text in a
+  // string. A global regex rewrites values such as "model,}" and makes the
+  // parser validate different bytes from the artifact OpenCode will consume.
+  let plain = ""
+  inString = false
+  for (let i = 0; i < out.length; i++) {
+    const ch = out[i]
+    if (inString) {
+      plain += ch
+      if (ch === "\\") {
+        plain += out[i + 1] ?? ""
+        i++
+      } else if (ch === '"') {
+        inString = false
+      }
+      continue
+    }
+    if (ch === '"') {
+      inString = true
+      plain += ch
+      continue
+    }
+    if (ch === ",") {
+      let nextIndex = i + 1
+      while (/\s/.test(out[nextIndex] ?? "")) nextIndex++
+      if (out[nextIndex] === "}" || out[nextIndex] === "]") {
+        let previousIndex = plain.length - 1
+        while (/\s/.test(plain[previousIndex] ?? "")) previousIndex--
+        // A trailing comma is valid only after a completed value. Keep commas
+        // after an opener, separator, or colon so malformed `{,}`, `[1,,]`,
+        // and `{"a":,}` remain malformed and JSON.parse rejects them.
+        if (previousIndex >= 0 && !"{[,:".includes(plain[previousIndex])) continue
+      }
+    }
+    plain += ch
+  }
+  return plain
 }
 
 /**
@@ -121,7 +156,62 @@ export function stripJsonc(text) {
  * @returns {object}
  */
 export function parseJsonc(text) {
-  return JSON.parse(stripJsonc(text))
+  const plain = stripJsonc(text)
+  // JSON.parse silently applies last-key-wins to duplicate properties. Reject
+  // them before parsing so validation cannot inspect one value while OpenCode
+  // or another consumer obeys another. A tiny recursive scanner is sufficient
+  // here because comments/trailing commas are already removed above.
+  const parseValue = (state) => {
+    const skip = () => { while (/\s/.test(plain[state.i] ?? "")) state.i++ }
+    const parseString = () => {
+      const start = state.i++
+      while (state.i < plain.length) {
+        if (plain[state.i] === "\\") state.i += 2
+        else if (plain[state.i++] === '"') return JSON.parse(plain.slice(start, state.i))
+      }
+      throw new SyntaxError("Unterminated JSON string")
+    }
+    skip()
+    if (plain[state.i] === "{") {
+      state.i++
+      const keys = new Set()
+      skip()
+      while (plain[state.i] !== "}") {
+        const key = parseString()
+        if (keys.has(key)) throw new SyntaxError(`Duplicate JSON property ${JSON.stringify(key)}`)
+        keys.add(key)
+        skip()
+        if (plain[state.i++] !== ":") throw new SyntaxError("Expected ':' after JSON property")
+        parseValue(state)
+        skip()
+        if (plain[state.i] === ",") { state.i++; skip() }
+        else if (plain[state.i] !== "}") throw new SyntaxError("Expected ',' or '}' in JSON object")
+      }
+      state.i++
+      return
+    }
+    if (plain[state.i] === "[") {
+      state.i++
+      skip()
+      while (plain[state.i] !== "]") {
+        parseValue(state)
+        skip()
+        if (plain[state.i] === ",") { state.i++; skip() }
+        else if (plain[state.i] !== "]") throw new SyntaxError("Expected ',' or ']' in JSON array")
+      }
+      state.i++
+      return
+    }
+    if (plain[state.i] === '"') { parseString(); return }
+    const token = plain.slice(state.i).match(/^(?:true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/)?.[0]
+    if (!token) throw new SyntaxError(`Invalid JSON value at offset ${state.i}`)
+    state.i += token.length
+  }
+  const state = { i: 0 }
+  parseValue(state)
+  while (/\s/.test(plain[state.i] ?? "")) state.i++
+  if (state.i !== plain.length) throw new SyntaxError(`Unexpected JSON content at offset ${state.i}`)
+  return JSON.parse(plain)
 }
 
 function isPlainObject(value) {

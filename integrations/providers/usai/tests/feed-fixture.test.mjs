@@ -12,7 +12,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { test } from "node:test"
 
-import { nonChatReason, shapeFromFeeds } from "../scripts/build-catalog.mjs"
+import { nonChatReason, reportUnenriched, shapeFromFeeds } from "../scripts/build-catalog.mjs"
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURES = path.join(HERE, "fixtures")
@@ -81,4 +81,41 @@ test("a NEW underscore-delimited embedding id is excluded by the pattern", () =>
 
   assert.equal(ids.includes("titan_embed_text_v2"), false)
   assert.equal(ids.includes("cohere_embed_v4"), false)
+})
+
+test("unenriched reporting distinguishes feed limits from hardcoded fallbacks", () => {
+  const writes = []
+  const original = process.stderr.write
+  process.stderr.write = (chunk) => { writes.push(String(chunk)); return true }
+  try {
+    reportUnenriched([
+      { id: "feed-limits", fallbacks: [] },
+      { id: "fallback-limits", fallbacks: ["context", "output"] },
+    ], true)
+    reportUnenriched([{ id: "suppressed", fallbacks: ["context"] }], false)
+  } finally {
+    process.stderr.write = original
+  }
+  const output = writes.join("")
+  assert.match(output, /feed-limits; USAi feed limits retained/)
+  assert.match(output, /fallback-limits; fallback context\+output limit\(s\) used/)
+  assert.doesNotMatch(output, /suppressed/)
+})
+
+test("shapeFromFeeds rejects oversized and malformed feed entries", () => {
+  assert.throws(() => shapeFromFeeds(Array.from({ length: 1001 }, (_, i) => ({ id: `m${i}` })), null), /exceeds limit/)
+  assert.throws(() => shapeFromFeeds([null], null), /must be an object/)
+  assert.throws(() => shapeFromFeeds([{ id: "a".repeat(129) }], null), /out of bounds/)
+})
+
+test("shapeFromFeeds prefers valid models.dev limits over invalid truthy feed limits", () => {
+  const feed = [{ id: "claude_4_5_haiku", owned_by: "anthropic", context_window: -1, max_output_tokens: "invalid" }]
+  const modelsDev = {
+    "amazon-bedrock": {
+      models: { "claude_4_5_haiku": { limit: { context: 200000, output: 64000 } } },
+    },
+  }
+  const { models } = shapeFromFeeds(feed, modelsDev)
+  assert.equal(models[0].contextWindow, 200000)
+  assert.equal(models[0].maxOutputTokens, 64000)
 })
