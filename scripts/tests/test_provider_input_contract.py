@@ -1012,6 +1012,19 @@ def test_runtime_validator_rejects_keyenv_absent_from_credentials(tmp_path):
         validate_bundle(bundle_dir / "bundle.json", {"acme-ai": "ACME_AI_API_KEY"})
 
 
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_runtime_validator_rejects_nonstandard_json_constants(tmp_path, constant):
+    """Host validation rejects values that strict downstream JSON parsers cannot read."""
+    bundle_dir = tmp_path / "provider"
+    shutil.copytree(FIXTURES_DIR / "acme-ai", bundle_dir)
+    snapshot_path = bundle_dir / "snapshot.json"
+    snapshot_text = snapshot_path.read_text().replace('"input": 4.0', f'"input": {constant}')
+    snapshot_path.write_text(snapshot_text)
+
+    with pytest.raises(ContractError, match="non-standard JSON constant"):
+        validate_bundle(bundle_dir / "bundle.json", {"acme-ai": "ACME_AI_API_KEY"})
+
+
 def test_runtime_validator_accepts_keyenv_among_multiple_credentials(tmp_path):
     """facts.keyEnv matching one of several declared credential names is accepted."""
     bundle_dir = tmp_path / "provider"

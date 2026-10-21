@@ -23,9 +23,12 @@ class ContractError(ValueError):
 
 
 def load_json(path: Path) -> dict:
+    def reject_nonstandard_constant(value: str) -> None:
+        raise ValueError(f"non-standard JSON constant {value}")
+
     try:
-        return json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError) as error:
+        return json.loads(path.read_text(), parse_constant=reject_nonstandard_constant)
+    except (OSError, ValueError) as error:
         raise ContractError(f"{path}: cannot read JSON: {error}") from error
 
 
