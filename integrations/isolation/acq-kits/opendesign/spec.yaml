@@ -1,0 +1,174 @@
+# spec.yaml — opendesign (a neutral acq mixin kit, hybrid/v1)
+#
+# Runs OpenDesign (https://github.com/nexu-io/open-design) headlessly inside an
+# acq sandbox and publishes its browser UI / daemon to the host. OpenDesign is a
+# local-first design workspace that launches existing agent CLIs; this kit does
+# NOT install OpenCode or own model-provider credentials. It composes with the
+# usai-provider kit, which injects USAI_API_KEY and configures OpenCode.
+#
+# DESIGN:
+#   - Startup, not create-time install. OpenDesign is built from source, needs
+#     Node 24 + pnpm 10.33.2, and may compile native dependencies. A transient
+#     npm/GitHub/proxy failure should make the UI unavailable, not kill sandbox
+#     creation. The startup script is fail-soft and supervised.
+#   - Kit-managed Node 24. The OpenCode sandbox base may carry another Node major,
+#     so this kit downloads a pinned Linux Node 24 archive into its persistent
+#     volume and verifies SHA-256 before use.
+#   - OpenDesign runs as a headless daemon bound to guest loopback on internal
+#     port 17456: `od --host 127.0.0.1 --port 17456 --no-open`. A small
+#     kit-managed relay (opendesign-relay.mjs) binds the published guest network
+#     port 7456 and forwards to that loopback listener, because msb/acq
+#     create-time port publishing dials the
+#     guest network IP rather than guest 127.0.0.1. Binding the daemon itself to
+#     0.0.0.0 would make it observe a non-loopback PEER address for every request
+#     arriving from the host, and upstream's `requireLocalDaemonRequest` guard
+#     then answers 403 on routes the browser UI calls directly — including
+#     Settings -> About -> Export diagnostics. See
+#     docs/decisions/disable-api-auth-loopback-boundary.md.
+#   - Authentication is disabled with OD_DISABLE_API_AUTH=1. The sandbox boundary
+#     and host-loopback port are the control, matching the approved posture for
+#     this kit and the sibling paseo/openchamber UI kits.
+#   - OpenCode's global config is named to OpenDesign-launched runs via
+#     OPENCODE_CONFIG. OpenDesign sets OD_SANDBOX_MODE=1, which rewrites HOME and
+#     XDG_CONFIG_HOME for agent children, so OpenCode would otherwise never read
+#     the usai-provider kit's config and would fall back to its own hosted
+#     gateway. This names a config PATH only; no key material is copied.
+#   - OD_DATA_DIR lives on a persistent kit volume. BYOK/model credentials should
+#     continue to flow through acq + usai-provider + OpenCode, not through files in
+#     this kit.
+schemaVersion: "hybrid/v1"
+kind: mixin
+name: opendesign
+displayName: OpenDesign (headless browser design workspace)
+description: >
+  Runs OpenDesign headlessly inside the sandbox as a browser-accessible local
+  design workspace. Installs a pinned OpenDesign source checkout with a
+  kit-managed Node 24 runtime, publishes the OpenDesign daemon/UI on port 7456,
+  persists OpenDesign state on a kit volume, and seeds OpenDesign to use the
+  existing OpenCode CLI. Opt-in mixin; designed to compose with usai-provider
+  for model access and BYOK credential injection.
+
+caps:
+  network:
+    allow:
+      # OpenDesign source checkout and release metadata.
+      - github.com:443
+      - codeload.github.com:443
+      - objects.githubusercontent.com:443
+      - release-assets.githubusercontent.com:443
+      # Node 24 tarball + checksum list.
+      - nodejs.org:443
+      # pnpm/npm package metadata and tarballs. Avoid leading-* wildcard entries:
+      # neutral->backend translation may emit YAML that treats them as aliases.
+      - registry.npmjs.org:443
+
+files:
+  - path: /home/agent/opendesign-install.sh
+    mode: "0755"
+    source: files/home/opendesign-install.sh
+    description: Install/update pinned OpenDesign source checkout and kit-managed Node 24 runtime
+  - path: /home/agent/opendesign-start.sh
+    mode: "0755"
+    source: files/home/opendesign-start.sh
+    description: Install first boot, seed OpenDesign app config, and supervise the daemon/UI
+  - path: /home/agent/opendesign-relay.mjs
+    mode: "0644"
+    source: files/home/opendesign-relay.mjs
+    description: Forward the published guest-network port to the loopback-bound daemon so peer-loopback-gated routes work
+
+commands:
+  - phase: startup
+    user: "0"
+    background: false
+    description: Ensure OpenDesign persistent volume is writable by the agent user
+    command:
+      - sh
+      - -c
+      - |
+        mkdir -p /home/agent/.local/share/opendesign /home/agent/.local/state/opendesign
+        chown 1000:1000 /home/agent/.local/share/opendesign /home/agent/.local/state/opendesign
+  - phase: startup
+    user: "1000"
+    background: true
+    description: Install/update OpenDesign and supervise the headless daemon/UI (background)
+    command:
+      - sh
+      - -c
+      - |
+        OPENDESIGN_REF="open-design-v0.24.0" \
+        OPENDESIGN_COMMIT="0d3a14c1df6dc5017f3cc3ef05b24558250c220b" \
+        OPENDESIGN_NODE_VERSION="24.21.0" \
+        OPENDESIGN_PNPM_VERSION="10.33.2" \
+          sh /home/agent/opendesign-start.sh &
+
+publishedPorts:
+  - guest: 7456
+    protocol: tcp
+    name: opendesign
+
+volumes:
+  - path: /home/agent/.local/share/opendesign
+    size: "10G"
+
+environment:
+  # Loopback-only. opendesign-relay.mjs publishes this on the guest network
+  # address; see the DESIGN note above and the ADR for why the daemon itself
+  # must not bind 0.0.0.0.
+  OD_BIND_HOST: "127.0.0.1"
+  OPENDESIGN_PUBLISHED_PORT: "7456"
+  OPENDESIGN_DAEMON_PORT: "17456"
+  OD_PORT: "17456"
+  OD_WEB_PORT: "7456"
+  OD_DATA_DIR: "/home/agent/.local/share/opendesign/data"
+  OD_DISABLE_API_AUTH: "1"
+  OD_SANDBOX_MODE: "1"
+
+agentContext: |
+  ## OpenDesign (headless browser design workspace)
+
+  This sandbox runs **OpenDesign** in the background on container port **7456**.
+  OpenDesign is a browser UI and local daemon for design work; it launches
+  existing agent CLIs from the sandbox, including OpenCode. The kit does not
+  install OpenCode and does not store model-provider credentials.
+
+  **Open it from the host.** The kit publishes container port 7456. Find the
+  mapped host-loopback port and open the browser:
+
+  ```
+  acq ports <sandbox>
+  # OpenDesign UI: open http://localhost:<host-port-for-7456>
+  ```
+
+  **Model credentials.** Pair this kit with `usai-provider` for the GSA default
+  path. `usai-provider` configures OpenCode to use USAi, and `acq` injects
+  `USAI_API_KEY` at runtime. Startup exports `OPENCODE_CONFIG` pointing at that
+  kit's `~/.config/opencode/opencode.jsonc`, because OpenDesign's sandbox mode
+  rewrites `HOME`/`XDG_CONFIG_HOME` for agent children and OpenCode would
+  otherwise fall back to its own hosted gateway and fail every run. Do not paste
+  provider keys into chat. If you choose to configure extra OpenDesign media
+  providers through the UI, those settings are stored under the persistent
+  OpenDesign data directory.
+
+  **Default agent.** Startup seeds OpenDesign's app config to select OpenCode,
+  complete onboarding, and disable local telemetry when no user choice exists. It
+  deliberately does NOT seed a default model; OpenCode/OpenDesign should use
+  their configured defaults.
+
+  **Auth.** The OpenDesign daemon runs with `OD_DISABLE_API_AUTH=1`. The sandbox
+  is the security boundary and the host port is loopback-only. Run this only on a
+  trusted, single-user host and do not forward the mapped port.
+
+  **Networking.** The daemon binds guest `127.0.0.1:17456` only; a supervised
+  relay (`~/opendesign-relay.mjs`) forwards published guest port `7456` to it.
+  This is required because OpenDesign gates some routes on the request peer being
+  loopback, and would otherwise return 403 for the browser (visibly: Settings ->
+  About -> Export diagnostics). If a UI action returns 403, check the relay log
+  before anything else.
+
+  Logs: `~/.local/state/opendesign/opendesign-daemon.log`,
+  `~/.local/state/opendesign/opendesign-relay.log`, and
+  `~/.local/state/opendesign/opendesign-install.log`.
+
+# No backend_shortcuts / backend_extras: the port, volume, files, env, and
+# background startup are declared with the neutral hybrid/v1 vocabulary and are
+# translated by acq for the active backend.
