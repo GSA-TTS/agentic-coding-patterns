@@ -8,6 +8,7 @@
   "required": [
     "schemaVersion",
     "providerId",
+    "apiProtocol",
     "host",
     "baseUrl",
     "modelsUrl",
@@ -25,6 +26,11 @@
       "maxLength": 32,
       "pattern": "^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?(?![\\s\\S])",
       "description": "Stable, lowercase slug used as a filesystem path segment under /var/lib/acq/host/models/providers/<providerId>/. Allowed: lowercase ASCII alphanumerics and internal hyphens, 1-32 characters total. Disallowed: path separators, dots, underscores, uppercase, non-ASCII, leading/trailing hyphens, whitespace, and control characters. The pattern ends with (?![\\s\\S]) — a zero-width assertion that matches only at the true end of the string — rather than $ because JSON Schema (ECMA regex) and Python re both allow $ to match before a trailing newline, which would permit 'usai\\n' as a path segment. The (?![\\s\\S]) lookahead has no such exception and enforces fullmatch semantics portably."
+    },
+    "apiProtocol": {
+      "type": "string",
+      "enum": ["openai-compatible"],
+      "description": "Wire protocol spoken by this provider's API. Harness renderers map this bounded value through a harness-owned static allowlist without branching on providerId. Version 1 supports only the OpenAI-compatible REST protocol used by the providers proven in this milestone; additional protocols require their own neutral authentication/routing facts and concrete renderer support before this enum expands."
     },
     "host": {
       "type": "string",

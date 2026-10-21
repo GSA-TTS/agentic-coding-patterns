@@ -6,9 +6,9 @@ Verifies:
   - Valid USAi fixture validates as an ordinary provider instance.
   - Valid fictitious acme-ai fixture validates without USAi-specific fields.
   - Strict validation of feed-controlled strings: providerId slug, keyEnv charset,
-    URL patterns.
-  - Malformed URLs, unsafe feed-controlled strings, and unknown required fields
-    fail closed.
+    URL patterns, and apiProtocol enum membership.
+  - Malformed URLs, unsafe feed-controlled strings, unknown required fields,
+    and unsupported apiProtocol values fail closed.
   - Duplicate model IDs are detected by the validator (not just by the schema,
     since JSON Schema draft-2020-12 uniqueItems only checks structural equality).
   - Model catalog carries no routing or credential fields.
@@ -231,6 +231,7 @@ def test_facts_rejects_bad_provider_id(facts_schema, bad_id):
     instance = {
         "schemaVersion": "acq-provider-facts/v1",
         "providerId": bad_id,
+        "apiProtocol": "openai-compatible",
         "host": "api.example.com",
         "baseUrl": "https://api.example.com/v1",
         "modelsUrl": "https://api.example.com/v1/models",
@@ -259,6 +260,7 @@ def test_facts_accepts_valid_provider_id(facts_schema, good_id):
     instance = {
         "schemaVersion": "acq-provider-facts/v1",
         "providerId": good_id,
+        "apiProtocol": "openai-compatible",
         "host": "api.example.com",
         "baseUrl": "https://api.example.com/v1",
         "modelsUrl": "https://api.example.com/v1/models",
@@ -299,6 +301,7 @@ def test_facts_rejects_bad_key_env(facts_schema, bad_env):
     instance = {
         "schemaVersion": "acq-provider-facts/v1",
         "providerId": "usai",
+        "apiProtocol": "openai-compatible",
         "host": "api.example.com",
         "baseUrl": "https://api.example.com/v1",
         "modelsUrl": "https://api.example.com/v1/models",
@@ -324,6 +327,7 @@ def test_facts_accepts_valid_key_env(facts_schema, good_env):
     instance = {
         "schemaVersion": "acq-provider-facts/v1",
         "providerId": "usai",
+        "apiProtocol": "openai-compatible",
         "host": "api.example.com",
         "baseUrl": "https://api.example.com/v1",
         "modelsUrl": "https://api.example.com/v1/models",
@@ -353,6 +357,7 @@ def test_facts_rejects_non_https_urls(facts_schema, bad_url_field, bad_url):
     instance = {
         "schemaVersion": "acq-provider-facts/v1",
         "providerId": "usai",
+        "apiProtocol": "openai-compatible",
         "host": "api.example.com",
         "baseUrl": "https://api.example.com/v1",
         "modelsUrl": "https://api.example.com/v1/models",
@@ -373,6 +378,7 @@ def test_facts_rejects_non_https_urls(facts_schema, bad_url_field, bad_url):
     [
         "schemaVersion",
         "providerId",
+        "apiProtocol",
         "host",
         "baseUrl",
         "modelsUrl",
@@ -384,6 +390,7 @@ def test_facts_rejects_missing_required_field(facts_schema, missing_field):
     instance = {
         "schemaVersion": "acq-provider-facts/v1",
         "providerId": "usai",
+        "apiProtocol": "openai-compatible",
         "host": "api.example.com",
         "baseUrl": "https://api.example.com/v1",
         "modelsUrl": "https://api.example.com/v1/models",
@@ -399,6 +406,7 @@ def test_facts_rejects_wrong_schema_version(facts_schema):
     instance = {
         "schemaVersion": "acq-provider-facts/v2",
         "providerId": "usai",
+        "apiProtocol": "openai-compatible",
         "host": "api.example.com",
         "baseUrl": "https://api.example.com/v1",
         "modelsUrl": "https://api.example.com/v1/models",
@@ -413,6 +421,7 @@ def test_facts_rejects_additional_properties(facts_schema):
     instance = {
         "schemaVersion": "acq-provider-facts/v1",
         "providerId": "usai",
+        "apiProtocol": "openai-compatible",
         "host": "api.example.com",
         "baseUrl": "https://api.example.com/v1",
         "modelsUrl": "https://api.example.com/v1/models",
@@ -421,6 +430,90 @@ def test_facts_rejects_additional_properties(facts_schema):
     }
     with pytest.raises(jsonschema.ValidationError):
         _validate(instance, facts_schema)
+
+
+# ---------------------------------------------------------------------------
+# acq-provider-facts/v1 — apiProtocol closed-enum enforcement
+# ---------------------------------------------------------------------------
+
+
+def test_facts_accepts_supported_api_protocol(facts_schema):
+    """The protocol proven by this milestone passes schema validation."""
+    instance = {
+        "schemaVersion": "acq-provider-facts/v1",
+        "providerId": "usai",
+        "apiProtocol": "openai-compatible",
+        "host": "api.example.com",
+        "baseUrl": "https://api.example.com/v1",
+        "modelsUrl": "https://api.example.com/v1/models",
+        "keyEnv": "EXAMPLE_API_KEY",
+    }
+    _validate(instance, facts_schema)
+
+
+@pytest.mark.parametrize(
+    "bad_protocol",
+    [
+        # completely unknown value
+        "unknown-protocol",
+        # harness-native vocabulary — must not be accepted
+        "opencode",
+        "cursor",
+        # empty string
+        "",
+        # case variants of a valid enum value (enum is case-sensitive)
+        "OpenAI-Compatible",
+        "OPENAI-COMPATIBLE",
+        "Anthropic",
+        "ANTHROPIC",
+        # trailing line terminators — close the $ anchor bypass, same as other fields
+        "openai-compatible\n",
+        "openai-compatible\r",
+        "openai-compatible\r\n",
+        # null (wrong type)
+        None,
+        # integer (wrong type)
+        42,
+        # executable / injection-attempt strings
+        "require('fs')",
+        "import('evil')",
+        "exec(cmd)",
+    ],
+)
+def test_facts_rejects_invalid_api_protocol(facts_schema, bad_protocol):
+    """Unsupported apiProtocol values MUST fail schema validation."""
+    instance = {
+        "schemaVersion": "acq-provider-facts/v1",
+        "providerId": "usai",
+        "apiProtocol": bad_protocol,
+        "host": "api.example.com",
+        "baseUrl": "https://api.example.com/v1",
+        "modelsUrl": "https://api.example.com/v1/models",
+        "keyEnv": "EXAMPLE_API_KEY",
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        _validate(instance, facts_schema)
+
+
+def test_facts_api_protocol_is_bounded_string(facts_schema):
+    """apiProtocol is declarative data constrained by a closed vocabulary."""
+    protocol_prop = facts_schema["properties"]["apiProtocol"]
+    assert protocol_prop["type"] == "string"
+    assert protocol_prop["enum"] == ["openai-compatible"]
+
+
+def test_facts_api_protocol_usai_uses_openai_compatible(usai_facts):
+    """USAi declares its wire protocol independently of its provider ID."""
+    assert usai_facts.get("apiProtocol") == "openai-compatible", (
+        "USAi speaks the OpenAI-compatible REST API; facts must reflect that"
+    )
+
+
+def test_facts_api_protocol_acme_is_provider_independent(acme_facts):
+    """A second provider ID can use the same protocol without special casing."""
+    assert acme_facts.get("apiProtocol") == "openai-compatible", (
+        "acme-ai fixture must declare the protocol independently of providerId"
+    )
 
 
 # ---------------------------------------------------------------------------
