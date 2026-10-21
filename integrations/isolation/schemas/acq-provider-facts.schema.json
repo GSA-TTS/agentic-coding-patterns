@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "acq-provider-facts/v1",
   "title": "ACQ Provider Facts",
-  "description": "Host-materialised, read-only self-registration record for a provider kit. Validated by acq host-side before the sandbox is created; the resulting directory is mounted read-only at /var/lib/acq/host/models/providers/<providerId>/. See integrations/isolation/docs/decisions/0004-neutral-model-provider-discovery.md §Layer 1.",
+  "description": "Host-materialised, read-only self-registration record for a provider kit. With legacy bundle v1, the resulting directory is mounted at /var/lib/acq/host/models/providers/<providerId>/. With bundle v2, it is at the validated provider-relative path models/providers/<providerId> beneath the backend-supplied root. The backend materializer owns root injection, read-only mounting, and materialized-directory identity checks. See integrations/isolation/docs/decisions/0004-neutral-model-provider-discovery.md §Layer 1.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -25,7 +25,7 @@
       "minLength": 1,
       "maxLength": 32,
       "pattern": "^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?(?![\\s\\S])",
-      "description": "Stable, lowercase slug used as a filesystem path segment under /var/lib/acq/host/models/providers/<providerId>/. Allowed: lowercase ASCII alphanumerics and internal hyphens, 1-32 characters total. Disallowed: path separators, dots, underscores, uppercase, non-ASCII, leading/trailing hyphens, whitespace, and control characters. The pattern ends with (?![\\s\\S]) — a zero-width assertion that matches only at the true end of the string — rather than $ because JSON Schema (ECMA regex) and Python re both allow $ to match before a trailing newline, which would permit 'usai\\n' as a path segment. The (?![\\s\\S]) lookahead has no such exception and enforces fullmatch semantics portably."
+      "description": "Stable, lowercase slug used as the final materialized provider directory. Bundle v1 uses the legacy fixed root; bundle v2 uses a backend-supplied root plus models/providers/<providerId>. The backend materializer enforces that the materialized directory name equals this value. Allowed: lowercase ASCII alphanumerics and internal hyphens, 1-32 characters total. Disallowed: path separators, dots, underscores, uppercase, non-ASCII, leading/trailing hyphens, whitespace, and control characters. The pattern ends with (?![\\s\\S]) — a zero-width assertion that matches only at the true end of the string — rather than $ because JSON Schema (ECMA regex) and Python re both allow $ to match before a trailing newline, which would permit 'usai\\n' as a path segment. The (?![\\s\\S]) lookahead has no such exception and enforces fullmatch semantics portably."
     },
     "apiProtocol": {
       "type": "string",

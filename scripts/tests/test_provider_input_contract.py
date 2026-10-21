@@ -25,7 +25,12 @@ from pathlib import Path
 
 import jsonschema
 import pytest
-from validate_provider_input_contract import ContractError, load_json, validate_bundle, validate_catalog
+from validate_provider_input_contract import (
+    ContractError,
+    load_json,
+    validate_bundle,
+    validate_catalog,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 SCHEMAS_DIR = ROOT / "integrations" / "isolation" / "schemas"
@@ -34,6 +39,12 @@ FIXTURES_DIR = SCHEMAS_DIR / "fixtures"
 FACTS_SCHEMA_PATH = SCHEMAS_DIR / "acq-provider-facts.schema.json"
 CATALOG_SCHEMA_PATH = SCHEMAS_DIR / "acq-neutral-model-catalog.schema.json"
 BUNDLE_SCHEMA_PATH = SCHEMAS_DIR / "acq-provider-input-bundle.schema.json"
+BUNDLE_V2_SCHEMA_PATH = SCHEMAS_DIR / "acq-provider-input-bundle-v2.schema.json"
+VALIDATOR_PATH = ROOT / "scripts" / "validate_provider_input_contract.py"
+
+
+def _bundle(relative: str) -> dict:
+    return _load_fixture(relative)
 
 
 def _load_schema(path: Path) -> dict:
@@ -140,10 +151,217 @@ def acme_snapshot() -> dict:
 
 def test_schemas_are_valid_json_schema_2020_12():
     """Both schema files are self-consistent against draft 2020-12."""
-    for path in [FACTS_SCHEMA_PATH, CATALOG_SCHEMA_PATH, BUNDLE_SCHEMA_PATH]:
+    for path in [FACTS_SCHEMA_PATH, CATALOG_SCHEMA_PATH, BUNDLE_SCHEMA_PATH, BUNDLE_V2_SCHEMA_PATH]:
         schema = _load_schema(path)
         validator_cls = jsonschema.validators.validator_for(schema)
         validator_cls.check_schema(schema)
+
+
+def test_v1_bundle_remains_valid():
+    """Consumers can continue validating released fixed-root v1 bundles."""
+    _validate(
+        {
+            "schemaVersion": "acq-provider-input-bundle/v1",
+            "providerId": "acme-ai",
+            "factsPath": "facts.json",
+            "normalizerPath": "normalize.py",
+            "snapshotPath": "snapshot.json",
+            "projectedPath": "/var/lib/acq/host/models/providers/acme-ai",
+            "credentialEnvNames": ["ACME_AI_API_KEY"],
+        },
+        _load_schema(BUNDLE_SCHEMA_PATH),
+    )
+
+
+def test_v1_schema_rejects_v2_bundle():
+    """The released v1 schema remains a v1-only public contract."""
+    with pytest.raises(jsonschema.ValidationError):
+        _validate(_bundle("acme-ai/bundle.json"), _load_schema(BUNDLE_SCHEMA_PATH))
+
+
+def test_v2_schema_rejects_v1_bundle():
+    """Version 2 has its own schema identity and rejects legacy fields."""
+    v1_bundle = {
+        "schemaVersion": "acq-provider-input-bundle/v1",
+        "providerId": "acme-ai",
+        "factsPath": "facts.json",
+        "normalizerPath": "normalize.py",
+        "snapshotPath": "snapshot.json",
+        "projectedPath": "/var/lib/acq/host/models/providers/acme-ai",
+        "credentialEnvNames": ["ACME_AI_API_KEY"],
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        _validate(v1_bundle, _load_schema(BUNDLE_V2_SCHEMA_PATH))
+
+
+def test_v2_bundle_path_agrees_with_provider_id():
+    """The provider-relative location has one canonical provider-id segment."""
+    for fixture_name, provider_id in [("usai", "usai"), ("acme-ai", "acme-ai")]:
+        bundle = _bundle(f"{fixture_name}/bundle.json")
+        assert bundle["schemaVersion"] == "acq-provider-input-bundle/v2"
+        assert bundle["providerPath"] == f"models/providers/{provider_id}"
+        _validate(bundle, _load_schema(BUNDLE_V2_SCHEMA_PATH))
+
+
+@pytest.mark.parametrize(
+    "provider_path",
+    ["/models/providers/acme-ai", "models/../providers/acme-ai", ".", "models/providers/."],
+)
+def test_v2_bundle_rejects_unsafe_provider_path(provider_path):
+    """v2 paths are stable relative layout names, never consumer-controlled paths."""
+    bundle = _bundle("acme-ai/bundle.json")
+    bundle["providerPath"] = provider_path
+    with pytest.raises(jsonschema.ValidationError):
+        _validate(bundle, _load_schema(BUNDLE_V2_SCHEMA_PATH))
+
+
+def test_runtime_validator_accepts_v1_bundle(tmp_path):
+    """Released v1 bundles continue to pass all host-time artifact checks."""
+    bundle_dir = tmp_path / "provider"
+    shutil.copytree(FIXTURES_DIR / "acme-ai", bundle_dir)
+    bundle_path = bundle_dir / "bundle.json"
+    bundle = json.loads(bundle_path.read_text())
+    bundle["schemaVersion"] = "acq-provider-input-bundle/v1"
+    bundle["projectedPath"] = "/var/lib/acq/host/models/providers/acme-ai"
+    del bundle["providerPath"]
+    bundle_path.write_text(json.dumps(bundle))
+    validate_bundle(bundle_path, {"acme-ai": "ACME_AI_API_KEY"})
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [("projectedPath", "/var/lib/acq/other/providers/acme-ai"), ("providerPath", "models/providers/other")],
+)
+def test_runtime_validator_rejects_noncanonical_bundle_path(tmp_path, field, value):
+    """The host validator enforces canonical paths that JSON Schema cannot cross-check."""
+    bundle_dir = tmp_path / "provider"
+    shutil.copytree(FIXTURES_DIR / "acme-ai", bundle_dir)
+    bundle_path = bundle_dir / "bundle.json"
+    bundle = json.loads(bundle_path.read_text())
+    if field == "projectedPath":
+        bundle["schemaVersion"] = "acq-provider-input-bundle/v1"
+        bundle["projectedPath"] = value
+        del bundle["providerPath"]
+    else:
+        bundle[field] = value
+    bundle_path.write_text(json.dumps(bundle))
+    with pytest.raises(ContractError):
+        validate_bundle(bundle_path, {"acme-ai": "ACME_AI_API_KEY"})
+
+
+def test_runtime_validator_rejects_unknown_bundle_version(tmp_path):
+    """A materializer fails closed rather than guessing an unknown bundle contract."""
+    bundle_dir = tmp_path / "provider"
+    shutil.copytree(FIXTURES_DIR / "acme-ai", bundle_dir)
+    bundle_path = bundle_dir / "bundle.json"
+    bundle = json.loads(bundle_path.read_text())
+    bundle["schemaVersion"] = "acq-provider-input-bundle/v3"
+    bundle_path.write_text(json.dumps(bundle))
+    with pytest.raises(ContractError, match="unsupported bundle schemaVersion"):
+        validate_bundle(bundle_path, {"acme-ai": "ACME_AI_API_KEY"})
+
+
+def test_validator_cli_accepts_explicit_external_bundle(tmp_path):
+    """A host materializer can invoke the released validator outside its checkout."""
+    bundle_dir = tmp_path / "provider"
+    shutil.copytree(FIXTURES_DIR / "acme-ai", bundle_dir)
+    command = [
+        "python3",
+        str(VALIDATOR_PATH),
+        "--schema-dir",
+        str(SCHEMAS_DIR),
+        "--credential-bindings",
+        str(SCHEMAS_DIR / "provider-credential-bindings.json"),
+        "--bundle",
+        str(bundle_dir / "bundle.json"),
+    ]
+
+    result = subprocess.run(command, text=True, capture_output=True, check=False)
+    assert result.returncode == 0, result.stderr
+    assert "validated 1 bundle(s)" in result.stdout
+
+    bundle = json.loads((bundle_dir / "bundle.json").read_text())
+    bundle["providerPath"] = "models/providers/other-provider"
+    (bundle_dir / "bundle.json").write_text(json.dumps(bundle))
+    result = subprocess.run(command, text=True, capture_output=True, check=False)
+    assert result.returncode == 1
+    assert "providerPath must be models/providers/acme-ai" in result.stderr
+
+
+def test_validator_cli_rejects_duplicate_explicit_provider_ids(tmp_path):
+    """Repeated explicit bundles share one provider-ID uniqueness set."""
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    shutil.copytree(FIXTURES_DIR / "acme-ai", first)
+    shutil.copytree(FIXTURES_DIR / "acme-ai", second)
+    result = subprocess.run(
+        [
+            "python3",
+            str(VALIDATOR_PATH),
+            "--schema-dir",
+            str(SCHEMAS_DIR),
+            "--credential-bindings",
+            str(SCHEMAS_DIR / "provider-credential-bindings.json"),
+            "--bundle",
+            str(first / "bundle.json"),
+            "--bundle",
+            str(second / "bundle.json"),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert "duplicate providerId 'acme-ai'" in result.stderr
+
+
+def test_validator_cli_explicit_mode_skips_repository_discovery(tmp_path):
+    """An explicit external bundle is the complete requested validation set."""
+    bundle_dir = tmp_path / "provider"
+    shutil.copytree(FIXTURES_DIR / "acme-ai", bundle_dir)
+    result = subprocess.run(
+        [
+            "python3",
+            str(VALIDATOR_PATH),
+            "--schema-dir",
+            str(SCHEMAS_DIR),
+            "--credential-bindings",
+            str(SCHEMAS_DIR / "provider-credential-bindings.json"),
+            "--bundle",
+            str(bundle_dir / "bundle.json"),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert "validated 1 bundle(s)" in result.stdout
+
+
+def test_validator_cli_rejects_malformed_credential_bindings(tmp_path):
+    """Backend-owned binding data fails closed with a concise diagnostic."""
+    bundle_dir = tmp_path / "provider"
+    shutil.copytree(FIXTURES_DIR / "acme-ai", bundle_dir)
+    bindings = tmp_path / "bindings.json"
+    bindings.write_text('{"providers": []}')
+    result = subprocess.run(
+        [
+            "python3",
+            str(VALIDATOR_PATH),
+            "--schema-dir",
+            str(SCHEMAS_DIR),
+            "--credential-bindings",
+            str(bindings),
+            "--bundle",
+            str(bundle_dir / "bundle.json"),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert "providers must be an object" in result.stderr
+    assert "Traceback" not in result.stderr
 
 
 # ---------------------------------------------------------------------------
@@ -1081,3 +1299,76 @@ def test_fixture_normalizers_are_directly_invocable(tmp_path):
         catalog = load_json(out)
         validate_catalog(catalog, provider_id, str(out))
         assert out.read_bytes() == (fixture_dir / "snapshot.json").read_bytes()
+
+
+# ---------------------------------------------------------------------------
+# validate_bundle — malformed JSON root type guards
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("root_value", [None, [], "string", 42, True])
+def test_runtime_validator_rejects_non_object_root_direct_api(tmp_path, root_value):
+    """Direct validate_bundle raises ContractError for non-object JSON roots."""
+    bundle_path = tmp_path / "bundle.json"
+    bundle_path.write_text(json.dumps(root_value))
+    with pytest.raises(ContractError, match="bundle root must be an object"):
+        validate_bundle(bundle_path, {"acme-ai": "ACME_AI_API_KEY"})
+
+
+@pytest.mark.parametrize("root_value", [None, [], "string", 42, True])
+def test_validator_cli_rejects_non_object_root(tmp_path, root_value):
+    """CLI subprocess exits 1 with no Traceback for non-object JSON roots."""
+    bundle_path = tmp_path / "bundle.json"
+    bundle_path.write_text(json.dumps(root_value))
+    result = subprocess.run(
+        [
+            "python3",
+            str(VALIDATOR_PATH),
+            "--schema-dir",
+            str(SCHEMAS_DIR),
+            "--credential-bindings",
+            str(SCHEMAS_DIR / "provider-credential-bindings.json"),
+            "--bundle",
+            str(bundle_path),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert "Traceback" not in result.stderr
+    assert "bundle root must be an object" in result.stderr
+
+
+@pytest.mark.parametrize("schema_version_value", [None, [], 42, True, {"nested": "object"}])
+def test_runtime_validator_rejects_non_string_schema_version_direct_api(tmp_path, schema_version_value):
+    """Direct validate_bundle raises ContractError for non-string schemaVersion."""
+    bundle_path = tmp_path / "bundle.json"
+    bundle_path.write_text(json.dumps({"schemaVersion": schema_version_value}))
+    with pytest.raises(ContractError, match="bundle schemaVersion must be a string"):
+        validate_bundle(bundle_path, {"acme-ai": "ACME_AI_API_KEY"})
+
+
+@pytest.mark.parametrize("schema_version_value", [None, [], 42, True, {"nested": "object"}])
+def test_validator_cli_rejects_non_string_schema_version(tmp_path, schema_version_value):
+    """CLI subprocess exits 1 with no Traceback for non-string schemaVersion."""
+    bundle_path = tmp_path / "bundle.json"
+    bundle_path.write_text(json.dumps({"schemaVersion": schema_version_value}))
+    result = subprocess.run(
+        [
+            "python3",
+            str(VALIDATOR_PATH),
+            "--schema-dir",
+            str(SCHEMAS_DIR),
+            "--credential-bindings",
+            str(SCHEMAS_DIR / "provider-credential-bindings.json"),
+            "--bundle",
+            str(bundle_path),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert "Traceback" not in result.stderr
+    assert "bundle schemaVersion must be a string" in result.stderr
