@@ -15,6 +15,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMAS = ROOT / "integrations" / "isolation" / "schemas"
 PROJECTED_ROOT = "/var/lib/acq/host/models/providers"
+PROVIDER_PATH_PREFIX = "models/providers"
 HOST_CREDENTIAL_BINDINGS = SCHEMAS / "provider-credential-bindings.json"
 
 
@@ -106,6 +107,19 @@ def validate_relative_path(value: str, label: str) -> None:
         raise ContractError(f"{label}: must be a non-empty kit-relative path without traversal")
 
 
+def provider_input_path(bundle: dict, supplied_root: str) -> Path:
+    """Compose a v2 provider path below the consumer's authoritative root."""
+    root = Path(supplied_root)
+    if not root.is_absolute() or ".." in root.parts:
+        raise ContractError("provider input root must be an absolute path without traversal")
+    if bundle["schemaVersion"] == "acq-provider-input-bundle/v1":
+        return Path(bundle["projectedPath"])
+    expected_provider_path = f"{PROVIDER_PATH_PREFIX}/{bundle['providerId']}"
+    if bundle.get("providerPath") != expected_provider_path:
+        raise ContractError(f"providerPath must be {expected_provider_path}")
+    return root / expected_provider_path
+
+
 def reject_symlink_components(package_root: Path, relative: str, label: str) -> None:
     current = package_root
     for part in Path(relative).parts:
@@ -167,9 +181,14 @@ def validate_bundle(
     validate_url(facts["baseUrl"], facts["host"], f"{facts_path}: baseUrl")
     validate_url(facts["modelsUrl"], facts["host"], f"{facts_path}: modelsUrl")
     validate_catalog(load_json(snapshot_path), provider_id, str(snapshot_path))
-    expected_projection = f"{PROJECTED_ROOT}/{provider_id}"
-    if bundle["projectedPath"] != expected_projection:
-        raise ContractError(f"{bundle_path}: projectedPath must be {expected_projection}")
+    if bundle["schemaVersion"] == "acq-provider-input-bundle/v1":
+        expected_projection = f"{PROJECTED_ROOT}/{provider_id}"
+        if bundle["projectedPath"] != expected_projection:
+            raise ContractError(f"{bundle_path}: projectedPath must be {expected_projection}")
+    else:
+        expected_provider_path = f"{PROVIDER_PATH_PREFIX}/{provider_id}"
+        if bundle["providerPath"] != expected_provider_path:
+            raise ContractError(f"{bundle_path}: providerPath must be {expected_provider_path}")
 
 
 def discovered_bundles() -> list[Path]:

@@ -11,11 +11,9 @@ nist_controls: ["SC-7", "AC-4", "CM-7", "SI-10"]
 # ADR 0004 (isolation) — Neutral model-provider discovery: provider facts, a models orchestrator kit, and harness-owned rendering
 
 > Area-scoped ADR for `integrations/isolation/`. Extends the neutral `hybrid/v1`
-> kit spec (ADR 0001) and the network egress tiers (ADR 0002). It changes neither
-> schema; the mechanism composes from already-shipped primitives
-> (`caps.network.allow` union, sequential kit startup) plus the
-> host-authoritative read-only config mount defined in quickstart ADR-0035
-> (pending — GSA-TTS/agentic-coding-quickstart#504).
+> kit spec (ADR 0001) and the network egress tiers (ADR 0002). Provider input
+> bundles are versioned independently so the mechanism can preserve a stable
+> provider layout while backends supply their proven read-only guest root.
 
 ## Context and Problem Statement
 
@@ -58,27 +56,35 @@ change is required.
 
 ### Layer 1 — Provider kit self-registration (host-materialized, read-only)
 
-A provider-role kit declares an `acq-provider-input-bundle/v1` manifest at its
+A provider-role kit declares an `acq-provider-input-bundle/v2` manifest at its
 kit root. The manifest declares kit-relative paths for a small, static JSON
 **facts file**, a **normalizer** entrypoint, and a **vendored fallback snapshot**.
 At provision, `acq` reads those static artifacts **on the
 host**, validates the facts file host-side (see
 [Security model](#security-model)), and materializes all three into a
-per-sandbox host directory that it mounts **read-only** into the guest as a
-fixed per-provider layout at a well-known path:
+per-sandbox host directory that it mounts **read-only** into the guest. Version
+2 fixes the provider-relative layout, not the guest root:
 
 ```text
-/var/lib/acq/host/models/providers/<PROVIDER_ID>/   (read-only mount)
+<ACQ_PROVIDER_INPUT_ROOT>/models/providers/<PROVIDER_ID>/   (read-only mount)
 ├── facts.json     # 7-field facts shape (v1), below
 ├── normalizer     # provider's normalizer entrypoint (executable)
 └── snapshot.json  # provider's vendored fallback snapshot
 ```
 
-The package manifest fixes both sides of the contract: its paths are relative
-to the provider kit and may not traverse outside it, while `projectedPath` MUST
-be exactly `/var/lib/acq/host/models/providers/<providerId>`. The host validates
-the relationship before it copies any files. The USAi names are one provider's
-data, not generic paths or vocabulary.
+The package manifest fixes both package and provider-relative paths: its artifact
+paths are relative to the provider kit and may not traverse outside it, while
+`providerPath` MUST be exactly `models/providers/<providerId>`. The backend
+supplies `ACQ_PROVIDER_INPUT_ROOT` as the absolute root of its read-only mount;
+consumers compose the path rather than selecting a backend destination. The host
+validates the relationship before it copies any files. Provider names are data,
+not generic paths or vocabulary.
+
+Version 1 remains accepted during migration. Its `projectedPath` remains exactly
+`/var/lib/acq/host/models/providers/<providerId>` and consumers that already
+understand version 1 continue to use that fixed path. New provider bundles use
+version 2. A future removal of version 1 requires an explicit compatibility
+decision after all supported consumers have moved to the supplied-root contract.
 
 `facts.json` shape (v1):
 
@@ -188,7 +194,7 @@ guarantees `zscaler-ca-certificate` runs before kits that need its CA trust
 Its `startup` phase:
 
 1. Globs the read-only provider-facts mount
-   `/var/lib/acq/host/models/providers/*/facts.json` (Layer 1).
+   `$ACQ_PROVIDER_INPUT_ROOT/models/providers/*/facts.json` (Layer 1).
 2. **The helper fetches; the normalizer never does.** The shared,
    vendored-into-this-kit bounded-fetch helper — one canonical implementation —
    performs the HTTPS request to `modelsUrl` itself, applying the per-provider
@@ -301,7 +307,7 @@ same ordering convention), reads:
   **model metadata only** (id, context window, pricing, capabilities,
   provenance);
 - the Layer 1 read-only facts mount,
-  `/var/lib/acq/host/models/providers/<PROVIDER_ID>/facts.json` — for
+   `$ACQ_PROVIDER_INPUT_ROOT/models/providers/<PROVIDER_ID>/facts.json` — for
   **routing/credential fields** (`apiProtocol`, `host`, `baseUrl`, `keyEnv`) — never from the
   catalog, since the catalog is guest-writable and cannot be authoritative for
   where a credential is sent (see [Security model](#security-model)); and
@@ -678,6 +684,8 @@ sequenceDiagram
 
 ## References
 
+- `integrations/isolation/docs/provider-input-contract.md` — consumer-facing
+  version 2 root discovery and version 1 migration rules.
 - `integrations/isolation/schemas/acq-provider-input-bundle.schema.json`,
   `acq-provider-facts.schema.json`, and `acq-neutral-model-catalog.schema.json`
   — formal shapes for the package manifest, provider facts, and neutral catalog.

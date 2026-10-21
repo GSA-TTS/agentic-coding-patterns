@@ -25,7 +25,13 @@ from pathlib import Path
 
 import jsonschema
 import pytest
-from validate_provider_input_contract import ContractError, load_json, validate_bundle, validate_catalog
+from validate_provider_input_contract import (
+    ContractError,
+    load_json,
+    provider_input_path,
+    validate_bundle,
+    validate_catalog,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 SCHEMAS_DIR = ROOT / "integrations" / "isolation" / "schemas"
@@ -34,6 +40,10 @@ FIXTURES_DIR = SCHEMAS_DIR / "fixtures"
 FACTS_SCHEMA_PATH = SCHEMAS_DIR / "acq-provider-facts.schema.json"
 CATALOG_SCHEMA_PATH = SCHEMAS_DIR / "acq-neutral-model-catalog.schema.json"
 BUNDLE_SCHEMA_PATH = SCHEMAS_DIR / "acq-provider-input-bundle.schema.json"
+
+
+def _bundle(relative: str) -> dict:
+    return _load_fixture(relative)
 
 
 def _load_schema(path: Path) -> dict:
@@ -144,6 +154,88 @@ def test_schemas_are_valid_json_schema_2020_12():
         schema = _load_schema(path)
         validator_cls = jsonschema.validators.validator_for(schema)
         validator_cls.check_schema(schema)
+
+
+def test_v1_bundle_remains_valid():
+    """Consumers can continue validating released fixed-root v1 bundles."""
+    _validate(
+        {
+            "schemaVersion": "acq-provider-input-bundle/v1",
+            "providerId": "acme-ai",
+            "factsPath": "facts.json",
+            "normalizerPath": "normalize.py",
+            "snapshotPath": "snapshot.json",
+            "projectedPath": "/var/lib/acq/host/models/providers/acme-ai",
+            "credentialEnvNames": ["ACME_AI_API_KEY"],
+        },
+        _load_schema(BUNDLE_SCHEMA_PATH),
+    )
+
+
+def test_v2_bundle_path_agrees_with_provider_id():
+    """The provider-relative location has one canonical provider-id segment."""
+    for fixture_name, provider_id in [("usai", "usai"), ("acme-ai", "acme-ai")]:
+        bundle = _bundle(f"{fixture_name}/bundle.json")
+        assert bundle["schemaVersion"] == "acq-provider-input-bundle/v2"
+        assert bundle["providerPath"] == f"models/providers/{provider_id}"
+
+
+@pytest.mark.parametrize(
+    "provider_path",
+    ["/models/providers/acme-ai", "models/../providers/acme-ai", ".", "models/providers/."],
+)
+def test_v2_bundle_rejects_unsafe_provider_path(provider_path):
+    """v2 paths are stable relative layout names, never consumer-controlled paths."""
+    bundle = _bundle("acme-ai/bundle.json")
+    bundle["providerPath"] = provider_path
+    with pytest.raises(jsonschema.ValidationError):
+        _validate(bundle, _load_schema(BUNDLE_SCHEMA_PATH))
+
+
+def test_consumer_composes_v2_provider_path_under_two_roots():
+    """Backends provide the root; bundles never select a backend-specific location."""
+    bundle = _bundle("acme-ai/bundle.json")
+    assert provider_input_path(bundle, "/var/lib/acq/host") == Path("/var/lib/acq/host/models/providers/acme-ai")
+    assert provider_input_path(bundle, "/srv/acq/state/sandbox-42") == Path(
+        "/srv/acq/state/sandbox-42/models/providers/acme-ai"
+    )
+
+
+def test_consumer_preserves_v1_projected_path():
+    """A v1 bundle retains its released fixed guest path during migration."""
+    bundle = {
+        "schemaVersion": "acq-provider-input-bundle/v1",
+        "projectedPath": "/var/lib/acq/host/models/providers/acme-ai",
+    }
+    assert provider_input_path(bundle, "/ignored/by/v1") == Path("/var/lib/acq/host/models/providers/acme-ai")
+
+
+def test_runtime_validator_accepts_v1_bundle(tmp_path):
+    """Released v1 bundles continue to pass all host-time artifact checks."""
+    bundle_dir = tmp_path / "provider"
+    shutil.copytree(FIXTURES_DIR / "acme-ai", bundle_dir)
+    bundle_path = bundle_dir / "bundle.json"
+    bundle = json.loads(bundle_path.read_text())
+    bundle["schemaVersion"] = "acq-provider-input-bundle/v1"
+    bundle["projectedPath"] = "/var/lib/acq/host/models/providers/acme-ai"
+    del bundle["providerPath"]
+    bundle_path.write_text(json.dumps(bundle))
+    validate_bundle(bundle_path, {"acme-ai": "ACME_AI_API_KEY"})
+
+
+@pytest.mark.parametrize("root", ["relative/root", "/var/lib/acq/../host"])
+def test_consumer_rejects_unsafe_root(root):
+    """Consumers may only compose beneath a supplied absolute non-traversing root."""
+    with pytest.raises(ContractError, match="provider input root"):
+        provider_input_path(_bundle("acme-ai/bundle.json"), root)
+
+
+def test_consumer_rejects_provider_path_that_disagrees_with_provider_id():
+    """A consumer does not compose a provider-selected path before validation."""
+    bundle = _bundle("acme-ai/bundle.json")
+    bundle["providerPath"] = "models/providers/other-provider"
+    with pytest.raises(ContractError, match="providerPath"):
+        provider_input_path(bundle, "/var/lib/acq/host")
 
 
 # ---------------------------------------------------------------------------
