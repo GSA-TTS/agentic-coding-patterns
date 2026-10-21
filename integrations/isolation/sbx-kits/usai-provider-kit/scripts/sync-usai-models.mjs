@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 
-import { mkdir, readFile, writeFile } from "node:fs/promises"
+import { chmod, mkdir, readFile, realpath, rename, stat, unlink, writeFile } from "node:fs/promises"
 import path from "node:path"
 import process from "node:process"
 import { fileURLToPath } from "node:url"
+
+import { parseJsonc } from "../files/home/usai-config/merge-global-config.mjs"
 
 // Anchor all default paths at the kit root (this file lives in <kit>/scripts/),
 // so the script works regardless of the caller's working directory.
@@ -11,6 +13,9 @@ const KIT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 
 const GENERATED_START = "// BEGIN GENERATED USAI MODELS"
 const GENERATED_END = "// END GENERATED USAI MODELS"
+const MAX_MODELS = 1000
+const MAX_MODEL_ID_LENGTH = 128
+const MAX_MODEL_NAME_LENGTH = 256
 
 // Vendor ordering and labels for grouped output
 const VENDOR_CONFIG = {
@@ -138,10 +143,58 @@ function parseModel(rawModel) {
   }
 }
 
+function validateFeedString(value, where, maxLength) {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`${where} must be a non-empty string`)
+  }
+  if ([...value].length > maxLength) {
+    throw new Error(`${where} exceeds ${maxLength} characters`)
+  }
+  if (/[\u0000-\u001F\u007F]/u.test(value)) {
+    throw new Error(`${where} contains a control character`)
+  }
+}
+
+function validateFeedEntries(list) {
+  if (list.length > MAX_MODELS) {
+    throw new Error(`USAi payload invalid: ${list.length} models exceeds limit ${MAX_MODELS}`)
+  }
+  list.forEach((entry, index) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(`USAi payload invalid: models[${index}] must be an object`)
+    }
+    const id = entry.id ?? entry.model_id ?? entry.name
+    if (id === undefined || id === null || id === "") {
+      throw new Error(`USAi payload invalid: models[${index}] has no id/model_id/name field`)
+    }
+    validateFeedString(id, `models[${index}].id`, MAX_MODEL_ID_LENGTH)
+    if (entry.name !== undefined) validateFeedString(entry.name, `models[${index}].name`, MAX_MODEL_NAME_LENGTH)
+    if (entry.display_name !== undefined) {
+      validateFeedString(entry.display_name, `models[${index}].display_name`, MAX_MODEL_NAME_LENGTH)
+    }
+  })
+}
+
 // Models the gateway serves that cannot be prompted, keyed to the reason.
 // Not caught by the embedding-id pattern above.
+//
+// Two distinct causes are represented. The embedding model has no generation
+// support. The undeployed entries are chat models the gateway advertises
+// without a backing deployment: a /chat/completions call returns HTTP 404
+// "The API deployment for this resource does not exist". Each was confirmed by
+// a real completion request, re-probed to rule out a transient, against a
+// control group of sibling models on the same route that answered 200.
+// Offering them would put a model in the picker that fails the moment a user
+// selects it, so they are withheld until the gateway serves them. Re-probe and
+// remove the entry when the deployment lands. Kept in step with the same list
+// in the harness-neutral catalog builder under integrations/providers/usai.
 const NON_CHAT_MODEL_IDS = {
   cohere_english_v3: "embedding model; /chat/completions returns 403 AccessDeniedException",
+  "gpt-6-luna": "advertised but undeployed; /chat/completions returns 404 (no API deployment)",
+  "gpt-6-sol-latest-guardrails-defaultv2":
+    "advertised but undeployed; /chat/completions returns 404 (no API deployment)",
+  "gpt-6.1-sol-latest-guardrails-defaultv2":
+    "advertised but undeployed; /chat/completions returns 404 (no API deployment)",
 }
 
 function isAllowedModel(model) {
@@ -451,6 +504,7 @@ function validateUsaiPayload(payload) {
   if (list.length === 0) {
     throw new Error("USAi payload invalid: model list is empty")
   }
+  validateFeedEntries(list)
   const hasUsableId = list.some(
     (m) => m && typeof m === "object" && (m.id || m.model_id || m.name),
   )
@@ -523,12 +577,21 @@ function normalizeCost(cost) {
   if (!cost || typeof cost !== "object") return null
   const out = {}
   for (const key of COST_SCALAR_KEYS) {
-    if (typeof cost[key] === "number") out[key] = cost[key]
+    if (cost[key] === undefined) continue
+    if (!Number.isFinite(cost[key]) || cost[key] < 0) {
+      throw new Error(`models.dev cost.${key} must be a finite non-negative number`)
+    }
+    out[key] = cost[key]
   }
   if (cost.context_over_200k && typeof cost.context_over_200k === "object") {
     const over = {}
     for (const key of COST_SCALAR_KEYS) {
-      if (typeof cost.context_over_200k[key] === "number") over[key] = cost.context_over_200k[key]
+      const value = cost.context_over_200k[key]
+      if (value === undefined) continue
+      if (!Number.isFinite(value) || value < 0) {
+        throw new Error(`models.dev cost.context_over_200k.${key} must be a finite non-negative number`)
+      }
+      over[key] = value
     }
     if (typeof over.input === "number" && typeof over.output === "number") {
       out.context_over_200k = over
@@ -553,6 +616,10 @@ function normalizeLimit(value, fallback) {
   return Number.isInteger(value) && value > 0 ? value : fallback
 }
 
+function hasPositiveLimit(...values) {
+  return values.some((value) => Number.isInteger(value) && value > 0)
+}
+
 /**
  * Enrich USAI models with limits + pricing from models.dev, sourcing each
  * vendor from the backend USAi actually routes it through.
@@ -575,35 +642,60 @@ function enrichModelsFromCatalog(models, catalog) {
       }
     }
 
-    if (match && match.data.limit) {
+    const feedContext = hasPositiveLimit(model.contextWindow)
+    const feedOutput = hasPositiveLimit(model.maxOutputTokens)
+    const matchedContext = hasPositiveLimit(match?.data?.limit?.context)
+    const matchedOutput = hasPositiveLimit(match?.data?.limit?.output)
+    if (match) {
       return {
         ...model,
-        contextWindow: normalizeLimit(
-          model.contextWindow || match.data.limit.context,
-          FALLBACK_LIMITS.context,
-        ),
-        maxOutputTokens: normalizeLimit(
-          model.maxOutputTokens || match.data.limit.output,
-          FALLBACK_LIMITS.output,
-        ),
+        contextWindow: feedContext
+          ? model.contextWindow
+          : matchedContext
+            ? match.data.limit.context
+            : FALLBACK_LIMITS.context,
+        maxOutputTokens: feedOutput
+          ? model.maxOutputTokens
+          : matchedOutput
+            ? match.data.limit.output
+            : FALLBACK_LIMITS.output,
         toolCall: match.data.tool_call,
         reasoning: match.data.reasoning,
         cost: normalizeCost(match.data.cost),
         modelsDevId: match.id,
         modelsDevProvider: matchedProvider,
+        contextSource: feedContext ? "usai" : matchedContext ? "models.dev" : "fallback",
+        outputSource: feedOutput ? "usai" : matchedOutput ? "models.dev" : "fallback",
       }
     }
 
     // No match found - use fallbacks (no pricing available)
     return {
       ...model,
-      contextWindow: normalizeLimit(model.contextWindow, FALLBACK_LIMITS.context),
-      maxOutputTokens: normalizeLimit(model.maxOutputTokens, FALLBACK_LIMITS.output),
+      contextWindow: feedContext ? model.contextWindow : FALLBACK_LIMITS.context,
+      maxOutputTokens: feedOutput ? model.maxOutputTokens : FALLBACK_LIMITS.output,
       cost: null,
       modelsDevId: null,
       modelsDevProvider: null,
+      contextSource: feedContext ? "usai" : "fallback",
+      outputSource: feedOutput ? "usai" : "fallback",
     }
   })
+}
+
+export function describeModelProvenance(models) {
+  const lines = []
+  const priced = models.filter((m) => m.cost && Object.keys(m.cost).length > 0)
+  const unpriced = models.filter((m) => !m.cost || Object.keys(m.cost).length === 0)
+  if (priced.length) lines.push(`Pricing available for ${priced.length} models: ${priced.map((m) => m.id).join(", ")}`)
+  if (unpriced.length) lines.push(`No pricing available for ${unpriced.length} models: ${unpriced.map((m) => m.id).join(", ")}`)
+  for (const source of ["usai", "models.dev", "fallback"]) {
+    const context = models.filter((m) => m.contextSource === source)
+    const output = models.filter((m) => m.outputSource === source)
+    if (context.length) lines.push(`Context limit from ${source} for ${context.length} models: ${context.map((m) => m.id).join(", ")}`)
+    if (output.length) lines.push(`Output limit from ${source} for ${output.length} models: ${output.map((m) => m.id).join(", ")}`)
+  }
+  return lines
 }
 
 // -----------------------------------------------------------------------------
@@ -690,8 +782,15 @@ function renderModelBlock(models, eol) {
     // Generate display name
     const displayName = generateDisplayName(model.id)
 
-    lines.push(`        "${model.id}": {`)
-    lines.push(`          "name": "${displayName}",`)
+    // SERIALIZE, NEVER INTERPOLATE, a feed-derived string. `model.id` arrives
+    // from the gateway verbatim and `displayName` is derived from it, so a `"`
+    // in an id would close its own JSON string on BOTH of these lines and could
+    // add sibling keys to a config an AI coding agent then obeys. Today that
+    // happens to produce a corrupt file rather than a clean injection — the two
+    // lines mangle each other — but relying on a double fault to be safe is not
+    // a control, and it stops holding the moment either line changes.
+    lines.push(`        ${JSON.stringify(model.id)}: {`)
+    lines.push(`          "name": ${JSON.stringify(displayName)},`)
 
     const hasCost = model.cost && Object.keys(model.cost).length > 0
 
@@ -793,17 +892,25 @@ export function updateTemplate(templateText, payload, modelsDevCatalog = {}) {
       : Array.isArray(payload.models)
         ? payload.models
         : []
+  validateFeedEntries(rawModels)
 
   let models = rawModels
     .map(parseModel)
     .filter((model) => model.id)
     .filter(isAllowedModel)
-    .sort((a, b) => a.id.localeCompare(b.id))
 
-  // Enrich with models.dev metadata if catalog provided
-  if (Object.keys(modelsDevCatalog).length > 0) {
-    models = enrichModelsFromCatalog(models, modelsDevCatalog)
+  const modelIds = new Set()
+  for (const model of models) {
+    if (modelIds.has(model.id)) {
+      throw new Error(`USAI model payload contains duplicate id ${JSON.stringify(model.id)}`)
+    }
+    modelIds.add(model.id)
   }
+  models.sort((a, b) => a.id.localeCompare(b.id))
+
+  // Always normalize limits and record provenance. An empty catalog means no
+  // models.dev match, not "skip normalization".
+  models = enrichModelsFromCatalog(models, modelsDevCatalog)
 
   const updatedBlock = renderModelBlock(models, eol)
   let updatedTemplate = replaceBetween(templateText, GENERATED_START, GENERATED_END, updatedBlock, eol)
@@ -833,6 +940,62 @@ export function updateTemplate(templateText, payload, modelsDevCatalog = {}) {
   return {
     updatedTemplate,
     models,
+  }
+}
+
+// Validate the COMPLETE artifact before check/write. Validating only the model
+// fragment would miss an unbalanced escape that closes the models/provider
+// objects and adds a top-level key. Use the kit's production JSONC parser —
+// never eval/vm.runInNewContext on feed-influenced text.
+function copyJson(value) {
+  return JSON.parse(JSON.stringify(value))
+}
+
+function maskGeneratorOwnedPaths(config, source) {
+  config.provider.usai.models = copyJson(source.provider.usai.models)
+  config.model = source.model
+  config.small_model = source.small_model
+  if (config.agent?.compaction && source.agent?.compaction) {
+    config.agent.compaction.model = source.agent.compaction.model
+  }
+  return config
+}
+
+export function validateGeneratedConfig(sourceText, generatedText) {
+  let source
+  let parsed
+  try {
+    source = parseJsonc(sourceText)
+    parsed = parseJsonc(generatedText)
+  } catch (error) {
+    throw new Error(`Generated opencode.jsonc is not valid JSONC: ${error.message}`)
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Generated opencode.jsonc must contain a top-level object")
+  }
+  if (!source.provider?.usai?.models || !parsed.provider?.usai?.models || typeof parsed.provider.usai.models !== "object" || Array.isArray(parsed.provider.usai.models)) {
+    throw new Error("Generated opencode.jsonc is missing provider.usai.models")
+  }
+  const masked = maskGeneratorOwnedPaths(copyJson(parsed), source)
+  if (JSON.stringify(masked) !== JSON.stringify(source)) {
+    throw new Error("Generated opencode.jsonc changed configuration outside generator-owned paths")
+  }
+  return parsed
+}
+
+export async function writeValidatedConfig(targetPath, sourceText, generatedText) {
+  const writePath = await realpath(targetPath).catch(() => targetPath)
+  const tempPath = `${writePath}.tmp-${process.pid}-${Date.now()}`
+  const mode = await stat(writePath).then((info) => info.mode & 0o777).catch(() => 0o600)
+  try {
+    await writeFile(tempPath, generatedText, { flag: "wx", mode })
+    await chmod(tempPath, mode)
+    const persisted = await readFile(tempPath, "utf8")
+    validateGeneratedConfig(sourceText, persisted)
+    await rename(tempPath, writePath)
+  } catch (error) {
+    await unlink(tempPath).catch(() => {})
+    throw error
   }
 }
 
@@ -883,16 +1046,9 @@ async function main() {
   ])
 
   const { updatedTemplate, models } = updateTemplate(templateText, payload, modelsDevCatalog)
+  validateGeneratedConfig(templateText, updatedTemplate)
 
-  // Log enrichment results
-  const enriched = models.filter((m) => m.modelsDevId)
-  const notEnriched = models.filter((m) => !m.modelsDevId)
-  if (enriched.length > 0) {
-    process.stdout.write(`Enriched ${enriched.length} models from models.dev\n`)
-  }
-  if (notEnriched.length > 0) {
-    process.stdout.write(`Using fallback limits for ${notEnriched.length} models: ${notEnriched.map((m) => m.id).join(", ")}\n`)
-  }
+  for (const line of describeModelProvenance(models)) process.stdout.write(`${line}\n`)
 
   if (checkOnly) {
     if (templateText !== updatedTemplate) {
@@ -901,12 +1057,12 @@ async function main() {
     return
   }
 
-  await writeFile(templatePath, updatedTemplate)
+  await writeValidatedConfig(templatePath, templateText, updatedTemplate)
 
   if (writeSnapshot) {
     const snapshotPath = path.join(KIT_ROOT, "tests/output/latest-opencode.jsonc")
     await mkdir(path.dirname(snapshotPath), { recursive: true })
-    await writeFile(snapshotPath, updatedTemplate)
+    await writeValidatedConfig(snapshotPath, templateText, updatedTemplate)
   }
 
   process.stdout.write(`Updated ${templatePath} with ${models.length} models\n`)

@@ -87,7 +87,10 @@
         "properties": {
           "id": {
             "type": "string",
-            "description": "Model identifier as used by the gateway (e.g. claude_4_8_opus)."
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
+            "description": "Model identifier as used by the gateway (e.g. claude_4_8_opus). Control characters are not allowed; punctuation remains valid neutral catalog data and is serialized by each emitter."
           },
           "vendor": {
             "type": "string",
@@ -95,14 +98,19 @@
           },
           "name": {
             "type": "string",
-            "description": "Human-readable display name."
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": "^[^\\u0000-\\u001F\\u007F]+$",
+            "description": "Human-readable display name. Control characters are not allowed; punctuation and Unicode display text remain valid. Emitters serialize this value independently."
           },
           "contextWindow": {
             "type": "integer",
+            "minimum": 1,
             "description": "Maximum input context window in tokens (opencode limit.context)."
           },
           "maxOutputTokens": {
             "type": "integer",
+            "minimum": 1,
             "description": "Maximum output tokens per response (opencode limit.output)."
           },
           "cost": {
@@ -136,18 +144,22 @@
       "properties": {
         "input": {
           "type": "number",
+          "minimum": 0,
           "description": "Cost per input token (opencode cost.input)."
         },
         "output": {
           "type": "number",
+          "minimum": 0,
           "description": "Cost per output token (opencode cost.output)."
         },
         "cacheRead": {
           "type": "number",
+          "minimum": 0,
           "description": "Cost per cached-read token (opencode cost.cache_read)."
         },
         "cacheWrite": {
           "type": "number",
+          "minimum": 0,
           "description": "Cost per cache-write token (opencode cost.cache_write)."
         }
       }

@@ -39,6 +39,24 @@ test("stripJsonc does not strip // sequences inside string values", () => {
   assert.equal(parsed.b, "/* also not */")
 })
 
+test("stripJsonc does not strip comma-brace text inside string values", () => {
+  const parsed = parseJsonc('{"id":"model,}","array":"value,]",}')
+  assert.equal(parsed.id, "model,}")
+  assert.equal(parsed.array, "value,]")
+})
+
+test("parseJsonc rejects duplicate properties at every object depth", () => {
+  assert.throws(() => parseJsonc('{"permission":{},"permission":{}}'), /Duplicate JSON property/)
+  assert.throws(() => parseJsonc('{"provider":{"usai":{},"usai":{}}}'), /Duplicate JSON property/)
+  assert.throws(() => parseJsonc('{"models":{"same":{},"same":{}}}'), /Duplicate JSON property/)
+})
+
+test("parseJsonc rejects leading and repeated commas", () => {
+  for (const malformed of ["{,}", "[,]", '{"a":1,,}', "[1,,]", '{"a":,}']) {
+    assert.throws(() => parseJsonc(malformed), SyntaxError)
+  }
+})
+
 test("parseJsonc parses the shipped kit config", async () => {
   const text = await readFile(kitConfigPath, "utf8")
   const cfg = parseJsonc(text)
