@@ -96,12 +96,12 @@ contrasting the two mechanisms. The reasoning:
 
 ## Links
 
-- `../../openchamber/scripts/verify` — `in_sbx`'s own comment explaining why
+- `../../../openchamber/scripts/verify` — `in_sbx`'s own comment explaining why
   it injects `$HOME/.npm-global/bin` (the workaround this decision avoids
   needing).
-- `../../paseo/scripts/verify` — the same workaround, independently
+- `../../../paseo/scripts/verify` — the same workaround, independently
   duplicated.
-- `../../openchamber/docs/decisions/wrapper-entrypoint-owns-server.md` — the
+- `../../../openchamber/docs/decisions/wrapper-entrypoint-owns-server.md` — the
   base-image fact (`~/.local/bin` first on `PATH`) this decision also relies
   on.
 - [`ca-bundle-wrapper-not-env-var.md`](ca-bundle-wrapper-not-env-var.md) — the
