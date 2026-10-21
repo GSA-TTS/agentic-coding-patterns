@@ -7,6 +7,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  merge_group:
+    branches: [main]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
@@ -195,6 +197,9 @@ jobs:
 
       - name: Validate acq-kits (hybrid/v1 schema)
         run: make validate-kits
+
+      - name: Validate provider input contract
+        run: make validate-provider-input-contract
 
   # acq-kits node test suites (offline, no sandbox required)
   acq-kits:

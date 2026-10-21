@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "acq-provider-input-bundle/v2",
+  "providerId": "usai",
+  "factsPath": "facts.json",
+  "normalizerPath": "normalize.py",
+  "snapshotPath": "snapshot.json",
+  "providerPath": "models/providers/usai",
+  "credentialEnvNames": ["USAI_API_KEY"]
+}
