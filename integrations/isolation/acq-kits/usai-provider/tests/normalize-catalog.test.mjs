@@ -83,6 +83,7 @@ test("normalizeCatalog rejects malformed model records with actionable errors", 
     [["gpt"], /models\[0\] must be an object \(got "gpt"\)/],
     [[{}], /models\[0\]\.id must be a non-empty string \(got undefined\)/],
     [[{ id: "" }], /models\[0\]\.id must be a non-empty string \(got ""\)/],
+    [[{ id: "model\n" }], /not a valid neutral model identifier/],
     [[{ id: 123 }], /models\[0\]\.id must be a non-empty string \(got 123\)/],
     [[{ id: "model", contextWindow: -5 }], /models\[0\]\.contextWindow must be a positive integer/],
     [[{ id: "model", contextWindow: 1.5 }], /models\[0\]\.contextWindow must be a positive integer/],
@@ -103,6 +104,17 @@ test("normalizeCatalog rejects malformed model records with actionable errors", 
   }
 })
 
+test("normalizeCatalog rejects duplicate and excessive model lists", () => {
+  assert.throws(
+    () => normalizeCatalog({ models: [{ id: "model-a" }, { id: "model-a" }] }),
+    /duplicate model IDs/,
+  )
+  assert.throws(
+    () => normalizeCatalog({ models: Array.from({ length: 501 }, (_, i) => ({ id: `model-${i}` })) }),
+    /exceeds 500 entries/,
+  )
+})
+
 test("normalizeCatalog accepts omitted optional metadata, zero prices, and unknown cost keys", () => {
   assert.deepEqual(normalizeCatalog({ models: [{ id: "bare" }] }).models, [{ id: "bare" }])
   assert.deepEqual(normalizeCatalog({ models: [] }).models, [])
@@ -120,13 +132,24 @@ test("CLI: reads --source and writes --out, producing valid JSON matching normal
   const scriptPath = path.join(__dirname, "../scripts/normalize-catalog.mjs")
   const outPath = path.join(__dirname, "output/normalize-catalog-cli-test.json")
 
-  await execFileAsync("node", [scriptPath, "--source", fixturePath, "--out", outPath])
+  await execFileAsync(scriptPath, ["--source", fixturePath, "--out", outPath])
 
   const written = JSON.parse(await readFile(outPath, "utf8"))
   const source = JSON.parse(await readFile(fixturePath, "utf8"))
   assert.deepEqual(written, normalizeCatalog(source))
 
   await rm(path.dirname(outPath), { recursive: true, force: true })
+})
+
+test("CLI: rejects unknown options and missing option values", async () => {
+  const { execFile } = await import("node:child_process")
+  const { promisify } = await import("node:util")
+  const execFileAsync = promisify(execFile)
+  const scriptPath = path.join(__dirname, "../scripts/normalize-catalog.mjs")
+
+  await assert.rejects(execFileAsync(scriptPath, ["--soruce", fixturePath]), /unknown option/)
+  await assert.rejects(execFileAsync(scriptPath, ["--source"]), /requires a path/)
+  await assert.rejects(execFileAsync(scriptPath, ["--out"]), /requires a path/)
 })
 
 // ---------------------------------------------------------------------------

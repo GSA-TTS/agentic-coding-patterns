@@ -71,6 +71,8 @@ const DEFAULT_OUT_PATH = path.join(KIT_ROOT, "tests/output/usai-normalized-catal
 
 const NEUTRAL_SCHEMA_VERSION = "acq-neutral-model-catalog/v1"
 const PROVIDER_ID = "usai"
+const MODEL_ID_PATTERN = /^[^\u0000-\u001F\u007F\u2028\u2029]+$/
+const MAX_MODELS = 500
 
 /**
  * Re-shape one usai-model-catalog/v1 model entry into the neutral
@@ -110,6 +112,9 @@ function normalizeModel(model, index) {
   }
   if (typeof model.id !== "string" || model.id.length === 0) {
     throw new Error(`${prefix}.id must be a non-empty string (got ${describe(model.id)})`)
+  }
+  if (model.id.length > 128 || !MODEL_ID_PATTERN.test(model.id)) {
+    throw new Error(`${prefix}.id is not a valid neutral model identifier`)
   }
 
   const out = { id: model.id }
@@ -153,6 +158,13 @@ export function normalizeCatalog(sourceCatalog) {
   if (!sourceCatalog || typeof sourceCatalog !== "object" || !Array.isArray(sourceCatalog.models)) {
     throw new Error("normalizeCatalog: source catalog is missing a models[] array")
   }
+  if (sourceCatalog.models.length > MAX_MODELS) {
+    throw new Error(`normalizeCatalog: models[] exceeds ${MAX_MODELS} entries`)
+  }
+  const ids = sourceCatalog.models.map((model) => model?.id)
+  if (new Set(ids).size !== ids.length) {
+    throw new Error("normalizeCatalog: source catalog contains duplicate model IDs")
+  }
   return {
     schemaVersion: NEUTRAL_SCHEMA_VERSION,
     providerId: PROVIDER_ID,
@@ -163,8 +175,15 @@ export function normalizeCatalog(sourceCatalog) {
 function parseArgs(argv) {
   const args = { source: DEFAULT_SOURCE_PATH, out: DEFAULT_OUT_PATH }
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--source") args.source = path.resolve(argv[++i])
-    else if (argv[i] === "--out") args.out = path.resolve(argv[++i])
+    const option = argv[i]
+    if (option !== "--source" && option !== "--out") {
+      throw new Error(`unknown option: ${option}`)
+    }
+    const value = argv[++i]
+    if (value === undefined || value.startsWith("--")) {
+      throw new Error(`${option} requires a path`)
+    }
+    args[option === "--source" ? "source" : "out"] = path.resolve(value)
   }
   return args
 }

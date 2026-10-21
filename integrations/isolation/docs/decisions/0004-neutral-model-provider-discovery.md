@@ -58,9 +58,10 @@ change is required.
 
 ### Layer 1 — Provider kit self-registration (host-materialized, read-only)
 
-A provider-role kit ships a small, static JSON **facts file**, a **normalizer**
-entrypoint, and a **vendored fallback snapshot**, all inside its own (pinned)
-kit directory. At provision, `acq` reads those static artifacts **on the
+A provider-role kit declares an `acq-provider-input-bundle/v1` manifest at its
+kit root. The manifest declares kit-relative paths for a small, static JSON
+**facts file**, a **normalizer** entrypoint, and a **vendored fallback snapshot**.
+At provision, `acq` reads those static artifacts **on the
 host**, validates the facts file host-side (see
 [Security model](#security-model)), and materializes all three into a
 per-sandbox host directory that it mounts **read-only** into the guest as a
@@ -68,10 +69,16 @@ fixed per-provider layout at a well-known path:
 
 ```text
 /var/lib/acq/host/models/providers/<PROVIDER_ID>/   (read-only mount)
-├── facts.json     # 6-field facts shape (v1), below
+├── facts.json     # 7-field facts shape (v1), below
 ├── normalizer     # provider's normalizer entrypoint (executable)
 └── snapshot.json  # provider's vendored fallback snapshot
 ```
+
+The package manifest fixes both sides of the contract: its paths are relative
+to the provider kit and may not traverse outside it, while `projectedPath` MUST
+be exactly `/var/lib/acq/host/models/providers/<providerId>`. The host validates
+the relationship before it copies any files. The USAi names are one provider's
+data, not generic paths or vocabulary.
 
 `facts.json` shape (v1):
 
@@ -79,6 +86,7 @@ fixed per-provider layout at a well-known path:
 {
   "schemaVersion": "acq-provider-facts/v1",
   "providerId": "usai",
+  "apiProtocol": "openai-compatible",
   "host": "api.gsa.usai.gov",
   "baseUrl": "https://api.gsa.usai.gov/api/v1",
   "modelsUrl": "https://api.gsa.usai.gov/api/v1/models",
@@ -144,6 +152,17 @@ provider kit may only name a credential it declares itself: `acq` confirms
 before that variable is ever read. This check is a mechanical string comparison,
 runs host-side as part of facts validation, and prevents a kit from naming an
 unrelated credential (e.g. `GITHUB_TOKEN`).
+
+`apiProtocol` declares the wire protocol this provider's API speaks. Version 1
+supports `openai-compatible`, the protocol used by both providers proven in
+this milestone. A harness renderer maps this bounded value through a static,
+harness-owned allowlist without branching on `providerId`; it must reject an
+unknown protocol rather than dynamically import or execute a value from the
+facts file. Deployment platforms such as Bedrock, Vertex, and Azure are not
+protocols and are deliberately excluded until their authentication, region,
+project, deployment, and API-version requirements have neutral facts and a
+concrete renderer. This keeps the field declarative, provider-neutral, and no
+broader than the behavior the repository can currently prove.
 
 Each provider kit also ships, inside its own kit directory (never centrally),
 as siblings of `facts.json` in the materialized `<PROVIDER_ID>/` directory
@@ -283,7 +302,7 @@ same ordering convention), reads:
   provenance);
 - the Layer 1 read-only facts mount,
   `/var/lib/acq/host/models/providers/<PROVIDER_ID>/facts.json` — for
-  **routing/credential fields** (`host`, `baseUrl`, `keyEnv`) — never from the
+  **routing/credential fields** (`apiProtocol`, `host`, `baseUrl`, `keyEnv`) — never from the
   catalog, since the catalog is guest-writable and cannot be authoritative for
   where a credential is sent (see [Security model](#security-model)); and
 - the config kit's cross-harness defaults (model-role priority, etc.).
@@ -320,8 +339,8 @@ Provenance belongs where the knowledge is: the orchestrator performed the fetch
 or took the fallback, so the orchestrator records it.
 
 Constraints this ADR places on the **per-provider** shape
-(`acq-neutral-model-catalog/v1`), which the formal JSON Schema (tracked in
-GSA-TTS/agentic-coding-patterns#435) must honor:
+(`acq-neutral-model-catalog/v1`), formalised by the provider-input contract
+work tracked separately from this ADR:
 
 - **The model list is a required array and MAY be empty.** A provider that
   legitimately exposes no models is *valid*, not a schema violation.
@@ -659,6 +678,9 @@ sequenceDiagram
 
 ## References
 
+- `integrations/isolation/schemas/acq-provider-input-bundle.schema.json`,
+  `acq-provider-facts.schema.json`, and `acq-neutral-model-catalog.schema.json`
+  — formal shapes for the package manifest, provider facts, and neutral catalog.
 - Quickstart ADR-0035 (*Host-Authoritative Sandbox Configuration*, pending —
   GSA-TTS/agentic-coding-quickstart#504) — the general principle and the
   per-sandbox host config dir + read-only mount + trusted-startup-execution

@@ -1,0 +1,43 @@
+{
+  "schemaVersion": "acq-neutral-model-catalog/v1",
+  "providerId": "usai",
+  "models": [
+    {
+      "id": "claude_4_5_sonnet",
+      "contextWindow": 200000,
+      "maxOutputTokens": 64000,
+      "cost": {
+        "input": 3,
+        "output": 15,
+        "cacheRead": 0.3,
+        "cacheWrite": 3.75
+      }
+    },
+    {
+      "id": "claude_4_5_haiku",
+      "contextWindow": 200000,
+      "maxOutputTokens": 64000,
+      "cost": {
+        "input": 1,
+        "output": 5,
+        "cacheRead": 0.1,
+        "cacheWrite": 1.25
+      }
+    },
+    {
+      "id": "gpt_5_4_default_v2",
+      "contextWindow": 1050000,
+      "maxOutputTokens": 128000,
+      "cost": {
+        "input": 2.5,
+        "output": 15,
+        "cacheRead": 0.25
+      }
+    }
+  ],
+  "recommendations": {
+    "primary": "claude_4_5_sonnet",
+    "small": "claude_4_5_haiku",
+    "compaction": "gpt_5_4_default_v2"
+  }
+}
