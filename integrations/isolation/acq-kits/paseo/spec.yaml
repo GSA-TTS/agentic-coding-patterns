@@ -186,7 +186,7 @@ commands:
       - sh
       - -c
       - |
-        PASEO_CLI_VERSION="0.10.2" \
+        PASEO_CLI_VERSION="0.12.0" \
           sh /home/agent/paseo-start.sh &
 
 # Neutral published port (schema hybrid/v1). Publish the single container/guest

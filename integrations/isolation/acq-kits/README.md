@@ -96,3 +96,46 @@ make test-kits
 # Live, per-backend end-to-end check (needs a backend CLI + a sandbox-capable host):
 <kit>/scripts/verify
 ```
+
+### What a `scripts/verify` exit code means
+
+The shared verdict contract lives in `verify-report.sh` in this directory, and
+**adoption is staged**: only the kits listed as converted below implement it
+today. A verdict is a function of a coverage record, not a failure counter, so a
+converted run that exercised nothing cannot report the same result as a run that
+passed.
+
+**Converted kits** — `git-ssh-sign`, `usai-provider`. For these, and only these,
+the exit codes and reporters below apply.
+
+| Exit | Meaning |
+|---|---|
+| `0` | every check that ran passed, and at least one check ran |
+| `1` | at least one check FAILED |
+| `3` | nothing failed, but the run is **not** a pass: a check could not be performed, or no check ran at all |
+
+`3` is distinct from `1` so a caller can tell *"we looked and found problems"*
+from *"we could not look"*. Treat any non-zero exit as "do not ship".
+
+The five reporters: `ok` / `bad` are the ran-and-passed / ran-and-failed cases;
+`unver` is **could not check** (missing tool, absent credential, no network) and
+degrades the verdict to `3`; `skip` is *not applicable in this configuration*
+(e.g. a backend-specific check on the other backend) and does **not** degrade
+it; `warn` is advisory.
+
+**Unconverted kits** — `agentic-coding-playbook`, `oci-engine`, `opencode`,
+`openchamber`, `paseo`, `pi-coding-agent`, `zscaler-ca-certificate`. These still
+use the older two-state verdict, so nothing above applies to them. A non-zero
+exit means a check failed *or* a precondition could not be met — the two are not
+distinguished — and a `0` does **not** establish that every check ran: these
+scripts report an unmet precondition with a bare message that increments no
+counter, then exit `0` on the strength of the checks that did run. Treat a `0`
+here as "nothing that ran failed", never as full coverage.
+
+The authoritative classification is `scripts/tests/test_verify_contract.py`. It
+executes the verdict contract for converted kits, asserts each unconverted kit
+still matches its description, and compares both lists above against its own, so
+the split cannot rot in either direction: converting a kit without moving it
+fails, a converted kit reverting fails, and a README edit alone fails. The
+unconverted list must reach empty, at which point this carve-out goes away and
+the contract above applies to every kit.

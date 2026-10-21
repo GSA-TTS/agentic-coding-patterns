@@ -4,9 +4,9 @@
 // wins over it. Prefer keys the global config does not set; do not redeclare
 // the provider.
 //
-// `instructions` below needs OpenCode 1.x: OpenCode 2.x accepts the field but
-// never loads the files it lists ("Check against your acq" in the pattern
-// doc). scripts/verify fails when 2.x is what sandbox sessions run.
+// `instructions` below needs OpenCode 1.x or 2.0.30+: 2.0.0 through 2.0.29
+// accept the field but never load the files it lists ("Check against your
+// acq" in the pattern doc). scripts/verify fails when one of those runs.
 //
 // Deliberately NOT set here:
 //   - model / small_model. The global provider kit owns them and updates its
