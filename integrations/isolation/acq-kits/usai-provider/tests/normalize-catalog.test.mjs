@@ -132,13 +132,24 @@ test("CLI: reads --source and writes --out, producing valid JSON matching normal
   const scriptPath = path.join(__dirname, "../scripts/normalize-catalog.mjs")
   const outPath = path.join(__dirname, "output/normalize-catalog-cli-test.json")
 
-  await execFileAsync("node", [scriptPath, "--source", fixturePath, "--out", outPath])
+  await execFileAsync(scriptPath, ["--source", fixturePath, "--out", outPath])
 
   const written = JSON.parse(await readFile(outPath, "utf8"))
   const source = JSON.parse(await readFile(fixturePath, "utf8"))
   assert.deepEqual(written, normalizeCatalog(source))
 
   await rm(path.dirname(outPath), { recursive: true, force: true })
+})
+
+test("CLI: rejects unknown options and missing option values", async () => {
+  const { execFile } = await import("node:child_process")
+  const { promisify } = await import("node:util")
+  const execFileAsync = promisify(execFile)
+  const scriptPath = path.join(__dirname, "../scripts/normalize-catalog.mjs")
+
+  await assert.rejects(execFileAsync(scriptPath, ["--soruce", fixturePath]), /unknown option/)
+  await assert.rejects(execFileAsync(scriptPath, ["--source"]), /requires a path/)
+  await assert.rejects(execFileAsync(scriptPath, ["--out"]), /requires a path/)
 })
 
 // ---------------------------------------------------------------------------

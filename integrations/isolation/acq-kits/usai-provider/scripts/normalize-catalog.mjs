@@ -175,8 +175,15 @@ export function normalizeCatalog(sourceCatalog) {
 function parseArgs(argv) {
   const args = { source: DEFAULT_SOURCE_PATH, out: DEFAULT_OUT_PATH }
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--source") args.source = path.resolve(argv[++i])
-    else if (argv[i] === "--out") args.out = path.resolve(argv[++i])
+    const option = argv[i]
+    if (option !== "--source" && option !== "--out") {
+      throw new Error(`unknown option: ${option}`)
+    }
+    const value = argv[++i]
+    if (value === undefined || value.startsWith("--")) {
+      throw new Error(`${option} requires a path`)
+    }
+    args[option === "--source" ? "source" : "out"] = path.resolve(value)
   }
   return args
 }

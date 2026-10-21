@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import os
 import sys
 from pathlib import Path
 from urllib.parse import urlparse
@@ -102,6 +103,14 @@ def validate_relative_path(value: str, label: str) -> None:
         raise ContractError(f"{label}: must be a non-empty kit-relative path without traversal")
 
 
+def reject_symlink_components(package_root: Path, relative: str, label: str) -> None:
+    current = package_root
+    for part in Path(relative).parts:
+        current /= part
+        if current.is_symlink():
+            raise ContractError(f"{label}: path components must not be symlinks")
+
+
 def validate_bundle(
     bundle_path: Path,
     credential_bindings: dict[str, str] | None = None,
@@ -115,6 +124,7 @@ def validate_bundle(
     resolved_package_root = package_root.resolve()
     for field in ("factsPath", "snapshotPath", "normalizerPath"):
         validate_relative_path(bundle[field], f"{bundle_path}: {field}")
+        reject_symlink_components(package_root, bundle[field], f"{bundle_path}: {field}")
     facts_path = package_root / bundle["factsPath"]
     snapshot_path = package_root / bundle["snapshotPath"]
     normalizer_path = package_root / bundle["normalizerPath"]
@@ -123,6 +133,10 @@ def validate_bundle(
             raise ContractError(f"{bundle_path}: declared artifact paths must be regular files inside the provider kit")
     if not facts_path.is_file() or not snapshot_path.is_file() or not normalizer_path.is_file():
         raise ContractError(f"{bundle_path}: declared artifact paths must be regular files")
+    if not normalizer_path.stat().st_mode & 0o111:
+        raise ContractError(f"{bundle_path}: normalizerPath must be an executable file")
+    if not os.access(normalizer_path, os.X_OK):
+        raise ContractError(f"{bundle_path}: normalizerPath is not executable by the validator")
     facts = load_json(facts_path)
     validate_schema(facts, "acq-provider-facts.schema.json", str(facts_path))
     provider_id = facts["providerId"]
@@ -136,6 +150,10 @@ def validate_bundle(
         allowed_hosts = {facts["host"]}
     if credential_bindings is not None and credential_bindings.get(provider_id) != facts["keyEnv"]:
         raise ContractError(f"{bundle_path}: facts.keyEnv must match the host credential binding")
+    if facts["keyEnv"] not in bundle["credentialEnvNames"]:
+        raise ContractError(
+            f"{bundle_path}: facts.keyEnv '{facts['keyEnv']}' must be declared in bundle credentialEnvNames"
+        )
     if seen_provider_ids is not None:
         if provider_id in seen_provider_ids:
             raise ContractError(f"{bundle_path}: duplicate providerId '{provider_id}'")

@@ -1,0 +1,25 @@
+#!/usr/bin/env python3
+"""Deterministically normalize the fictitious fixture source catalog."""
+
+import argparse
+import json
+from pathlib import Path
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--source", required=True, type=Path)
+    parser.add_argument("--out", required=True, type=Path)
+    args = parser.parse_args()
+    source = json.loads(args.source.read_text())
+    output = {
+        "schemaVersion": "acq-neutral-model-catalog/v1",
+        "providerId": "acme-ai",
+        "models": source["availableModels"],
+        "recommendations": source["recommendedModels"],
+    }
+    args.out.write_text(json.dumps(output, indent=2) + "\n")
+
+
+if __name__ == "__main__":
+    main()

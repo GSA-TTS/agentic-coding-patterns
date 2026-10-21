@@ -898,8 +898,9 @@ def test_usai_normalizer_output_satisfies_runtime_contract(tmp_path):
     """The shipped normalizer cannot emit a catalog outside the neutral contract."""
     output_path = tmp_path / "catalog.json"
     script_path = ROOT / "integrations/isolation/acq-kits/usai-provider/scripts/normalize-catalog.mjs"
+    source_path = ROOT / "integrations/providers/usai/catalog.json"
     subprocess.run(
-        ["node", str(script_path), "--out", str(output_path)],
+        [str(script_path), "--source", str(source_path), "--out", str(output_path)],
         check=True,
         capture_output=True,
         text=True,
@@ -937,7 +938,7 @@ def test_runtime_validator_rejects_artifact_symlink(tmp_path):
     shutil.copytree(FIXTURES_DIR / "acme-ai", bundle_dir)
     (bundle_dir / "facts.json").unlink()
     (bundle_dir / "facts.json").symlink_to(ROOT / "README.md")
-    with pytest.raises(ContractError, match="regular files inside"):
+    with pytest.raises(ContractError, match="path components must not be symlinks"):
         validate_bundle(bundle_dir / "bundle.json")
 
 
@@ -981,3 +982,89 @@ def test_runtime_validator_rejects_noncanonical_ip_literals(tmp_path, host):
     facts_path.write_text(json.dumps(facts))
     with pytest.raises(ContractError):
         validate_bundle(bundle_dir / "bundle.json")
+
+
+# ---------------------------------------------------------------------------
+# credentialEnvNames — facts.keyEnv must be declared in the bundle manifest
+# ---------------------------------------------------------------------------
+
+
+def test_runtime_validator_accepts_keyenv_declared_in_credentials(tmp_path):
+    """Positive: facts.keyEnv that appears in credentialEnvNames validates cleanly."""
+    bundle_dir = tmp_path / "provider"
+    shutil.copytree(FIXTURES_DIR / "acme-ai", bundle_dir)
+    # The acme-ai fixture already declares ACME_AI_API_KEY in both facts and
+    # credentialEnvNames — this is the positive round-trip proof.
+    validate_bundle(bundle_dir / "bundle.json", {"acme-ai": "ACME_AI_API_KEY"})
+
+
+def test_runtime_validator_rejects_keyenv_absent_from_credentials(tmp_path):
+    """facts.keyEnv not listed in credentialEnvNames must be rejected."""
+    bundle_dir = tmp_path / "provider"
+    shutil.copytree(FIXTURES_DIR / "acme-ai", bundle_dir)
+    bundle_path = bundle_dir / "bundle.json"
+    bundle = json.loads(bundle_path.read_text())
+    # Remove ACME_AI_API_KEY and replace with an unrelated name so the
+    # host-credential-binding check still passes but the cross-check fails.
+    bundle["credentialEnvNames"] = ["UNRELATED_CREDENTIAL"]
+    bundle_path.write_text(json.dumps(bundle))
+    with pytest.raises(ContractError, match="credentialEnvNames"):
+        validate_bundle(bundle_dir / "bundle.json", {"acme-ai": "ACME_AI_API_KEY"})
+
+
+def test_runtime_validator_accepts_keyenv_among_multiple_credentials(tmp_path):
+    """facts.keyEnv matching one of several declared credential names is accepted."""
+    bundle_dir = tmp_path / "provider"
+    shutil.copytree(FIXTURES_DIR / "acme-ai", bundle_dir)
+    bundle_path = bundle_dir / "bundle.json"
+    bundle = json.loads(bundle_path.read_text())
+    # Declare two credential names; the facts keyEnv matches the second one.
+    bundle["credentialEnvNames"] = ["ACME_AI_LEGACY_KEY", "ACME_AI_API_KEY"]
+    bundle_path.write_text(json.dumps(bundle))
+    validate_bundle(bundle_dir / "bundle.json", {"acme-ai": "ACME_AI_API_KEY"})
+
+
+# ---------------------------------------------------------------------------
+# normalizerPath — must be an executable regular file, not a symlink or mode 0644
+# ---------------------------------------------------------------------------
+
+
+def test_runtime_validator_rejects_non_executable_normalizer(tmp_path):
+    """normalizerPath pointing at a non-executable file (mode 0644) must be rejected."""
+    bundle_dir = tmp_path / "provider"
+    shutil.copytree(FIXTURES_DIR / "acme-ai", bundle_dir)
+    normalizer_path = bundle_dir / "normalize.py"
+    # Strip all execute bits to simulate the pre-fix 0644 state.
+    normalizer_path.chmod(0o644)
+    with pytest.raises(ContractError, match="executable"):
+        validate_bundle(bundle_dir / "bundle.json", {"acme-ai": "ACME_AI_API_KEY"})
+
+
+def test_runtime_validator_rejects_normalizer_symlink(tmp_path):
+    """normalizerPath that is a symlink (even to an executable) must be rejected."""
+    bundle_dir = tmp_path / "provider"
+    shutil.copytree(FIXTURES_DIR / "acme-ai", bundle_dir)
+    normalizer_path = bundle_dir / "normalize.py"
+    real_path = bundle_dir / "normalize_real.py"
+    normalizer_path.rename(real_path)
+    normalizer_path.symlink_to(real_path)
+    with pytest.raises(ContractError, match="path components must not be symlinks"):
+        validate_bundle(bundle_dir / "bundle.json", {"acme-ai": "ACME_AI_API_KEY"})
+
+
+def test_fixture_normalizers_are_directly_invocable(tmp_path):
+    """Fixture normalizers transform vendor-shaped source into the exact snapshot."""
+    for fixture_name, provider_id in [("usai", "usai"), ("acme-ai", "acme-ai")]:
+        fixture_dir = FIXTURES_DIR / fixture_name
+        normalizer = fixture_dir / "normalize.py"
+        out = tmp_path / f"{fixture_name}-catalog.json"
+        result = subprocess.run(
+            [str(normalizer), "--source", str(fixture_dir / "source.json"), "--out", str(out)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        catalog = load_json(out)
+        validate_catalog(catalog, provider_id, str(out))
+        assert out.read_bytes() == (fixture_dir / "snapshot.json").read_bytes()

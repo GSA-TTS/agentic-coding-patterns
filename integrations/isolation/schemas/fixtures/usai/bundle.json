@@ -2,7 +2,7 @@
   "schemaVersion": "acq-provider-input-bundle/v1",
   "providerId": "usai",
   "factsPath": "facts.json",
-  "normalizerPath": "snapshot.json",
+  "normalizerPath": "normalize.py",
   "snapshotPath": "snapshot.json",
   "projectedPath": "/var/lib/acq/host/models/providers/usai",
   "credentialEnvNames": ["USAI_API_KEY"]
