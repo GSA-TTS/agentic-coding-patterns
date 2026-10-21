@@ -58,9 +58,10 @@ change is required.
 
 ### Layer 1 — Provider kit self-registration (host-materialized, read-only)
 
-A provider-role kit ships a small, static JSON **facts file**, a **normalizer**
-entrypoint, and a **vendored fallback snapshot**, all inside its own (pinned)
-kit directory. At provision, `acq` reads those static artifacts **on the
+A provider-role kit declares an `acq-provider-input-bundle/v1` manifest at its
+kit root. The manifest declares kit-relative paths for a small, static JSON
+**facts file**, a **normalizer** entrypoint, and a **vendored fallback snapshot**.
+At provision, `acq` reads those static artifacts **on the
 host**, validates the facts file host-side (see
 [Security model](#security-model)), and materializes all three into a
 per-sandbox host directory that it mounts **read-only** into the guest as a
@@ -72,6 +73,12 @@ fixed per-provider layout at a well-known path:
 ├── normalizer     # provider's normalizer entrypoint (executable)
 └── snapshot.json  # provider's vendored fallback snapshot
 ```
+
+The package manifest fixes both sides of the contract: its paths are relative
+to the provider kit and may not traverse outside it, while `projectedPath` MUST
+be exactly `/var/lib/acq/host/models/providers/<providerId>`. The host validates
+the relationship before it copies any files. The USAi names are one provider's
+data, not generic paths or vocabulary.
 
 `facts.json` shape (v1):
 
@@ -320,8 +327,8 @@ Provenance belongs where the knowledge is: the orchestrator performed the fetch
 or took the fallback, so the orchestrator records it.
 
 Constraints this ADR places on the **per-provider** shape
-(`acq-neutral-model-catalog/v1`), which the formal JSON Schema (tracked in
-GSA-TTS/agentic-coding-patterns#435) must honor:
+(`acq-neutral-model-catalog/v1`), formalised by the provider-input contract
+work tracked separately from this ADR:
 
 - **The model list is a required array and MAY be empty.** A provider that
   legitimately exposes no models is *valid*, not a schema violation.
@@ -659,6 +666,9 @@ sequenceDiagram
 
 ## References
 
+- `integrations/isolation/schemas/acq-provider-input-bundle.schema.json`,
+  `acq-provider-facts.schema.json`, and `acq-neutral-model-catalog.schema.json`
+  — formal shapes for the package manifest, provider facts, and neutral catalog.
 - Quickstart ADR-0035 (*Host-Authoritative Sandbox Configuration*, pending —
   GSA-TTS/agentic-coding-quickstart#504) — the general principle and the
   per-sandbox host config dir + read-only mount + trusted-startup-execution

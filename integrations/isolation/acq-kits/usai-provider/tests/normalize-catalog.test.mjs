@@ -83,6 +83,7 @@ test("normalizeCatalog rejects malformed model records with actionable errors", 
     [["gpt"], /models\[0\] must be an object \(got "gpt"\)/],
     [[{}], /models\[0\]\.id must be a non-empty string \(got undefined\)/],
     [[{ id: "" }], /models\[0\]\.id must be a non-empty string \(got ""\)/],
+    [[{ id: "model\n" }], /not a valid neutral model identifier/],
     [[{ id: 123 }], /models\[0\]\.id must be a non-empty string \(got 123\)/],
     [[{ id: "model", contextWindow: -5 }], /models\[0\]\.contextWindow must be a positive integer/],
     [[{ id: "model", contextWindow: 1.5 }], /models\[0\]\.contextWindow must be a positive integer/],
@@ -101,6 +102,17 @@ test("normalizeCatalog rejects malformed model records with actionable errors", 
   for (const [models, expected] of cases) {
     assert.throws(() => normalizeCatalog({ models }), expected)
   }
+})
+
+test("normalizeCatalog rejects duplicate and excessive model lists", () => {
+  assert.throws(
+    () => normalizeCatalog({ models: [{ id: "model-a" }, { id: "model-a" }] }),
+    /duplicate model IDs/,
+  )
+  assert.throws(
+    () => normalizeCatalog({ models: Array.from({ length: 501 }, (_, i) => ({ id: `model-${i}` })) }),
+    /exceeds 500 entries/,
+  )
 })
 
 test("normalizeCatalog accepts omitted optional metadata, zero prices, and unknown cost keys", () => {

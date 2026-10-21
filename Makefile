@@ -1,4 +1,6 @@
-.PHONY: setup validate validate-kits test-kits generate generate-check test coverage security ci clean search install-hooks help
+.PHONY: setup validate validate-kits validate-provider-input-contract test-kits generate generate-check test coverage security ci clean search install-hooks help
+
+PYTHON ?= python3
 
 help:  ## Show this help message
 	@echo "agentic-coding-patterns — Available targets:"
@@ -31,10 +33,13 @@ install-hooks:  ## Install pre-commit hooks (opt-in for contributors)
 	@echo "  To skip hooks: git commit --no-verify"
 
 validate:  ## Run all validators (frontmatter + sensitive terms)
-	python scripts/validate_repo.py
+	$(PYTHON) scripts/validate_repo.py
 
 validate-kits:  ## Validate neutral acq-kits specs against the hybrid/v1 schema (strict: warnings fail)
-	python integrations/isolation/acq-kits/validate-kits.py --strict
+	$(PYTHON) integrations/isolation/acq-kits/validate-kits.py --strict
+
+validate-provider-input-contract:  ## Validate provider facts, catalogs, and package-to-projection manifests
+	$(PYTHON) scripts/validate_provider_input_contract.py
 
 test-kits:  ## Run the acq-kits node test suites (usai-provider + paseo) + providers/usai emitters
 	@if command -v node >/dev/null 2>&1; then \
@@ -49,15 +54,15 @@ test-kits:  ## Run the acq-kits node test suites (usai-provider + paseo) + provi
 	fi
 
 scan-shell:  ## Scan shell scripts + markdown bash blocks for unsafe patterns (#154)
-	python scripts/scan_unsafe_shell.py .
+	$(PYTHON) scripts/scan_unsafe_shell.py .
 
 generate:  ## Generate INDEX.yaml from patterns
-	python scripts/generate_index.py
-	python scripts/generate_catalog.py
+	$(PYTHON) scripts/generate_index.py
+	$(PYTHON) scripts/generate_catalog.py
 
 generate-check:  ## Verify INDEX.yaml is up to date (used in pre-commit)
-	python scripts/generate_index.py --check
-	python scripts/generate_catalog.py --check
+	$(PYTHON) scripts/generate_index.py --check
+	$(PYTHON) scripts/generate_catalog.py --check
 
 search:  ## Search patterns (e.g., make search TAG=security)
 	@if [ -z "$(QUERY)" ] && [ -z "$(TAG)" ] && [ -z "$(STATUS)" ] && [ -z "$(PERSONA)" ] && [ -z "$(TOOL)" ]; then \
@@ -68,7 +73,7 @@ search:  ## Search patterns (e.g., make search TAG=security)
 		echo "  make search STATUS=recommended"; \
 		echo "  make search QUERY='code review' TOOL=cursor"; \
 	else \
-		python scripts/search_patterns.py $(if $(QUERY),--query "$(QUERY)") $(if $(TAG),--tag $(TAG)) $(if $(STATUS),--status $(STATUS)) $(if $(PERSONA),--persona $(PERSONA)) $(if $(TOOL),--tool $(TOOL)); \
+		$(PYTHON) scripts/search_patterns.py $(if $(QUERY),--query "$(QUERY)") $(if $(TAG),--tag $(TAG)) $(if $(STATUS),--status $(STATUS)) $(if $(PERSONA),--persona $(PERSONA)) $(if $(TOOL),--tool $(TOOL)); \
 	fi
 
 security:  ## Run security audit (pip-audit for CVEs)
@@ -100,13 +105,16 @@ ci:  ## Full CI check (validate + security + test + pre-commit checks)
 	fi
 	@echo ""
 	@echo "==> Running validators..."
-	python scripts/validate_repo.py
+	$(PYTHON) scripts/validate_repo.py
 	@echo ""
 	@echo "==> Scanning for unsafe shell patterns..."
-	python scripts/scan_unsafe_shell.py .
+	$(PYTHON) scripts/scan_unsafe_shell.py .
 	@echo ""
 	@echo "==> Validating acq-kits (hybrid/v1 schema)..."
-	python integrations/isolation/acq-kits/validate-kits.py --strict
+	$(PYTHON) integrations/isolation/acq-kits/validate-kits.py --strict
+	@echo ""
+	@echo "==> Validating provider input contract..."
+	$(PYTHON) scripts/validate_provider_input_contract.py
 	@echo ""
 	@echo "==> Running security audit..."
 	pip-audit --skip-editable

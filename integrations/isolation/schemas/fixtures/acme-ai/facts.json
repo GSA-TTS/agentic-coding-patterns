@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "acq-provider-facts/v1",
+  "providerId": "acme-ai",
+  "host": "api.acme-ai.example.com",
+  "baseUrl": "https://api.acme-ai.example.com/v2",
+  "modelsUrl": "https://api.acme-ai.example.com/v2/models",
+  "keyEnv": "ACME_AI_API_KEY"
+}
