@@ -14,6 +14,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMAS = ROOT / "integrations" / "isolation" / "schemas"
 PROJECTED_ROOT = "/var/lib/acq/host/models/providers"
+HOST_CREDENTIAL_BINDINGS = SCHEMAS / "provider-credential-bindings.json"
 
 
 class ContractError(ValueError):
@@ -43,6 +44,22 @@ def reject_unsafe_host(host: str, label: str) -> None:
     raise ContractError(f"{label}: IP address literals are not permitted")
 
 
+def reject_url_ip_literal(host: str, label: str) -> None:
+    """Reject URL-parser IPv4 spellings that are not accepted by ipaddress."""
+
+    def is_url_number(component: str) -> bool:
+        lower = component.lower()
+        if lower.startswith("0x"):
+            return len(component) > 2 and all(character in "0123456789abcdef" for character in lower[2:])
+        if len(component) > 1 and component.startswith("0"):
+            return all(character in "01234567" for character in component[1:])
+        return component.isdecimal()
+
+    labels = host.rstrip(".").split(".")
+    if host.endswith(".") or all(is_url_number(component) for component in labels):
+        raise ContractError(f"{label}: IP address literals are not permitted")
+
+
 def validate_url(value: str, host: str, label: str) -> None:
     parsed = urlparse(value)
     try:
@@ -63,6 +80,7 @@ def validate_url(value: str, host: str, label: str) -> None:
     if any(character.isspace() for character in value):
         raise ContractError(f"{label}: must not contain whitespace")
     reject_unsafe_host(parsed.hostname, label)
+    reject_url_ip_literal(parsed.hostname, label)
 
 
 def validate_catalog(catalog: dict, provider_id: str, label: str) -> None:
@@ -84,7 +102,13 @@ def validate_relative_path(value: str, label: str) -> None:
         raise ContractError(f"{label}: must be a non-empty kit-relative path without traversal")
 
 
-def validate_bundle(bundle_path: Path, seen_provider_ids: set[str] | None = None) -> None:
+def validate_bundle(
+    bundle_path: Path,
+    credential_bindings: dict[str, str] | None = None,
+    seen_provider_ids: set[str] | None = None,
+) -> None:
+    if credential_bindings is None:
+        credential_bindings = load_json(HOST_CREDENTIAL_BINDINGS)["providers"]
     bundle = load_json(bundle_path)
     validate_schema(bundle, "acq-provider-input-bundle.schema.json", str(bundle_path))
     package_root = bundle_path.parent
@@ -110,8 +134,8 @@ def validate_bundle(bundle_path: Path, seen_provider_ids: set[str] | None = None
         allowed_hosts = set(spec.get("caps", {}).get("network", {}).get("allow", []))
     else:
         allowed_hosts = {facts["host"]}
-    if facts["keyEnv"] not in bundle["credentialEnvNames"]:
-        raise ContractError(f"{bundle_path}: facts.keyEnv must be declared by this provider bundle")
+    if credential_bindings is not None and credential_bindings.get(provider_id) != facts["keyEnv"]:
+        raise ContractError(f"{bundle_path}: facts.keyEnv must match the host credential binding")
     if seen_provider_ids is not None:
         if provider_id in seen_provider_ids:
             raise ContractError(f"{bundle_path}: duplicate providerId '{provider_id}'")
@@ -139,13 +163,14 @@ def main() -> int:
         print("provider input contract: no bundles discovered", file=sys.stderr)
         return 1
     try:
+        credential_bindings = load_json(HOST_CREDENTIAL_BINDINGS)["providers"]
         fixture_bundles = [bundle for bundle in bundles if "/schemas/fixtures/" in str(bundle)]
         kit_bundles = [bundle for bundle in bundles if bundle not in fixture_bundles]
         for bundle in fixture_bundles:
-            validate_bundle(bundle)
+            validate_bundle(bundle, credential_bindings)
         seen_provider_ids: set[str] = set()
         for bundle in kit_bundles:
-            validate_bundle(bundle, seen_provider_ids)
+            validate_bundle(bundle, credential_bindings, seen_provider_ids)
     except ContractError as error:
         print(f"provider input contract: {error}", file=sys.stderr)
         return 1

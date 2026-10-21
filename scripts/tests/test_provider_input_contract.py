@@ -834,8 +834,8 @@ def test_runtime_validator_rejects_undeclared_credential_name(tmp_path):
     facts = json.loads(facts_path.read_text())
     facts["keyEnv"] = "GITHUB_TOKEN"
     facts_path.write_text(json.dumps(facts))
-    with pytest.raises(ContractError, match="must be declared"):
-        validate_bundle(bundle_dir / "bundle.json")
+    with pytest.raises(ContractError, match="host credential binding"):
+        validate_bundle(bundle_dir / "bundle.json", {"acme-ai": "ACME_AI_API_KEY"})
 
 
 def test_runtime_validator_rejects_artifact_symlink(tmp_path):
@@ -869,4 +869,22 @@ def test_runtime_validator_rejects_malformed_port(tmp_path):
     facts["modelsUrl"] = "https://api.acme-ai.example.com:99999/v2/models"
     facts_path.write_text(json.dumps(facts))
     with pytest.raises(ContractError, match="invalid port"):
+        validate_bundle(bundle_dir / "bundle.json")
+
+
+@pytest.mark.parametrize(
+    "host",
+    ["127.1", "2130706433", "0x7f000001", "127.0x0.0.1", "0177.0.0.1", "127.0.0.1."],
+)
+def test_runtime_validator_rejects_noncanonical_ip_literals(tmp_path, host):
+    """Host validation rejects URL-parser spellings of IPv4 literals."""
+    bundle_dir = tmp_path / "provider"
+    shutil.copytree(FIXTURES_DIR / "acme-ai", bundle_dir)
+    facts_path = bundle_dir / "facts.json"
+    facts = json.loads(facts_path.read_text())
+    facts["host"] = host
+    facts["baseUrl"] = f"https://{host}/v2"
+    facts["modelsUrl"] = f"https://{host}/v2/models"
+    facts_path.write_text(json.dumps(facts))
+    with pytest.raises(ContractError):
         validate_bundle(bundle_dir / "bundle.json")
