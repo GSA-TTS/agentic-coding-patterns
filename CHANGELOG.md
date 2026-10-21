@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.16.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.15.0...v1.16.0) (2026-10-21)
+
+
+### Features
+
+* **isolation:** support backend-supplied provider roots ([#522](https://github.com/GSA-TTS/agentic-coding-patterns/issues/522)) ([78d88e4](https://github.com/GSA-TTS/agentic-coding-patterns/commit/78d88e495ea2f14c72ec2b39b69e4a46da90e2d3))
+
 ## [1.15.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.14.0...v1.15.0) (2026-10-21)
 
 
