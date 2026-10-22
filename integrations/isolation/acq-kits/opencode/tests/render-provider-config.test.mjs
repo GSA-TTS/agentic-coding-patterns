@@ -305,10 +305,18 @@ test("semantic edits to an owned provider fail closed instead of being deleted",
   await assert.rejects(writeConfigAtomically(directory, rendered, ownershipFromRendered(rendered)), /was modified/)
 })
 
-test("existing dangling defaults fail closed", async () => {
+test("existing dangling defaults for managed providers fail closed", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "opencode-config-"))
-  await writeFile(path.join(directory, "opencode.jsonc"), '{ "model": "missing/model" }')
-  await assert.rejects(writeConfigAtomically(directory, { enabled_providers: [], provider: {} }), /dangling primary default/)
+  await writeFile(path.join(directory, "opencode.jsonc"), '{ "model": "acme-ai/nonexistent" }')
+  await assert.rejects(writeConfigAtomically(directory, renderProviderConfig([{ facts: facts("acme-ai"), catalog: catalog("acme-ai", ["real"]) }]), ownershipFromRendered(renderProviderConfig([{ facts: facts("acme-ai"), catalog: catalog("acme-ai", ["real"]) }]))), /dangling primary default/)
+})
+
+test("existing dangling defaults for unmanaged providers are preserved without error", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "opencode-config-"))
+  await writeFile(path.join(directory, "opencode.jsonc"), '{ "model": "anthropic/claude-sonnet-4-5" }')
+  await writeConfigAtomically(directory, { enabled_providers: [], provider: {} })
+  const installed = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+  assert.equal(installed.model, "anthropic/claude-sonnet-4-5")
 })
 
 test("failure before replacement leaves the previous config and embedded ownership intact", async () => {
@@ -385,4 +393,134 @@ test("separate process writers retain unrelated settings", async () => {
   const installed = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
   assert.equal(installed.theme, "dark")
   assert.equal(installed.formatter.enabled, true)
+})
+
+// ── Finding 1 regressions ────────────────────────────────────────────────────
+// Legacy migration claims roles only when values EXACTLY equal historical shipped
+// defaults. Differing user selections on a recognized legacy provider are
+// unowned and preserved even when that provider is later removed.
+
+test("legacy migration: user-changed primary on legacy provider is preserved after removal", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "opencode-config-"))
+  const legacy = await readFile(new URL("../../../../providers/usai/tests/fixtures/opencode-production.jsonc", import.meta.url), "utf8")
+  const legacyConfig = parseJsonc(legacy)
+  // User changed primary but kept small/compaction/summary/title at shipped defaults
+  legacyConfig.model = "usai/some-user-selected-model"
+  await writeFile(path.join(directory, "opencode.jsonc"), JSON.stringify(legacyConfig))
+  const rendered = renderProviderConfig([])
+  await writeConfigAtomically(directory, rendered, ownershipFromRendered(rendered))
+  const installed = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+  // User-changed primary must survive (not claimed as kit-owned)
+  assert.equal(installed.model, "usai/some-user-selected-model")
+  // Shipped defaults for other roles must be removed (kit-owned, provider gone)
+  assert.equal(installed.small_model, undefined)
+  assert.equal(installed.agent?.compaction?.model, undefined)
+  assert.equal(installed.agent?.summary?.model, undefined)
+  assert.equal(installed.agent?.title?.model, undefined)
+})
+
+test("legacy migration: each role is claimed only if it exactly matches its own shipped default", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "opencode-config-"))
+  const legacy = await readFile(new URL("../../../../providers/usai/tests/fixtures/opencode-production.jsonc", import.meta.url), "utf8")
+  const legacyConfig = parseJsonc(legacy)
+  // User changed small and compaction; primary, summary, title stay at shipped defaults
+  legacyConfig.small_model = "usai/user-custom-small"
+  legacyConfig.agent.compaction.model = "usai/user-custom-compaction"
+  await writeFile(path.join(directory, "opencode.jsonc"), JSON.stringify(legacyConfig))
+  const rendered = renderProviderConfig([])
+  await writeConfigAtomically(directory, rendered, ownershipFromRendered(rendered))
+  const installed = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+  // User-changed small and compaction must survive
+  assert.equal(installed.small_model, "usai/user-custom-small")
+  assert.equal(installed.agent?.compaction?.model, "usai/user-custom-compaction")
+  // Shipped defaults for primary, summary, title must be removed
+  assert.equal(installed.model, undefined)
+  assert.equal(installed.agent?.summary?.model, undefined)
+  assert.equal(installed.agent?.title?.model, undefined)
+})
+
+// ── Finding 2 regressions ────────────────────────────────────────────────────
+// Removed providers must remain removed across repeated authoritative renders even
+// when stale lower-precedence config.json/opencode.json contains them.
+
+test("removed legacy provider stays removed across repeated empty renders with stale lower config", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "opencode-config-"))
+  const legacy = await readFile(new URL("../../../../providers/usai/tests/fixtures/opencode-production.jsonc", import.meta.url), "utf8")
+  const legacyConfig = parseJsonc(legacy)
+  await writeFile(path.join(directory, "opencode.jsonc"), JSON.stringify(legacyConfig))
+  // First render removes usai
+  const empty = renderProviderConfig([])
+  await writeConfigAtomically(directory, empty, ownershipFromRendered(empty))
+  // Write stale lower-precedence config.json with the usai provider block
+  await writeFile(path.join(directory, "config.json"), JSON.stringify({ provider: { usai: legacyConfig.provider.usai } }))
+  // Second render must still keep usai removed
+  await writeConfigAtomically(directory, empty, ownershipFromRendered(empty))
+  const after2 = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+  assert.equal(after2.provider?.usai, undefined)
+  // Third render must also keep usai removed
+  await writeConfigAtomically(directory, empty, ownershipFromRendered(empty))
+  const after3 = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+  assert.equal(after3.provider?.usai, undefined)
+})
+
+test("removed legacy provider stays removed with stale lower config while preserving unrelated lower keys", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "opencode-config-"))
+  const legacy = await readFile(new URL("../../../../providers/usai/tests/fixtures/opencode-production.jsonc", import.meta.url), "utf8")
+  const legacyConfig = parseJsonc(legacy)
+  await writeFile(path.join(directory, "opencode.jsonc"), JSON.stringify(legacyConfig))
+  const empty = renderProviderConfig([])
+  await writeConfigAtomically(directory, empty, ownershipFromRendered(empty))
+  // Stale lower config has usai provider AND an unrelated key (theme)
+  await writeFile(path.join(directory, "config.json"), JSON.stringify({ provider: { usai: legacyConfig.provider.usai }, theme: "dark" }))
+  await writeConfigAtomically(directory, empty, ownershipFromRendered(empty))
+  const installed = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+  assert.equal(installed.provider?.usai, undefined, "removed provider must stay removed")
+  assert.equal(installed.theme, "dark", "unrelated lower key must be preserved")
+})
+
+// ── Finding 3 regressions ────────────────────────────────────────────────────
+// Built-in provider/model references (e.g. anthropic/claude-sonnet-4-5) must not
+// fail global-file validation when provider is not managed/defined.
+// Dangling references to MANAGED providers still fail.
+
+test("built-in unmanaged provider reference in model does not fail validation", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "opencode-config-"))
+  await writeFile(path.join(directory, "opencode.jsonc"), JSON.stringify({ model: "anthropic/claude-sonnet-4-5", provider: {} }))
+  await writeConfigAtomically(directory, { enabled_providers: [], provider: {} })
+  const installed = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+  assert.equal(installed.model, "anthropic/claude-sonnet-4-5")
+})
+
+test("built-in unmanaged provider references in all five roles do not fail validation", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "opencode-config-"))
+  await writeFile(path.join(directory, "opencode.jsonc"), JSON.stringify({
+    model: "anthropic/claude-sonnet-4-5",
+    small_model: "anthropic/claude-haiku-4-5",
+    agent: { compaction: { model: "openai/gpt-4o-mini" }, summary: { model: "openai/gpt-4o-mini" }, title: { model: "openai/gpt-4o-mini" } },
+    provider: {},
+  }))
+  await writeConfigAtomically(directory, { enabled_providers: [], provider: {} })
+  const installed = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+  assert.equal(installed.model, "anthropic/claude-sonnet-4-5")
+  assert.equal(installed.small_model, "anthropic/claude-haiku-4-5")
+  assert.equal(installed.agent?.compaction?.model, "openai/gpt-4o-mini")
+  assert.equal(installed.agent?.summary?.model, "openai/gpt-4o-mini")
+  assert.equal(installed.agent?.title?.model, "openai/gpt-4o-mini")
+})
+
+test("dangling reference to a managed provider still fails validation", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "opencode-config-"))
+  await writeFile(path.join(directory, "opencode.jsonc"), JSON.stringify({ model: "acme-ai/nonexistent", provider: {} }))
+  const rendered = renderProviderConfig([{ facts: facts("acme-ai"), catalog: catalog("acme-ai", ["real-model"]) }])
+  await assert.rejects(writeConfigAtomically(directory, rendered, ownershipFromRendered(rendered)), /dangling primary default/)
+})
+
+test("unmanaged built-in reference in lower-priority config survives managed render without error", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "opencode-config-"))
+  await writeFile(path.join(directory, "config.json"), JSON.stringify({ model: "openai/gpt-4o" }))
+  const rendered = renderProviderConfig([{ facts: facts("acme-ai"), catalog: catalog("acme-ai", ["a"], { primary: "a" }) }])
+  await writeConfigAtomically(directory, rendered, ownershipFromRendered(rendered))
+  const installed = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+  // openai/gpt-4o is an unowned user selection — preserved, no validation error
+  assert.equal(installed.model, "openai/gpt-4o")
 })

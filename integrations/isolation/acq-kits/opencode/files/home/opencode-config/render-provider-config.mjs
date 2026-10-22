@@ -44,21 +44,31 @@ const MAX_WRITE_RETRIES = 8
 // config shape that is safe to claim as kit-owned and migrate forward.
 //
 // HOW TO ADD AN ENTRY: compute digest(config.provider.<id>) from the committed
-// fixture, then add the resulting hex string to this Set.
+// fixture, then record the resulting hex string as the key. The value is the
+// frozen set of role defaults that were shipped alongside that provider block —
+// only exact string matches claim the role; any user deviation is preserved.
 // NEVER add partial or user-edited configs — only exact shipped shapes.
+// NEVER invent role defaults — transcribe them verbatim from the shipped config.
 // Users who edited their config get the fail-closed path (no silent clobber).
 //
 // Detection is provider-ID-independent: the renderer checks every provider block
-// in the existing config against this Set, so adding a new provider's legacy
-// migration requires only adding its fingerprint here — no renderer ID branches.
+// in the existing config against this Map, so adding a new provider's legacy
+// migration requires only adding its entry here — no renderer ID branches.
 //
 // USAI legacy: the prior usai-provider kit shipped opencode-production.jsonc
 // as a verbatim copy into the global config, without any state metadata.
 // Digest was computed from that file's provider.usai block via:
 //   JSON.stringify(parseJsonc(readFileSync("opencode-production.jsonc")).provider.usai)
 //   sha256 -> "96994eee8f388ddb4330224ba9b3bcf73f8e17604a43d07b1e9b416ee6142df4"
-const LEGACY_PROVIDER_FINGERPRINT_SET = Object.freeze(new Set([
-  "96994eee8f388ddb4330224ba9b3bcf73f8e17604a43d07b1e9b416ee6142df4",
+// Role defaults were transcribed from opencode-production.jsonc top-level keys.
+const LEGACY_PROVIDER_FINGERPRINT_MAP = Object.freeze(new Map([
+  ["96994eee8f388ddb4330224ba9b3bcf73f8e17604a43d07b1e9b416ee6142df4", Object.freeze({
+    primary: "usai/claude-sonnet-5",
+    small: "usai/claude_4_5_haiku",
+    compaction: "usai/gpt-5.6-terra",
+    summary: "usai/gpt_5_2_default_v2",
+    title: "usai/gpt_5_2_default_v2",
+  })],
 ]))
 
 export function stripJsonc(text) {
@@ -358,7 +368,7 @@ export async function writeConfigAtomically(globalDir, rendered, ownership = { p
       // Policy is kit-owned: preserving foreign settings must not reopen the
       // credential and outbound-action safeguards staged with this kit.
       const output = mergeManagedConfig(composed, rendered, state, ownership)
-      validateRoleReferences(output.config, "merged OpenCode config")
+      validateRoleReferences(output.config, "merged OpenCode config", ownership.providers)
       const text = serializeConfig(output.config, output.state)
       await options.beforeReplace?.(attempt)
       // The startup contract has one acq-owned writer. This comparison only
@@ -374,6 +384,14 @@ export async function writeConfigAtomically(globalDir, rendered, ownership = { p
 
 function mergeManagedConfig(existing, rendered, state, ownership) {
   const managed = new Set(Object.keys(state.providers))
+  // Providers that were previously kit-owned but are absent from the current
+  // authoritative render are tombstoned: they must not reappear from stale
+  // lower-precedence files (config.json, opencode.json) on the next startup.
+  // The tombstone set is: providers that were ever owned (in state.providers OR
+  // in state.removed) but are NOT in the new authoritative render's owned set.
+  const previouslyRemoved = new Set(state.removed ?? [])
+  const newOwned = new Set(Object.keys(ownership.providers))
+  const tombstoned = new Set([...managed, ...previouslyRemoved].filter((id) => !newOwned.has(id)))
   const userRoles = Object.fromEntries(Object.entries(ROLE_PATHS)
     .map(([role, keys]) => {
       const current = roleValue(existing, keys)
@@ -381,9 +399,12 @@ function mergeManagedConfig(existing, rendered, state, ownership) {
     })
     .filter(([, value]) => value !== undefined))
   const provider = { ...(existing.provider ?? {}), ...(rendered.provider ?? {}) }
+  // Remove all managed providers (to be replaced by rendered set) and all
+  // tombstoned providers (previously owned, now absent from authoritative render).
   for (const id of managed) delete provider[id]
+  for (const id of tombstoned) delete provider[id]
   Object.assign(provider, rendered.provider)
-  const enabled = (existing.enabled_providers ?? []).filter((id) => !managed.has(id))
+  const enabled = (existing.enabled_providers ?? []).filter((id) => !managed.has(id) && !tombstoned.has(id))
   for (const id of rendered.enabled_providers) if (!enabled.includes(id)) enabled.push(id)
   enabled.sort((left, right) => left.localeCompare(right))
   const config = { ...deepMerge(existing, rendered), provider, enabled_providers: enabled }
@@ -412,7 +433,9 @@ function mergeManagedConfig(existing, rendered, state, ownership) {
     for (const key of keys) source = source?.[key]
     if (source !== undefined && roleValue(config, keys) === source) roles[role] = source
   }
-  return { config, state: { schemaVersion: "acq-opencode-provider-state/v3", providers: ownership.providers, roles } }
+  const removed = tombstoned.size > 0 ? [...tombstoned].sort() : undefined
+  const newState = { schemaVersion: "acq-opencode-provider-state/v3", providers: ownership.providers, roles, ...(removed ? { removed } : {}) }
+  return { config, state: newState }
 }
 
 export function ownershipFromRendered(rendered) {
@@ -444,6 +467,12 @@ function validateOwnership(state) {
   object(state.roles, "provider ownership roles")
   for (const [role, reference] of Object.entries(state.roles)) {
     if (!ROLE_PATHS[role] || typeof reference !== "string") throw new Error("invalid provider ownership role")
+  }
+  if (state.removed !== undefined) {
+    if (!Array.isArray(state.removed)) throw new Error("invalid provider ownership removed list")
+    for (const id of state.removed) {
+      if (!PROVIDER_ID.test(id)) throw new Error("invalid provider ownership removed entry")
+    }
   }
 }
 
@@ -480,30 +509,33 @@ function readEmbeddedState(text, config, expectedOwnership) {
     }
     // Legacy cutover: recognize previously shipped provider blocks whose exact
     // digest matches a committed fingerprint. Detection is provider-ID-independent —
-    // each block in the existing config is checked against the fingerprint set.
+    // each block in the existing config is checked against the fingerprint map.
     // Only exact committed shapes pass; any user or provider edit falls through
     // to the fail-closed path. This path fires exactly once per provider: on the
     // first render after upgrading from a kit that wrote the config without state
     // metadata. Subsequent renders carry state.
     const legacyMatches = Object.entries(provider)
-      .filter(([, block]) => generatedProvider(block) && LEGACY_PROVIDER_FINGERPRINT_SET.has(digest(block)))
+      .filter(([, block]) => generatedProvider(block) && LEGACY_PROVIDER_FINGERPRINT_MAP.has(digest(block)))
     if (legacyMatches.length > 0) {
       const legacyProviders = Object.fromEntries(legacyMatches.map(([id, block]) => [id, digest(block)]))
       const legacyIdSet = new Set(Object.keys(legacyProviders))
       // Any provider block not covered by the legacy set that still looks auto-generated
       // is ambiguous state — fail closed rather than silently passing it through.
       if (Object.entries(provider).some(([id, block]) => !legacyIdSet.has(id) && generatedProvider(block))) throw new Error("generated provider config has no trustworthy ownership metadata")
-      // Claim roles whose current value references a recognized legacy provider.
-      // This ensures stale defaults are treated as kit-owned and can be removed
-      // or replaced by new recommendations rather than silently preserved as
-      // dangling user overrides after the legacy provider is removed.
+      // Claim only roles whose current value EXACTLY equals the historically shipped
+      // default for that fingerprint. Any deviation — even a different model on the
+      // same legacy provider — is a user selection and must remain unowned/preserved.
       const legacyRoles = Object.fromEntries(
         Object.entries(ROLE_PATHS)
           .flatMap(([role, keys]) => {
             const current = roleValue(config, keys)
             if (typeof current !== "string") return []
-            const slash = current.indexOf("/")
-            return slash > 0 && legacyIdSet.has(current.slice(0, slash)) ? [[role, current]] : []
+            // Look up the shipped default for this role across all matched legacy blocks.
+            for (const [, block] of legacyMatches) {
+              const shippedRoles = LEGACY_PROVIDER_FINGERPRINT_MAP.get(digest(block))
+              if (shippedRoles?.[role] === current) return [[role, current]]
+            }
+            return []
           })
       )
       return { providers: legacyProviders, roles: legacyRoles }
@@ -527,7 +559,7 @@ function roleValue(config, keys) {
   return value
 }
 
-function validateRoleReferences(config, label) {
+function validateRoleReferences(config, label, managedProviders = {}) {
   const provider = config.provider === undefined ? {} : object(config.provider, `${label} provider`)
   for (const [role, keys] of Object.entries(ROLE_PATHS)) {
     const reference = roleValue(config, keys)
@@ -536,6 +568,12 @@ function validateRoleReferences(config, label) {
     const slash = reference.indexOf("/")
     const providerId = reference.slice(0, slash)
     const modelId = reference.slice(slash + 1)
+    // Only validate references that point to a managed (kit-generated) provider.
+    // Built-in or user-configured providers (anthropic, openai, etc.) are unowned
+    // by the renderer and must pass through without validation errors.
+    // A reference to a managed provider that is absent or missing the model is
+    // still a hard failure (dangling managed reference).
+    if (!Object.prototype.hasOwnProperty.call(managedProviders, providerId)) continue
     if (slash < 1 || !Object.prototype.hasOwnProperty.call(provider, providerId) || !provider[providerId].models || !Object.prototype.hasOwnProperty.call(provider[providerId].models, modelId)) throw new Error(`${label} has dangling ${role} default '${reference}'`)
   }
 }
