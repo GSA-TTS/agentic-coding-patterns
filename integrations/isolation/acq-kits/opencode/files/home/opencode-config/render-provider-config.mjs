@@ -37,6 +37,23 @@ const API_PROTOCOLS = Object.freeze({
 const LOCK_FILENAME = ".acq-provider-config.lock"
 const STATE_COMMENT = "// acq-provider-config-state: "
 const MAX_WRITE_RETRIES = 8
+// Canonical SHA-256 fingerprints of previously shipped provider blocks that
+// lack v3 ownership metadata. Each entry identifies ONE exact, committed
+// config shape that is safe to claim as kit-owned and migrate forward.
+//
+// HOW TO ADD AN ENTRY: compute `digest(config.provider.<id>)` from the
+// committed opencode-production.jsonc fixture, then add an entry here.
+// NEVER add partial or user-edited configs — only exact shipped shapes.
+// Users who edited their config get the fail-closed path (no silent clobber).
+//
+// USAI legacy: the prior usai-provider kit shipped opencode-production.jsonc
+// as a verbatim copy into the global config, without any state metadata.
+// Digest was computed from that file's provider.usai block via:
+//   JSON.stringify(parseJsonc(readFileSync("opencode-production.jsonc")).provider.usai)
+//   sha256 -> "96994eee8f388ddb4330224ba9b3bcf73f8e17604a43d07b1e9b416ee6142df4"
+const LEGACY_PROVIDER_FINGERPRINTS = Object.freeze({
+  usai: "96994eee8f388ddb4330224ba9b3bcf73f8e17604a43d07b1e9b416ee6142df4",
+})
 
 export function stripJsonc(text) {
   let output = ""
@@ -452,6 +469,29 @@ function readEmbeddedState(text, config, expectedOwnership) {
       return {
         providers: expected,
         roles: Object.fromEntries(Object.entries(expectedOwnership.roles ?? {})
+          .filter(([role, reference]) => roleValue(config, ROLE_PATHS[role]) === reference)),
+      }
+    }
+    // Legacy cutover: recognize a previously shipped, provider-owned config whose
+    // exact provider block matches a committed fingerprint. Only the committed shape
+    // passes — any user or provider edit falls through to the fail-closed path.
+    // This path fires exactly once: on the first render after upgrading from a kit
+    // that wrote the config without state metadata. Subsequent renders carry state.
+    const legacyIds = Object.keys(LEGACY_PROVIDER_FINGERPRINTS)
+    if (
+      legacyIds.length > 0 &&
+      legacyIds.every((id) =>
+        Object.prototype.hasOwnProperty.call(provider, id) &&
+        generatedProvider(provider[id]) &&
+        digest(provider[id]) === LEGACY_PROVIDER_FINGERPRINTS[id]
+      )
+    ) {
+      // Claim the legacy providers as kit-owned. Other providers in the config
+      // remain unmanaged (their presence does not block migration). Roles that
+      // match the expected defaults for the new render are also claimed.
+      return {
+        providers: Object.fromEntries(legacyIds.map((id) => [id, LEGACY_PROVIDER_FINGERPRINTS[id]])),
+        roles: Object.fromEntries(Object.entries(expectedOwnership?.roles ?? {})
           .filter(([role, reference]) => roleValue(config, ROLE_PATHS[role]) === reference)),
       }
     }

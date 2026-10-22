@@ -41,14 +41,14 @@ test("normalizeCatalog passes cost through UNCHANGED (per-million-token, no /1e6
   assert.equal(beta.cost.cacheRead, 0.125)
 })
 
-test("normalizeCatalog drops fields not modeled by the neutral v1 shape (vendor, name, costAbove200kContext)", async () => {
+test("normalizeCatalog preserves modeled display names and tiered costs while dropping vendor metadata", async () => {
   const source = JSON.parse(await readFile(fixturePath, "utf8"))
   const { models } = normalizeCatalog(source)
 
   const beta = models.find((m) => m.id === "fake-model-beta")
   assert.equal("vendor" in beta, false, "vendor must be dropped")
-  assert.equal("name" in beta, false, "name must be dropped")
-  assert.equal("costAbove200kContext" in beta, false, "costAbove200kContext must be dropped (not in neutral v1 shape)")
+  assert.equal(beta.name, "Fake Model Beta")
+  assert.deepEqual(beta.costAbove200kContext, { input: 3.5, output: 28, cacheRead: 0.25 })
 })
 
 test("normalizeCatalog omits cost entirely for a model with no cost data", async () => {
@@ -155,13 +155,9 @@ test("CLI: rejects unknown options and missing option values", async () => {
 // ---------------------------------------------------------------------------
 // Drift gate for the SHIPPED snapshot.
 //
-// The snapshot at files/home/usai-config/model-catalog-snapshot.json is a
-// hand-trimmed SUBSET of the full USAi catalog (a handful of models, so the
-// payload stays small), but every entry it keeps must be byte-equal to what
-// this normalizer produces from integrations/providers/usai/catalog.json.
-// Without this, the snapshot is a second hand-maintained copy that can silently
-// drift from its stated source -- exactly the drift this repo has been bitten by
-// before. A subset is allowed; a DIVERGENT subset is not.
+// The shipped snapshot is generated from the full production catalog. It must
+// remain exactly equal to normalizer output, including recommendations, so the
+// runtime projection cannot silently diverge from the catalog contract.
 // ---------------------------------------------------------------------------
 
 const snapshotPath = path.join(
@@ -173,7 +169,7 @@ const upstreamCatalogPath = path.join(
   "../../../../providers/usai/catalog.json",
 )
 
-test("shipped snapshot: every model matches normalizeCatalog(upstream catalog) exactly", async () => {
+test("shipped snapshot exactly matches normalizeCatalog(upstream catalog)", async () => {
   const snapshot = JSON.parse(await readFile(snapshotPath, "utf8"))
   const upstream = JSON.parse(await readFile(upstreamCatalogPath, "utf8"))
   const regenerated = normalizeCatalog(upstream)
@@ -190,21 +186,8 @@ test("shipped snapshot: every model matches normalizeCatalog(upstream catalog) e
     "normalizer produced no models[] from the upstream catalog -- gate cannot pass",
   )
 
-  const byId = new Map(regenerated.models.map((m) => [m.id, m]))
-  for (const model of snapshot.models) {
-    const fresh = byId.get(model.id)
-    assert.ok(
-      fresh,
-      `snapshot model '${model.id}' is absent from the upstream catalog -- ` +
-        `regenerate the snapshot with scripts/normalize-catalog.mjs`,
-    )
-    assert.deepEqual(
-      model,
-      fresh,
-      `snapshot model '${model.id}' has drifted from the normalizer output -- ` +
-        `regenerate rather than hand-editing`,
-    )
-  }
+  assert.equal(snapshot.models.length, 24)
+  assert.deepEqual(snapshot, regenerated)
 })
 
 test("shipped snapshot: envelope matches the normalizer and carries no credential or routing fields", async () => {

@@ -4,6 +4,11 @@
   "sources": {
     "bootstrappedFrom": "integrations/providers/usai/tests/fixtures/opencode-renderer-contract.jsonc"
   },
+  "recommendations": {
+    "primary": "claude-sonnet-5",
+    "small": "claude_4_5_haiku",
+    "compaction": "gpt-5.6-terra"
+  },
   "gateway": {
     "host": "api.gsa.usai.gov",
     "baseUrl": "https://api.gsa.usai.gov/api/v1",
