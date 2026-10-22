@@ -199,7 +199,7 @@ export function normalizeCatalog(sourceCatalog) {
       throw new Error("normalizeCatalog: recommendations must be an object")
     }
     for (const [role, modelId] of Object.entries(recommendations)) {
-      if (!["primary", "small", "compaction"].includes(role)) {
+      if (!["primary", "small", "compaction", "summary", "title"].includes(role)) {
         throw new Error(`normalizeCatalog: unsupported recommendation role '${role}'`)
       }
       if (typeof modelId !== "string" || !ids.includes(modelId)) {
