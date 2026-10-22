@@ -721,23 +721,11 @@ function buildVendors(vendorKeysInOrder) {
 // The gateway's /v1/models response carries no capability field, so
 // promptability is decided here rather than read from the feed.
 //
-// Two distinct causes are represented. The embedding models have no generation
-// support at all. The undeployed entries are chat models the gateway advertises
-// without a backing deployment behind them: a /chat/completions call returns
-// HTTP 404 "The API deployment for this resource does not exist". Each was
-// confirmed by a real completion request, re-probed to rule out a transient,
-// against a control group of sibling models on the same route that answered
-// 200. Offering them would put a model in the picker that fails the moment a
-// user selects it, so they are withheld until the gateway serves them. Re-probe
-// and remove the entry when the deployment lands.
+// These embedding models have no generation support. Chat deployments are
+// eligible once their completion endpoint is available.
 const NON_CHAT_MODELS = {
   cohere_english_v3: "embedding model; /chat/completions returns 403 AccessDeniedException",
   "text-embedding-005": "embedding model; /chat/completions returns 400 (no generation support)",
-  "gpt-6-luna": "advertised but undeployed; /chat/completions returns 404 (no API deployment)",
-  "gpt-6-sol-latest-guardrails-defaultv2":
-    "advertised but undeployed; /chat/completions returns 404 (no API deployment)",
-  "gpt-6.1-sol-latest-guardrails-defaultv2":
-    "advertised but undeployed; /chat/completions returns 404 (no API deployment)",
 }
 
 // Default-deny net for a non-chat model not yet listed above. Substring, not
