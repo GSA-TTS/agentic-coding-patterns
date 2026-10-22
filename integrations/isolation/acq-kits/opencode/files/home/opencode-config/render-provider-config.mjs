@@ -17,18 +17,20 @@ const ROLE_PATHS = {
 }
 const PROVIDER_ID = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/
 const KEY_ENV = /^[A-Z][A-Z0-9_]*$/
-const API_PROTOCOLS = Object.freeze({ "openai-compatible": Object.freeze({ npm: "@ai-sdk/openai-compatible" }) })
-// Harness-owned compatibility adapters are selected only from validated neutral
+// Harness-owned protocol adapters are selected only from validated neutral
 // facts. Provider inputs cannot inject OpenCode-specific options.
-const PROVIDER_COMPATIBILITY = Object.freeze({
-  usai: Object.freeze({
-    timeout: 600000,
-    chunkTimeout: 120000,
-    litellmProxy: true,
-    headers: Object.freeze({
-      "User-Agent": "OpenCode-USAI/1.0 (GSA-TTS/agentic-coding-quickstart)",
-      "X-Agent-Type": "opencode",
-      "X-Agent-Environment": "development",
+const API_PROTOCOLS = Object.freeze({
+  "openai-compatible": Object.freeze({
+    npm: "@ai-sdk/openai-compatible",
+    options: Object.freeze({
+      timeout: 600000,
+      chunkTimeout: 120000,
+      litellmProxy: true,
+      headers: Object.freeze({
+        "User-Agent": "OpenCode/1.0",
+        "X-Agent-Type": "opencode",
+        "X-Agent-Environment": "development",
+      }),
     }),
   }),
 })
@@ -177,6 +179,14 @@ function optionalCost(value, label) {
   return cost
 }
 
+function renameToSnakeCase(cost) {
+  if (cost === undefined) return undefined
+  const result = { ...cost }
+  if ("cacheRead" in result) { result.cache_read = result.cacheRead; delete result.cacheRead }
+  if ("cacheWrite" in result) { result.cache_write = result.cacheWrite; delete result.cacheWrite }
+  return result
+}
+
 export function deepMerge(base, source) {
   const result = Object.assign(Object.create(null), base)
   for (const [key, value] of Object.entries(source)) {
@@ -234,9 +244,9 @@ export function renderProviderConfig(inputs) {
       delete cost?.cacheRead
       delete cost?.cacheWrite
       models[modelId] = {
-        name: modelId,
+        name: model.name === undefined ? modelId : string(model.name, `model name for '${reference}'`),
         ...(contextWindow === undefined ? {} : { limit: { context: contextWindow, ...(maxOutputTokens === undefined ? {} : { output: maxOutputTokens }) } }),
-        ...(cost === undefined ? {} : { cost }),
+        ...(cost === undefined ? {} : { cost: { ...cost, ...(model.costAbove200kContext === undefined ? {} : { context_over_200k: renameToSnakeCase(optionalCost(model.costAbove200kContext, `tiered cost for '${reference}'`)) }) } }),
       }
     }
     const protocol = API_PROTOCOLS[facts.apiProtocol]
@@ -250,7 +260,7 @@ export function renderProviderConfig(inputs) {
     providers[providerId] = {
       npm: protocol.npm,
       name: providerId,
-      options: { baseURL: baseUrl, apiKey: `{env:${keyEnv}}`, ...(PROVIDER_COMPATIBILITY[providerId] ?? {}) },
+      options: { baseURL: baseUrl, apiKey: `{env:${keyEnv}}`, ...protocol.options },
       models,
     }
     enabled.push(providerId)
@@ -319,7 +329,7 @@ export async function writeConfigAtomically(globalDir, rendered, ownership = { p
   try {
     for (let attempt = 0; attempt < MAX_WRITE_RETRIES; attempt++) {
       const current = await existingConfig(globalDir)
-      const state = readEmbeddedState(current.canonicalText, current.config)
+      const state = readEmbeddedState(current.canonicalText, current.config, ownership)
       const baseConfig = object(options.baseConfig ?? {}, "base OpenCode config")
       const composed = mergeBasePolicy(baseConfig, current.config)
       // Policy is kit-owned: preserving foreign settings must not reopen the
@@ -342,7 +352,10 @@ export async function writeConfigAtomically(globalDir, rendered, ownership = { p
 function mergeManagedConfig(existing, rendered, state, ownership) {
   const managed = new Set(Object.keys(state.providers))
   const userRoles = Object.fromEntries(Object.entries(ROLE_PATHS)
-    .map(([role, keys]) => [role, state.roles[role] !== undefined && roleValue(existing, keys) !== state.roles[role] ? roleValue(existing, keys) : undefined])
+    .map(([role, keys]) => {
+      const current = roleValue(existing, keys)
+      return [role, current !== undefined && (state.roles[role] === undefined || current !== state.roles[role]) ? current : undefined]
+    })
     .filter(([, value]) => value !== undefined))
   const provider = { ...(existing.provider ?? {}), ...(rendered.provider ?? {}) }
   for (const id of managed) delete provider[id]
@@ -425,11 +438,24 @@ function generatedProvider(value) {
   return value && typeof value === "object" && value.npm === "@ai-sdk/openai-compatible" && typeof value.options?.baseURL === "string" && typeof value.options?.apiKey === "string"
 }
 
-function readEmbeddedState(text, config) {
+function readEmbeddedState(text, config, expectedOwnership) {
   if (text === undefined) return { providers: {}, roles: {} }
   const line = text.split("\n", 1)[0]
   if (!line.startsWith(STATE_COMMENT)) {
-    if (Object.values(config.provider ?? {}).some(generatedProvider)) throw new Error("generated provider config has no trustworthy ownership metadata")
+    const expected = expectedOwnership?.providers ?? {}
+    const provider = config.provider ?? {}
+    const ids = Object.keys(expected)
+    // The sole metadata-free migration accepts only a complete, byte-equivalent
+    // generated provider set. Any addition, removal, or semantic edit is
+    // ambiguous user state and remains fail-closed.
+    if (ids.length > 0 && ids.length === Object.keys(provider).length && ids.every((id) => digest(provider[id]) === expected[id])) {
+      return {
+        providers: expected,
+        roles: Object.fromEntries(Object.entries(expectedOwnership.roles ?? {})
+          .filter(([role, reference]) => roleValue(config, ROLE_PATHS[role]) === reference)),
+      }
+    }
+    if (Object.values(provider).some(generatedProvider)) throw new Error("generated provider config has no trustworthy ownership metadata")
     return { providers: {}, roles: {} }
   }
   let state

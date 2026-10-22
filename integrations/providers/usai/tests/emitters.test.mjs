@@ -8,9 +8,8 @@
 // group comments, snake_case cost keys, the compact one-line context_over_200k,
 // and the last-entry trailing-comma formatting).
 //
-// Provider kits no longer own an OpenCode config. The renderer-contract fixture
-// defines the byte format consumed by the OpenCode kit, so it remains valid
-// after provider-kit files are removed.
+// Provider kits no longer own an OpenCode config. The production fixture is the
+// prior shipped config, retained as the durable rendering contract.
 // =============================================================================
 
 import assert from "node:assert/strict"
@@ -20,6 +19,7 @@ import { fileURLToPath } from "node:url"
 import { test } from "node:test"
 
 import { emitOpenCodeBlockFromCatalog } from "../emitters/opencode.mjs"
+import { renderProviderConfig } from "../../../isolation/acq-kits/opencode/files/home/opencode-config/render-provider-config.mjs"
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const USAI_DIR = path.resolve(HERE, "..")
@@ -30,7 +30,7 @@ const RENDERER_CONTRACTS = [
     label: "OpenCode renderer contract",
     file: path.join(
       REPO_ROOT,
-      "integrations/providers/usai/tests/fixtures/opencode-renderer-contract.jsonc",
+      "integrations/providers/usai/tests/fixtures/opencode-production.jsonc",
     ),
   },
 ]
@@ -93,7 +93,7 @@ for (const { label, file } of RENDERER_CONTRACTS) {
   test(`emitOpenCodeBlockFromCatalog reproduces the ${label} byte-for-byte`, () => {
     const jsoncText = readFileSync(file, "utf8")
     const expected = extractShippedBlock(jsoncText, label)
-    const actual = emitOpenCodeBlockFromCatalog(minimalCatalog({ id: "contract-model", name: "Contract Model" }))
+    const actual = emitOpenCodeBlockFromCatalog(JSON.parse(readFileSync(CATALOG_JSON, "utf8")))
 
     if (expected !== actual) {
       // Print a targeted diff before the assertion fails.
@@ -111,6 +111,38 @@ for (const { label, file } of RENDERER_CONTRACTS) {
 test("the committed catalog remains renderable under the OpenCode contract", () => {
   const models = parseEmittedModels(JSON.parse(readFileSync(CATALOG_JSON, "utf8")))
   assert.ok(Object.keys(models).length > 0)
+})
+
+test("the OpenCode renderer preserves the prior shipped model block and role defaults", () => {
+  const shipped = readFileSync(RENDERER_CONTRACTS[0].file, "utf8")
+  const catalog = JSON.parse(readFileSync(CATALOG_JSON, "utf8"))
+  const facts = {
+    schemaVersion: "acq-provider-facts/v1",
+    providerId: "usai",
+    apiProtocol: "openai-compatible",
+    host: "api.gsa.usai.gov",
+    baseUrl: "https://api.gsa.usai.gov/api/v1",
+    modelsUrl: "https://api.gsa.usai.gov/api/v1/models",
+    keyEnv: "USAI_API_KEY",
+  }
+  const neutral = {
+    schemaVersion: "acq-neutral-model-catalog/v1",
+    providerId: "usai",
+    models: catalog.models.map(({ id, name, contextWindow, maxOutputTokens, cost, costAbove200kContext }) => ({ id, name, contextWindow, maxOutputTokens, cost, costAbove200kContext })),
+    recommendations: {
+      primary: "claude-sonnet-5",
+      small: "claude_4_5_haiku",
+      compaction: "gpt-5.6-terra",
+    },
+  }
+  const rendered = renderProviderConfig([{ facts, catalog: neutral }])
+  const expected = JSON.parse(shipped.replace(/^\s*\/\/.*$/gm, "").replace(/,\s*([}\]])/g, "$1"))
+  assert.deepEqual(JSON.parse(JSON.stringify(rendered.provider.usai.models)), expected.provider.usai.models)
+  assert.equal(rendered.model, expected.model)
+  assert.equal(rendered.small_model, expected.small_model)
+  assert.equal(rendered.agent.compaction.model, expected.agent.compaction.model)
+  assert.equal(expected.agent.summary.model, "usai/gpt_5_2_default_v2")
+  assert.equal(expected.agent.title.model, "usai/gpt_5_2_default_v2")
 })
 
 test("feed-controlled model ids are serialized as data, not config keys", () => {

@@ -97,7 +97,7 @@ test("staged base policy defeats attempted user overrides but preserves unrelate
   assert.equal(installed.permission.bash["git push *"], "ask")
 })
 
-test("USAi provider projection retains adapter options, OpenCode cost keys, and defaults", async () => {
+test("provider projection applies protocol adapter options, OpenCode cost keys, and defaults", async () => {
   const kitRoot = new URL("../../usai-provider/", import.meta.url)
   const [factsText, snapshotText] = await Promise.all([
     readFile(new URL("provider-input/facts.json", kitRoot), "utf8"),
@@ -111,7 +111,7 @@ test("USAi provider projection retains adapter options, OpenCode cost keys, and 
     chunkTimeout: 120000,
     litellmProxy: true,
     headers: {
-      "User-Agent": "OpenCode-USAI/1.0 (GSA-TTS/agentic-coding-quickstart)",
+      "User-Agent": "OpenCode/1.0",
       "X-Agent-Type": "opencode",
       "X-Agent-Environment": "development",
     },
@@ -122,16 +122,22 @@ test("USAi provider projection retains adapter options, OpenCode cost keys, and 
   assert.equal(output.agent.compaction.model, "usai/gpt_5_4_default_v2")
 })
 
-test("a user-selected model role is preserved and released from renderer ownership", async () => {
+test("user-selected roles remain unowned across repeated renders", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "opencode-config-"))
-  const first = renderProviderConfig([{ facts: facts("acme-ai"), catalog: catalog("acme-ai", ["primary", "chosen"], { primary: "primary" }) }])
+  const first = renderProviderConfig([{ facts: facts("acme-ai"), catalog: catalog("acme-ai", ["primary", "chosen"], { primary: "primary", small: "primary", compaction: "primary" }) }])
   await writeConfigAtomically(directory, first, ownershipFromRendered(first))
   const filename = path.join(directory, "opencode.jsonc")
-  await writeFile(filename, (await readFile(filename, "utf8")).replace("acme-ai/primary", "acme-ai/chosen"))
+  const edited = parseJsonc(await readFile(filename, "utf8"))
+  edited.model = "acme-ai/chosen"
+  edited.small_model = "acme-ai/chosen"
+  edited.agent.compaction.model = "acme-ai/chosen"
+  await writeFile(filename, JSON.stringify(edited))
+  await writeConfigAtomically(directory, first, ownershipFromRendered(first))
   await writeConfigAtomically(directory, first, ownershipFromRendered(first))
   const installed = parseJsonc(await readFile(filename, "utf8"))
   assert.equal(installed.model, "acme-ai/chosen")
-  assert.doesNotMatch((await readFile(filename, "utf8")).split("\n", 1)[0], /"primary"/)
+  assert.equal(installed.small_model, "acme-ai/chosen")
+  assert.equal(installed.agent.compaction.model, "acme-ai/chosen")
 })
 
 test("invalid provider input fails closed", () => {
@@ -200,7 +206,7 @@ test("foreign providers are not claimed as generated ownership", async () => {
   assert.deepEqual(Object.keys(installed.provider).sort(), ["foreign", "zeta-ai"])
 })
 
-test("missing, malformed, and incompatible ownership metadata fail closed for generated config", async () => {
+test("malformed and incompatible ownership metadata fail closed for generated config", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "opencode-config-"))
   const rendered = renderProviderConfig([{ facts: facts("acme-ai"), catalog: catalog("acme-ai", ["a"]) }])
   await writeConfigAtomically(directory, rendered, ownershipFromRendered(rendered))
@@ -208,10 +214,49 @@ test("missing, malformed, and incompatible ownership metadata fail closed for ge
   const valid = await readFile(filename, "utf8")
   const body = valid.split("\n").slice(1).join("\n")
   const incompatible = `// acq-provider-config-state: ${Buffer.from(JSON.stringify({ schemaVersion: "acq-opencode-provider-state/v2", providers: { "acme-ai": "0".repeat(64) }, roles: {} })).toString("base64url")}\n${body}`
-  for (const broken of [body, `// acq-provider-config-state: bad\n${body}`, incompatible]) {
+  for (const broken of [`// acq-provider-config-state: bad\n${body}`, incompatible]) {
     await writeFile(filename, broken)
     await assert.rejects(writeConfigAtomically(directory, rendered, ownershipFromRendered(rendered)), /ownership metadata/)
   }
+})
+
+test("byte-equivalent config without ownership metadata migrates to the new state format", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "opencode-config-"))
+  const rendered = renderProviderConfig([{ facts: facts("acme-ai"), catalog: catalog("acme-ai", ["a"]) }])
+  await writeConfigAtomically(directory, rendered, ownershipFromRendered(rendered))
+  const filename = path.join(directory, "opencode.jsonc")
+  const body = (await readFile(filename, "utf8")).split("\n").slice(1).join("\n")
+  await writeFile(filename, body)
+  await writeConfigAtomically(directory, rendered, ownershipFromRendered(rendered))
+  const installed = parseJsonc(await readFile(filename, "utf8"))
+  assert.ok(installed.provider["acme-ai"])
+})
+
+test("the exact previous shipped config migrates once without ownership metadata", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "opencode-config-"))
+  const legacy = await readFile(new URL("../../../../providers/usai/tests/fixtures/opencode-production.jsonc", import.meta.url), "utf8")
+  const legacyConfig = parseJsonc(legacy)
+  const rendered = {
+    enabled_providers: legacyConfig.enabled_providers,
+    provider: { usai: legacyConfig.provider.usai },
+    model: legacyConfig.model,
+    small_model: legacyConfig.small_model,
+    agent: { compaction: { model: legacyConfig.agent.compaction.model } },
+  }
+  await writeFile(path.join(directory, "opencode.jsonc"), legacy)
+  await writeConfigAtomically(directory, rendered, ownershipFromRendered(rendered))
+  const installed = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+  assert.deepEqual(installed.provider.usai, legacyConfig.provider.usai)
+  assert.equal(installed.model, legacyConfig.model)
+})
+
+test("metadata-free legacy provider edits fail closed", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "opencode-config-"))
+  const legacy = await readFile(new URL("../../../../providers/usai/tests/fixtures/opencode-production.jsonc", import.meta.url), "utf8")
+  const legacyConfig = parseJsonc(legacy)
+  const rendered = { enabled_providers: legacyConfig.enabled_providers, provider: { usai: legacyConfig.provider.usai } }
+  await writeFile(path.join(directory, "opencode.jsonc"), legacy.replace('"name": "GSA USAI"', '"name": "user-modified"'))
+  await assert.rejects(writeConfigAtomically(directory, rendered, ownershipFromRendered(rendered)), /ownership metadata/)
 })
 
 test("semantic edits to an owned provider fail closed instead of being deleted", async () => {

@@ -16,7 +16,7 @@
 // provided for future regeneration.
 //
 // Modes:
-//   (default, no flags)     bootstrap catalog.json from the renderer contract fixture
+//   (default, no flags)     bootstrap catalog.json from the prior shipped production config
 //                           GENERATED block (offline, deterministic).
 //   --models-url <path|url> read the USAi model list from a local path or URL.
 //   --no-enrichment         do not fetch/read models.dev; use only the models
@@ -69,11 +69,11 @@ const DEFAULT_OUT = path.join(USAI_DIR, "catalog.json")
 const DEFAULT_SCHEMA = path.join(USAI_DIR, "catalog.schema.json")
 const DEFAULT_OPENCODE_JSONC = path.join(
   REPO_ROOT,
-  "integrations/providers/usai/tests/fixtures/opencode-renderer-contract.jsonc",
+  "integrations/providers/usai/tests/fixtures/opencode-production.jsonc",
 )
 // Path recorded in catalog.sources.bootstrappedFrom — repo-relative, stable.
 const OPENCODE_JSONC_REL =
-  "integrations/providers/usai/tests/fixtures/opencode-renderer-contract.jsonc"
+  "integrations/providers/usai/tests/fixtures/opencode-production.jsonc"
 
 const GENERATED_START = "// BEGIN GENERATED USAI MODELS"
 const GENERATED_END = "// END GENERATED USAI MODELS"
