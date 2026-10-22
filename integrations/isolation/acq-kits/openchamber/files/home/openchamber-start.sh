@@ -159,12 +159,20 @@ command -v openchamber >/dev/null 2>&1 || {
 }
 
 # --- Supervise the shared server and OpenChamber (idempotent). ---------------
-# The shared `opencode serve` runs on 0.0.0.0:4096 and is UNSECURED (no
-# OPENCODE_SERVER_PASSWORD) — the sandbox is the security boundary, and the
-# published host port is loopback only. OpenChamber runs in SKIP-START mode
-# (OPENCODE_SKIP_START=true, OPENCODE_PORT=4096): it does NOT start its own
-# opencode server; it attaches to the shared server this script brings up on
-# 127.0.0.1:4096.
+# The shared `opencode serve` runs on 0.0.0.0:4096. OpenCode 2.x REQUIRES HTTP
+# Basic auth on every API route — there is no way to run it unsecured, so the
+# pre-2.x "no OPENCODE_SERVER_PASSWORD" arrangement now 401s every request and
+# leaves the UI loaded but inert. We therefore generate a per-sandbox password,
+# pass it to the server, and give OpenChamber credentialed access. The sandbox
+# is still the security boundary (the published host port is loopback only);
+# this credential exists because the server mandates one, not to harden the
+# sandbox. OpenChamber runs in SKIP-START mode (OPENCODE_SKIP_START=true): it
+# does NOT start its own opencode server; it attaches to the shared server this
+# script brings up on 127.0.0.1:4096.
+#
+# The username must be NON-EMPTY: OpenCode checks Basic credentials as a pair,
+# so `http://:pw@host` (empty user) is rejected while `http://opencode:pw@host`
+# is accepted. The literal username is not validated — only the password is.
 #
 # Each service is kept alive by a tiny supervisor loop: if it exits (a crash, or
 # an OpenChamber self-update, which requires a restart to take effect), wait a
@@ -175,6 +183,26 @@ command -v openchamber >/dev/null 2>&1 || {
 #
 # RESTART_DELAY: seconds to wait before respawning a stopped process.
 RESTART_DELAY="${OPENCHAMBER_RESTART_DELAY:-5}"
+
+# Shared-server credential. OpenCode 2.x mandates Basic auth, so mint a random
+# per-sandbox password once and persist it at an agent-only path (0600) so a
+# restart of this script reuses it rather than orphaning the running server's
+# credential. OPENCODE_SERVER_PASSWORD from the environment wins, so a caller
+# can pin a known value.
+OC_USER="opencode"
+_pwfile="$HOME/.local/state/openchamber/server-password"
+mkdir -p "$(dirname "$_pwfile")" 2>/dev/null || true
+if [ -n "${OPENCODE_SERVER_PASSWORD:-}" ]; then
+  OC_PASSWORD="$OPENCODE_SERVER_PASSWORD"
+elif [ -s "$_pwfile" ]; then
+  OC_PASSWORD="$(cat "$_pwfile")"
+else
+  # 32 hex chars from the kernel CSPRNG; od avoids a coreutils/openssl dependency.
+  OC_PASSWORD="$(od -An -tx1 -N16 /dev/urandom 2>/dev/null | tr -d ' \n')"
+  [ -n "$OC_PASSWORD" ] || OC_PASSWORD="openchamber-$$-$(date +%s)"
+  ( umask 077; printf '%s' "$OC_PASSWORD" > "$_pwfile" ) 2>/dev/null || true
+fi
+export OPENCODE_SERVER_PASSWORD="$OC_PASSWORD"
 
 # Guard against a second startup run (idempotent restarts) spawning a duplicate
 # supervisor: only start a supervisor if one isn't already running. Each loop is
@@ -213,18 +241,21 @@ fi
 # failed with "OpenChamber is already running on port <N>" in an endless loop.
 # The sandbox is the security boundary, so OpenChamber's own LAN access is
 # unauthenticated.
-# argv to the inner sh -c: $0=marker, $1=RESTART_DELAY, $2=OC_PORT, $3=CHAMBER_PORT.
+# argv to the inner sh -c: $0=marker, $1=RESTART_DELAY, $2=OC_PORT, $3=CHAMBER_PORT,
+# $4=credentialed OPENCODE_HOST base URL.
 if ! supervisor_running openchamber; then
   ( sh -c '
       while :; do
         echo "[supervisor] starting openchamber at $(date -u +%FT%TZ)"
         OPENCODE_SKIP_START=true \
         OPENCODE_PORT="$2" \
+        OPENCODE_HOST="$4" \
         OPENCHAMBER_ALLOW_UNAUTHENTICATED_LAN=true \
           openchamber --lan --port "$3" --foreground || true
         echo "[supervisor] openchamber exited; restarting in ${1}s"
         sleep "$1"
       done
     ' "supervisor:openchamber" "$RESTART_DELAY" "$OC_PORT" "$CHAMBER_PORT" \
+    "http://${OC_USER}:${OC_PASSWORD}@127.0.0.1:${OC_PORT}" \
     >>/tmp/openchamber.log 2>&1 ) &
 fi
