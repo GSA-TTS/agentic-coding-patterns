@@ -178,23 +178,10 @@ function validateFeedEntries(list) {
 // Models the gateway serves that cannot be prompted, keyed to the reason.
 // Not caught by the embedding-id pattern above.
 //
-// Two distinct causes are represented. The embedding model has no generation
-// support. The undeployed entries are chat models the gateway advertises
-// without a backing deployment: a /chat/completions call returns HTTP 404
-// "The API deployment for this resource does not exist". Each was confirmed by
-// a real completion request, re-probed to rule out a transient, against a
-// control group of sibling models on the same route that answered 200.
-// Offering them would put a model in the picker that fails the moment a user
-// selects it, so they are withheld until the gateway serves them. Re-probe and
-// remove the entry when the deployment lands. Kept in step with the same list
-// in the harness-neutral catalog builder under integrations/providers/usai.
+// The embedding model has no generation support. Keep exclusions in step with
+// the harness-neutral catalog builder under integrations/providers/usai.
 const NON_CHAT_MODEL_IDS = {
   cohere_english_v3: "embedding model; /chat/completions returns 403 AccessDeniedException",
-  "gpt-6-luna": "advertised but undeployed; /chat/completions returns 404 (no API deployment)",
-  "gpt-6-sol-latest-guardrails-defaultv2":
-    "advertised but undeployed; /chat/completions returns 404 (no API deployment)",
-  "gpt-6.1-sol-latest-guardrails-defaultv2":
-    "advertised but undeployed; /chat/completions returns 404 (no API deployment)",
 }
 
 function isAllowedModel(model) {
