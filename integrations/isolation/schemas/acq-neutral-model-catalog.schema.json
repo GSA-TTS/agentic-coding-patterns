@@ -31,34 +31,48 @@
         "$ref": "#/$defs/model"
       }
     },
-    "recommendations": {
-      "type": "object",
-      "description": "Optional, advisory-only model role suggestions from the provider. Roles are neutral functional tiers — primary, small, compaction — not harness-native keys. Each value MUST reference an id present in this catalog's own models[]. Final role selection, conflict resolution, and harness-native vocabulary (e.g. OpenCode's model/small_model/compaction.model) remain in each agent kit. Consumers that do not understand a role MUST silently ignore it.",
-      "additionalProperties": false,
-      "properties": {
-        "primary": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128,
-          "pattern": "^[^\\u0000-\\u001F\\u007F\\u2028\\u2029]+(?![\\s\\S])",
-          "description": "Advisory default model id for general-purpose tasks. MUST reference a model id present in models[]. JSON Schema cannot enforce this cross-reference constraint; implementations MUST validate it separately (see _validate_recommendations in scripts/tests/test_provider_input_contract.py)."
-        },
-        "small": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128,
-          "pattern": "^[^\\u0000-\\u001F\\u007F\\u2028\\u2029]+(?![\\s\\S])",
-          "description": "Advisory default model id for lightweight, fast, or low-cost tasks. MUST reference a model id present in models[]. JSON Schema cannot enforce this cross-reference constraint; implementations MUST validate it separately."
-        },
-        "compaction": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128,
-          "pattern": "^[^\\u0000-\\u001F\\u007F\\u2028\\u2029]+(?![\\s\\S])",
-          "description": "Advisory default model id for context-compaction or summarisation tasks. MUST reference a model id present in models[]. JSON Schema cannot enforce this cross-reference constraint; implementations MUST validate it separately."
-        }
-      }
-    }
+     "recommendations": {
+       "type": "object",
+       "description": "Optional, advisory-only model role suggestions from the provider. Roles are neutral functional tiers — primary, small, compaction, summary, title — not harness-native keys. Each value MUST reference an id present in this catalog's own models[]. Final role selection, conflict resolution, and harness-native vocabulary (e.g. OpenCode's model/small_model/compaction.model) remain in each agent kit. Consumers that do not understand a role MUST silently ignore it.",
+       "additionalProperties": false,
+       "properties": {
+         "primary": {
+           "type": "string",
+           "minLength": 1,
+           "maxLength": 128,
+           "pattern": "^[^\\u0000-\\u001F\\u007F\\u2028\\u2029]+(?![\\s\\S])",
+           "description": "Advisory default model id for general-purpose tasks. MUST reference a model id present in models[]. JSON Schema cannot enforce this cross-reference constraint; implementations MUST validate it separately (see _validate_recommendations in scripts/tests/test_provider_input_contract.py)."
+         },
+         "small": {
+           "type": "string",
+           "minLength": 1,
+           "maxLength": 128,
+           "pattern": "^[^\\u0000-\\u001F\\u007F\\u2028\\u2029]+(?![\\s\\S])",
+           "description": "Advisory default model id for lightweight, fast, or low-cost tasks. MUST reference a model id present in models[]. JSON Schema cannot enforce this cross-reference constraint; implementations MUST validate it separately."
+         },
+         "compaction": {
+           "type": "string",
+           "minLength": 1,
+           "maxLength": 128,
+           "pattern": "^[^\\u0000-\\u001F\\u007F\\u2028\\u2029]+(?![\\s\\S])",
+           "description": "Advisory default model id for context-compaction or summarisation tasks. MUST reference a model id present in models[]. JSON Schema cannot enforce this cross-reference constraint; implementations MUST validate it separately."
+         },
+         "summary": {
+           "type": "string",
+           "minLength": 1,
+           "maxLength": 128,
+           "pattern": "^[^\\u0000-\\u001F\\u007F\\u2028\\u2029]+(?![\\s\\S])",
+           "description": "Advisory default model id for session-summary tasks. MUST reference a model id present in models[]. JSON Schema cannot enforce this cross-reference constraint; implementations MUST validate it separately."
+         },
+         "title": {
+           "type": "string",
+           "minLength": 1,
+           "maxLength": 128,
+           "pattern": "^[^\\u0000-\\u001F\\u007F\\u2028\\u2029]+(?![\\s\\S])",
+           "description": "Advisory default model id for session-title generation tasks. MUST reference a model id present in models[]. JSON Schema cannot enforce this cross-reference constraint; implementations MUST validate it separately."
+         }
+       }
+     }
   },
   "$defs": {
     "model": {
