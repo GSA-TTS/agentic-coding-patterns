@@ -2,8 +2,8 @@
 // Render host-projected, provider-neutral inputs into OpenCode's global config.
 // This is the only kit that writes OpenCode configuration for provider inputs.
 
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises"
-import { randomBytes } from "node:crypto"
+import { mkdir, open, readdir, readFile, rename, rm, unlink, writeFile } from "node:fs/promises"
+import { createHash, randomBytes } from "node:crypto"
 import os from "node:os"
 import path from "node:path"
 import process from "node:process"
@@ -18,10 +18,22 @@ const ROLE_PATHS = {
 const PROVIDER_ID = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/
 const KEY_ENV = /^[A-Z][A-Z0-9_]*$/
 const API_PROTOCOLS = Object.freeze({ "openai-compatible": Object.freeze({ npm: "@ai-sdk/openai-compatible" }) })
-const PROJECTION_FILENAME = "projection.json"
+// Harness-owned compatibility adapters are selected only from validated neutral
+// facts. Provider inputs cannot inject OpenCode-specific options.
+const PROVIDER_COMPATIBILITY = Object.freeze({
+  usai: Object.freeze({
+    timeout: 600000,
+    chunkTimeout: 120000,
+    litellmProxy: true,
+    headers: Object.freeze({
+      "User-Agent": "OpenCode-USAI/1.0 (GSA-TTS/agentic-coding-quickstart)",
+      "X-Agent-Type": "opencode",
+      "X-Agent-Environment": "development",
+    }),
+  }),
+})
 const LOCK_FILENAME = ".acq-provider-config.lock"
 const STATE_COMMENT = "// acq-provider-config-state: "
-const LOCK_TTL_MS = 30_000
 const MAX_WRITE_RETRIES = 8
 
 export function stripJsonc(text) {
@@ -65,7 +77,11 @@ export function stripJsonc(text) {
     if (character === ",") {
       let next = index + 1
       while (/\s/.test(output[next] ?? "")) next++
-      if (output[next] === "}" || output[next] === "]") continue
+      if (output[next] === "}" || output[next] === "]") {
+        let previous = plain.length - 1
+        while (/\s/.test(plain[previous] ?? "")) previous--
+        if (previous >= 0 && !"{[,:".includes(plain[previous])) continue
+      }
     }
     plain += character
   }
@@ -73,7 +89,54 @@ export function stripJsonc(text) {
 }
 
 export function parseJsonc(text) {
-  const parsed = JSON.parse(stripJsonc(text))
+  const plain = stripJsonc(text)
+  // JSON.parse permits duplicate properties with last-key-wins behavior. Parse
+  // the structure first so the renderer and OpenCode cannot disagree about a
+  // duplicate key's value.
+  const state = { index: 0 }
+  const skip = () => { while (/\s/.test(plain[state.index] ?? "")) state.index++ }
+  const parseString = () => {
+    const start = state.index++
+    while (state.index < plain.length) {
+      if (plain[state.index] === "\\") state.index += 2
+      else if (plain[state.index++] === '"') return JSON.parse(plain.slice(start, state.index))
+    }
+    throw new SyntaxError("unterminated JSON string")
+  }
+  const parseValue = () => {
+    skip()
+    if (plain[state.index] === "{") {
+      state.index++; skip()
+      const keys = new Set()
+      while (plain[state.index] !== "}") {
+        if (plain[state.index] !== '"') throw new SyntaxError("expected JSON object property")
+        const key = parseString()
+        if (keys.has(key)) throw new SyntaxError(`duplicate JSON property ${JSON.stringify(key)}`)
+        keys.add(key); skip()
+        if (plain[state.index++] !== ":") throw new SyntaxError("expected ':' after JSON property")
+        parseValue(); skip()
+        if (plain[state.index] === ",") { state.index++; skip() }
+        else if (plain[state.index] !== "}") throw new SyntaxError("expected ',' or '}' in JSON object")
+      }
+      state.index++; return
+    }
+    if (plain[state.index] === "[") {
+      state.index++; skip()
+      while (plain[state.index] !== "]") {
+        parseValue(); skip()
+        if (plain[state.index] === ",") { state.index++; skip() }
+        else if (plain[state.index] !== "]") throw new SyntaxError("expected ',' or ']' in JSON array")
+      }
+      state.index++; return
+    }
+    if (plain[state.index] === '"') { parseString(); return }
+    const token = plain.slice(state.index).match(/^(?:true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/)?.[0]
+    if (!token) throw new SyntaxError(`invalid JSON value at offset ${state.index}`)
+    state.index += token.length
+  }
+  parseValue(); skip()
+  if (state.index !== plain.length) throw new SyntaxError(`unexpected JSON content at offset ${state.index}`)
+  const parsed = JSON.parse(plain)
   return object(parsed, "OpenCode config")
 }
 
@@ -94,11 +157,13 @@ function integer(value, label) {
   return value
 }
 
-function hostname(value, label) {
+function parseProviderUrl(value, label) {
   let url
   try { url = new URL(string(value, label)) } catch { throw new Error(`${label} must be a URL`) }
-  if (url.protocol !== "https:" || !url.hostname) throw new Error(`${label} must be an HTTPS URL`)
-  return url.hostname.toLowerCase()
+  if (url.protocol !== "https:" || !url.hostname || url.username || url.password || url.port || url.search || url.hash) {
+    throw new Error(`${label} must be an HTTPS URL without credentials, port, query, or fragment`)
+  }
+  return url
 }
 
 function optionalCost(value, label) {
@@ -113,18 +178,25 @@ function optionalCost(value, label) {
 }
 
 export function deepMerge(base, source) {
-  const result = { ...base }
+  const result = Object.assign(Object.create(null), base)
   for (const [key, value] of Object.entries(source)) {
-    result[key] = value !== null && typeof value === "object" && !Array.isArray(value) &&
-      result[key] !== null && typeof result[key] === "object" && !Array.isArray(result[key])
-      ? deepMerge(result[key], value)
-      : value
+    const baseValue = Object.prototype.hasOwnProperty.call(result, key) ? result[key] : undefined
+    Object.defineProperty(result, key, { configurable: true, enumerable: true, writable: true, value: value !== null && typeof value === "object" && !Array.isArray(value) &&
+      baseValue !== null && typeof baseValue === "object" && !Array.isArray(baseValue)
+      ? deepMerge(baseValue, value)
+      : value })
   }
   return result
 }
 
+function mergeBasePolicy(baseConfig, currentConfig) {
+  const composed = deepMerge(baseConfig, currentConfig)
+  if (baseConfig.permission !== undefined) composed.permission = baseConfig.permission
+  return composed
+}
+
 export function renderProviderConfig(inputs) {
-  const providers = {}
+  const providers = Object.create(null)
   const enabled = []
   const recommendations = {}
   const seenProviders = new Set()
@@ -140,7 +212,7 @@ export function renderProviderConfig(inputs) {
     if (seenProviders.has(providerId)) throw new Error(`duplicate provider '${providerId}'`)
     if (catalog.providerId !== providerId) throw new Error(`catalog providerId does not match '${providerId}'`)
     seenProviders.add(providerId)
-    const models = {}
+    const models = Object.create(null)
     const modelIds = new Set()
     if (!Array.isArray(catalog.models)) throw new Error(`models for '${providerId}' must be an array`)
     for (const model of catalog.models) {
@@ -153,7 +225,14 @@ export function renderProviderConfig(inputs) {
       modelReferences.add(reference)
       const contextWindow = model.contextWindow === undefined ? undefined : integer(model.contextWindow, `context window for '${reference}'`)
       const maxOutputTokens = model.maxOutputTokens === undefined ? undefined : integer(model.maxOutputTokens, `output limit for '${reference}'`)
-      const cost = optionalCost(model.cost, `cost for '${reference}'`)
+      const neutralCost = optionalCost(model.cost, `cost for '${reference}'`)
+      const cost = neutralCost === undefined ? undefined : {
+        ...neutralCost,
+        ...(neutralCost.cacheRead === undefined ? {} : { cache_read: neutralCost.cacheRead }),
+        ...(neutralCost.cacheWrite === undefined ? {} : { cache_write: neutralCost.cacheWrite }),
+      }
+      delete cost?.cacheRead
+      delete cost?.cacheWrite
       models[modelId] = {
         name: modelId,
         ...(contextWindow === undefined ? {} : { limit: { context: contextWindow, ...(maxOutputTokens === undefined ? {} : { output: maxOutputTokens }) } }),
@@ -164,14 +243,14 @@ export function renderProviderConfig(inputs) {
     if (!protocol) throw new Error(`unsupported apiProtocol for '${providerId}'`)
     const declaredHost = string(facts.host, `host for '${providerId}'`).toLowerCase()
     const baseUrl = string(facts.baseUrl, `baseUrl for '${providerId}'`)
-    if (hostname(baseUrl, `baseUrl for '${providerId}'`) !== declaredHost) throw new Error(`baseUrl host does not match '${providerId}'`)
-    if (hostname(facts.modelsUrl, `modelsUrl for '${providerId}'`) !== declaredHost) throw new Error(`modelsUrl host does not match '${providerId}'`)
+    if (parseProviderUrl(baseUrl, `baseUrl for '${providerId}'`).hostname.toLowerCase() !== declaredHost) throw new Error(`baseUrl host does not match '${providerId}'`)
+    if (parseProviderUrl(facts.modelsUrl, `modelsUrl for '${providerId}'`).hostname.toLowerCase() !== declaredHost) throw new Error(`modelsUrl host does not match '${providerId}'`)
     const keyEnv = string(facts.keyEnv, `keyEnv for '${providerId}'`)
     if (!KEY_ENV.test(keyEnv)) throw new Error(`invalid keyEnv for '${providerId}'`)
     providers[providerId] = {
       npm: protocol.npm,
       name: providerId,
-      options: { baseURL: baseUrl, apiKey: `{env:${keyEnv}}` },
+      options: { baseURL: baseUrl, apiKey: `{env:${keyEnv}}`, ...(PROVIDER_COMPATIBILITY[providerId] ?? {}) },
       models,
     }
     enabled.push(providerId)
@@ -209,27 +288,12 @@ export async function loadProviderInputs(providerRoot) {
     const root = path.join(providerRoot, directory.name)
     if (!PROVIDER_ID.test(directory.name)) throw new Error(`invalid provider directory '${directory.name}'`)
     const [factsText, catalogText] = await Promise.all([readFile(path.join(root, "facts.json"), "utf8"), readFile(path.join(root, "snapshot.json"), "utf8")])
-    const facts = JSON.parse(factsText)
-    const catalog = JSON.parse(catalogText)
+    const facts = object(JSON.parse(factsText), `facts for '${directory.name}'`)
+    const catalog = object(JSON.parse(catalogText), `snapshot for '${directory.name}'`)
     if (facts.providerId !== directory.name || catalog.providerId !== directory.name) throw new Error(`provider identity does not match directory '${directory.name}'`)
     inputs.push({ facts, catalog })
   }
   return inputs
-}
-
-// A missing projection is not evidence that no providers are configured. Only
-// a host-owned authoritative manifest can authorize generated-key removal.
-export async function loadProviderProjection(providerRoot) {
-  let manifestText
-  try {
-    manifestText = await readFile(path.join(providerRoot, PROJECTION_FILENAME), "utf8")
-  } catch (error) {
-    if (error?.code === "ENOENT") return { status: "not-ready" }
-    throw error
-  }
-  const manifest = object(JSON.parse(manifestText), "provider projection")
-  if (manifest.schemaVersion !== "acq-provider-projection/v1" || manifest.authoritative !== true) throw new Error("provider projection is not authoritative")
-  return { status: "authoritative", inputs: await loadProviderInputs(providerRoot) }
 }
 
 async function existingConfig(globalDir) {
@@ -247,7 +311,7 @@ async function existingConfig(globalDir) {
   return { config: merged, canonicalText: await canonicalText(globalDir) }
 }
 
-export async function writeConfigAtomically(globalDir, rendered, ownership = { providers: [], roles: {} }, options = {}) {
+export async function writeConfigAtomically(globalDir, rendered, ownership = { providers: {}, roles: {} }, options = {}) {
   object(rendered, "rendered provider config")
   validateOwnership(ownership)
   await mkdir(globalDir, { recursive: true })
@@ -256,12 +320,17 @@ export async function writeConfigAtomically(globalDir, rendered, ownership = { p
     for (let attempt = 0; attempt < MAX_WRITE_RETRIES; attempt++) {
       const current = await existingConfig(globalDir)
       const state = readEmbeddedState(current.canonicalText, current.config)
-      const output = mergeManagedConfig(current.config, rendered, state, ownership)
+      const baseConfig = object(options.baseConfig ?? {}, "base OpenCode config")
+      const composed = mergeBasePolicy(baseConfig, current.config)
+      // Policy is kit-owned: preserving foreign settings must not reopen the
+      // credential and outbound-action safeguards staged with this kit.
+      const output = mergeManagedConfig(composed, rendered, state, ownership)
       validateRoleReferences(output.config, "merged OpenCode config")
       const text = serializeConfig(output.config, output.state)
       await options.beforeReplace?.(attempt)
-      // The lock only coordinates this renderer. Detect a non-cooperating writer
-      // before replacing so its settings are merged on the next attempt.
+      // The startup contract has one acq-owned writer. This comparison only
+      // detects an unexpected external change before replacement; it does not
+      // claim to coordinate or preserve non-cooperating writers.
       if ((await canonicalText(globalDir)) !== current.canonicalText) continue
       await replaceAtomically(globalDir, CANONICAL_FILENAME, text, options)
       return
@@ -271,7 +340,10 @@ export async function writeConfigAtomically(globalDir, rendered, ownership = { p
 }
 
 function mergeManagedConfig(existing, rendered, state, ownership) {
-  const managed = new Set(state.providers)
+  const managed = new Set(Object.keys(state.providers))
+  const userRoles = Object.fromEntries(Object.entries(ROLE_PATHS)
+    .map(([role, keys]) => [role, state.roles[role] !== undefined && roleValue(existing, keys) !== state.roles[role] ? roleValue(existing, keys) : undefined])
+    .filter(([, value]) => value !== undefined))
   const provider = { ...(existing.provider ?? {}), ...(rendered.provider ?? {}) }
   for (const id of managed) delete provider[id]
   Object.assign(provider, rendered.provider)
@@ -282,10 +354,17 @@ function mergeManagedConfig(existing, rendered, state, ownership) {
   for (const [role, keys] of Object.entries(ROLE_PATHS)) {
     let target = config
     for (const key of keys.slice(0, -1)) target = target?.[key]
-    if (state.roles[role] !== undefined && target?.[keys.at(-1)] === state.roles[role]) delete target[keys.at(-1)]
+    const userOverride = Object.prototype.hasOwnProperty.call(userRoles, role)
+    if (userOverride) {
+      target = config
+      for (const key of keys.slice(0, -1)) target = target[key] ??= {}
+      target[keys.at(-1)] = userRoles[role]
+      continue
+    }
+    if (state.roles[role] !== undefined && !userOverride) delete target[keys.at(-1)]
     let source = rendered
     for (const key of keys.slice(0, -1)) source = source?.[key]
-    if (source?.[keys.at(-1)] !== undefined) {
+    if (source?.[keys.at(-1)] !== undefined && !userOverride) {
       target = config
       for (const key of keys.slice(0, -1)) target = target[key] ??= {}
       target[keys.at(-1)] = source[keys.at(-1)]
@@ -295,13 +374,20 @@ function mergeManagedConfig(existing, rendered, state, ownership) {
   for (const [role, keys] of Object.entries(ROLE_PATHS)) {
     let source = rendered
     for (const key of keys) source = source?.[key]
-    if (source !== undefined) roles[role] = source
+    if (source !== undefined && roleValue(config, keys) === source) roles[role] = source
   }
-  return { config, state: { schemaVersion: "acq-opencode-provider-state/v2", providers: ownership.providers, roles } }
+  return { config, state: { schemaVersion: "acq-opencode-provider-state/v3", providers: ownership.providers, roles } }
 }
 
-function ownershipFromRendered(rendered) {
-  return { providers: [...(rendered.enabled_providers ?? [])], roles: selectedRoles(rendered) }
+export function ownershipFromRendered(rendered) {
+  return {
+    providers: Object.fromEntries(Object.entries(rendered.provider ?? {}).map(([id, provider]) => [id, digest(provider)])),
+    roles: selectedRoles(rendered),
+  }
+}
+
+function digest(value) {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex")
 }
 
 function selectedRoles(config) {
@@ -315,7 +401,10 @@ function selectedRoles(config) {
 }
 
 function validateOwnership(state) {
-  if (!Array.isArray(state.providers) || new Set(state.providers).size !== state.providers.length || !state.providers.every((id) => typeof id === "string" && PROVIDER_ID.test(id))) throw new Error("invalid provider ownership")
+  object(state.providers, "provider ownership")
+  for (const [id, providerDigest] of Object.entries(state.providers)) {
+    if (!PROVIDER_ID.test(id) || !/^[a-f0-9]{64}$/.test(providerDigest)) throw new Error("invalid provider ownership")
+  }
   object(state.roles, "provider ownership roles")
   for (const [role, reference] of Object.entries(state.roles)) {
     if (!ROLE_PATHS[role] || typeof reference !== "string") throw new Error("invalid provider ownership role")
@@ -337,21 +426,18 @@ function generatedProvider(value) {
 }
 
 function readEmbeddedState(text, config) {
-  if (text === undefined) return { providers: [], roles: {} }
+  if (text === undefined) return { providers: {}, roles: {} }
   const line = text.split("\n", 1)[0]
   if (!line.startsWith(STATE_COMMENT)) {
     if (Object.values(config.provider ?? {}).some(generatedProvider)) throw new Error("generated provider config has no trustworthy ownership metadata")
-    return { providers: [], roles: {} }
+    return { providers: {}, roles: {} }
   }
   let state
   try { state = JSON.parse(Buffer.from(line.slice(STATE_COMMENT.length), "base64url").toString("utf8")) } catch { throw new Error("malformed provider ownership metadata") }
-  if (state.schemaVersion !== "acq-opencode-provider-state/v2") throw new Error("incompatible provider ownership metadata")
+  if (state.schemaVersion !== "acq-opencode-provider-state/v3") throw new Error("incompatible provider ownership metadata")
   validateOwnership(state)
-  for (const id of state.providers) {
-    if (!generatedProvider(config.provider?.[id])) throw new Error(`owned provider '${id}' is missing or was modified`)
-  }
-  for (const [role, reference] of Object.entries(state.roles)) {
-    if (roleValue(config, ROLE_PATHS[role]) !== reference) throw new Error(`owned ${role} default was modified`)
+  for (const [id, providerDigest] of Object.entries(state.providers)) {
+    if (!Object.prototype.hasOwnProperty.call(config.provider ?? {}, id) || !generatedProvider(config.provider[id]) || digest(config.provider[id]) !== providerDigest) throw new Error(`owned provider '${id}' is missing or was modified`)
   }
   return state
 }
@@ -371,7 +457,7 @@ function validateRoleReferences(config, label) {
     const slash = reference.indexOf("/")
     const providerId = reference.slice(0, slash)
     const modelId = reference.slice(slash + 1)
-    if (slash < 1 || !provider[providerId] || !provider[providerId].models || !provider[providerId].models[modelId]) throw new Error(`${label} has dangling ${role} default '${reference}'`)
+    if (slash < 1 || !Object.prototype.hasOwnProperty.call(provider, providerId) || !provider[providerId].models || !Object.prototype.hasOwnProperty.call(provider[providerId].models, modelId)) throw new Error(`${label} has dangling ${role} default '${reference}'`)
   }
 }
 
@@ -381,56 +467,115 @@ async function canonicalText(globalDir) {
 
 async function replaceAtomically(globalDir, filename, text, options = {}) {
   const temporary = path.join(globalDir, `.${filename}.${process.pid}.${randomBytes(16).toString("hex")}.tmp`)
-  await writeFile(temporary, text, { mode: 0o600, flag: "wx" })
-  await options.beforeRename?.()
-  await rename(temporary, path.join(globalDir, filename))
+  try {
+    const file = await open(temporary, "wx", 0o600)
+    try { await file.writeFile(text); await file.sync() } finally { await file.close() }
+    await options.beforeRename?.()
+    await rename(temporary, path.join(globalDir, filename))
+    const directory = await open(globalDir, "r")
+    try { await directory.sync() } finally { await directory.close() }
+  } catch (error) {
+    await rm(temporary, { force: true })
+    throw error
+  }
 }
 
 async function acquireLock(globalDir, options = {}) {
   const lock = path.join(globalDir, LOCK_FILENAME)
-  const owner = JSON.stringify({ schemaVersion: "acq-opencode-provider-lock/v1", pid: process.pid, host: os.hostname(), nonce: randomBytes(16).toString("hex"), expiresAt: Date.now() + (options.lockTtlMs ?? LOCK_TTL_MS) })
+  const host = options.hostname ?? os.hostname()
+  const startTime = options.processStartTime ?? processStartTime
+  const owner = JSON.stringify({ schemaVersion: "acq-opencode-provider-lock/v3", pid: process.pid, host, startTime: await startTime(process.pid), nonce: randomBytes(16).toString("hex") })
   for (let attempt = 0; attempt < 100; attempt++) {
     try {
-      await mkdir(lock, { mode: 0o700 })
-      await writeFile(path.join(lock, "owner.json"), owner, { mode: 0o600, flag: "wx" })
+      await readFile(`${lock}.recovery`, "utf8")
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      continue
+    } catch (error) { if (error?.code !== "ENOENT") throw error }
+    try {
+      await writeFile(lock, owner, { mode: 0o600, flag: "wx" })
       return async () => releaseLock(lock, owner)
     } catch (error) {
       if (error?.code !== "EEXIST") throw error
-      await recoverStaleLock(lock)
+      const stale = await staleLock(lock, host, { ...options, processStartTime: startTime })
+      if (stale) continue
       await new Promise((resolve) => setTimeout(resolve, 10))
     }
   }
-  throw new Error("timed out waiting for provider config lock")
+  throw new Error(`timed out waiting for provider config lock at ${lock}; inspect the lock file for the active owner`)
 }
 
-async function recoverStaleLock(lock) {
-  let owner
-  try { owner = JSON.parse(await readFile(path.join(lock, "owner.json"), "utf8")) } catch (error) {
-    if (error?.code === "ENOENT") {
-      const details = await stat(lock)
-      if (Date.now() - details.mtimeMs < LOCK_TTL_MS) return
-    } else { return }
+async function staleLock(lock, host, options) {
+  const recovery = `${lock}.recovery`
+  const recoveryOwner = JSON.stringify({ pid: process.pid, host, nonce: randomBytes(16).toString("hex") })
+  try {
+    await writeFile(recovery, recoveryOwner, { mode: 0o600, flag: "wx" })
+  } catch (error) {
+    if (error?.code === "EEXIST") return false
+    throw error
   }
-  if (owner && (owner.schemaVersion !== "acq-opencode-provider-lock/v1" || !Number.isSafeInteger(owner.expiresAt) || Date.now() <= owner.expiresAt)) return
-  const retired = `${lock}.stale.${randomBytes(12).toString("hex")}`
-  try { await rename(lock, retired); await rm(retired, { recursive: true, force: true }) } catch (error) { if (error?.code !== "ENOENT") throw error }
+  try {
+  let owner
+  try { owner = JSON.parse(await readFile(lock, "utf8")) } catch (error) {
+    if (error?.code === "ENOENT") return false
+    throw new Error(`provider config lock at ${lock} has no readable owner identity; refusing to steal it`)
+  }
+  if (owner.schemaVersion !== "acq-opencode-provider-lock/v3" || owner.host !== host || !Number.isSafeInteger(owner.pid) || owner.pid < 1 || typeof owner.startTime !== "string" || typeof owner.nonce !== "string") {
+    throw new Error(`provider config lock at ${lock} has an untrusted owner identity; refusing to steal it`)
+  }
+  const alive = options.isProcessAlive ?? ((pid) => {
+    try { process.kill(pid, 0); return true } catch (error) { if (error?.code === "ESRCH") return false; if (error?.code === "EPERM") return true; throw error }
+  })
+  const startTime = options.processStartTime ?? processStartTime
+  if (await alive(owner.pid) && await startTime(owner.pid) === owner.startTime) return false
+  try {
+    // Every acquisition observes this recovery sentinel before creating the
+    // primary lock. Once held, no replacement lock can race this unlink.
+    if (await readFile(lock, "utf8") !== JSON.stringify(owner)) return false
+    await unlink(lock)
+    return true
+  } catch (error) {
+    if (error?.code === "ENOENT") return false
+    throw error
+  }
+  } finally {
+    try { if (await readFile(recovery, "utf8") === recoveryOwner) await unlink(recovery) } catch (error) { if (error?.code !== "ENOENT") throw error }
+  }
 }
 
 async function releaseLock(lock, owner) {
   try {
-    if (await readFile(path.join(lock, "owner.json"), "utf8") !== owner) return
-    const retired = `${lock}.released.${randomBytes(12).toString("hex")}`
-    await rename(lock, retired)
-    await rm(retired, { recursive: true, force: true })
+    if (await readFile(lock, "utf8") !== owner) return
+    await unlink(lock)
   } catch (error) { if (error?.code !== "ENOENT") throw error }
 }
 
-export async function applyProviderProjection(providerRoot, globalDir) {
-  const projection = await loadProviderProjection(providerRoot)
-  if (projection.status !== "authoritative") return projection.status
-  const rendered = renderProviderConfig(projection.inputs)
-  await writeConfigAtomically(globalDir, rendered, ownershipFromRendered(rendered))
-  return projection.status
+async function processStartTime(pid) {
+  try {
+    const fields = (await readFile(`/proc/${pid}/stat`, "utf8")).trim().split(" ")
+    return fields[21] ?? "unavailable"
+  } catch (error) {
+    if (error?.code === "ENOENT") return "missing"
+    return "unavailable"
+  }
+}
+
+export async function applyProviderProjection(providerRoot, globalDir, options = {}) {
+  // The backend materializes the authoritative provider directories directly
+  // below its read-only input root. A missing root is not an empty set and
+  // therefore deliberately leaves the existing config untouched.
+  const current = path.join(providerRoot, "models", "providers")
+  let inputs
+  try {
+    await readdir(current)
+    inputs = await loadProviderInputs(current)
+  } catch (error) {
+    if (error?.code === "ENOENT") return "not-ready"
+    throw error
+  }
+  const rendered = renderProviderConfig(inputs)
+  const baseConfig = options.baseConfig ?? parseJsonc(await readFile(options.baseConfigPath ?? "/home/agent/opencode-config/base-config.jsonc", "utf8"))
+  await writeConfigAtomically(globalDir, rendered, ownershipFromRendered(rendered), { ...options, baseConfig })
+  return "authoritative"
 }
 
 function argument(name, fallback) {
@@ -439,9 +584,10 @@ function argument(name, fallback) {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const providerRoot = argument("--provider-root", "/var/lib/acq/host/models/providers")
+  const providerRoot = argument("--provider-root", process.env.ACQ_PROVIDER_INPUT_ROOT ?? "/var/lib/acq/provider-input")
   const globalDir = argument("--global-dir", path.join(process.env.HOME ?? "/home/agent", ".config/opencode"))
-  applyProviderProjection(providerRoot, globalDir).catch((error) => {
+  const baseConfigPath = argument("--base-config", "/home/agent/opencode-config/base-config.jsonc")
+  applyProviderProjection(providerRoot, globalDir, { baseConfigPath }).catch((error) => {
     console.error(`opencode-config: ${error.message}`)
     process.exit(1)
   })

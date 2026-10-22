@@ -2,7 +2,7 @@
   "schemaVersion": "usai-model-catalog/v1",
   "generatedBy": "build-catalog.mjs (generated — do not hand-edit)",
   "sources": {
-    "bootstrappedFrom": "integrations/isolation/acq-kits/usai-provider/files/home/usai-config/opencode.jsonc"
+    "bootstrappedFrom": "integrations/providers/usai/tests/fixtures/opencode-renderer-contract.jsonc"
   },
   "gateway": {
     "host": "api.gsa.usai.gov",

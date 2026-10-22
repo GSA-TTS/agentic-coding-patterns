@@ -7,8 +7,8 @@
 // This module is a PURE function: given the parsed catalog.json object it
 // returns the EXACT text of the region between (and including) the
 // `// BEGIN GENERATED USAI MODELS` and `// END GENERATED USAI MODELS` marker
-// comment lines as it appears in the shipped provider config:
-//   integrations/isolation/acq-kits/usai-provider/files/home/usai-config/opencode.jsonc
+// comment lines under the durable renderer contract fixture:
+//   integrations/providers/usai/tests/fixtures/opencode-renderer-contract.jsonc
 //
 // The byte-exact round-trip test (tests/emitters.test.mjs) asserts that this
 // emitter reproduces the shipped block verbatim, which is the guarantee that
@@ -32,7 +32,7 @@
 const BEGIN_MARKER = "// BEGIN GENERATED USAI MODELS"
 const END_MARKER = "// END GENERATED USAI MODELS"
 
-// Indentation constants matching the shipped opencode.jsonc. The model MAP lives
+// Indentation constants matching the renderer contract. The model MAP lives
 // under provider.usai.models, which is nested 4 levels deep (8 spaces) in the
 // file; nested objects add 2 spaces per level.
 const INDENT_MODEL = "        " // 8 spaces — model key + marker/comment lines
@@ -164,7 +164,7 @@ function renderModel(model, trailingComma) {
  * marker comment lines) from a parsed catalog.json object.
  *
  * @param {object} catalog parsed catalog.json (schema usai-model-catalog/v1)
- * @returns {string} the exact block text, matching the shipped opencode.jsonc
+ * @returns {string} the exact block text, matching the renderer contract fixture
  */
 export function emitOpenCodeBlockFromCatalog(catalog) {
   if (!catalog || typeof catalog !== "object") {

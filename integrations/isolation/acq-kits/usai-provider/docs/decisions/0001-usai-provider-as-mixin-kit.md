@@ -1,11 +1,9 @@
 # Decision: Ship the USAi provider config as a self-contained sbx mixin kit
 
-**Status:** accepted — but the `OPENCODE_CONFIG` delivery mechanism below is
-**superseded by** [`0004-global-config-merge-instead-of-opencode-config.md`](0004-global-config-merge-instead-of-opencode-config.md).
-The kit is still a self-contained mixin with allow-listed egress and injected
-secrets (those parts stand); it no longer sets `OPENCODE_CONFIG` — it merges its
-config into the global path instead. Read the "Namespaced `OPENCODE_CONFIG`"
-section below as historical context.
+**Status:** superseded (2026-10-22)
+
+> The OpenCode kit now owns global configuration rendering. This historical
+> record is retained for the provider policy and prior delivery rationale only.
 
 ## Context
 

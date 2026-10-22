@@ -1,261 +1,47 @@
 # usai-provider (acq mixin kit, `hybrid/v1`)
 
-A neutral [`acq`](https://github.com/GSA-TTS/agentic-coding-quickstart) **mixin
-kit** that configures a coding agent to use the GSA **USAi** OpenAI-compatible
-endpoint as its model provider, with network egress allow-listed.
+This neutral [`acq`](https://github.com/GSA-TTS/agentic-coding-quickstart)
+mixin publishes USAi provider input and allow-lists its endpoint. It does not
+write OpenCode configuration.
 
-> **Neutral (backend-agnostic) kit.** This is the `schemaVersion: "hybrid/v1"`
-> form consumed by `acq`, which abstracts the isolation backend. It replaces the former `sbx-kits/usai-provider-kit/` sbx-only
-> spec. See the [backend parity](#backend-parity) note and
-> [`../../docs/decisions/0001-neutral-hybrid-v1-acq-kits.md`](../../docs/decisions/0001-neutral-hybrid-v1-acq-kits.md).
+## Interface
 
-## Scope and roadmap
+The provider bundle declares the provider facts, the catalog normalizer, and
+the vendored snapshot. `acq` validates the bundle, materializes each selected
+provider under the backend-supplied input root, then atomically selects a
+generation at `current/models/providers/usai/`.
 
-Today this kit targets **OpenCode**: it ships an `opencode.jsonc` and merges it
-into OpenCode's global config. It is named `usai-provider` (rather than
-`usai-opencode-provider`) deliberately — the intent is to grow it into a single
-kit that configures the USAi provider for **multiple agents** (e.g. Codex,
-Claude Code, Cursor) as their config formats are added. Until then, applying it
-on a non-OpenCode agent has no effect beyond the network allow-list.
+The OpenCode kit is the sole acq-owned OpenCode configuration writer. At
+startup it reads the selected generation and renders `facts.json` plus
+`snapshot.json` into the global config. This ordering prevents two kits from
+merging competing config writes. The catalog snapshot is model metadata only;
+credentials remain acq-managed.
 
-## What it does
+## What It Does
 
-- **Network egress** — allow-lists `api.gsa.usai.gov` (`caps.network.allow`),
-  since USAi is a custom endpoint, not a built-in backend service.
-- **Provider config** — ships `opencode.jsonc` (the USAi provider block + the
-  generated USAi model catalog) and, at startup, **merges it into OpenCode's
-  global config** (`~/.config/opencode/opencode.jsonc`) so OpenCode loads it
-  instead of prompting for a provider — without clobbering any existing global
-  config (see [Design: merge, don't clobber](#design-merge-dont-clobber)).
-- **Permissions** — a deliberately **default-allow** OpenCode permission policy
-  tuned for the sandbox, keeping only a zero-prompt `read` credential deny-list
-  (see [Permissions](#permissions)).
+- Allow-lists `api.gsa.usai.gov` through `caps.network.allow`.
+- Supplies facts, normalizer, and snapshot paths through `provider-input.json`.
+- Does not install provider-specific OpenCode files or a startup writer.
 
-## Backend parity
+## Catalog Updates
 
-All backends use the **same** mechanism for this kit — allow-list
-`api.gsa.usai.gov`, drop the two `files`, and run the startup merge command.
-There is no backend shortcut. The only per-backend difference is **how the USAi
-API key reaches the guest at runtime**, which `acq` owns (not this kit): each
-backend injects the key on the egress path so the container never holds the raw
-value. Behavioral parity: the agent ends up configured for USAi on every
-backend.
-
-## Permissions
-
-The shipped `opencode.jsonc` uses a **default-allow** permission policy. This is
-a deliberate deviation from a host-safe config, and it is safe **only because
-this kit runs exclusively inside an isolation sandbox**: an ephemeral container
-with no host filesystem access, a proxied/allow-listed network, and injected
-credentials (the container never holds real key material). That isolation is the
-security boundary; re-gating ordinary operations (`rm`, package installs,
-`sudo`, `env`/`printenv`, …) would only duplicate it and train users to approve
-prompts reflexively.
-
-The policy gates (`ask`):
-
-- **New-outbound-destination commands** — `git push`, `git remote add`/`set-url`,
-  `gh pr create`/`gh api`, and `scp`/`sftp`/`rsync`/`nc`/`telnet`. This is a
-  human-in-the-loop *affordance* for the highest-consequence "push my workspace
-  somewhere named" actions, **not** an exhaustive egress firewall — the sandbox
-  proxy allow-list is the real network control, so `aws s3 cp`/`gcloud`/`az`/
-  `docker push`/`dig` are intentionally left ungated (same proxy boundary; see
-  the decision record).
-- **`gh pr merge`** (and the equivalent `gh api .../pulls/*/merge` REST form) —
-  gated separately from PR creation. Merging alters the authoritative state of
-  a shared, version-controlled system outside the sandbox; this maps to NIST SP
-  800-53 **CM-3** (Configuration Change Control), not AC-6, since it's a
-  change-control concern, not a filesystem/privilege-scope one. See the
-  decision record for why AC-6 is the wrong citation here, and for the gate's
-  disclosed gap (it doesn't cover `git push` to an auto-merge-enabled branch).
-- **`rm` outside the workspace** — an absolute path, a `~`/`$HOME`-relative
-  path, or a path that climbs out via `..` (e.g. `rm -rf /`, `rm -rf ~/other`,
-  `rm -rf ../sibling`). In-workspace `rm` (`rm -rf build`, `rm -rf ./dist`)
-  stays fully allowed, matching the rest of this policy. **This is
-  defense-in-depth, not enforcement** — it's a glob match on a command
-  string, not a filesystem boundary, and it has real, disclosed bypasses
-  (`cd .. && rm -rf x`, `sh -c 'rm -rf ~/x'`, `find .. -delete`, and similar —
-  see the decision record's full list). The sandbox's mount scope remains the
-  actual, structural implementation of AC-6's "restricted to the project
-  directory" language; this gate only covers the residual writable paths the
-  mount scope doesn't reach.
-- **Data-bearing `curl`/`wget`** (`-d`/`--data`/`-F`/`-T`/`-X POST`, wget
-  `--post-*`/`--body-*`) — as **defense-in-depth**, not a completeness claim.
-
-**Neither the `gh pr merge` gate nor the `rm` gate protects anything under
-`opencode --auto`/`opencode run --auto`**, which auto-approves any request
-that isn't an explicit `deny` (OpenCode's own documented behavior). Both are
-interactive-session safeguards by construction — see the decision record for
-what the actual controls are for an automated pipeline (credential scoping
-for `rm`; branch protection for merges).
-
-It also keeps one hard **`deny`**: the `read` tool's **credential-file
-deny-list** (`.env`, `*.pem`, `*.key`, `*.tfvars`, `~/.aws/*`, kubeconfig, …).
-This costs zero prompts (reading credentials is never the agent's job) and is the
-one control the proxy allow-list can't provide — it breaks a prompt-injected
-`read .env` → `curl -d @.env <allowed-host>` chain at the read step. It governs
-the **read tool** only (not `bash`, so `cat .env` isn't blocked), so it is
-belt-and-suspenders, not a complete exfil block.
-
-Everything else — including benign `curl`/`wget` reads and secret-surfacing
-commands like `env`/`printenv`/`git remote -v` (which expose injected
-placeholders, not real secrets) — is allowed. `bash` has **no** hard-deny rules;
-the sandbox, not a bash denylist, is the control there.
-
-**Want a stricter posture?** Don't fork this kit. Compose a separate mixin that
-contributes `ask`/`deny` rules via a project-layer
-`<workspace>/.opencode/opencode.jsonc`, which OpenCode deep-merges *over* this
-config (OpenCode evaluates the **last matching** rule, so a later fragment wins —
-which is also why this config orders every `ask` edge after the broad `allow`).
-See
-[`docs/decisions/0003-relax-permissions-for-sandbox.md`](docs/decisions/0003-relax-permissions-for-sandbox.md).
-
-## Usage
+`scripts/normalize-catalog.mjs` converts the checked-in USAi catalog to the
+neutral catalog shape without network access. The snapshot is consumed by the
+OpenCode renderer for this milestone; aggregation or live normalizer execution
+belongs to acq materialization, not this kit.
 
 ```bash
-acq run opencode /path/to/project        # acq applies the pinned kits, incl. this one
+npm test
 ```
 
-The kit is a `mixin`, so it composes with the other acq-kits. `acq` translates
-the neutral spec to the active backend's primitives via its kit-translate layer.
+## Credentials
 
-## Prerequisites
-
-The USAi API key is **not** stored in the kit. The shipped `opencode.jsonc`
-reads it from the injected `USAI_API_KEY` env var. Supply it once via `acq`; the
-active backend injects it on the egress path (the container never sees the raw
-value):
+The API key is not stored in this kit. Set it through acq:
 
 ```bash
 acq secret set usai --host api.gsa.usai.gov
 ```
 
-USAi keys expire periodically — if the agent starts failing auth, rotate the key
-and update the secret. See [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md).
-
-## Design: merge, don't clobber
-
-OpenCode reads config from the **global** path
-(`~/.config/opencode/opencode.json[c]`) < **project**
-(`<workspace>/.opencode/`). By request, this kit lands its config at the
-**global** path (rather than pointing `OPENCODE_CONFIG` at a namespaced file, as
-earlier versions did).
-
-To avoid overwriting a global config the base template or another kit may have
-written, a startup step **merges** instead of copying blindly:
-
-- **No existing global config** → the kit's `opencode.jsonc` is copied
-  **verbatim** (comments and the ownership marker preserved).
-- **An existing global config** → the USAi keys are **deep-merged into** it.
-  USAi wins for its own keys (`provider.usai`, `model`, `small_model`, `agent`,
-  `permission`, …); unrelated keys are preserved; any existing leaf the kit
-  overrides (e.g. a pre-existing top-level `model`) is logged as a warning.
-  Comments are dropped in this branch (JSON has none) — the fully annotated
-  source stays at `~/usai-config/opencode.jsonc` and in this repo.
-
-The merge is idempotent and runs as the agent user at every start. See
-[`docs/decisions/0004-global-config-merge-instead-of-opencode-config.md`](docs/decisions/0004-global-config-merge-instead-of-opencode-config.md).
-
-## Co-tenancy
-
-Because the kit no longer sets `OPENCODE_CONFIG` (a single-valued env var that
-only one kit could own), there is no env-var shadowing to guard against. Another
-kit that needs to add OpenCode config should drop its fragment at
-`<workspace>/.opencode/opencode.jsonc` — OpenCode's **project** layer
-deep-merges it *over* the global config, so its keys and the USAi provider config
-compose without either clobbering the other.
-
-> The ownership **marker comment**
-> (`usai-provider:owns-opencode-config`) is present in the shipped file. It
-> is a JSONC **comment**, not a config key, because OpenCode validates against a
-> closed schema and rejects unknown top-level keys. It survives the verbatim-copy
-> path and lets `scripts/verify` recognize the kit's own config.
-
-## Updating the model catalog
-
-The shipped `opencode.jsonc` contains a generated block of USAi models. To
-refresh it against the live USAi + models.dev data:
-
-```bash
-npm run sync:usai-models     # from this kit directory
-```
-
-The generator only rewrites the region between the `BEGIN/END GENERATED USAI
-MODELS` markers and the default model selection; the ownership marker comment and
-hand-maintained config are preserved. `npm test` covers the generator.
-
-### Token limits and pricing
-
-Each generated model carries a `limit` (context/output tokens) and, when known,
-a `cost` object (USD **per 1M tokens**: `input`, `output`, and where available
-`cache_read`, `cache_write`, plus a `context_over_200k` override for
-context-tiered pricing). Both are sourced from
-[models.dev](https://models.dev)'s `api.json` catalog. Only the cost keys
-OpenCode's config schema accepts are emitted — models.dev extras such as
-`input_audio`, `output_audio`, `reasoning`, and the `tiers` array are dropped so
-the config validates cleanly.
-
-Pricing is **backend-aware**: USAi routes each vendor through a specific
-backend, so the generator pulls each vendor's price from the matching
-models.dev provider rather than the first-party catalog:
-
-| USAi vendor | models.dev provider | fallback |
-| --- | --- | --- |
-| Anthropic (Claude) | `amazon-bedrock` | `anthropic` |
-| OpenAI (GPT) | `azure` | `openai` |
-| Google (Gemini) | `google-vertex` | `google` |
-| Meta (Llama) | `amazon-bedrock` | `meta`, `llama` |
-| Cohere | `cohere` | — |
-
-Bedrock Claude pricing uses the US/base regional entries (the `eu.`/`au.`
-prefixes carry a premium and are deliberately demoted). Models with no
-models.dev match keep their fallback limits and omit `cost`.
-
-## Verifying
-
-Run the bundled check on a host with a backend CLI (e.g. `sbx`) installed and
-logged in:
-
-```bash
-./scripts/verify
-```
-
-It validates the spec, creates a throwaway sandbox with the kit, and confirms
-the global config (`~/.config/opencode/opencode.jsonc`) exists and carries the
-USAi `provider.usai` block, that a pre-seeded foreign global key survives the
-merge, and that the USAi API is reachable with the injected key. Set `KEEP=1` to
-keep the sandbox for inspection.
-
-## Design decisions
-
-See [`docs/decisions/`](docs/decisions/):
-
-- [`0001-usai-provider-as-mixin-kit.md`](docs/decisions/0001-usai-provider-as-mixin-kit.md)
-  — why a self-contained kit, secret handling (config-delivery portion
-  superseded by 0004).
-- [`0002-opencode-config-co-tenancy.md`](docs/decisions/0002-opencode-config-co-tenancy.md)
-  — the old single-`OPENCODE_CONFIG` owner contract (**superseded** by 0004).
-- [`0003-relax-permissions-for-sandbox.md`](docs/decisions/0003-relax-permissions-for-sandbox.md)
-  — why the permission policy is default-allow, and how to re-gate via a mixin.
-- [`0004-global-config-merge-instead-of-opencode-config.md`](docs/decisions/0004-global-config-merge-instead-of-opencode-config.md)
-  — why the kit merges into the global config path instead of setting
-  `OPENCODE_CONFIG`.
-
-The move to the neutral `hybrid/v1` spec is recorded in the area-level ADR
-[`../../docs/decisions/0001-neutral-hybrid-v1-acq-kits.md`](../../docs/decisions/0001-neutral-hybrid-v1-acq-kits.md).
-
-## Layout
-
-```
-usai-provider/
-├── spec.yaml                                   # the kit (hybrid/v1)
-├── files/home/usai-config/
-│   ├── opencode.jsonc                          # USAi provider + model catalog
-│   └── merge-global-config.mjs                 # startup merge into global config
-├── scripts/
-│   ├── sync-usai-models.mjs                    # regenerate the model catalog
-│   └── verify                                  # host-side end-to-end check
-├── tests/                                      # generator + merge tests + fixture
-├── docs/decisions/                             # numbered design decision records
-└── package.json                                # npm test / sync:usai-models
-```
+The active backend injects the credential for the selected provider. The
+OpenCode renderer references the configured environment-variable name from
+provider facts and never receives a key value.

@@ -1,6 +1,11 @@
 {
   "schemaVersion": "acq-neutral-model-catalog/v1",
   "providerId": "usai",
+  "recommendations": {
+    "primary": "claude_4_5_sonnet",
+    "small": "gemini-2.5-flash",
+    "compaction": "gpt_5_4_default_v2"
+  },
   "models": [
     {
       "id": "claude_4_5_sonnet",

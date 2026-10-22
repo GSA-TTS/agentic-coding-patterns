@@ -608,7 +608,7 @@ sequenceDiagram
 
   Two host-side builders already exist in this repo, so this is a live question
   rather than a hypothetical:
-  `acq-kits/usai-provider/scripts/sync-usai-models.mjs` (requires
+   the retired `acq-kits/usai-provider/scripts/sync-usai-models.mjs` (required
   `USAI_API_KEY` in the host environment, fetches the live models list,
   rewrites the kit's committed `opencode.jsonc` generated block) and
   `integrations/providers/usai/` (`build-catalog.mjs` → `catalog.json` →
