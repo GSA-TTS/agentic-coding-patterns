@@ -123,6 +123,8 @@ test("provider projection applies protocol adapter options, OpenCode cost keys, 
   assert.equal(output.model, "usai/claude-sonnet-5")
   assert.equal(output.small_model, "usai/claude_4_5_haiku")
   assert.equal(output.agent.compaction.model, "usai/gpt-5.6-terra")
+  assert.equal(output.agent.summary.model, "usai/gpt_5_2_default_v2")
+  assert.equal(output.agent.title.model, "usai/gpt_5_2_default_v2")
 })
 
 test("user-selected roles remain unowned across repeated renders", async () => {
@@ -260,6 +262,37 @@ test("metadata-free legacy provider edits fail closed", async () => {
   const rendered = { enabled_providers: legacyConfig.enabled_providers, provider: { usai: legacyConfig.provider.usai } }
   await writeFile(path.join(directory, "opencode.jsonc"), legacy.replace('"name": "GSA USAI"', '"name": "user-modified"'))
   await assert.rejects(writeConfigAtomically(directory, rendered, ownershipFromRendered(rendered)), /ownership metadata/)
+})
+
+test("legacy provider is removed when authoritative projection is empty", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "opencode-config-"))
+  const legacy = await readFile(new URL("../../../../providers/usai/tests/fixtures/opencode-production.jsonc", import.meta.url), "utf8")
+  await writeFile(path.join(directory, "opencode.jsonc"), legacy)
+  const rendered = renderProviderConfig([])
+  await writeConfigAtomically(directory, rendered, ownershipFromRendered(rendered))
+  const installed = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+  assert.deepEqual(Object.keys(installed.provider ?? {}), [])
+  assert.deepEqual(installed.enabled_providers, [])
+  assert.equal(installed.model, undefined)
+  assert.equal(installed.small_model, undefined)
+  assert.equal(installed.agent?.compaction?.model, undefined)
+  assert.equal(installed.agent?.summary?.model, undefined)
+  assert.equal(installed.agent?.title?.model, undefined)
+})
+
+test("legacy provider is replaced when authoritative projection switches to a fictitious provider", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "opencode-config-"))
+  const legacy = await readFile(new URL("../../../../providers/usai/tests/fixtures/opencode-production.jsonc", import.meta.url), "utf8")
+  await writeFile(path.join(directory, "opencode.jsonc"), legacy)
+  const rendered = renderProviderConfig([{ facts: facts("acme-ai"), catalog: catalog("acme-ai", ["large", "small-model"], { primary: "large", small: "small-model" }) }])
+  await writeConfigAtomically(directory, rendered, ownershipFromRendered(rendered))
+  const installed = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+  assert.equal(installed.provider?.usai, undefined)
+  assert.ok(installed.provider?.["acme-ai"])
+  assert.deepEqual(installed.enabled_providers, ["acme-ai"])
+  assert.equal(installed.model, "acme-ai/large")
+  assert.equal(installed.small_model, "acme-ai/small-model")
+  assert.equal(installed.agent?.compaction?.model, undefined)
 })
 
 test("semantic edits to an owned provider fail closed instead of being deleted", async () => {

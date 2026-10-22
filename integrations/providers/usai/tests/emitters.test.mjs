@@ -133,6 +133,8 @@ test("the OpenCode renderer preserves the prior shipped model block and role def
       primary: "claude-sonnet-5",
       small: "claude_4_5_haiku",
       compaction: "gpt-5.6-terra",
+      summary: "gpt_5_2_default_v2",
+      title: "gpt_5_2_default_v2",
     },
   }
   const rendered = renderProviderConfig([{ facts, catalog: neutral }])
@@ -141,6 +143,8 @@ test("the OpenCode renderer preserves the prior shipped model block and role def
   assert.equal(rendered.model, expected.model)
   assert.equal(rendered.small_model, expected.small_model)
   assert.equal(rendered.agent.compaction.model, expected.agent.compaction.model)
+  assert.equal(rendered.agent.summary.model, "usai/gpt_5_2_default_v2")
+  assert.equal(rendered.agent.title.model, "usai/gpt_5_2_default_v2")
   assert.equal(expected.agent.summary.model, "usai/gpt_5_2_default_v2")
   assert.equal(expected.agent.title.model, "usai/gpt_5_2_default_v2")
 })
