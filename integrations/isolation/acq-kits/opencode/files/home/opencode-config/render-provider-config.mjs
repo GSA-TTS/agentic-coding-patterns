@@ -369,7 +369,7 @@ export async function writeConfigAtomically(globalDir, rendered, ownership = { p
       const composed = mergeBasePolicy(baseConfig, current.config)
       // Policy is kit-owned: preserving foreign settings must not reopen the
       // credential and outbound-action safeguards staged with this kit.
-      const output = mergeManagedConfig(composed, rendered, state, ownership)
+      const output = mergeManagedConfig(composed, rendered, state, ownership, current.canonicalConfig)
       validateRoleReferences(output.config, "merged OpenCode config", ownership.providers)
       const text = serializeConfig(output.config, output.state)
       await options.beforeReplace?.(attempt)
@@ -384,7 +384,7 @@ export async function writeConfigAtomically(globalDir, rendered, ownership = { p
   } finally { await release() }
 }
 
-function mergeManagedConfig(existing, rendered, state, ownership) {
+function mergeManagedConfig(existing, rendered, state, ownership, canonicalConfig = undefined) {
   const managed = new Set(Object.keys(state.providers))
   // Providers that were previously kit-owned but are absent from the current
   // authoritative render are tombstoned: they must not reappear from stale
@@ -427,7 +427,14 @@ function mergeManagedConfig(existing, rendered, state, ownership) {
       const current = roleValue(existing, keys)
       // A role value is stale if it appears in the per-role tombstone history (any previously
       // kit-owned value across all provider transitions) OR matches the single removedRoles entry.
-      const staleRemoved = current !== undefined && (
+      // Exception: if the canonical file (opencode.jsonc) explicitly carries this value AND it
+      // differs from the current kit recommendation (state.roles[role]), it is a direct user edit
+      // to the canonical file — not a lower-file fallback — and must be treated as a user override
+      // regardless of history membership.  Only suppress values that arrive exclusively from
+      // lower-precedence files (config.json / opencode.json).
+      const canonicalValue = canonicalConfig !== undefined ? roleValue(canonicalConfig, keys) : undefined
+      const isCanonicalExplicitEdit = canonicalValue === current && current !== state.roles[role]
+      const staleRemoved = current !== undefined && !isCanonicalExplicitEdit && (
         removedRoles[role] === current ||
         (removedRoleHistory[role] !== undefined && removedRoleHistory[role].has(current))
       )

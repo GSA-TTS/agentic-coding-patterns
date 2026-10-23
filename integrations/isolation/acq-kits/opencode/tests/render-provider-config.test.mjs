@@ -679,3 +679,72 @@ test("provider-switch role regression: a,b -> a -> a with role recommendation", 
   assert.equal(installed.model, "acme-ai/a", "recommendation preserved after shrink")
   assert.deepEqual(Object.keys(installed.provider["acme-ai"].models), ["a"], "only model a present")
 })
+
+// ── Finding 7 regression (4246101) ───────────────────────────────────────────
+// Tombstone history must not suppress an explicit canonical user edit that selects
+// an older kit-owned reference. A value present in the canonical opencode.jsonc
+// that differs from the current kit recommendation is a user override — not a stale
+// lower-file fallback — and must persist and clear the relevant tombstone.
+// Stale same values arriving only from config.json / opencode.json remain suppressed.
+
+test("canonical explicit model selection overrides tombstone: render a, render b, set canonical model to a, next render preserves a", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "opencode-config-"))
+
+  // Step 1: Render acme-ai with primary=a (both a and b available)
+  const renderedA = renderProviderConfig([{ facts: facts("acme-ai"), catalog: catalog("acme-ai", ["a", "b"], { primary: "a" }) }])
+  await writeConfigAtomically(directory, renderedA, ownershipFromRendered(renderedA))
+  const afterA = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+  assert.equal(afterA.model, "acme-ai/a", "primary is acme-ai/a after first render")
+
+  // Step 2: Render acme-ai with primary=b — acme-ai/a enters removedRoleHistory
+  const renderedB = renderProviderConfig([{ facts: facts("acme-ai"), catalog: catalog("acme-ai", ["a", "b"], { primary: "b" }) }])
+  await writeConfigAtomically(directory, renderedB, ownershipFromRendered(renderedB))
+  const afterB = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+  assert.equal(afterB.model, "acme-ai/b", "primary updated to acme-ai/b after second render")
+
+  // Step 3: User explicitly edits the canonical opencode.jsonc to select acme-ai/a,
+  // preserving the embedded state metadata (as a real user editor would do).
+  const canonicalText = await readFile(path.join(directory, "opencode.jsonc"), "utf8")
+  const [stateLine, ...bodyLines] = canonicalText.split("\n")
+  const bodyParsed = parseJsonc(bodyLines.join("\n"))
+  bodyParsed.model = "acme-ai/a"
+  await writeFile(path.join(directory, "opencode.jsonc"), stateLine + "\n" + JSON.stringify(bodyParsed))
+  assert.equal(
+    parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8")).model,
+    "acme-ai/a",
+    "user edit written to canonical"
+  )
+
+  // Step 4: Next render (still recommending acme-ai/b) must preserve user's acme-ai/a selection.
+  // acme-ai/a is in removedRoleHistory but the canonical file explicitly holds it — it is a
+  // user override, not a stale lower-file fallback, so the tombstone must not suppress it.
+  await writeConfigAtomically(directory, renderedB, ownershipFromRendered(renderedB))
+  const final = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+  assert.equal(final.model, "acme-ai/a", "canonical user selection acme-ai/a persists across render")
+
+  // Verify the tombstone for primary was cleared by the user override
+  const finalText = await readFile(path.join(directory, "opencode.jsonc"), "utf8")
+  const finalState = JSON.parse(Buffer.from(finalText.split("\n")[0].slice("// acq-provider-config-state: ".length), "base64url").toString("utf8"))
+  assert.equal(finalState.removedRoleHistory?.primary, undefined, "primary tombstone cleared after canonical user override")
+})
+
+test("stale lower-file historical model is still suppressed when canonical does not hold it", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "opencode-config-"))
+
+  // Step 1: Render acme-ai with primary=a
+  const renderedA = renderProviderConfig([{ facts: facts("acme-ai"), catalog: catalog("acme-ai", ["a", "b"], { primary: "a" }) }])
+  await writeConfigAtomically(directory, renderedA, ownershipFromRendered(renderedA))
+
+  // Step 2: Render acme-ai with primary=b — acme-ai/a enters removedRoleHistory
+  const renderedB = renderProviderConfig([{ facts: facts("acme-ai"), catalog: catalog("acme-ai", ["a", "b"], { primary: "b" }) }])
+  await writeConfigAtomically(directory, renderedB, ownershipFromRendered(renderedB))
+
+  // Step 3: Write stale acme-ai/a only into lower-precedence config.json (not the canonical)
+  const staleConfig = { model: "acme-ai/a" }
+  await writeFile(path.join(directory, "config.json"), JSON.stringify(staleConfig))
+
+  // Step 4: Next render (recommending b) must suppress the stale lower-file acme-ai/a
+  await writeConfigAtomically(directory, renderedB, ownershipFromRendered(renderedB))
+  const final = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+  assert.equal(final.model, "acme-ai/b", "stale lower-file acme-ai/a suppressed by tombstone; kit recommendation acme-ai/b wins")
+})
