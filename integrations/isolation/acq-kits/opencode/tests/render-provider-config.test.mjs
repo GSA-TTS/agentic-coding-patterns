@@ -728,6 +728,95 @@ test("canonical explicit model selection overrides tombstone: render a, render b
   assert.equal(finalState.removedRoleHistory?.primary, undefined, "primary tombstone cleared after canonical user override")
 })
 
+// ── Finding 8 regression (c5ea632) ───────────────────────────────────────────
+// Output equality must not silently reclaim an explicitly user-owned role.
+// Scenario: render recommendation a → render recommendation b → user explicitly
+// selects a (canonical) → repeated b renders preserve a → render a then b
+// must NOT reclaim the five user-owned roles. Provenance must survive across
+// full recommendation cycles once the user establishes ownership.
+
+test("user canonical override survives repeated recommendation cycles across all five roles", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "opencode-config-"))
+  const ALL_ROLES = { primary: "large", small: "small-m", compaction: "compact-m", summary: "summary-m", title: "title-m" }
+  const allModels = Object.values(ALL_ROLES)
+
+  // Step 1: Render acme-ai with recommendations = a-suffixed models
+  const renderedA = renderProviderConfig([{ facts: facts("acme-ai"), catalog: catalog("acme-ai", [...allModels.map(m => m + "-a"), ...allModels.map(m => m + "-b")], Object.fromEntries(Object.entries(ALL_ROLES).map(([role, m]) => [role, m + "-a"]))) }])
+  await writeConfigAtomically(directory, renderedA, ownershipFromRendered(renderedA))
+
+  // Step 2: Render with recommendations = b-suffixed models (a-suffixed enter tombstone history)
+  const renderedB = renderProviderConfig([{ facts: facts("acme-ai"), catalog: catalog("acme-ai", [...allModels.map(m => m + "-a"), ...allModels.map(m => m + "-b")], Object.fromEntries(Object.entries(ALL_ROLES).map(([role, m]) => [role, m + "-b"]))) }])
+  await writeConfigAtomically(directory, renderedB, ownershipFromRendered(renderedB))
+  const afterB1 = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+  assert.equal(afterB1.model, "acme-ai/large-b", "primary is b after second render")
+
+  // Step 3: User explicitly edits canonical to select a-suffixed models for ALL FIVE ROLES,
+  // preserving the embedded state metadata line (as a real user editor would).
+  const canonicalRaw = await readFile(path.join(directory, "opencode.jsonc"), "utf8")
+  const [stateLineU, ...bodyLinesU] = canonicalRaw.split("\n")
+  const bodyU = parseJsonc(bodyLinesU.join("\n"))
+  bodyU.model = "acme-ai/large-a"
+  bodyU.small_model = "acme-ai/small-m-a"
+  bodyU.agent = { ...bodyU.agent, compaction: { ...bodyU.agent?.compaction, model: "acme-ai/compact-m-a" }, summary: { ...bodyU.agent?.summary, model: "acme-ai/summary-m-a" }, title: { ...bodyU.agent?.title, model: "acme-ai/title-m-a" } }
+  await writeFile(path.join(directory, "opencode.jsonc"), stateLineU + "\n" + JSON.stringify(bodyU))
+
+  // Step 4: Repeated b renders must preserve the user-selected a values for all five roles
+  for (let i = 0; i < 3; i++) {
+    await writeConfigAtomically(directory, renderedB, ownershipFromRendered(renderedB))
+    const after = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+    assert.equal(after.model, "acme-ai/large-a", `render b #${i + 1}: primary must stay user-selected large-a`)
+    assert.equal(after.small_model, "acme-ai/small-m-a", `render b #${i + 1}: small must stay user-selected small-m-a`)
+    assert.equal(after.agent?.compaction?.model, "acme-ai/compact-m-a", `render b #${i + 1}: compaction must stay user-selected`)
+    assert.equal(after.agent?.summary?.model, "acme-ai/summary-m-a", `render b #${i + 1}: summary must stay user-selected`)
+    assert.equal(after.agent?.title?.model, "acme-ai/title-m-a", `render b #${i + 1}: title must stay user-selected`)
+  }
+
+  // Step 5: Render a again — output equality (config already contains a-suffixed models) must NOT
+  // reclaim ownership of any of the five roles. They are user overrides, not kit defaults.
+  await writeConfigAtomically(directory, renderedA, ownershipFromRendered(renderedA))
+  const afterA2 = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+  assert.equal(afterA2.model, "acme-ai/large-a", "render a: primary must stay user-owned")
+  assert.equal(afterA2.small_model, "acme-ai/small-m-a", "render a: small must stay user-owned")
+  assert.equal(afterA2.agent?.compaction?.model, "acme-ai/compact-m-a", "render a: compaction must stay user-owned")
+  assert.equal(afterA2.agent?.summary?.model, "acme-ai/summary-m-a", "render a: summary must stay user-owned")
+  assert.equal(afterA2.agent?.title?.model, "acme-ai/title-m-a", "render a: title must stay user-owned")
+
+  // Step 6: Render b again — must STILL not reclaim any of the five roles (provenance persists)
+  await writeConfigAtomically(directory, renderedB, ownershipFromRendered(renderedB))
+  const afterB2 = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+  assert.equal(afterB2.model, "acme-ai/large-a", "render b after a: primary must remain user-owned")
+  assert.equal(afterB2.small_model, "acme-ai/small-m-a", "render b after a: small must remain user-owned")
+  assert.equal(afterB2.agent?.compaction?.model, "acme-ai/compact-m-a", "render b after a: compaction must remain user-owned")
+  assert.equal(afterB2.agent?.summary?.model, "acme-ai/summary-m-a", "render b after a: summary must remain user-owned")
+  assert.equal(afterB2.agent?.title?.model, "acme-ai/title-m-a", "render b after a: title must remain user-owned")
+})
+
+test("new untouched roles still become managed when user has overrides on other roles", async () => {
+  // A user override on role X must not prevent role Y (which the user never touched) from
+  // becoming a kit-managed role when the renderer recommends it for the first time.
+  const directory = await mkdtemp(path.join(os.tmpdir(), "opencode-config-"))
+
+  // Step 1: Render with primary=a only (no small/compaction/summary/title recommendations)
+  const renderedPrimary = renderProviderConfig([{ facts: facts("acme-ai"), catalog: catalog("acme-ai", ["a", "b"], { primary: "a" }) }])
+  await writeConfigAtomically(directory, renderedPrimary, ownershipFromRendered(renderedPrimary))
+
+  // Step 2: User explicitly selects a different primary model
+  const rawAfter1 = await readFile(path.join(directory, "opencode.jsonc"), "utf8")
+  const [sl1, ...bl1] = rawAfter1.split("\n")
+  const b1 = parseJsonc(bl1.join("\n"))
+  b1.model = "acme-ai/b"
+  await writeFile(path.join(directory, "opencode.jsonc"), sl1 + "\n" + JSON.stringify(b1))
+
+  // Step 3: Render with primary=a AND small=a for the first time
+  const renderedBoth = renderProviderConfig([{ facts: facts("acme-ai"), catalog: catalog("acme-ai", ["a", "b"], { primary: "a", small: "a" }) }])
+  await writeConfigAtomically(directory, renderedBoth, ownershipFromRendered(renderedBoth))
+  const after3 = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+  // User's primary override must persist
+  assert.equal(after3.model, "acme-ai/b", "user primary override must survive")
+  // New small recommendation (never user-touched) must become managed
+  assert.equal(after3.small_model, "acme-ai/a", "new small recommendation must become managed")
+})
+
 test("stale lower-file historical model is still suppressed when canonical does not hold it", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "opencode-config-"))
 

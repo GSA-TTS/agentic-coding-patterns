@@ -470,8 +470,15 @@ function mergeManagedConfig(existing, rendered, state, ownership, canonicalConfi
       target[keys.at(-1)] = source[keys.at(-1)]
     }
   }
+  // Record kit-owned roles only for roles that are NOT user overrides. A role
+  // whose output value happens to equal the current recommendation must not be
+  // reclaimed as kit-owned when the user explicitly selected that value — doing
+  // so would cause a future recommendation change to tombstone the user's value
+  // into history and silently suppress it on the next render. Kit ownership is
+  // only valid when the renderer (not the user) is the authority for that role.
   const roles = {}
   for (const [role, keys] of Object.entries(ROLE_PATHS)) {
+    if (Object.prototype.hasOwnProperty.call(userRoles, role)) continue
     let source = rendered
     for (const key of keys) source = source?.[key]
     if (source !== undefined && roleValue(config, keys) === source) roles[role] = source
