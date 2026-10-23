@@ -20,7 +20,7 @@ The provider projection reads `ACQ_PROVIDER_INPUT_ROOT/models/providers`.
 The renderer returns `not-ready` without changing global config when that
 generation is absent. Current kit lifecycle semantics do not prove startup hooks
 complete before the agent entrypoint consumes config. The required readiness
-barrier is supplied by the dependent Quickstart #608 change; this kit does not
+barrier is supplied by Quickstart's provider-projection startup gate; this kit does not
 claim that ordering until that dependency lands.
 
 This is the first **harness-agent kit** in the family: it declares the
@@ -61,10 +61,19 @@ reopening credential reads or approval gates. User settings outside
 `permission`, including themes, instructions, MCP entries, and foreign provider
 definitions, are retained.
 
-The renderer owns the static USAi compatibility adapter selected by the trusted
-`providerId`; it supplies the legacy gateway timeouts, LiteLLM mode, and
-non-secret identification headers without adding OpenCode-specific fields to
-neutral provider facts or catalogs.
+The renderer owns the OpenAI-compatible adapter selected by the validated
+`apiProtocol`; it supplies gateway timeouts, LiteLLM mode, and non-secret
+identification headers without adding OpenCode-specific fields to neutral
+provider facts or catalogs.
+
+The adapter in `files/home/opencode-config/render-provider-config.mjs` sets
+`chunkTimeout` to **300000 ms (five minutes)**. This is the maximum idle wait
+for the next SSE event, not the total request duration.
+Extended reasoning or gateway buffering can exceed the former two-minute idle
+limit and trigger `SSE read timed out`. The separate `timeout` remains
+**600000 ms (ten minutes)**, so stalled requests are still bounded. A genuinely
+stalled stream can now take three minutes longer to fail. Restart or reload the
+OpenCode runtime after the kit renders updated configuration to apply it.
 
 ## Why a direct platform tarball pin, not npm install or nixpkgs
 

@@ -26,7 +26,9 @@ const API_PROTOCOLS = Object.freeze({
     npm: "@ai-sdk/openai-compatible",
     options: Object.freeze({
       timeout: 600000,
-      chunkTimeout: 120000,
+      // Allow five-minute SSE idle gaps during reasoning or gateway buffering;
+      // the separate ten-minute total request limit still bounds each attempt.
+      chunkTimeout: 300000,
       litellmProxy: true,
       headers: Object.freeze({
         "User-Agent": "OpenCode/1.0",
