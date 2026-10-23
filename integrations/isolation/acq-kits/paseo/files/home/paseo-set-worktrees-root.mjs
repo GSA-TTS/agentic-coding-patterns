@@ -14,6 +14,10 @@
 //
 // USAGE:
 //   node paseo-set-worktrees-root.mjs --root <absolute-path> [--paseo-home <dir>]
+//     [--initialize-only]
+// Initialize-only seeds an absent config; any existing directory entry (even a
+// dangling symlink or invalid config) returns "existing" without modification.
+// Successful initialization returns "changed". Normal mode is unchanged.
 //
 // EXIT / OUTPUT (single line to stdout, for the wrapper to branch on):
 //   changed   — config.json was updated (worktrees.root differed); caller should
@@ -28,7 +32,7 @@
 // startup script, then writes atomically (temp file + rename) with private 0600
 // perms, matching how Paseo itself stores config.json.
 
-import { mkdirSync, readFileSync, renameSync, rmdirSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmdirSync, writeFileSync, existsSync, lstatSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -40,6 +44,8 @@ function parseArgs(argv) {
       args.root = argv[++i];
     } else if (a === "--paseo-home") {
       args.paseoHome = argv[++i];
+    } else if (a === "--initialize-only") {
+      args.initializeOnly = true;
     } else {
       throw new Error(`unknown argument: ${a}`);
     }
@@ -86,8 +92,18 @@ function withConfigLock(paseoHome, fn) {
   }
 }
 
-function updateConfig(root, paseoHome) {
+function updateConfig(root, paseoHome, initializeOnly = false) {
   const configPath = path.join(paseoHome, "config.json");
+
+  if (initializeOnly) {
+    try {
+      lstatSync(configPath);
+      process.stdout.write("existing\n");
+      return;
+    } catch (err) {
+      if (err.code !== "ENOENT") throw err;
+    }
+  }
 
   // Read the existing config if present. The daemon initializes config.json on
   // first start; if it isn't there yet (we ran before the daemon), start from an
@@ -147,7 +163,7 @@ function updateConfig(root, paseoHome) {
 }
 
 function main() {
-  const { root, paseoHome: paseoHomeArg } = parseArgs(process.argv.slice(2));
+  const { root, paseoHome: paseoHomeArg, initializeOnly } = parseArgs(process.argv.slice(2));
 
   if (!path.isAbsolute(root)) {
     // A relative root would be resolved by Paseo against PASEO_HOME, not the
@@ -157,7 +173,7 @@ function main() {
 
   const paseoHome = resolvePaseoHome(paseoHomeArg);
   mkdirSync(paseoHome, { recursive: true });
-  withConfigLock(paseoHome, () => updateConfig(root, paseoHome));
+  withConfigLock(paseoHome, () => updateConfig(root, paseoHome, initializeOnly));
 }
 
 try {

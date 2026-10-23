@@ -53,6 +53,9 @@
 
 set -eu
 
+. "${HOME:-/home/agent}/paseo-timing.sh"
+paseo_timing shim_begin
+
 # Daemon bind. Keep in sync with the kit spec's PASEO_LISTEN / publishedPorts.
 PASEO_PORT="$(printf '%s' "${PASEO_LISTEN:-0.0.0.0:6767}" | sed -n 's/.*:\([0-9][0-9]*\)$/\1/p')"
 [ -n "$PASEO_PORT" ] || PASEO_PORT=6767
@@ -68,15 +71,17 @@ SET_ROOT_SCRIPT="$HOME_DIR/paseo-set-worktrees-root.mjs"
 #    resolves a relative root against PASEO_HOME, not the project).
 WORKTREES_ROOT="$(pwd -P)/.paseo-worktrees"
 worktrees_changed=""
+paseo_timing root_begin
 if [ -f "$SET_ROOT_SCRIPT" ] && command -v node >/dev/null 2>&1; then
   # The helper prints "changed" / "unchanged" on success, or "error: ..." + rc=1.
   _set_out="$(PASEO_HOME="$PASEO_HOME_DIR" node "$SET_ROOT_SCRIPT" --root "$WORKTREES_ROOT" 2>&1 || true)"
   case "$_set_out" in
-    changed)   worktrees_changed=yes ;;
-    unchanged) : ;;
-    *)         echo "paseo: could not pin Paseo worktree root: $_set_out" >&2 ;;
+    changed)   worktrees_changed=yes; paseo_timing root_changed ;;
+    unchanged) paseo_timing root_unchanged ;;
+    *)         paseo_timing root_error 1; echo "paseo: could not pin Paseo worktree root: $_set_out" >&2 ;;
   esac
 fi
+paseo_timing root_end
 
 # 2. If the root changed, restart the daemon worker so it re-reads config.json.
 #    Paseo 0.9 exposes `paseo daemon restart` for this. If the daemon is wedged or
@@ -104,9 +109,41 @@ daemon_up() {
 # serves for `Accept-Encoding: br`, what a browser sends). curl codec support is
 # irrelevant — we never decode, only count bytes. Returns 0 only when the full
 # body is delivered.
+# Resolve the kit's per-user installation first, then the inherited PATH.
+# Startup normally prepends the per-user bin only in its own process tree;
+# attach does not inherit that PATH change. Keep this lookup local to artifacts.
+# Prefer its nested dependency; only use a same-prefix hoisted server when no
+# nested server exists. Unknown layouts retain the original search below.
+paseo_bundle_artifact() {
+  _artifact_bin="$HOME_DIR/.npm-global/bin/paseo"
+  if [ ! -f "$_artifact_bin" ] || [ ! -x "$_artifact_bin" ]; then
+    _artifact_bin="$(command -v paseo 2>/dev/null)" || return 1
+  fi
+  _artifact_bin="$(readlink -f "$_artifact_bin" 2>/dev/null)" || return 1
+  case "$_artifact_bin" in
+    */node_modules/@getpaseo/cli/bin/paseo) ;;
+    *) return 1 ;;
+  esac
+  _artifact_cli="${_artifact_bin%/bin/paseo}"
+  _artifact_server="$_artifact_cli/node_modules/@getpaseo/server"
+  if [ ! -d "$_artifact_server" ]; then
+    _artifact_server="${_artifact_cli%/cli}/server"
+  fi
+  _artifact_file="$_artifact_server/dist/server/web-ui$1.br"
+  [ -f "$_artifact_file" ] && [ -r "$_artifact_file" ] || return 1
+  printf '%s\n' "$_artifact_file"
+}
+
 ui_ready() {
-  daemon_up || return 1
-  _idx="$(curl -fsS "http://127.0.0.1:$PASEO_PORT/" 2>/dev/null)" || return 1
+  paseo_timing ui_health_begin
+  _ui_rc=0
+  daemon_up || _ui_rc=$?
+  paseo_timing ui_health_end "$_ui_rc"
+  [ "$_ui_rc" -eq 0 ] || return 1
+  paseo_timing ui_index_begin
+  _idx="$(curl -fsS "http://127.0.0.1:$PASEO_PORT/" 2>/dev/null)" || _ui_rc=$?
+  paseo_timing ui_index_end "$_ui_rc"
+  [ "$_ui_rc" -eq 0 ] || return 1
   _bundle="$(printf '%s' "$_idx" \
     | grep -oE '/_expo/static/js/web/index-[0-9a-f]+\.js' | head -1)"
   # No hashed bundle in index.html => can't assert; treat "root serves HTML" as
@@ -114,23 +151,50 @@ ui_ready() {
   [ -n "$_bundle" ] || return 0
   # Locate the on-disk .br the daemon would serve; its size is the expected wire
   # length for an Accept-Encoding: br fetch.
-  _brfile="$(find / -path "*/web-ui$_bundle.br" 2>/dev/null | head -1)"
+  paseo_timing ui_find_begin
+  _brfile="$(paseo_bundle_artifact "$_bundle")" || \
+    _brfile="$(find / -path "*/web-ui$_bundle.br" 2>/dev/null | head -1)"
+  paseo_timing ui_find_end
+  paseo_timing ui_bundle_begin
   _got="$(curl -fsS -H 'Accept-Encoding: br' -o /dev/null \
-      -w '%{size_download}' "http://127.0.0.1:$PASEO_PORT$_bundle" 2>/dev/null)" || return 1
+      -w '%{size_download}' "http://127.0.0.1:$PASEO_PORT$_bundle" 2>/dev/null)" || _ui_rc=$?
+  paseo_timing ui_bundle_end "$_ui_rc"
+  [ "$_ui_rc" -eq 0 ] || return 1
+  paseo_timing ui_size_begin
   if [ -n "$_brfile" ] && [ -r "$_brfile" ]; then
     _expected="$(wc -c < "$_brfile" 2>/dev/null | tr -d ' ')"
-    [ -n "$_expected" ] && [ "$_got" = "$_expected" ]
+    if [ -n "$_expected" ] && [ "$_got" = "$_expected" ]; then
+      _ui_rc=0
+    else
+      _ui_rc=1
+    fi
   else
     # Can't find the artifact to size-check against: fall back to "got a
     # non-trivial body" rather than blocking readiness forever.
-    [ "${_got:-0}" -gt 100000 ] 2>/dev/null
+    if [ "${_got:-0}" -gt 100000 ] 2>/dev/null; then
+      _ui_rc=0
+    else
+      _ui_rc=1
+    fi
   fi
+  paseo_timing ui_size_end "$_ui_rc"
+  return "$_ui_rc"
+}
+timed_ui_ready() {
+  paseo_timing ui_probe_begin
+  _probe_rc=0
+  ui_ready || _probe_rc=$?
+  paseo_timing ui_probe_end "$_probe_rc"
+  return "$_probe_rc"
 }
 if [ -n "$worktrees_changed" ]; then
   echo "paseo: pinned Paseo worktree root to $WORKTREES_ROOT; restarting the daemon to apply it ..."
+  paseo_timing restart_begin
   if command -v paseo >/dev/null 2>&1 && paseo daemon restart --home "$PASEO_HOME_DIR" --timeout 30 >/dev/null 2>&1; then
-    :
+    paseo_timing restart_end
   else
+    paseo_timing restart_end "$?"
+    paseo_timing fallback_begin
     echo "paseo: daemon restart command failed; falling back to supervisor respawn" >&2
     killed_daemon=""
     for _pid in $(pgrep -u "$(id -u)" -f "paseo daemon run" 2>/dev/null); do
@@ -140,18 +204,29 @@ if [ -n "$worktrees_changed" ]; then
       fi
       if kill "$_pid" 2>/dev/null; then
         killed_daemon=yes
+        paseo_timing fallback_kill_sent
       fi
     done
     [ -n "$killed_daemon" ] && rm -f "$PASEO_HOME_DIR/paseo.pid" 2>/dev/null || true
+    paseo_timing fallback_end
   fi
-  # Wait for the daemon to return on the new root (bounded).
-  _i=0
-  while [ "$_i" -lt 30 ]; do
-    daemon_up && break
-    _i=$((_i + 1))
-    sleep 1
-  done
 fi
+
+# Wait for initial startup or the restarted daemon with the same bounded budget.
+# An early-seeded root avoids a restart, not the cold-start health allowance.
+_i=0
+paseo_timing health_wait_begin
+_health_rc=1
+while [ "$_i" -lt 30 ]; do
+  paseo_timing health_probe_begin
+  _health_rc=0
+  daemon_up || _health_rc=$?
+  paseo_timing health_probe_end "$_health_rc"
+  [ "$_health_rc" -eq 0 ] && break
+  _i=$((_i + 1))
+  sleep 1
+done
+paseo_timing health_wait_end "$_health_rc"
 
 # 3. Report status + how to reach it. Give the daemon a brief moment if it is
 #    still coming up (first boot installs the CLI first), and — importantly — wait
@@ -160,7 +235,8 @@ fi
 #    immutable asset cache (see ui_ready() above), which black-pages every later
 #    reload until the cache is cleared.
 ui_is_ready=""
-if ui_ready; then
+paseo_timing ui_wait_begin
+if timed_ui_ready; then
   ui_is_ready=yes
   echo "paseo: Paseo daemon + web UI are up on 127.0.0.1:$PASEO_PORT (started by the kit startup script)"
 else
@@ -168,7 +244,7 @@ else
   # also installs the CLI, so allow a generous window.
   _i=0
   while [ "$_i" -lt 60 ]; do
-    if ui_ready; then ui_is_ready=yes; break; fi
+    if timed_ui_ready; then ui_is_ready=yes; break; fi
     _i=$((_i + 1))
     sleep 1
   done
@@ -182,6 +258,11 @@ else
     echo "paseo: Paseo daemon not answering yet on :$PASEO_PORT; the startup" >&2
     echo "       supervisor keeps retrying — see $DAEMON_LOG" >&2
   fi
+fi
+if [ -n "$ui_is_ready" ]; then
+  paseo_timing ui_wait_end
+else
+  paseo_timing ui_wait_end 1
 fi
 
 cat <<EOF
@@ -224,6 +305,7 @@ EOF
 #     daemon + UI are already supervised by the startup script, so there is
 #     nothing for us to hold — EXIT CLEANLY and give the terminal back.
 is_pid1() { [ "$$" -eq 1 ]; }
+paseo_timing shim_end
 
 if is_pid1; then
   cat <<EOF

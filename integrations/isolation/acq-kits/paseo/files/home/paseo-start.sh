@@ -81,12 +81,12 @@ reconcile_preboot_lock() {
         epoch <= 0 ||
         epoch > Date.now() / 1000
       ) process.exit(2);
-      process.stdout.write(`${pid}\t${Math.floor(epoch)}\n`);
+      process.stdout.write(String(pid) + "\t" + Math.floor(epoch) + "\n");
     } catch { process.exit(2); }
   ' "$_lock" 2>/dev/null || true)"
   _tab="$(printf '\t')"
-  _pid="${_lock_record%%$_tab*}"
-  _started="${_lock_record#*$_tab}"
+  _pid="${_lock_record%%"$_tab"*}"
+  _started="${_lock_record#*"$_tab"}"
   case "$_pid" in
     ''|*[!0-9]*)
       echo "paseo: pre-boot lock check: malformed or ambiguous lock $_lock; leaving it untouched" >>"$_log" 2>/dev/null || true
@@ -177,6 +177,36 @@ if [ "${PASEO_START_RECONCILE_TEST:-}" = 1 ]; then
   exit $?
 fi
 
+. "$HOME/paseo-timing.sh"
+paseo_timing startup_begin
+
+# Seed only an absent config, before npm work gives attach time to race us.
+# ACQ_WORKSPACE is the primary GUEST mount (also under --clone), not necessarily
+# an overridden attach cwd. Existing configs belong to the normal shim path.
+seed_initial_worktrees_root() {
+  case "${ACQ_WORKSPACE:-}" in /*) ;; *) return 0 ;; esac
+  _seed_home="${PASEO_HOME:-$HOME/.paseo}"
+  # Shell startup and the Node helper must address the same home. Do not infer
+  # meanings for relative or literal-tilde homes in this optional optimization.
+  case "$_seed_home" in /*) ;; *) return 0 ;; esac
+  # The helper trims and lexically resolves its argument. Reject forms that can
+  # disagree with shell/filesystem traversal, especially symlink/.. components.
+  case "$_seed_home" in
+    *[[:space:]]|*/../*|*/..|*/./*|*/.|*//*) return 0 ;;
+  esac
+  [ -d "$ACQ_WORKSPACE" ] || return 0
+  command -v node >/dev/null 2>&1 || return 0
+  [ -r "$HOME/paseo-set-worktrees-root.mjs" ] || return 0
+  _seed_workspace="$(CDPATH='' cd -- "$ACQ_WORKSPACE" && pwd -P)" || return 1
+  _seed_result="$(node "$HOME/paseo-set-worktrees-root.mjs" \
+    --initialize-only --paseo-home "$_seed_home" \
+    --root "${_seed_workspace%/}/.paseo-worktrees")" || return 1
+  case "$_seed_result" in changed|existing) return 0 ;; *) return 1 ;; esac
+}
+if ! seed_initial_worktrees_root; then
+  echo "paseo: initial workspace root could not be seeded; retaining attach-time handling" >&2
+fi
+
 # Daemon bind. Keep in sync with the kit spec's publishedPorts guest port (6767)
 # and PASEO_LISTEN env. We derive the port from PASEO_LISTEN so a single override
 # moves both the bind and the health probe. The default is 0.0.0.0 (all guest
@@ -209,20 +239,24 @@ mkdir -p "$STATE_DIR" 2>/dev/null || true
 # the non-root agent user, which cannot write the only files a bare non-login
 # `sh -c` would pick up PATH from (/etc/environment, /etc/profile.d/* are
 # root-owned, and a plain `sh -c` sources neither /etc/profile nor ~/.profile).
-# Callers that exec into the sandbox (e.g. the kit's verify probes) must augment
-# PATH themselves; the verify script's in_sbx() does exactly that.
+# Below, publication into ~/.local/bin makes the installed CLI discoverable to
+# later callers that retain the image PATH, without inheriting this adjustment.
 NPM_BIN="$(npm prefix -g 2>/dev/null)/bin"
 case ":$PATH:" in *":$NPM_BIN:"*) : ;; *) PATH="$NPM_BIN:$PATH" ;; esac
 case ":$PATH:" in *":$HOME/.npm-global/bin:"*) : ;; *) PATH="$HOME/.npm-global/bin:$PATH" ;; esac
 export PATH
+paseo_timing startup_path_done
 
 # --- Install the pinned Paseo CLI if it is missing or out of date. -----------
 _ver="${PASEO_CLI_VERSION:-0.12.0}"
 _installed_ver=""
+paseo_timing version_begin
 if command -v paseo >/dev/null 2>&1; then
   _installed_ver="$(paseo --version 2>/dev/null | sed -n 's/^v//; s/.*\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p; q')"
 fi
+paseo_timing version_end
 if [ "$_installed_ver" != "$_ver" ]; then
+  paseo_timing install_begin
   # Route npm through the sandbox proxy. npm honors HTTP(S)_PROXY automatically,
   # but be explicit so any Node-side downloads (none expected for the sherpa
   # prebuilt, which is a plain npm tarball) also proxy.
@@ -270,8 +304,10 @@ if [ "$_installed_ver" != "$_ver" ]; then
   # var regardless of case, so it can't be silently shadowed the same way. Same
   # pattern the sibling pi-coding-agent kit uses for the identical reason.
   mkdir -p "$HOME/.npm-global" "$HOME/.npm"
+  _install_rc=0
   npm install -g --prefix "$HOME/.npm-global" --cache "$HOME/.npm" \
-    "@getpaseo/cli@${_ver}" >>"$HOME/.local/state/paseo/paseo-install.log" 2>&1 || true
+    "@getpaseo/cli@${_ver}" >>"$HOME/.local/state/paseo/paseo-install.log" 2>&1 || _install_rc=$?
+  paseo_timing install_end "$_install_rc"
 fi
 command -v paseo >/dev/null 2>&1 || {
   # Route the marker to BOTH the log and stderr. This is written for ANY
@@ -283,6 +319,53 @@ command -v paseo >/dev/null 2>&1 || {
     | tee -a "$HOME/.local/state/paseo/paseo-install.log" >&2
   exit 0   # never fail the sandbox over an optional UI
 }
+
+# Publish into the image's existing user bin, without changing later shells' PATH.
+# The receipt records only a link we created. Never replace a foreign destination,
+# even when it happens to point at the same CLI. Canonical targets keep readlink-
+# based package discovery working and avoid linking back to our own public name.
+publish_paseo_cli() {
+  _cli_target=""
+  for _cli_candidate in "$HOME/.npm-global/bin/paseo" "$NPM_BIN/paseo"; do
+    if [ -f "$_cli_candidate" ] && [ -x "$_cli_candidate" ]; then
+      _cli_target="$(readlink -f "$_cli_candidate" 2>/dev/null)" || return 1
+      break
+    fi
+  done
+  if [ -z "$_cli_target" ]; then
+    _cli_candidate="$(command -v paseo 2>/dev/null)" || return 1
+    _cli_target="$(readlink -f "$_cli_candidate" 2>/dev/null)" || return 1
+  fi
+  _cli_link="$HOME/.local/bin/paseo"
+  [ "$_cli_target" != "$_cli_link" ] && [ -f "$_cli_target" ] && [ -x "$_cli_target" ] || return 1
+  _cli_receipt="$STATE_DIR/paseo-cli-link-target"
+  _cli_owned=""
+  if [ -r "$_cli_receipt" ]; then
+    read -r _cli_owned < "$_cli_receipt" || return 1
+  fi
+  if [ -e "$_cli_link" ] || [ -L "$_cli_link" ]; then
+    if [ ! -L "$_cli_link" ] || [ -z "$_cli_owned" ]; then
+      echo "paseo: preserving existing CLI destination; public CLI link not managed by kit" >&2
+      return 0
+    fi
+    _cli_current="$(readlink "$_cli_link")" || return 1
+    if [ "$_cli_current" != "$_cli_owned" ]; then
+      echo "paseo: preserving changed CLI link; destination no longer managed by kit" >&2
+      return 0
+    fi
+    [ "$_cli_current" != "$_cli_target" ] || return 0
+    # -n prevents following a stale link that now points to a directory.
+    ln -sfn "$_cli_target" "$_cli_link" || return 1
+  else
+    mkdir -p "$HOME/.local/bin" || return 1
+    # No force: a destination created since the check is preserved.
+    ln -s "$_cli_target" "$_cli_link" || return 1
+  fi
+  printf '%s\n' "$_cli_target" > "$_cli_receipt" || return 1
+}
+if ! publish_paseo_cli; then
+  echo "paseo: could not publish managed CLI link; check user bin/state permissions" >&2
+fi
 
 # --- Persist daemon configuration that Paseo 0.9 no longer accepts as flags. ---
 # Paseo 0.9 removed `paseo daemon start --listen/--web-ui/--foreground` and, in
@@ -311,7 +394,9 @@ release_config_lock() {
 }
 
 config_ok=yes
+paseo_timing config_begin
 if ! acquire_config_lock; then
+  paseo_timing config_end 1
   echo "paseo: error: could not lock $PASEO_HOME_DIR/config.json; not starting unverified daemon" >&2
   exit 0
 fi
@@ -333,8 +418,10 @@ if ! node "$HOME/paseo-assert-daemon-config.mjs" --paseo-home "$PASEO_HOME_DIR" 
 fi
 release_config_lock
 if [ -z "$config_ok" ]; then
+  paseo_timing config_end 1
   exit 0
 fi
+paseo_timing config_end
 
 if ! reconcile_preboot_lock; then
   echo "paseo: pre-boot lock reconciliation did not complete; not starting a second daemon" >&2
@@ -370,18 +457,27 @@ mkdir -p "$(dirname "$DAEMON_LOG")" 2>/dev/null || true
 # so the supervisor can see it exit and relaunch it.
 # argv to the inner sh -c: $0=marker, $1=RESTART_DELAY, $2=PASEO_LISTEN.
 if ! supervisor_running paseo-daemon; then
+  paseo_timing supervisor_spawn
   ( sh -c '
+      . "$HOME/paseo-timing.sh"
       while :; do
         echo "[supervisor] starting paseo daemon at $(date -u +%FT%TZ)"
         # Let Paseo own its PID lock. It already reclaims dead-owner/stale locks,
         # and deleting the lock here could remove a live worker lock during
         # restart races.
-        PASEO_LISTEN="$2" PASEO_WEB_UI_ENABLED=true PASEO_RELAY_ENABLED=false paseo daemon run --home "${PASEO_HOME:-$HOME/.paseo}" || true
+        paseo_timing daemon_launch
+        _daemon_rc=0
+        PASEO_LISTEN="$2" PASEO_WEB_UI_ENABLED=true PASEO_RELAY_ENABLED=false paseo daemon run --home "${PASEO_HOME:-$HOME/.paseo}" || _daemon_rc=$?
+        paseo_timing daemon_exit "$_daemon_rc"
         echo "[supervisor] paseo daemon exited; restarting in ${1}s"
+        paseo_timing backoff_begin
         sleep "$1"
+        paseo_timing backoff_end
       done
     ' "supervisor:paseo-daemon" "$RESTART_DELAY" "$PASEO_LISTEN" \
     >>"$DAEMON_LOG" 2>&1 ) &
+else
+  paseo_timing supervisor_existing
 fi
 
 # --- Pre-populate projects from the mounted host directories (every boot). -----
