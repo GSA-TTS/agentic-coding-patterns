@@ -108,7 +108,7 @@ test("provider projection applies protocol adapter options, OpenCode cost keys, 
     baseURL: "https://api.gsa.usai.gov/api/v1",
     apiKey: "{env:USAI_API_KEY}",
     timeout: 600000,
-    chunkTimeout: 120000,
+    chunkTimeout: 300000,
     litellmProxy: true,
     headers: {
       "User-Agent": "OpenCode/1.0",
@@ -253,6 +253,37 @@ test("the exact previous shipped config migrates once without ownership metadata
   const installed = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
   assert.deepEqual(installed.provider.usai, legacyConfig.provider.usai)
   assert.equal(installed.model, legacyConfig.model)
+})
+
+test("stream timeout upgrades owned and legacy configs and survives repeated startup writes", async (t) => {
+  const kitRoot = new URL("../../usai-provider/", import.meta.url)
+  const rendered = renderProviderConfig([{
+    facts: JSON.parse(await readFile(new URL("provider-input/facts.json", kitRoot), "utf8")),
+    catalog: JSON.parse(await readFile(new URL("files/home/usai-config/model-catalog-snapshot.json", kitRoot), "utf8")),
+  }])
+  for (const mode of ["fresh", "owned", "legacy"]) {
+    await t.test(mode, async (t) => {
+      const directory = await mkdtemp(path.join(os.tmpdir(), "opencode-timeout-"))
+      t.after(() => rm(directory, { recursive: true, force: true }))
+      const filename = path.join(directory, "opencode.jsonc")
+      if (mode === "owned") {
+        const previous = structuredClone(rendered)
+        previous.provider.usai.options.chunkTimeout = 120000
+        await writeConfigAtomically(directory, previous, ownershipFromRendered(previous))
+      } else if (mode === "legacy") {
+        const legacy = await readFile(new URL("../../../../providers/usai/tests/fixtures/opencode-production.jsonc", import.meta.url), "utf8")
+        assert.equal(parseJsonc(legacy).provider.usai.options.chunkTimeout, 120000)
+        await writeFile(filename, legacy)
+      }
+      await writeConfigAtomically(directory, rendered, ownershipFromRendered(rendered))
+      const first = await readFile(filename, "utf8")
+      const options = parseJsonc(first).provider.usai.options
+      assert.equal(options.chunkTimeout, 300000)
+      assert.equal(options.timeout, 600000)
+      await writeConfigAtomically(directory, rendered, ownershipFromRendered(rendered))
+      assert.deepEqual(parseJsonc(await readFile(filename, "utf8")), parseJsonc(first))
+    })
+  }
 })
 
 test("metadata-free legacy provider edits fail closed", async () => {
