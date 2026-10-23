@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.17.1](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.17.0...v1.17.1) (2026-10-23)
+
+
+### Bug Fixes
+
+* **opencode:** allow five-minute stream idle gaps ([#533](https://github.com/GSA-TTS/agentic-coding-patterns/issues/533)) ([9fe6440](https://github.com/GSA-TTS/agentic-coding-patterns/commit/9fe644008ff300eae48e2ebe95c5c4da5a461d15))
+* **paseo-kit:** improve startup readiness and CLI discovery ([#535](https://github.com/GSA-TTS/agentic-coding-patterns/issues/535)) ([3fcab2d](https://github.com/GSA-TTS/agentic-coding-patterns/commit/3fcab2d43476ac5d25f931e35238d7b55d1bd81e))
+
 ## [1.17.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.16.1...v1.17.0) (2026-10-23)
 
 
