@@ -478,6 +478,45 @@ test("removed legacy provider stays removed with stale lower config while preser
   assert.equal(installed.theme, "dark", "unrelated lower key must be preserved")
 })
 
+test("all stale legacy role defaults stay removed until a genuine user override replaces one", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "opencode-config-"))
+  const legacy = await readFile(new URL("../../../../providers/usai/tests/fixtures/opencode-production.jsonc", import.meta.url), "utf8")
+  const legacyConfig = parseJsonc(legacy)
+  await writeFile(path.join(directory, "config.json"), JSON.stringify(legacyConfig))
+  await writeFile(path.join(directory, "opencode.jsonc"), legacy)
+  const empty = renderProviderConfig([])
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await writeConfigAtomically(directory, empty, ownershipFromRendered(empty))
+    const installed = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+    assert.equal(installed.model, undefined)
+    assert.equal(installed.small_model, undefined)
+    assert.equal(installed.agent?.compaction?.model, undefined)
+    assert.equal(installed.agent?.summary?.model, undefined)
+    assert.equal(installed.agent?.title?.model, undefined)
+  }
+  const current = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+  current.model = "anthropic/claude-sonnet-4-5"
+  await writeFile(path.join(directory, "opencode.jsonc"), JSON.stringify(current))
+  await writeConfigAtomically(directory, empty, ownershipFromRendered(empty))
+  const installed = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+  assert.equal(installed.model, "anthropic/claude-sonnet-4-5")
+  assert.equal(installed.small_model, undefined)
+})
+
+test("lower-file-only shipped legacy config is recognized and remains removed", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "opencode-config-"))
+  const legacy = await readFile(new URL("../../../../providers/usai/tests/fixtures/opencode-production.jsonc", import.meta.url), "utf8")
+  await writeFile(path.join(directory, "config.json"), legacy)
+  const empty = renderProviderConfig([])
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await writeConfigAtomically(directory, empty, ownershipFromRendered(empty))
+    const installed = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+    assert.equal(installed.provider?.usai, undefined)
+    assert.equal(installed.model, undefined)
+    assert.equal(installed.small_model, undefined)
+  }
+})
+
 // ── Finding 3 regressions ────────────────────────────────────────────────────
 // Built-in provider/model references (e.g. anthropic/claude-sonnet-4-5) must not
 // fail global-file validation when provider is not managed/defined.

@@ -392,10 +392,15 @@ function mergeManagedConfig(existing, rendered, state, ownership) {
   const previouslyRemoved = new Set(state.removed ?? [])
   const newOwned = new Set(Object.keys(ownership.providers))
   const tombstoned = new Set([...managed, ...previouslyRemoved].filter((id) => !newOwned.has(id)))
+  const removedRoles = { ...(state.removedRoles ?? {}) }
+  for (const [role, reference] of Object.entries(state.roles)) {
+    if (ownership.roles[role] === undefined) removedRoles[role] = reference
+  }
   const userRoles = Object.fromEntries(Object.entries(ROLE_PATHS)
     .map(([role, keys]) => {
       const current = roleValue(existing, keys)
-      return [role, current !== undefined && (state.roles[role] === undefined || current !== state.roles[role]) ? current : undefined]
+      const staleRemoved = current !== undefined && removedRoles[role] === current
+      return [role, current !== undefined && !staleRemoved && (state.roles[role] === undefined || current !== state.roles[role]) ? current : undefined]
     })
     .filter(([, value]) => value !== undefined))
   const provider = { ...(existing.provider ?? {}), ...(rendered.provider ?? {}) }
@@ -418,7 +423,7 @@ function mergeManagedConfig(existing, rendered, state, ownership) {
       target[keys.at(-1)] = userRoles[role]
       continue
     }
-    if (state.roles[role] !== undefined && !userOverride) delete target[keys.at(-1)]
+    if ((state.roles[role] !== undefined || removedRoles[role] !== undefined) && !userOverride) delete target[keys.at(-1)]
     let source = rendered
     for (const key of keys.slice(0, -1)) source = source?.[key]
     if (source?.[keys.at(-1)] !== undefined && !userOverride) {
@@ -433,8 +438,11 @@ function mergeManagedConfig(existing, rendered, state, ownership) {
     for (const key of keys) source = source?.[key]
     if (source !== undefined && roleValue(config, keys) === source) roles[role] = source
   }
+  for (const role of Object.keys(userRoles)) delete removedRoles[role]
+  for (const role of Object.keys(roles)) delete removedRoles[role]
   const removed = tombstoned.size > 0 ? [...tombstoned].sort() : undefined
-  const newState = { schemaVersion: "acq-opencode-provider-state/v3", providers: ownership.providers, roles, ...(removed ? { removed } : {}) }
+  const hasRemovedRoles = Object.keys(removedRoles).length > 0
+  const newState = { schemaVersion: "acq-opencode-provider-state/v3", providers: ownership.providers, roles, ...(removed ? { removed } : {}), ...(hasRemovedRoles ? { removedRoles } : {}) }
   return { config, state: newState }
 }
 
@@ -474,6 +482,12 @@ function validateOwnership(state) {
       if (!PROVIDER_ID.test(id)) throw new Error("invalid provider ownership removed entry")
     }
   }
+  if (state.removedRoles !== undefined) {
+    object(state.removedRoles, "provider ownership removed roles")
+    for (const [role, reference] of Object.entries(state.removedRoles)) {
+      if (!ROLE_PATHS[role] || typeof reference !== "string") throw new Error("invalid provider ownership removed role")
+    }
+  }
 }
 
 function statePayload(state) {
@@ -491,8 +505,13 @@ function generatedProvider(value) {
 }
 
 function readEmbeddedState(text, config, expectedOwnership) {
-  if (text === undefined) return { providers: {}, roles: {} }
-  const line = text.split("\n", 1)[0]
+  // Finding 2 fix: when canonical opencode.jsonc is absent, still run legacy
+  // recognition against the composed merged configuration (which includes
+  // lower-precedence config.json / opencode.json). An absent canonical is not
+  // "no config at all" — the merged config may contain a fingerprint-matched
+  // legacy block that must be claimed and migrated on this first render.
+  const effectiveText = text === undefined ? "" : text
+  const line = effectiveText.split("\n", 1)[0]
   if (!line.startsWith(STATE_COMMENT)) {
     const expected = expectedOwnership?.providers ?? {}
     const provider = config.provider ?? {}
