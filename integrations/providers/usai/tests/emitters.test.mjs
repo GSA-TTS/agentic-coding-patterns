@@ -20,7 +20,11 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { test } from "node:test"
 
-import { emitOpenCodeBlockFromCatalog } from "../emitters/opencode.mjs"
+import {
+  emitOpenCodeBlockFromCatalog,
+  emitOpenCodeDefaults,
+  patchOpenCodeConfig,
+} from "../emitters/opencode.mjs"
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const USAI_DIR = path.resolve(HERE, "..")
@@ -192,4 +196,242 @@ test("duplicate ids and multiline vendor labels are refused", () => {
   const duplicateVendor = minimalCatalog({ id: "benign", name: "Benign" })
   duplicateVendor.vendors.push({ ...duplicateVendor.vendors[0] })
   assert.throws(() => emitOpenCodeBlockFromCatalog(duplicateVendor), /duplicate vendor key/)
+})
+
+for (const { label, file } of SHIPPED_CONFIGS) {
+  test(`patchOpenCodeConfig reproduces the ${label} shipped opencode.jsonc byte-for-byte`, () => {
+    const originalText = readFileSync(file, "utf8")
+    const catalog = JSON.parse(readFileSync(CATALOG_JSON, "utf8"))
+    const patched = patchOpenCodeConfig(originalText, catalog)
+
+    if (patched !== originalText) {
+      // eslint-disable-next-line no-console
+      console.error(`[${label} patchOpenCodeConfig mismatch]\n${firstMismatchReport(originalText, patched)}`)
+    }
+    assert.strictEqual(
+      patched,
+      originalText,
+      `patchOpenCodeConfig does not reproduce ${label} opencode.jsonc byte-for-byte`,
+    )
+  })
+}
+
+test("emitOpenCodeDefaults maps neutral catalog defaults to usai/ prefixed roles", () => {
+  const catalog = JSON.parse(readFileSync(CATALOG_JSON, "utf8"))
+  const defaults = emitOpenCodeDefaults(catalog)
+  assert.deepEqual(defaults, {
+    model: "usai/claude-sonnet-5",
+    small_model: "usai/claude_4_5_haiku",
+    compaction: "usai/gpt-5.6-terra",
+    summary: "usai/gpt_5_2_default_v2",
+    title: "usai/gpt_5_2_default_v2",
+  })
+})
+
+test("emitOpenCodeDefaults reports an absent optional agent role as null, not as missing", () => {
+  // A role the catalog does not define must be an explicit null, so a caller
+  // iterating the roles cannot mistake "not configured" for "forgot to read it".
+  const defaults = emitOpenCodeDefaults({ defaults: { primary: "sonnet", small: "haiku" } })
+  assert.deepEqual(defaults, {
+    model: "usai/sonnet",
+    small_model: "usai/haiku",
+    compaction: null,
+    summary: null,
+    title: null,
+  })
+})
+
+test("emitOpenCodeDefaults validates optional agent roles as strictly as the required pair", () => {
+  for (const role of ["compaction", "summary", "title"]) {
+    assert.throws(
+      () => emitOpenCodeDefaults({ defaults: { primary: "sonnet", small: "haiku", [role]: "" } }),
+      new RegExp(`defaults\\.${role} must be a non-empty string`),
+      `${role}: empty string must be rejected`,
+    )
+    assert.throws(
+      () => emitOpenCodeDefaults({ defaults: { primary: "sonnet", small: "haiku", [role]: 'x", "permission": {}' } }),
+      new RegExp(`defaults\\.${role} contains invalid characters`),
+      `${role}: id that could break out of the JSON string must be rejected`,
+    )
+  }
+})
+
+test("emitOpenCodeDefaults rejects malformed defaults or invalid characters", () => {
+  assert.throws(() => emitOpenCodeDefaults(null), /must be an object/)
+  assert.throws(() => emitOpenCodeDefaults({ defaults: null }), /must be an object/)
+  assert.throws(() => emitOpenCodeDefaults({ defaults: { small: "haiku" } }), /defaults.primary must be/)
+  assert.throws(() => emitOpenCodeDefaults({ defaults: { primary: "sonnet", small: "" } }), /defaults.small must be/)
+  for (const bad of ['sonnet", "permission": {}', "model\\escape", "model{env:VAR}", "model}"]) {
+    assert.throws(
+      () => emitOpenCodeDefaults({ defaults: { primary: bad, small: "haiku" } }),
+      /invalid characters/,
+    )
+  }
+})
+
+test("patchOpenCodeConfig safely handles $ in model ids without string replacement expansion", () => {
+  const originalText = readFileSync(SHIPPED_CONFIGS[0].file, "utf8")
+  const catalog = JSON.parse(readFileSync(CATALOG_JSON, "utf8"))
+  // Add a test model and set as default to check replacement function
+  const testCat = {
+    ...catalog,
+    models: [
+      {
+        id: "model_with_dollar",
+        vendor: "anthropic",
+        name: "Dollar Model",
+        contextWindow: 1000,
+        maxOutputTokens: 100,
+      },
+      ...catalog.models,
+    ],
+    defaults: {
+      primary: "model_with_dollar",
+      small: "claude_4_5_haiku",
+    },
+  }
+  const patched = patchOpenCodeConfig(originalText, testCat)
+  assert.ok(patched.includes('"model": "usai/model_with_dollar"'))
+})
+
+test("patchOpenCodeConfig does not cross object braces if agent.compaction is missing", () => {
+  // A template without agent.compaction.model
+  const template = `
+{
+  "provider": { "usai": { "models": {
+// BEGIN GENERATED USAI MODELS
+// END GENERATED USAI MODELS
+  } } },
+  "model": "usai/old-model",
+  "small_model": "usai/old-small",
+  "compaction": { "auto": true },
+  "instructions": "important instructions"
+}
+`
+  const catalog = JSON.parse(readFileSync(CATALOG_JSON, "utf8"))
+  const patched = patchOpenCodeConfig(template, catalog)
+  // Ensure "instructions" was not wiped out by runaway regex
+  assert.ok(patched.includes('"instructions": "important instructions"'))
+  assert.ok(patched.includes('"compaction": { "auto": true }'))
+  assert.ok(patched.includes('"model": "usai/claude-sonnet-5"'))
+})
+
+// -----------------------------------------------------------------------------
+// Structural resolution of the patched paths.
+//
+// These exist because the previous implementation located `agent.compaction.model`
+// with a regex whose `[^{}]*?` forbade any brace between `agent` and
+// `compaction`, which only holds while `compaction` is the FIRST nested object
+// under `agent`. The shipped config satisfies that today, so the byte-exact
+// round-trip test above passes either way — it cannot see this class of defect.
+// Each case below is a template shape that is valid JSONC and that the regex
+// approach got wrong.
+// -----------------------------------------------------------------------------
+
+const MARKERS = "// BEGIN GENERATED USAI MODELS\n// END GENERATED USAI MODELS"
+
+function templateWithAgent(agentBody, { agentFirst = false } = {}) {
+  const topLevel = `  "model": "usai/STALE-TOP",
+  "small_model": "usai/STALE-SMALL",`
+  const agent = `  "agent": {
+${agentBody}
+  },`
+  return `{
+${agentFirst ? `${agent}\n${topLevel}` : `${topLevel}\n${agent}`}
+${MARKERS}
+}
+`
+}
+
+const agentRoleBlock = (role, value) => `    "${role}": {
+      "model": "usai/${value}",
+      "temperature": 0
+    }`
+
+test("agent.compaction.model is patched regardless of sibling order", () => {
+  const catalog = JSON.parse(readFileSync(CATALOG_JSON, "utf8"))
+  const compactionFirst = [agentRoleBlock("compaction", "STALE"), agentRoleBlock("summary", "STALE")].join(",\n")
+  const summaryFirst = [agentRoleBlock("summary", "STALE"), agentRoleBlock("compaction", "STALE")].join(",\n")
+
+  for (const [label, body] of [["compaction first", compactionFirst], ["summary first", summaryFirst]]) {
+    const patched = patchOpenCodeConfig(templateWithAgent(body), catalog)
+    const found = /"compaction"\s*:\s*\{\s*"model"\s*:\s*"([^"]*)"/.exec(patched)
+    assert.equal(found?.[1], "usai/gpt-5.6-terra", `${label}: compaction.model must be patched`)
+  }
+})
+
+test("top-level model is patched even when the agent block precedes it", () => {
+  // The top-level patterns matched the first line-anchored `"model"` in the
+  // file, which is a nested agent role whenever `agent` comes first.
+  const catalog = JSON.parse(readFileSync(CATALOG_JSON, "utf8"))
+  const patched = patchOpenCodeConfig(
+    templateWithAgent(agentRoleBlock("compaction", "STALE"), { agentFirst: true }),
+    catalog,
+  )
+  assert.ok(!patched.includes("usai/STALE-TOP"), "top-level model must not keep its stale value")
+  assert.ok(!patched.includes("usai/STALE-SMALL"), "top-level small_model must not keep its stale value")
+  assert.ok(patched.includes('"model": "usai/claude-sonnet-5"'))
+  assert.ok(patched.includes('"small_model": "usai/claude_4_5_haiku"'))
+})
+
+test("every modelled agent role is patched, not just compaction", () => {
+  const catalog = JSON.parse(readFileSync(CATALOG_JSON, "utf8"))
+  const body = ["compaction", "summary", "title"].map((r) => agentRoleBlock(r, "STALE")).join(",\n")
+  const patched = patchOpenCodeConfig(templateWithAgent(body), catalog)
+  assert.ok(!patched.includes("usai/STALE"), "no agent role may retain a stale model")
+  for (const [role, expected] of [
+    ["compaction", "usai/gpt-5.6-terra"],
+    ["summary", "usai/gpt_5_2_default_v2"],
+    ["title", "usai/gpt_5_2_default_v2"],
+  ]) {
+    const found = new RegExp(`"${role}"\\s*:\\s*\\{\\s*"model"\\s*:\\s*"([^"]*)"`).exec(patched)
+    assert.equal(found?.[1], expected, `agent.${role}.model`)
+  }
+})
+
+test("commented-out and in-array decoys are not mistaken for the real key", () => {
+  const catalog = JSON.parse(readFileSync(CATALOG_JSON, "utf8"))
+  const template = `{
+  // "model": "usai/COMMENTED",
+  /* "model": "usai/BLOCK-COMMENTED" */
+  "experimental": [ { "model": "usai/IN-ARRAY" } ],
+  "model": "usai/STALE-TOP",
+  "small_model": "usai/STALE-SMALL",
+${MARKERS}
+}
+`
+  const patched = patchOpenCodeConfig(template, catalog)
+  assert.ok(patched.includes('"model": "usai/COMMENTED"'), "a commented-out key must be left untouched")
+  assert.ok(patched.includes('"model": "usai/BLOCK-COMMENTED"'), "a block-commented key must be left untouched")
+  assert.ok(patched.includes('"model": "usai/IN-ARRAY"'), "a key inside an array must be left untouched")
+  assert.ok(patched.includes('"model": "usai/claude-sonnet-5"'), "the real top-level key must be patched")
+})
+
+test("a configured agent role that cannot be patched is an error, not a silent skip", () => {
+  // `agent.compaction` exists but carries no `model` key. Leaving it alone would
+  // report a regenerated file while the role stayed unset, so this must throw.
+  const catalog = JSON.parse(readFileSync(CATALOG_JSON, "utf8"))
+  const template = `{
+  "model": "usai/old",
+  "small_model": "usai/old-small",
+  "agent": {
+    "compaction": { "temperature": 0 }
+  },
+${MARKERS}
+}
+`
+  assert.throws(
+    () => patchOpenCodeConfig(template, catalog),
+    /could not locate a string value at 'agent\.compaction\.model'/,
+  )
+})
+
+test("a missing top-level role is an error naming which key was not found", () => {
+  const catalog = JSON.parse(readFileSync(CATALOG_JSON, "utf8"))
+  const template = `{
+  "small_model": "usai/old-small",
+${MARKERS}
+}
+`
+  assert.throws(() => patchOpenCodeConfig(template, catalog), /top-level 'model'/)
 })

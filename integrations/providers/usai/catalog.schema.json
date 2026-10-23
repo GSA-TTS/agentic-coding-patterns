@@ -5,7 +5,7 @@
   "description": "Harness-neutral catalog of USAi gateway models. Generated from live feeds by build-catalog.mjs; consumed by per-harness emitters. Do not hand-edit the generated catalog.json.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "gateway", "vendors", "models"],
+  "required": ["schemaVersion", "gateway", "vendors", "defaults", "models"],
   "properties": {
     "schemaVersion": {
       "type": "string",
@@ -47,6 +47,56 @@
           "type": "string",
           "pattern": "^[A-Z][A-Z0-9_]*$",
           "description": "NAME of the environment variable holding the API key. Never a secret value."
+        }
+      }
+    },
+    "defaults": {
+      "type": "object",
+      "description": "Recommended default models for standard agent roles. Every value must reference a valid model id in models[].",
+      "additionalProperties": false,
+      "required": ["primary", "small"],
+      "properties": {
+        "primary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_.:-]+$",
+          "description": "Primary interactive coding and instruction-following model."
+        },
+        "small": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_.:-]+$",
+          "description": "Fast, lower-cost model for lightweight sub-tasks and completions."
+        },
+        "compaction": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_.:-]+$",
+          "description": "Cost-effective model for context compaction and conversation summarization."
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_.:-]+$",
+          "description": "Model that writes a short recap of a finished exchange."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_.:-]+$",
+          "description": "Model that names a session in one line."
+        },
+        "reasoning": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9_.:-]+$",
+          "description": "High-capacity reasoning and architectural planning model."
         }
       }
     },
