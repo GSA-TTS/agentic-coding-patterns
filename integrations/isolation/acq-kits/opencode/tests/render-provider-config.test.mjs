@@ -563,3 +563,119 @@ test("unmanaged built-in reference in lower-priority config survives managed ren
   // openai/gpt-4o is an unowned user selection — preserved, no validation error
   assert.equal(installed.model, "openai/gpt-4o")
 })
+
+// ── Finding 5 regressions (b43916b) ─────────────────────────────────────────
+// Role removal ownership must retain ALL superseded kit-owned references across
+// provider switches, not only the latest per role. A stale lower-file historical
+// USAi default must stay suppressed after rendering fictitious provider
+// recommendations then empty twice. Genuine differing user values still survive.
+
+test("older role defaults stay removed after provider switch then two empty renders", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "opencode-config-"))
+  const legacy = await readFile(new URL("../../../../providers/usai/tests/fixtures/opencode-production.jsonc", import.meta.url), "utf8")
+  const legacyConfig = parseJsonc(legacy)
+  // Both global files start with the legacy USAi config
+  await writeFile(path.join(directory, "config.json"), JSON.stringify(legacyConfig))
+  await writeFile(path.join(directory, "opencode.jsonc"), legacy)
+  // Render fictitious provider with all five recommendations (replaces USAi)
+  const fictitious = renderProviderConfig([{ facts: facts("acme-ai"), catalog: catalog("acme-ai", ["large", "small-m", "compact-m", "summary-m", "title-m"], { primary: "large", small: "small-m", compaction: "compact-m", summary: "summary-m", title: "title-m" }) }])
+  await writeConfigAtomically(directory, fictitious, ownershipFromRendered(fictitious))
+  // First empty render: acme-ai roles removed, USAi still in config.json
+  const empty = renderProviderConfig([])
+  await writeConfigAtomically(directory, empty, ownershipFromRendered(empty))
+  const after1 = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+  assert.equal(after1.model, undefined, "primary must be absent after first empty render")
+  // Second empty render: USAi defaults from config.json must NOT resurrect
+  await writeConfigAtomically(directory, empty, ownershipFromRendered(empty))
+  const after2 = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+  assert.equal(after2.model, undefined, "primary must stay absent after second empty render")
+  assert.equal(after2.small_model, undefined, "small must stay absent")
+  assert.equal(after2.agent?.compaction?.model, undefined, "compaction must stay absent")
+  assert.equal(after2.agent?.summary?.model, undefined, "summary must stay absent")
+  assert.equal(after2.agent?.title?.model, undefined, "title must stay absent")
+  // Genuine user override after the history is established must survive
+  const canonical = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+  canonical.model = "anthropic/claude-sonnet-4-5"
+  await writeFile(path.join(directory, "opencode.jsonc"), JSON.stringify(canonical))
+  await writeConfigAtomically(directory, empty, ownershipFromRendered(empty))
+  const after3 = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+  assert.equal(after3.model, "anthropic/claude-sonnet-4-5", "genuine user override must survive")
+  assert.equal(after3.small_model, undefined, "other roles still suppressed")
+})
+
+test("provider-switch role regression: usai defaults replaced by fictitious then returned to empty twice", async () => {
+  // Focused regression: exactly mirrors the reviewer scenario at b43916b.
+  // Legacy in opencode.jsonc only (no config.json stale file), same logic applies.
+  const directory = await mkdtemp(path.join(os.tmpdir(), "opencode-config-"))
+  const legacy = await readFile(new URL("../../../../providers/usai/tests/fixtures/opencode-production.jsonc", import.meta.url), "utf8")
+  await writeFile(path.join(directory, "opencode.jsonc"), legacy)
+  const fictitious = renderProviderConfig([{ facts: facts("acme-ai"), catalog: catalog("acme-ai", ["m"], { primary: "m", small: "m", compaction: "m", summary: "m", title: "m" }) }])
+  await writeConfigAtomically(directory, fictitious, ownershipFromRendered(fictitious))
+  const empty = renderProviderConfig([])
+  for (let i = 0; i < 3; i++) {
+    await writeConfigAtomically(directory, empty, ownershipFromRendered(empty))
+    const installed = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+    assert.equal(installed.model, undefined, `model must be absent on empty render ${i + 1}`)
+    assert.equal(installed.small_model, undefined, `small_model must be absent on empty render ${i + 1}`)
+    assert.equal(installed.agent?.compaction?.model, undefined, `compaction must be absent on empty render ${i + 1}`)
+    assert.equal(installed.agent?.summary?.model, undefined, `summary must be absent on empty render ${i + 1}`)
+    assert.equal(installed.agent?.title?.model, undefined, `title must be absent on empty render ${i + 1}`)
+  }
+})
+
+// ── Finding 6 regressions (b43916b) ─────────────────────────────────────────
+// Catalog shrinkage: canonical ownership validation must examine the canonical
+// owned provider before merging lower files. Owned provider blocks must be
+// replaced wholesale from the authoritative rendered provider, so stale
+// lower-file models cannot reappear and invalidate next startup.
+
+test("catalog shrink a,b -> a -> a succeeds (stale lower file has a,b)", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "opencode-config-"))
+  // Step 1: first authoritative render a,b (canonical owns it)
+  const ab = renderProviderConfig([{ facts: facts("acme-ai"), catalog: catalog("acme-ai", ["a", "b"]) }])
+  await writeConfigAtomically(directory, ab, ownershipFromRendered(ab))
+  // Step 2: stale config.json written after initial render (simulates sync lag)
+  await writeFile(path.join(directory, "config.json"), JSON.stringify(ab))
+  // Step 3: first shrink — catalog reduced to a-only
+  const aOnly = renderProviderConfig([{ facts: facts("acme-ai"), catalog: catalog("acme-ai", ["a"]) }])
+  await writeConfigAtomically(directory, aOnly, ownershipFromRendered(aOnly))
+  const after1 = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+  assert.deepEqual(Object.keys(after1.provider["acme-ai"].models), ["a"], "first shrink: only model a present")
+  // Step 4: second render with same a-only catalog — must not fail ownership check
+  await writeConfigAtomically(directory, aOnly, ownershipFromRendered(aOnly))
+  const after2 = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+  assert.deepEqual(Object.keys(after2.provider["acme-ai"].models), ["a"], "second render: still only model a")
+  // Step 5: third render for good measure
+  await writeConfigAtomically(directory, aOnly, ownershipFromRendered(aOnly))
+  const after3 = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+  assert.deepEqual(Object.keys(after3.provider["acme-ai"].models), ["a"], "third render: still only model a")
+})
+
+test("catalog shrink preserves foreign providers and unrelated settings", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "opencode-config-"))
+  const ab = renderProviderConfig([{ facts: facts("acme-ai"), catalog: catalog("acme-ai", ["a", "b"]) }])
+  await writeConfigAtomically(directory, ab, ownershipFromRendered(ab))
+  // Stale config.json has a,b PLUS foreign provider and theme
+  const stale = { ...ab, provider: { ...ab.provider, foreign: { models: { f: {} } } }, theme: "dark" }
+  await writeFile(path.join(directory, "config.json"), JSON.stringify(stale))
+  const aOnly = renderProviderConfig([{ facts: facts("acme-ai"), catalog: catalog("acme-ai", ["a"]) }])
+  await writeConfigAtomically(directory, aOnly, ownershipFromRendered(aOnly))
+  await writeConfigAtomically(directory, aOnly, ownershipFromRendered(aOnly))
+  const installed = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+  assert.deepEqual(Object.keys(installed.provider["acme-ai"].models), ["a"], "stale model b removed")
+  assert.ok(installed.provider.foreign, "foreign provider preserved")
+  assert.equal(installed.theme, "dark", "unrelated theme preserved")
+})
+
+test("provider-switch role regression: a,b -> a -> a with role recommendation", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "opencode-config-"))
+  const ab = renderProviderConfig([{ facts: facts("acme-ai"), catalog: catalog("acme-ai", ["a", "b"], { primary: "a" }) }])
+  await writeConfigAtomically(directory, ab, ownershipFromRendered(ab))
+  await writeFile(path.join(directory, "config.json"), JSON.stringify(ab))
+  const aOnly = renderProviderConfig([{ facts: facts("acme-ai"), catalog: catalog("acme-ai", ["a"], { primary: "a" }) }])
+  await writeConfigAtomically(directory, aOnly, ownershipFromRendered(aOnly))
+  await writeConfigAtomically(directory, aOnly, ownershipFromRendered(aOnly))
+  const installed = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+  assert.equal(installed.model, "acme-ai/a", "recommendation preserved after shrink")
+  assert.deepEqual(Object.keys(installed.provider["acme-ai"].models), ["a"], "only model a present")
+})
