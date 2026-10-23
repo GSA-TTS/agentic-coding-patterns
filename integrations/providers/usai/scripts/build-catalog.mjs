@@ -9,14 +9,14 @@
 // This script derives `integrations/providers/usai/catalog.json` (schema
 // `usai-model-catalog/v1`). It DOES NOT render any harness config — the RENDER
 // half (the opencode.jsonc emitter) lives in a later issue and consumes this
-// catalog. The byte-exact round-trip test against the shipped opencode.jsonc is
+// catalog. The byte-exact round-trip test against the renderer contract fixture is
 // the safety gate; therefore the FIRST committed catalog.json is BOOTSTRAPPED
 // from that shipped file's `// BEGIN GENERATED USAI MODELS` block so it exactly
 // represents today's models. Live-feed mode (fetch USAi + models.dev) is
 // provided for future regeneration.
 //
 // Modes:
-//   (default, no flags)     bootstrap catalog.json from the shipped opencode.jsonc
+//   (default, no flags)     bootstrap catalog.json from the prior shipped production config
 //                           GENERATED block (offline, deterministic).
 //   --models-url <path|url> read the USAi model list from a local path or URL.
 //   --no-enrichment         do not fetch/read models.dev; use only the models
@@ -69,11 +69,11 @@ const DEFAULT_OUT = path.join(USAI_DIR, "catalog.json")
 const DEFAULT_SCHEMA = path.join(USAI_DIR, "catalog.schema.json")
 const DEFAULT_OPENCODE_JSONC = path.join(
   REPO_ROOT,
-  "integrations/isolation/acq-kits/usai-provider/files/home/usai-config/opencode.jsonc",
+  "integrations/providers/usai/tests/fixtures/opencode-production.jsonc",
 )
 // Path recorded in catalog.sources.bootstrappedFrom — repo-relative, stable.
 const OPENCODE_JSONC_REL =
-  "integrations/isolation/acq-kits/usai-provider/files/home/usai-config/opencode.jsonc"
+  "integrations/providers/usai/tests/fixtures/opencode-production.jsonc"
 
 const GENERATED_START = "// BEGIN GENERATED USAI MODELS"
 const GENERATED_END = "// END GENERATED USAI MODELS"
@@ -600,7 +600,7 @@ function extractUsaiList(payload) {
 }
 
 // -----------------------------------------------------------------------------
-// Bootstrap: parse the shipped opencode.jsonc GENERATED block into catalog
+// Bootstrap: parse the renderer contract's GENERATED block into catalog
 // models, translating opencode cost keys -> catalog cost keys. This preserves
 // model ORDER and vendor grouping exactly as the block declares them.
 // -----------------------------------------------------------------------------
@@ -1057,7 +1057,7 @@ async function buildCatalog(args) {
       models,
     }
   } else {
-    // Bootstrap from the shipped opencode.jsonc GENERATED block (default).
+    // Bootstrap from the renderer contract's GENERATED block (default).
     const opencodePath = args.opts["--opencode-jsonc"] || DEFAULT_OPENCODE_JSONC
     const jsoncText = await readFile(opencodePath, "utf8")
     const block = extractGeneratedBlock(jsoncText)

@@ -6,6 +6,23 @@ OpenCode v2 platform package tarball**. Replaces acq's older unpinned MSB
 fallback (`npm install -g opencode-ai`, resolves to the legacy 1.x line) with a
 deterministic, version-pinned install.
 
+## Provider Renderer Ownership
+
+The kit stages its base policy at `/home/agent/opencode-config/base-config.jsonc`.
+It never file-drops that policy into `~/.config/opencode/opencode.jsonc`. At
+startup, the renderer is the sole OpenCode global-config writer: it composes the
+staged base policy, any existing user global config, and the authoritative
+provider projection, then atomically replaces the canonical file. Renderer-owned
+provider blocks carry SHA-256 ownership digests; modifying one fails closed
+rather than silently deleting a user edit.
+
+The provider projection reads `ACQ_PROVIDER_INPUT_ROOT/models/providers`.
+The renderer returns `not-ready` without changing global config when that
+generation is absent. Current kit lifecycle semantics do not prove startup hooks
+complete before the agent entrypoint consumes config. The required readiness
+barrier is supplied by the dependent Quickstart #608 change; this kit does not
+claim that ordering until that dependency lands.
+
 This is the first **harness-agent kit** in the family: it declares the
 top-level `agent:` block (`name: opencode`, `entrypoint: opencode`) so acq's
 built-in agent-kit readiness gate can confirm this kit genuinely provides the
@@ -17,6 +34,37 @@ replacement for acq's older backend-specific fallback installer.
 opencode is a **TUI, not a web UI** (contrast the sibling `paseo` and
 `openchamber` kits, which each publish a browser-UI port), so this kit
 publishes **no ports**.
+
+## Provider input rendering
+
+This kit is the sole acq-owned writer of OpenCode's global configuration. At
+startup it reads the backend-supplied `ACQ_PROVIDER_INPUT_ROOT`; each provider
+directory is `models/providers/<providerId>/`, with `facts.json` and
+`snapshot.json` for each provider. The SBX and MSB backends expose the same
+layout; MSB's root is `/var/lib/acq/provider-input`.
+
+The directory set below `models/providers` is authoritative, including
+an empty set. A missing input root or `current` is not authoritative and leaves
+the existing OpenCode config unchanged. The renderer consumes `snapshot.json`
+as the catalog for this milestone. It intentionally does not invoke provider
+normalizers or aggregate snapshots; acq has already selected and materialized
+the current generation.
+
+The provider renderer preserves unrelated user configuration and removes only
+the provider IDs and default model roles recorded in its previous ownership
+metadata. Startup runs after acq materializes `current`; no provider kit writes
+OpenCode configuration, preventing a dual-writer race during cutover.
+
+The staged `permission` object is security-owned and replaces any user
+`permission` object on every render. This prevents a global override from
+reopening credential reads or approval gates. User settings outside
+`permission`, including themes, instructions, MCP entries, and foreign provider
+definitions, are retained.
+
+The renderer owns the static USAi compatibility adapter selected by the trusted
+`providerId`; it supplies the legacy gateway timeouts, LiteLLM mode, and
+non-secret identification headers without adding OpenCode-specific fields to
+neutral provider facts or catalogs.
 
 ## Why a direct platform tarball pin, not npm install or nixpkgs
 

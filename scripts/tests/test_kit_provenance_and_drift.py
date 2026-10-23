@@ -3,12 +3,10 @@
 Three concerns, all additive/no-behavior-change:
 
 1. `provenance` schema field — additive + backward-compatible on hybrid/v1.
-2. Permission/MCP preservation — lock in that the usai kit's startup merge keeps
-   a user's existing `permission.*` sub-keys and `mcp` block (audit found this is
-   already the case; this guards against regression).
-3. acq/sbx drift guard — the two usai-provider `opencode.jsonc` payloads are
-   byte-identical today (only an ownership-marker comment + spec vocabulary
-   differ, by ADR-0001 design); fail if the JSON payloads ever diverge.
+2. Renderer ownership — provider kits no longer ship an OpenCode config or
+   writer; policy belongs to the OpenCode kit.
+3. Provider-package drift guard — the retired provider-owned config and writers
+   must remain absent from both neutral and SBX compatibility packages.
 """
 
 from __future__ import annotations
@@ -152,88 +150,9 @@ def _top_level_keys(jsonc_text: str) -> set[str]:
     return set(data.keys())
 
 
-class TestPermissionMcpPreservation:
-    def test_kit_does_not_ship_mcp(self):
-        # If the kit never ships `mcp`, the startup deep-merge can never overwrite
-        # a user's MCP allow-list. Locks in the audited "user MCP untouched" fact.
-        keys = _top_level_keys((ACQ_USAI / "files/home/usai-config/opencode.jsonc").read_text())
-        assert "mcp" not in keys, f"kit unexpectedly ships mcp; top-level keys={sorted(keys)}"
-
-    def test_kit_shipped_keys_are_the_known_conflict_surface(self):
-        # These are the ONLY top-level keys a merge can touch. If this set grows,
-        # a reviewer must re-check the "don't clobber user config" property.
-        keys = _top_level_keys((ACQ_USAI / "files/home/usai-config/opencode.jsonc").read_text())
-        expected = {
-            "$schema",
-            "enabled_providers",
-            "provider",
-            "model",
-            "small_model",
-            "agent",
-            "compaction",
-            "instructions",
-            "permission",
-            "watcher",
-        }
-        assert keys == expected, f"shipped top-level keys changed: {sorted(keys ^ expected)}"
-
-    def test_merge_script_present_for_both_variants(self):
-        assert (ACQ_USAI / "files/home/usai-config/merge-global-config.mjs").is_file()
-        assert (SBX_USAI / "files/home/usai-config/merge-global-config.mjs").is_file()
-
-
-# --- 3. acq/sbx drift guard ---------------------------------------------------
-
-_GEN_START = "// BEGIN GENERATED USAI MODELS"
-_GEN_END = "// END GENERATED USAI MODELS"
-
-
-def _generated_models_block(text: str) -> str:
-    start = text.index(_GEN_START)
-    end = text.index(_GEN_END)
-    return text[start:end]
-
-
-class TestAcqSbxDriftGuard:
-    """The two usai-provider opencode.jsonc payloads must not diverge (GSA-TTS/agentic-coding-patterns#273).
-
-    sbx-kits/usai-provider-kit's opencode.jsonc is now a SYMLINK to the
-    acq-kits copy (see that kit's README "Shared config with acq-kits") --
-    they are the same file on disk, so byte divergence between them is no
-    longer possible to introduce accidentally. These tests still run and
-    still matter: they catch a REGRESSION of the symlink itself (someone
-    replacing it with a real file again, e.g. by running a tool that
-    dereferences and rewrites symlinks in place) rather than catching
-    ongoing hand-maintained drift, which was their original purpose before
-    the symlink existed.
-    """
-
-    def test_generated_model_blocks_match(self):
-        acq = (ACQ_USAI / "files/home/usai-config/opencode.jsonc").read_text()
-        sbx = (SBX_USAI / "files/home/usai-config/opencode.jsonc").read_text()
-        assert _generated_models_block(acq) == _generated_models_block(sbx), (
-            "acq-kits and sbx-kits usai model catalogs have diverged — run "
-            "sync:usai-models against BOTH variants (or converge per ADR-0001 Phase-4)."
-        )
-
-    def test_parsed_json_payloads_match(self):
-        # Comments are now byte-identical too (same shared marker text, see
-        # class docstring), but compare parsed JSON rather than raw text
-        # regardless -- this test's job is "the effective config is the
-        # same," which should hold independent of how the sharing is
-        # implemented.
-        acq = json.loads(_strip_jsonc((ACQ_USAI / "files/home/usai-config/opencode.jsonc").read_text()))
-        sbx = json.loads(_strip_jsonc((SBX_USAI / "files/home/usai-config/opencode.jsonc").read_text()))
-        assert acq == sbx, (
-            "acq-kits and sbx-kits usai opencode.jsonc JSON payloads have "
-            "diverged (GSA-TTS/agentic-coding-patterns#273)"
-        )
-
-    def test_merge_and_sync_scripts_identical(self):
-        for rel in (
-            "files/home/usai-config/merge-global-config.mjs",
-            "scripts/sync-usai-models.mjs",
-        ):
-            assert (ACQ_USAI / rel).read_text() == (SBX_USAI / rel).read_text(), (
-                f"{rel} differs between acq-kits and sbx-kits variants (#273)"
-            )
+class TestRendererOwnership:
+    def test_provider_packages_do_not_ship_opencode_configs_or_writers(self):
+        for root in (ACQ_USAI, SBX_USAI):
+            assert not (root / "files/home/usai-config/opencode.jsonc").exists()
+            assert not (root / "files/home/usai-config/merge-global-config.mjs").exists()
+            assert not (root / "scripts/sync-usai-models.mjs").exists()

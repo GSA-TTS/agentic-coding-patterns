@@ -72,6 +72,7 @@ const DEFAULT_OUT_PATH = path.join(KIT_ROOT, "tests/output/usai-normalized-catal
 const NEUTRAL_SCHEMA_VERSION = "acq-neutral-model-catalog/v1"
 const PROVIDER_ID = "usai"
 const MODEL_ID_PATTERN = /^[^\u0000-\u001F\u007F\u2028\u2029]+$/
+const MODEL_NAME_PATTERN = /^[^\u0000-\u001F\u007F\u2028\u2029]+$/
 const MAX_MODELS = 500
 
 /**
@@ -80,7 +81,7 @@ const MAX_MODELS = 500
  * integrations/providers/usai/catalog.schema.json (contextWindow,
  * maxOutputTokens, cost.{input,output,cacheRead,cacheWrite}) — this function
  * does not invent new names, only narrows the shape to the fields the neutral
- * schema models today (drops vendor/name/costAbove200kContext/reasoning/
+ * schema models today (drops vendor/reasoning/
  * inputModalities, which the neutral v1 shape does not carry).
  * @param {object} model - one entry from the source catalog's `models[]`
  * @returns {{id: string, contextWindow?: number, maxOutputTokens?: number, cost?: object}}
@@ -118,6 +119,15 @@ function normalizeModel(model, index) {
   }
 
   const out = { id: model.id }
+  if (model.name !== undefined) {
+    if (typeof model.name !== "string" || model.name.length === 0) {
+      throw new Error(`${prefix}.name must be a non-empty string (got ${describe(model.name)})`)
+    }
+    if (model.name.length > 256 || !MODEL_NAME_PATTERN.test(model.name)) {
+      throw new Error(`${prefix}.name is not a valid model display name`)
+    }
+    out.name = model.name
+  }
   if (model.contextWindow !== undefined) {
     requirePositiveInteger(model.contextWindow, `${prefix}.contextWindow`)
     out.contextWindow = model.contextWindow
@@ -145,6 +155,24 @@ function normalizeModel(model, index) {
       out.cost = cost
     }
   }
+  if (model.costAbove200kContext !== undefined) {
+    if (!isPlainObject(model.costAbove200kContext)) {
+      throw new Error(`${prefix}.costAbove200kContext must be an object (got ${describe(model.costAbove200kContext)})`)
+    }
+    const tieredCost = {}
+    for (const key of ["input", "output", "cacheRead", "cacheWrite"]) {
+      if (model.costAbove200kContext[key] !== undefined) {
+        requireNonNegativeFiniteNumber(
+          model.costAbove200kContext[key],
+          `${prefix}.costAbove200kContext.${key}`,
+        )
+        tieredCost[key] = model.costAbove200kContext[key]
+      }
+    }
+    if (Object.keys(tieredCost).length > 0) {
+      out.costAbove200kContext = tieredCost
+    }
+  }
   return out
 }
 
@@ -165,10 +193,25 @@ export function normalizeCatalog(sourceCatalog) {
   if (new Set(ids).size !== ids.length) {
     throw new Error("normalizeCatalog: source catalog contains duplicate model IDs")
   }
+  const recommendations = sourceCatalog.recommendations
+  if (recommendations !== undefined) {
+    if (!isPlainObject(recommendations)) {
+      throw new Error("normalizeCatalog: recommendations must be an object")
+    }
+    for (const [role, modelId] of Object.entries(recommendations)) {
+      if (!["primary", "small", "compaction", "summary", "title"].includes(role)) {
+        throw new Error(`normalizeCatalog: unsupported recommendation role '${role}'`)
+      }
+      if (typeof modelId !== "string" || !ids.includes(modelId)) {
+        throw new Error(`normalizeCatalog: recommendation '${role}' must reference a model id`)
+      }
+    }
+  }
   return {
     schemaVersion: NEUTRAL_SCHEMA_VERSION,
     providerId: PROVIDER_ID,
     models: sourceCatalog.models.map(normalizeModel),
+    ...(recommendations === undefined ? {} : { recommendations: { ...recommendations } }),
   }
 }
 

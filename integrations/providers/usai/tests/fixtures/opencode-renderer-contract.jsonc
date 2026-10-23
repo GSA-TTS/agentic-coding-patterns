@@ -1,0 +1,20 @@
+{
+  "provider": {
+    "usai": {
+      "models": {
+        // BEGIN GENERATED USAI MODELS
+        // Anthropic Models
+        "contract-model": {
+          "name": "Contract Model",
+          "limit": {
+            "context": 1,
+            "output": 1
+          },
+          "cost": {
+          }
+        }
+        // END GENERATED USAI MODELS
+      }
+    }
+  }
+}
