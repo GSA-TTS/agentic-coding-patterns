@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.17.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.16.1...v1.17.0) (2026-10-23)
+
+
+### Features
+
+* **opencode:** render neutral provider config ([#530](https://github.com/GSA-TTS/agentic-coding-patterns/issues/530)) ([6285570](https://github.com/GSA-TTS/agentic-coding-patterns/commit/62855703b86d4d2639d2b7ac2fba46da4895899a))
+
+
+### Bug Fixes
+
+* **paseo-kit:** reconcile pre-boot daemon lock ([#488](https://github.com/GSA-TTS/agentic-coding-patterns/issues/488)) ([3a7f25b](https://github.com/GSA-TTS/agentic-coding-patterns/commit/3a7f25b304c05536128ed8694e402ad71f96f950))
+
 ## [1.16.1](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.16.0...v1.16.1) (2026-10-22)
 
 
