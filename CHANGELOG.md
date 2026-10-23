@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.16.1](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.16.0...v1.16.1) (2026-10-22)
+
+
+### Bug Fixes
+
+* **usai:** enable restored GPT-6 chat deployments ([#528](https://github.com/GSA-TTS/agentic-coding-patterns/issues/528)) ([3b61054](https://github.com/GSA-TTS/agentic-coding-patterns/commit/3b61054a20b18a35a11201a5add843f9caadd7eb))
+
 ## [1.16.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.15.0...v1.16.0) (2026-10-21)
 
 
