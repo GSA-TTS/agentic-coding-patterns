@@ -345,13 +345,15 @@ async function existingConfig(globalDir) {
   try {
     entries = new Set(await readdir(globalDir))
   } catch (error) {
-    if (error?.code === "ENOENT") return { config: merged, canonicalText: undefined }
+    if (error?.code === "ENOENT") return { config: merged, canonicalText: undefined, canonicalConfig: undefined }
     throw error
   }
   for (const name of GLOBAL_FILENAMES) {
     if (entries.has(name)) merged = deepMerge(merged, parseJsonc(await readFile(path.join(globalDir, name), "utf8")))
   }
-  return { config: merged, canonicalText: await canonicalText(globalDir) }
+  const text = await canonicalText(globalDir)
+  const canonicalConfig = text === undefined ? undefined : parseJsonc(text)
+  return { config: merged, canonicalText: text, canonicalConfig }
 }
 
 export async function writeConfigAtomically(globalDir, rendered, ownership = { providers: {}, roles: {} }, options = {}) {
@@ -362,7 +364,7 @@ export async function writeConfigAtomically(globalDir, rendered, ownership = { p
   try {
     for (let attempt = 0; attempt < MAX_WRITE_RETRIES; attempt++) {
       const current = await existingConfig(globalDir)
-      const state = readEmbeddedState(current.canonicalText, current.config, ownership)
+      const state = readEmbeddedState(current.canonicalText, current.config, current.canonicalConfig, ownership)
       const baseConfig = object(options.baseConfig ?? {}, "base OpenCode config")
       const composed = mergeBasePolicy(baseConfig, current.config)
       // Policy is kit-owned: preserving foreign settings must not reopen the
@@ -392,14 +394,43 @@ function mergeManagedConfig(existing, rendered, state, ownership) {
   const previouslyRemoved = new Set(state.removed ?? [])
   const newOwned = new Set(Object.keys(ownership.providers))
   const tombstoned = new Set([...managed, ...previouslyRemoved].filter((id) => !newOwned.has(id)))
+  // Per-role tombstone history: accumulate all kit-owned values for each role across
+  // transitions. A value is stale if it appears in the history for that role, which
+  // prevents resurrection of historical defaults from lower-precedence files even after
+  // multiple provider switches (e.g. usai→acme→empty: both "usai/..." and "acme/..." are
+  // in history and must be suppressed, not just the most recently recorded single value).
+  //
+  // removedRoles maps role → most-recently-dropped kit value (maintained for serialization
+  // compatibility with existing v3 state). removedRoleHistory maps role → sorted array of
+  // all kit-owned values ever recorded for that role; any of these appearing in the merged
+  // config is stale and must be suppressed.
   const removedRoles = { ...(state.removedRoles ?? {}) }
+  const removedRoleHistory = Object.fromEntries(
+    Object.entries(state.removedRoleHistory ?? {}).map(([role, refs]) => [role, new Set(Array.isArray(refs) ? refs : [refs])])
+  )
   for (const [role, reference] of Object.entries(state.roles)) {
-    if (ownership.roles[role] === undefined) removedRoles[role] = reference
+    if (ownership.roles[role] === undefined) {
+      // Role dropped: record in both removedRoles (last known) and per-role history.
+      removedRoles[role] = reference
+      if (!removedRoleHistory[role]) removedRoleHistory[role] = new Set()
+      removedRoleHistory[role].add(reference)
+    } else if (ownership.roles[role] !== reference) {
+      // Role superseded by a different kit value (provider switch): the old value must
+      // also be tombstoned so lower-file copies of it cannot resurrect after the new
+      // recommendation is later removed.
+      if (!removedRoleHistory[role]) removedRoleHistory[role] = new Set()
+      removedRoleHistory[role].add(reference)
+    }
   }
   const userRoles = Object.fromEntries(Object.entries(ROLE_PATHS)
     .map(([role, keys]) => {
       const current = roleValue(existing, keys)
-      const staleRemoved = current !== undefined && removedRoles[role] === current
+      // A role value is stale if it appears in the per-role tombstone history (any previously
+      // kit-owned value across all provider transitions) OR matches the single removedRoles entry.
+      const staleRemoved = current !== undefined && (
+        removedRoles[role] === current ||
+        (removedRoleHistory[role] !== undefined && removedRoleHistory[role].has(current))
+      )
       return [role, current !== undefined && !staleRemoved && (state.roles[role] === undefined || current !== state.roles[role]) ? current : undefined]
     })
     .filter(([, value]) => value !== undefined))
@@ -438,11 +469,28 @@ function mergeManagedConfig(existing, rendered, state, ownership) {
     for (const key of keys) source = source?.[key]
     if (source !== undefined && roleValue(config, keys) === source) roles[role] = source
   }
-  for (const role of Object.keys(userRoles)) delete removedRoles[role]
-  for (const role of Object.keys(roles)) delete removedRoles[role]
+  for (const role of Object.keys(userRoles)) {
+    delete removedRoles[role]
+    delete removedRoleHistory[role]
+  }
+  for (const role of Object.keys(roles)) {
+    delete removedRoles[role]
+    // Do NOT clear removedRoleHistory here: lower-precedence files may still contain
+    // historically kit-owned values for this role that should remain suppressed. Only a
+    // genuine user override (in userRoles above) clears the per-role tombstone history.
+  }
   const removed = tombstoned.size > 0 ? [...tombstoned].sort() : undefined
   const hasRemovedRoles = Object.keys(removedRoles).length > 0
-  const newState = { schemaVersion: "acq-opencode-provider-state/v3", providers: ownership.providers, roles, ...(removed ? { removed } : {}), ...(hasRemovedRoles ? { removedRoles } : {}) }
+  // Serialize per-role tombstone history: each role entry is a sorted array of all
+  // previously kit-owned values for that role. Only roles that still have history
+  // (not cleared by user override or new kit assignment) are persisted.
+  const removedRoleHistorySerializable = Object.fromEntries(
+    Object.entries(removedRoleHistory)
+      .filter(([, refs]) => refs.size > 0)
+      .map(([role, refs]) => [role, [...refs].sort()])
+  )
+  const hasRemovedRoleHistory = Object.keys(removedRoleHistorySerializable).length > 0
+  const newState = { schemaVersion: "acq-opencode-provider-state/v3", providers: ownership.providers, roles, ...(removed ? { removed } : {}), ...(hasRemovedRoles ? { removedRoles } : {}), ...(hasRemovedRoleHistory ? { removedRoleHistory: removedRoleHistorySerializable } : {}) }
   return { config, state: newState }
 }
 
@@ -488,6 +536,15 @@ function validateOwnership(state) {
       if (!ROLE_PATHS[role] || typeof reference !== "string") throw new Error("invalid provider ownership removed role")
     }
   }
+  if (state.removedRoleHistory !== undefined) {
+    object(state.removedRoleHistory, "provider ownership removed role history")
+    for (const [role, refs] of Object.entries(state.removedRoleHistory)) {
+      if (!ROLE_PATHS[role] || !Array.isArray(refs)) throw new Error("invalid provider ownership removed role history entry")
+      for (const ref of refs) {
+        if (typeof ref !== "string") throw new Error("invalid provider ownership removed role history reference")
+      }
+    }
+  }
 }
 
 function statePayload(state) {
@@ -504,7 +561,7 @@ function generatedProvider(value) {
   return value && typeof value === "object" && value.npm === "@ai-sdk/openai-compatible" && typeof value.options?.baseURL === "string" && typeof value.options?.apiKey === "string"
 }
 
-function readEmbeddedState(text, config, expectedOwnership) {
+function readEmbeddedState(text, config, canonicalConfig, expectedOwnership) {
   // Finding 2 fix: when canonical opencode.jsonc is absent, still run legacy
   // recognition against the composed merged configuration (which includes
   // lower-precedence config.json / opencode.json). An absent canonical is not
@@ -566,8 +623,17 @@ function readEmbeddedState(text, config, expectedOwnership) {
   try { state = JSON.parse(Buffer.from(line.slice(STATE_COMMENT.length), "base64url").toString("utf8")) } catch { throw new Error("malformed provider ownership metadata") }
   if (state.schemaVersion !== "acq-opencode-provider-state/v3") throw new Error("incompatible provider ownership metadata")
   validateOwnership(state)
+  // Finding 2 fix: validate ownership digests against the CANONICAL config's provider blocks,
+  // not the merged (canonical + lower-file) config. Lower-precedence files (config.json,
+  // opencode.json) may retain stale versions of previously rendered provider blocks (e.g.
+  // a catalog shrink from a,b→a), and deepMerge is additive — it would reintroduce deleted
+  // models from lower files, making the merged block's digest differ from the state digest.
+  // The canonical opencode.jsonc is the sole authoritative written artifact; ownership only
+  // needs to verify what the kit actually wrote last time, not what lower files may have
+  // contributed.
+  const ownedProviderSource = canonicalConfig?.provider ?? config.provider ?? {}
   for (const [id, providerDigest] of Object.entries(state.providers)) {
-    if (!Object.prototype.hasOwnProperty.call(config.provider ?? {}, id) || !generatedProvider(config.provider[id]) || digest(config.provider[id]) !== providerDigest) throw new Error(`owned provider '${id}' is missing or was modified`)
+    if (!Object.prototype.hasOwnProperty.call(ownedProviderSource, id) || !generatedProvider(ownedProviderSource[id]) || digest(ownedProviderSource[id]) !== providerDigest) throw new Error(`owned provider '${id}' is missing or was modified`)
   }
   return state
 }
