@@ -199,6 +199,20 @@
         },
 
         // OpenAI Models
+        "gpt-6.1-sol-latest-guardrails-defaultv2": {
+          "name": "GPT 6.1 Sol Latest Guardrails Defaultv2",
+          "limit": {
+            "context": 1050000,
+            "output": 128000
+          },
+          "cost": {
+            "input": 2,
+            "output": 10,
+            "cache_read": 0.1,
+            "cache_write": 2.5,
+            "context_over_200k": {"input":4,"output":15,"cache_read":0.2,"cache_write":5}
+          }
+        },
         "gpt-6-astra": {
           "name": "GPT 6 Astra",
           "limit": {
@@ -211,6 +225,34 @@
             "cache_read": 1,
             "cache_write": 12.5,
             "context_over_200k": {"input":20,"output":75,"cache_read":2,"cache_write":25}
+          }
+        },
+        "gpt-6-luna": {
+          "name": "GPT 6 Luna",
+          "limit": {
+            "context": 1050000,
+            "output": 128000
+          },
+          "cost": {
+            "input": 0.1,
+            "output": 0.5,
+            "cache_read": 0.01,
+            "cache_write": 0.125,
+            "context_over_200k": {"input":0.2,"output":0.75,"cache_read":0.02,"cache_write":0.25}
+          }
+        },
+        "gpt-6-sol-latest-guardrails-defaultv2": {
+          "name": "GPT 6 Sol Latest Guardrails Defaultv2",
+          "limit": {
+            "context": 1050000,
+            "output": 128000
+          },
+          "cost": {
+            "input": 2,
+            "output": 10,
+            "cache_read": 0.2,
+            "cache_write": 2.5,
+            "context_over_200k": {"input":4,"output":15,"cache_read":0.4,"cache_write":5}
           }
         },
         "gpt-5.6-luna": {

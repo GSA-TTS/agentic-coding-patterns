@@ -64,8 +64,8 @@
 # reread — verified against the Paseo source), so the shim — which runs in the
 # primary-workspace cwd on `acq run` — writes worktrees.root = <PWD>/.paseo-worktrees
 # into config.json and restarts the daemon worker with `paseo daemon restart`.
-# The supervisor starts the daemon immediately with Paseo's default root; the shim
-# rewrites + restarts only when the value actually changes. See
+# Startup optionally seeds an absent config from ACQ_WORKSPACE before install;
+# the shim rewrites + restarts only when the value actually changes. See
 # docs/decisions/worktrees-root-global-only.md and
 # supervisor-owns-daemon-wrapper-pins-worktrees.md.
 #
@@ -148,6 +148,10 @@ files:
     mode: "0755"
     source: files/home/paseo-start.sh
     description: Install/update the pinned Paseo CLI and supervise the Paseo daemon + web UI
+  - path: /home/agent/paseo-timing.sh
+    mode: "0644"
+    source: files/home/paseo-timing.sh
+    description: Opt-in fixed-label guest startup timing helpers
   - path: /home/agent/paseo-set-worktrees-root.mjs
     mode: "0755"
     source: files/home/paseo-set-worktrees-root.mjs
@@ -279,10 +283,11 @@ agentContext: |
   Paseo.
 
   **Worktrees.** Paseo keeps agent git worktrees under a single global root. This
-  kit pins that root to `<your-project>/.paseo-worktrees` (a subdir of the first
-  mounted project directory) when you run the `opencode` wrapper — it rewrites
-  `$PASEO_HOME/config.json` and restarts the daemon so the change takes effect.
-  Before you run the wrapper once, worktrees default to `$PASEO_HOME/worktrees`.
+  kit can initialize an absent config from the primary guest `ACQ_WORKSPACE`
+  before installation, preserving existing configuration during initialization.
+  The `opencode` wrapper reconciles the root with its physical working directory
+  plus `/.paseo-worktrees` and restarts only when that value changes. See the kit's
+  `docs/decisions/supervisor-owns-daemon-wrapper-pins-worktrees.md`.
 
   **Projects.** Every read-write host directory mounted into the sandbox is
   registered as a Paseo project at startup, so the web UI pre-lists your repos

@@ -23,6 +23,16 @@
         "type": "string"
       }
     },
+    "recommendations": {
+      "type": "object",
+      "description": "Harness-neutral advisory model ids for common roles.",
+      "additionalProperties": false,
+      "properties": {
+        "primary": { "type": "string", "minLength": 1 },
+        "small": { "type": "string", "minLength": 1 },
+        "compaction": { "type": "string", "minLength": 1 }
+      }
+    },
     "gateway": {
       "type": "object",
       "description": "USAi gateway connection metadata.",

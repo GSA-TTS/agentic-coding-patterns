@@ -1,6 +1,9 @@
 # Decision: Merge into OpenCode's global config instead of setting `OPENCODE_CONFIG`
 
-**Status:** accepted (2026-07-06)
+**Status:** superseded (2026-10-22)
+
+> The OpenCode kit is now the sole global-config renderer. This historical
+> record describes the retired provider-owned merge writer and is retained for context only.
 **Supersedes:** the `OPENCODE_CONFIG` delivery mechanism in
 [`0001-usai-provider-as-mixin-kit.md`](0001-usai-provider-as-mixin-kit.md)
 (§"Namespaced `OPENCODE_CONFIG`") and all of

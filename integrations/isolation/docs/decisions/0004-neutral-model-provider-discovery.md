@@ -11,11 +11,9 @@ nist_controls: ["SC-7", "AC-4", "CM-7", "SI-10"]
 # ADR 0004 (isolation) — Neutral model-provider discovery: provider facts, a models orchestrator kit, and harness-owned rendering
 
 > Area-scoped ADR for `integrations/isolation/`. Extends the neutral `hybrid/v1`
-> kit spec (ADR 0001) and the network egress tiers (ADR 0002). It changes neither
-> schema; the mechanism composes from already-shipped primitives
-> (`caps.network.allow` union, sequential kit startup) plus the
-> host-authoritative read-only config mount defined in quickstart ADR-0035
-> (pending — GSA-TTS/agentic-coding-quickstart#504).
+> kit spec (ADR 0001) and the network egress tiers (ADR 0002). Provider input
+> bundles are versioned independently so the mechanism can preserve a stable
+> provider layout while backends supply their proven read-only guest root.
 
 ## Context and Problem Statement
 
@@ -58,27 +56,46 @@ change is required.
 
 ### Layer 1 — Provider kit self-registration (host-materialized, read-only)
 
-A provider-role kit declares an `acq-provider-input-bundle/v1` manifest at its
+A provider-role kit declares an `acq-provider-input-bundle/v2` manifest at its
 kit root. The manifest declares kit-relative paths for a small, static JSON
 **facts file**, a **normalizer** entrypoint, and a **vendored fallback snapshot**.
 At provision, `acq` reads those static artifacts **on the
 host**, validates the facts file host-side (see
 [Security model](#security-model)), and materializes all three into a
-per-sandbox host directory that it mounts **read-only** into the guest as a
-fixed per-provider layout at a well-known path:
+per-sandbox host directory that it mounts **read-only** into the guest. Version
+2 fixes the provider-relative layout, not the guest root:
 
 ```text
-/var/lib/acq/host/models/providers/<PROVIDER_ID>/   (read-only mount)
+<ACQ_PROVIDER_INPUT_ROOT>/models/providers/<PROVIDER_ID>/   (read-only mount)
 ├── facts.json     # 7-field facts shape (v1), below
 ├── normalizer     # provider's normalizer entrypoint (executable)
 └── snapshot.json  # provider's vendored fallback snapshot
 ```
 
-The package manifest fixes both sides of the contract: its paths are relative
-to the provider kit and may not traverse outside it, while `projectedPath` MUST
-be exactly `/var/lib/acq/host/models/providers/<providerId>`. The host validates
-the relationship before it copies any files. The USAi names are one provider's
-data, not generic paths or vocabulary.
+The package manifest fixes both package and provider-relative paths: its artifact
+paths are relative to the provider kit and may not traverse outside it, while
+`providerPath` MUST be exactly `models/providers/<providerId>`. The backend
+supplies `ACQ_PROVIDER_INPUT_ROOT` as the absolute root of its read-only mount;
+consumers compose the path rather than selecting a backend destination. The host
+validates the relationship before it copies any files. Provider names are data,
+not generic paths or vocabulary.
+
+Version 1 remains accepted during migration. Its `projectedPath` remains exactly
+`/var/lib/acq/host/models/providers/<providerId>` and consumers that already
+understand version 1 continue to use that fixed path. New provider bundles use
+version 2. A future removal of version 1 requires an explicit compatibility
+decision after all supported consumers have moved to the supplied-root contract.
+
+The Patterns validator discovers provider bundles only in `acq-kits/*`; it does
+not infer duplicate bundle locations from other kit layouts. Every materializer
+MUST invoke the Python host validator because JSON Schema cannot prove
+cross-field agreement, artifact containment, symlink safety, or executable-file
+requirements. The backend materializer owns the supplied-root value, read-only
+mount enforcement, symlink rejection in the materialized tree, and the required
+directory-name-to-`providerId` cross-check. Backend tests are mandatory
+acceptance for this contract; this repository does not ship a substitute
+consumer or mount implementation. Implementation belongs to the Quickstart
+backend materializer and is outside this repository.
 
 `facts.json` shape (v1):
 
@@ -132,7 +149,7 @@ not merely as a schema string. The invariant:
   of the directory `acq` materializes for it, and the orchestrator MUST derive
   each provider's identity from the **directory name it globbed**, cross-checked
   against the `providerId` inside that directory's `facts.json`. A mismatch is a
-  hard failure for that provider, not a warning: it means the two sources of
+   provisioning failure, not a warning: it means the two sources of
   identity disagree, and neither can be trusted to select the right credential.
 - **Unique within the materialized set.** Two provider kits MUST NOT resolve to
   the same `providerId`. `acq` fails provisioning on a collision rather than
@@ -141,9 +158,8 @@ not merely as a schema string. The invariant:
   code and routing for another's while keeping that other's `keyEnv`.
 
 Validation runs host-side, before materialization, in the same pass as the
-checks below. A facts file failing it is rejected and that provider is absent
-from the mount — which the orchestrator treats as "no provider present"
-(Layer 2, step 4), never as a provider with a default identity.
+checks below. Any candidate bundle failing validation makes provisioning fail;
+it must not be converted into an absent provider or an authoritative empty set.
 
 `keyEnv` names the environment variable that holds the vendor credential. A
 provider kit may only name a credential it declares itself: `acq` confirms
@@ -188,7 +204,7 @@ guarantees `zscaler-ca-certificate` runs before kits that need its CA trust
 Its `startup` phase:
 
 1. Globs the read-only provider-facts mount
-   `/var/lib/acq/host/models/providers/*/facts.json` (Layer 1).
+   `$ACQ_PROVIDER_INPUT_ROOT/models/providers/*/facts.json` (Layer 1).
 2. **The helper fetches; the normalizer never does.** The shared,
    vendored-into-this-kit bounded-fetch helper — one canonical implementation —
    performs the HTTPS request to `modelsUrl` itself, applying the per-provider
@@ -240,16 +256,16 @@ Its `startup` phase:
    The provider still contributes entries; they are its last-known-good ones.
 
    **No provider present is a different case and is NOT a snapshot fallback.**
-   When the glob in step 1 matches nothing — no provider kit enabled, or every
-   candidate rejected by host-side facts validation — there is no provider
+   When authoritative discovery succeeds and finds no provider kit enabled,
+   there is no provider
    directory, so there is no `snapshot.json` to read. The orchestrator MUST then
    write a **valid, explicitly empty** aggregate (`models: []`) carrying the
    provenance that zero providers were discovered, and exit success. It MUST NOT
    omit the file, write a partial file, invent a default provider, or fail
    sandbox startup: a harness kit reading the catalog must be able to tell *"no
    providers are configured"* from *"discovery did not run"*, and an absent file
-   cannot express the difference. A provider whose facts failed validation is
-   reported in that provenance as rejected, not silently absent.
+   cannot express the difference. A candidate rejected during host validation
+   fails provisioning before the orchestrator runs.
 5. Aggregates every provider's neutral output into one **guest-local,
    per-sandbox** file, written read-write and never shared with any other
    sandbox: `/var/lib/acq/models/catalog.json`. The aggregate carries **only
@@ -301,7 +317,7 @@ same ordering convention), reads:
   **model metadata only** (id, context window, pricing, capabilities,
   provenance);
 - the Layer 1 read-only facts mount,
-  `/var/lib/acq/host/models/providers/<PROVIDER_ID>/facts.json` — for
+   `$ACQ_PROVIDER_INPUT_ROOT/models/providers/<PROVIDER_ID>/facts.json` — for
   **routing/credential fields** (`apiProtocol`, `host`, `baseUrl`, `keyEnv`) — never from the
   catalog, since the catalog is guest-writable and cannot be authoritative for
   where a credential is sent (see [Security model](#security-model)); and
@@ -359,11 +375,11 @@ Constraints on the **aggregate** shape (`acq-neutral-model-aggregate/v1`):
   would force the no-provider case to either omit the file or write something
   invalid, which is exactly the ambiguity step 4 exists to prevent.
 - **Discovery provenance is required.** The aggregate records the set of
-  providers discovered and, for each, the outcome (`live`, `snapshot`, or
-  `rejected`). A consumer must be able to tell a live catalog from a stale one,
+  successfully validated providers and, for each, the outcome (`live` or
+  `snapshot`). A consumer must be able to tell a live catalog from a stale one,
   and *"zero providers configured"* from *"discovery did not run"*, by reading
-  the file alone — and a provider rejected by host-side validation must be
-  visible as rejected rather than merely absent.
+  the file alone. Host-side validation rejection fails provisioning before an
+  aggregate is produced.
 - **Each entry names its origin provider.** Entries carry the `providerId` they
   came from, so a consumer can attribute a model without re-deriving it. Whether
   that entry was live or stale is answered by the per-provider outcome above,
@@ -592,7 +608,7 @@ sequenceDiagram
 
   Two host-side builders already exist in this repo, so this is a live question
   rather than a hypothetical:
-  `acq-kits/usai-provider/scripts/sync-usai-models.mjs` (requires
+   the retired `acq-kits/usai-provider/scripts/sync-usai-models.mjs` (required
   `USAI_API_KEY` in the host environment, fetches the live models list,
   rewrites the kit's committed `opencode.jsonc` generated block) and
   `integrations/providers/usai/` (`build-catalog.mjs` → `catalog.json` →
@@ -678,9 +694,12 @@ sequenceDiagram
 
 ## References
 
+- `integrations/isolation/docs/provider-input-contract.md` — consumer-facing
+  version 2 root discovery and version 1 migration rules.
 - `integrations/isolation/schemas/acq-provider-input-bundle.schema.json`,
-  `acq-provider-facts.schema.json`, and `acq-neutral-model-catalog.schema.json`
-  — formal shapes for the package manifest, provider facts, and neutral catalog.
+  `acq-provider-input-bundle-v2.schema.json`, `acq-provider-facts.schema.json`,
+  and `acq-neutral-model-catalog.schema.json` — formal shapes for version 1 and
+  version 2 package manifests, provider facts, and the neutral catalog.
 - Quickstart ADR-0035 (*Host-Authoritative Sandbox Configuration*, pending —
   GSA-TTS/agentic-coding-quickstart#504) — the general principle and the
   per-sandbox host config dir + read-only mount + trusted-startup-execution

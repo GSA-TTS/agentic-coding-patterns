@@ -31,34 +31,48 @@
         "$ref": "#/$defs/model"
       }
     },
-    "recommendations": {
-      "type": "object",
-      "description": "Optional, advisory-only model role suggestions from the provider. Roles are neutral functional tiers — primary, small, compaction — not harness-native keys. Each value MUST reference an id present in this catalog's own models[]. Final role selection, conflict resolution, and harness-native vocabulary (e.g. OpenCode's model/small_model/compaction.model) remain in each agent kit. Consumers that do not understand a role MUST silently ignore it.",
-      "additionalProperties": false,
-      "properties": {
-        "primary": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128,
-          "pattern": "^[^\\u0000-\\u001F\\u007F\\u2028\\u2029]+(?![\\s\\S])",
-          "description": "Advisory default model id for general-purpose tasks. MUST reference a model id present in models[]. JSON Schema cannot enforce this cross-reference constraint; implementations MUST validate it separately (see _validate_recommendations in scripts/tests/test_provider_input_contract.py)."
-        },
-        "small": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128,
-          "pattern": "^[^\\u0000-\\u001F\\u007F\\u2028\\u2029]+(?![\\s\\S])",
-          "description": "Advisory default model id for lightweight, fast, or low-cost tasks. MUST reference a model id present in models[]. JSON Schema cannot enforce this cross-reference constraint; implementations MUST validate it separately."
-        },
-        "compaction": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128,
-          "pattern": "^[^\\u0000-\\u001F\\u007F\\u2028\\u2029]+(?![\\s\\S])",
-          "description": "Advisory default model id for context-compaction or summarisation tasks. MUST reference a model id present in models[]. JSON Schema cannot enforce this cross-reference constraint; implementations MUST validate it separately."
-        }
-      }
-    }
+     "recommendations": {
+       "type": "object",
+       "description": "Optional, advisory-only model role suggestions from the provider. Roles are neutral functional tiers — primary, small, compaction, summary, title — not harness-native keys. Each value MUST reference an id present in this catalog's own models[]. Final role selection, conflict resolution, and harness-native vocabulary (e.g. OpenCode's model/small_model/compaction.model) remain in each agent kit. Consumers that do not understand a role MUST silently ignore it.",
+       "additionalProperties": false,
+       "properties": {
+         "primary": {
+           "type": "string",
+           "minLength": 1,
+           "maxLength": 128,
+           "pattern": "^[^\\u0000-\\u001F\\u007F\\u2028\\u2029]+(?![\\s\\S])",
+           "description": "Advisory default model id for general-purpose tasks. MUST reference a model id present in models[]. JSON Schema cannot enforce this cross-reference constraint; implementations MUST validate it separately (see _validate_recommendations in scripts/tests/test_provider_input_contract.py)."
+         },
+         "small": {
+           "type": "string",
+           "minLength": 1,
+           "maxLength": 128,
+           "pattern": "^[^\\u0000-\\u001F\\u007F\\u2028\\u2029]+(?![\\s\\S])",
+           "description": "Advisory default model id for lightweight, fast, or low-cost tasks. MUST reference a model id present in models[]. JSON Schema cannot enforce this cross-reference constraint; implementations MUST validate it separately."
+         },
+         "compaction": {
+           "type": "string",
+           "minLength": 1,
+           "maxLength": 128,
+           "pattern": "^[^\\u0000-\\u001F\\u007F\\u2028\\u2029]+(?![\\s\\S])",
+           "description": "Advisory default model id for context-compaction or summarisation tasks. MUST reference a model id present in models[]. JSON Schema cannot enforce this cross-reference constraint; implementations MUST validate it separately."
+         },
+         "summary": {
+           "type": "string",
+           "minLength": 1,
+           "maxLength": 128,
+           "pattern": "^[^\\u0000-\\u001F\\u007F\\u2028\\u2029]+(?![\\s\\S])",
+           "description": "Advisory default model id for session-summary tasks. MUST reference a model id present in models[]. JSON Schema cannot enforce this cross-reference constraint; implementations MUST validate it separately."
+         },
+         "title": {
+           "type": "string",
+           "minLength": 1,
+           "maxLength": 128,
+           "pattern": "^[^\\u0000-\\u001F\\u007F\\u2028\\u2029]+(?![\\s\\S])",
+           "description": "Advisory default model id for session-title generation tasks. MUST reference a model id present in models[]. JSON Schema cannot enforce this cross-reference constraint; implementations MUST validate it separately."
+         }
+       }
+     }
   },
   "$defs": {
     "model": {
@@ -76,6 +90,13 @@
           "pattern": "^[^\\u0000-\\u001F\\u007F\\u2028\\u2029]+(?![\\s\\S])",
           "description": "Model identifier as used by the provider. Disallowed: ASCII control characters (U+0000-U+001F, U+007F) and Unicode line/paragraph separators (U+2028, U+2029). The pattern uses (?![\\s\\S]) in place of $ to avoid the $ trailing-newline bypass ($ in ECMA and Python re matches before \\n)."
         },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001F\\u007F\\u2028\\u2029]+(?![\\s\\S])",
+          "description": "Optional human-readable display name for this model. Disallowed: ASCII control characters and Unicode line/paragraph separators. When absent, consumers SHOULD fall back to the model id."
+        },
         "contextWindow": {
           "type": "integer",
           "minimum": 1,
@@ -89,6 +110,10 @@
         "cost": {
           "$ref": "#/$defs/cost",
           "description": "Base per-million-token pricing."
+        },
+        "costAbove200kContext": {
+          "$ref": "#/$defs/cost",
+          "description": "Optional tiered pricing that applies when the input context window exceeds 200 000 tokens. Same per-million-token fields as cost. Consumers that do not support tiered pricing MUST fall back to cost."
         }
       }
     },

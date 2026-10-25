@@ -14,7 +14,7 @@ live feeds -> build-catalog.mjs -> catalog.json -> per-harness emitters
 - **build-catalog.mjs** — derives `catalog.json`.
 - **catalog.json** — the generated catalog. **GENERATED — do not hand-edit.**
 - **per-harness emitters** — render `catalog.json` into each harness config
-  (e.g. the OpenCode `opencode.jsonc` model block).
+  (e.g. the OpenCode renderer contract fixture's model block).
 
 ## Checking for drift
 
@@ -42,7 +42,7 @@ drift indistinguishable from the noise.
 
 ## Safety guarantee
 
-A byte-exact round-trip test against the shipped `opencode.jsonc` is the safety
+A byte-exact round-trip test against the durable OpenCode renderer contract is the safety
 guarantee: the emitter must reproduce the current, human-reviewed config exactly.
 That test is the gate that lets us treat `catalog.json` as the source of truth
 without silently changing any shipped kit.
