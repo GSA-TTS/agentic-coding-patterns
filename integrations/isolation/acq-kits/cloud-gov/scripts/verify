@@ -206,7 +206,8 @@ fi
 
 info "5. Create sandbox with the kit"
 printf '  creating %s (workspace %s)...\n' "$SBX_NAME" "$WORK"
-if acq create --name "$SBX_NAME" --kit "$KIT_DIR" opencode "$WORK" >"$CREATE_LOG" 2>&1; then
+# ACQ_EXTRA_KITS bypasses acq's interactive configured-kit picker.
+if ACQ_EXTRA_KITS="$KIT_DIR" acq create --name "$SBX_NAME" opencode "$WORK" >"$CREATE_LOG" 2>&1; then
   ok "sandbox created with cloud-gov kit"
 else
   bad "acq create failed"
@@ -236,8 +237,10 @@ for url in \
   https://cli.cloudfoundry.org/; do
   status="$(in_acq "curl -sS -o /dev/null -w '%{http_code}' '$url'")"
   printf '  %s -> %s\n' "$url" "${status:-<none>}"
+  # Some allow-listed service roots intentionally return 404; any HTTP response
+  # proves DNS, TLS, and egress to the intended host succeeded.
   case "$status" in
-    2*|3*|401|403) ok "$url reachable" ;;
+    [1-5][0-9][0-9]) ok "$url reachable" ;;
     *) bad "$url not reachable (status ${status:-none})" ;;
   esac
 done

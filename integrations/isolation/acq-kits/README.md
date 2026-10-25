@@ -125,8 +125,8 @@ degrades the verdict to `3`; `skip` is *not applicable in this configuration*
 (e.g. a backend-specific check on the other backend) and does **not** degrade
 it; `warn` is advisory.
 
-**Unconverted kits** — `agentic-coding-playbook`, `oci-engine`, `opencode`,
-`openchamber`, `opendesign`, `paseo`, `pi-coding-agent`,
+**Unconverted kits** — `agentic-coding-playbook`, `cloud-gov`, `oci-engine`,
+`opencode`, `openchamber`, `opendesign`, `paseo`, `pi-coding-agent`,
 `zscaler-ca-certificate`. These still use the older two-state verdict, so nothing
 above applies to them. A non-zero exit means a check failed *or* a precondition
 could not be met — the two are not distinguished — and a `0` does **not**
