@@ -133,14 +133,17 @@
           },
           "reasoning": {
             "type": "boolean",
-            "description": "Whether the model supports reasoning/extended thinking. Not populated yet."
+            "description": "Whether the model supports reasoning/extended thinking. Absent means UNKNOWN; false means known-unsupported. Never inferred from the model id or name."
           },
           "inputModalities": {
             "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
             "items": {
-              "type": "string"
+              "type": "string",
+              "enum": ["text", "image", "audio", "video", "pdf"]
             },
-            "description": "Supported input modalities (e.g. text, image). Not populated yet."
+            "description": "Supported input modalities. Absent means UNKNOWN; [\"text\"] means known text-only. Never inferred from the model id or name."
           }
         }
       }

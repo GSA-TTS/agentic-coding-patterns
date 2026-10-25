@@ -114,6 +114,20 @@
         "costAbove200kContext": {
           "$ref": "#/$defs/cost",
           "description": "Optional tiered pricing that applies when the input context window exceeds 200 000 tokens. Same per-million-token fields as cost. Consumers that do not support tiered pricing MUST fall back to cost."
+        },
+        "reasoning": {
+          "type": "boolean",
+          "description": "Optional capability flag: whether the PROVIDER's gateway supports reasoning for this model. Absent means UNKNOWN (consumers MUST NOT assume either value); false means known-unsupported; true means known-supported. Producers MUST NOT infer it from the model id or name, and MUST NOT populate it from upstream-vendor data unless the gateway's behavior has been verified. The one sanctioned exception is a producer tool that copies upstream data only behind an explicit opt-in flag and labels the output's provenance as unverified; such output MUST NOT be committed or shipped until verified. It is a capability statement only: producers and the renderer emit no reasoning effort, budget, or other request setting, although a consuming harness may derive selectable options (for example OpenCode 1.x derives reasoning-effort variants from reasoning:true for openai-compatible models)."
+        },
+        "inputModalities": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": ["text", "image", "audio", "video", "pdf"]
+          },
+          "description": "Optional capability list: input modalities the PROVIDER's gateway accepts for this model. Absent means UNKNOWN (consumers MUST NOT assume text-only or image-capable); [\"text\"] means known text-only. Producers MUST NOT infer it from the model id or name, and MUST NOT populate it from upstream-vendor data unless the gateway's behavior has been verified. The one sanctioned exception is a producer tool that copies upstream data only behind an explicit opt-in flag and labels the output's provenance as unverified; such output MUST NOT be committed or shipped until verified. The enum is a closed allowlist; a new modality requires a schema change."
         }
       }
     },

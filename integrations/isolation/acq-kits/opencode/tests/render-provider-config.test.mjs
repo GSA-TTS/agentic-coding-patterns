@@ -868,3 +868,61 @@ test("stale lower-file historical model is still suppressed when canonical does 
   const final = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
   assert.equal(final.model, "acme-ai/b", "stale lower-file acme-ai/a suppressed by tombstone; kit recommendation acme-ai/b wins")
 })
+
+// ---------------------------------------------------------------------------
+// Capability metadata: neutral reasoning / inputModalities -> OpenCode
+// `reasoning` / `modalities.input`. Absent stays absent (unknown); nothing is
+// inferred from names; invalid values fail closed because OpenCode v2 drops
+// the whole provider block for an out-of-allowlist modality.
+// ---------------------------------------------------------------------------
+
+const withCapabilities = (providerId, models) => ({ schemaVersion: "acq-neutral-model-catalog/v1", providerId, models })
+const renderModels = (models) => renderProviderConfig([{ facts: facts("acme-ai"), catalog: withCapabilities("acme-ai", models) }]).provider["acme-ai"].models
+
+test("renders image-capable, text-only, and unknown models distinctly", () => {
+  const rendered = renderModels([
+    { id: "vision", reasoning: true, inputModalities: ["text", "image"] },
+    { id: "text-only", reasoning: false, inputModalities: ["text"] },
+    { id: "unknown" },
+  ])
+  assert.deepEqual(rendered.vision.modalities, { input: ["text", "image"] })
+  assert.equal(rendered.vision.reasoning, true)
+  assert.deepEqual(rendered["text-only"].modalities, { input: ["text"] })
+  assert.equal(rendered["text-only"].reasoning, false, "known false must be rendered, not dropped")
+  assert.equal("modalities" in rendered.unknown, false, "unknown must not become text-only or image-capable")
+  assert.equal("reasoning" in rendered.unknown, false)
+})
+
+test("capability rendering does not infer from model id or name", () => {
+  const rendered = renderModels([{ id: "vision-reasoning-vl", name: "Vision Reasoning" }])
+  assert.equal("modalities" in rendered["vision-reasoning-vl"], false)
+  assert.equal("reasoning" in rendered["vision-reasoning-vl"], false)
+})
+
+test("capability rendering canonicalises modality order and adds no reasoning settings", () => {
+  const [model] = Object.values(renderModels([{ id: "m", reasoning: true, inputModalities: ["pdf", "image", "text"] }]))
+  assert.deepEqual(model.modalities, { input: ["text", "image", "pdf"] })
+  assert.deepEqual(Object.keys(model).sort(), ["modalities", "name", "reasoning"])
+})
+
+test("invalid capability metadata fails closed", () => {
+  for (const reasoning of ["true", 1, null]) {
+    assert.throws(() => renderModels([{ id: "m", reasoning }]), /reasoning .* must be a boolean/)
+  }
+  for (const inputModalities of [[], "image", ["hologram"], ["text", "text"], [1], null]) {
+    assert.throws(() => renderModels([{ id: "m", inputModalities }]), /input modalities/)
+  }
+})
+
+test("rendered capability metadata survives the atomic config write and reparse", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "opencode-config-"))
+  try {
+    const rendered = renderProviderConfig([{ facts: facts("acme-ai"), catalog: withCapabilities("acme-ai", [{ id: "vision", reasoning: true, inputModalities: ["text", "image"] }]) }])
+    await writeConfigAtomically(directory, rendered, ownershipFromRendered(rendered))
+    const installed = parseJsonc(await readFile(path.join(directory, "opencode.jsonc"), "utf8"))
+    assert.deepEqual(installed.provider["acme-ai"].models.vision.modalities, { input: ["text", "image"] })
+    assert.equal(installed.provider["acme-ai"].models.vision.reasoning, true)
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
