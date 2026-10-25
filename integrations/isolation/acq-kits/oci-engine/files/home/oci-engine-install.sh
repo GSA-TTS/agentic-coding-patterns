@@ -100,14 +100,28 @@ if ! mkdir -p "$TRUSTED_DIR" 2>/dev/null \
   echo "oci-engine: WARNING: could not prepare trusted root startup directory; OCI setup unavailable." >&2
   exit 0
 fi
+# The storage helper and the startup grant script are `readonly: true` kit files.
+# A consumer that honors the flag (acq msb, quickstart ADR-0035) keeps them OFF the
+# agent-writable disk and runs/sources them from a host-authoritative read-only
+# mount at every startup, so there is nothing here to publish. A consumer that
+# ignores the flag copies them under /home/agent as before; publish root-owned
+# copies of whatever was staged so the startup step has something trusted to run.
+#
+# TRUST NOTE: this install step still trusts /home/agent at CREATE time. It copies
+# whatever is staged there into the root-owned directory, which is safe only
+# because the sandbox has just been created and the agent has not yet had a
+# session. The tamper resistance of `readonly` applies to the startup phase on
+# every later start, not to this step.
+RO_MOUNT_DIR="/var/lib/acq/host/kit-files"
+_stage_missing=0
 if [ -f "$STAGE_DIR/oci-engine-storage-driver.sh" ]; then
   if ! install -m 0644 "$STAGE_DIR/oci-engine-storage-driver.sh" "$TRUSTED_STORAGE_HELPER"; then
     echo "oci-engine: WARNING: could not install trusted storage helper; OCI setup unavailable." >&2
     exit 0
   fi
 else
-  echo "oci-engine: WARNING: staged storage helper missing; cannot configure OCI storage." >&2
-  exit 0
+  _stage_missing=1
+  echo "oci-engine: note: storage helper not staged under $STAGE_DIR (read-only kit file); the startup step will configure storage." >&2
 fi
 if [ -f "$STAGED_GRANT_SCRIPT" ]; then
   if ! install -m 0755 "$STAGED_GRANT_SCRIPT" "$TRUSTED_GRANT_SCRIPT"; then
@@ -115,9 +129,17 @@ if [ -f "$STAGED_GRANT_SCRIPT" ]; then
     exit 0
   fi
 else
-  echo "oci-engine: WARNING: staged startup grant script missing; startup device grant unavailable." >&2
-  exit 0
+  _stage_missing=1
+  echo "oci-engine: note: startup grant script not staged under /home/agent (read-only kit file); the startup step runs it from the read-only mount." >&2
 fi
+# A staged file may be absent because the consumer honored `readonly` (the files
+# are on the read-only mount) or because the file copy failed. Tell them apart:
+# with neither a staged copy nor the mount, the startup step has nothing to run
+# and device grant + storage re-evaluation will silently not happen. Say so loudly.
+if [ "$_stage_missing" -eq 1 ] && [ ! -d "$RO_MOUNT_DIR" ]; then
+  echo "oci-engine: WARNING: kit startup files are neither staged under /home/agent nor available on $RO_MOUNT_DIR; the startup step will NOT grant devices or configure storage." >&2
+fi
+unset _stage_missing
 
 # 1) EARLY-OUT if the base image already provides a FUNCTIONAL container engine.
 #
@@ -205,9 +227,13 @@ fi
 #    transient /dev/fuse miss at create is not permanently baked in — see the
 #    helper's comment and finding #4 in the kit's docs/decisions.
 mkdir -p /etc/containers
-# shellcheck source=files/home/oci-engine-config/oci-engine-storage-driver.sh
-. "$TRUSTED_STORAGE_HELPER"
-oci_engine_write_storage_conf
+if [ -f "$TRUSTED_STORAGE_HELPER" ]; then
+  # shellcheck source=files/home/oci-engine-config/oci-engine-storage-driver.sh
+  . "$TRUSTED_STORAGE_HELPER"
+  oci_engine_write_storage_conf
+else
+  echo "oci-engine: note: storage driver selection deferred to the startup step (helper is a read-only kit file)." >&2
+fi
 
 # 4) Docker-Hub-first registry resolution (ADR-0020). System-level so it applies
 #    to the rootless agent (read as the lowest-precedence source). Install the

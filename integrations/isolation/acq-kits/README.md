@@ -60,6 +60,8 @@ vocabulary:
 - `caps.network.allow` — outbound egress hosts.
 - `files[]` — files to drop into the guest (inline `content` or a `source:`
   under the kit's `files/` tree), optionally tagged with a lifecycle `phase`.
+  `readonly: true` marks a file whose bytes are trusted **code** that root runs
+  at startup; see [Read-only startup code](#read-only-startup-code).
 - `commands[]` — lifecycle commands, each with a `phase` (`install` /
   `initFiles` / `startup`), `user`, and argv `command`.
 - `agentContext` — markdown surfaced to the agent.
@@ -141,3 +143,46 @@ the split cannot rot in either direction: converting a kit without moving it
 fails, a converted kit reverting fails, and a README edit alone fails. The
 unconverted list must reach empty, at which point this carve-out goes away and
 the contract above applies to every kit.
+
+## Read-only startup code
+
+A `files[]` entry may set `readonly: true` (it requires `source:`). The flag
+tells a consumer that the file is trusted code and should not run from a
+guest-writable copy, because a guest user with `sudo` can edit any file in the
+guest, including a root-owned one. A consumer that supports it (acq's `msb`
+backend, quickstart ADR-0035) keeps the file on a host-authoritative read-only
+mount, does **not** copy it to `path`, and replaces any `commands[]` argv
+element that is **exactly** `path` with the mounted location. A consumer that
+does not know the flag ignores it and copies the file to `path` as before.
+
+Rules for kit authors:
+
+- Pass the file to the command as a **whole argv element**. A path buried inside
+  an `sh -c` script string, or built from a variable, is not rewritten, so the
+  command would look for a file that was never copied. `validate-kits.py`
+  rejects a `readonly` file that no command passes as a whole element.
+- Write the command so it is safe on **both** consumers. When the flag is not
+  honored the argv element is still the original `path`, which is
+  agent-writable. A root command must validate **each** such token on its own
+  against the allowed prefix (the read-only mount, `/var/lib/acq/host/kit-files/`)
+  and otherwise substitute a root-owned copy or refuse, as `oci-engine` does.
+  Checking only one token lets a partial rewrite slip an agent path through the
+  other. A kit with no root-owned copy to fall back on (the file is staged at
+  start, so nothing publishes it at create) should not use the flag; see
+  `zscaler-ca-certificate`.
+- Write `readonly` as the literal `true` and `command:` as a block list. The acq
+  consumer reads specs with a line-based reader that only recognizes the string
+  `true` and drops flow-style `[a, b]` argv lists; `validate-kits.py` rejects both.
+- Do not set it on a file the kit or the user modifies at runtime, a file other
+  code reads by a fixed path, or a file a command copies by path. Those files
+  are not copied to `path` when the flag is honored.
+- Expect the whole-element rewrite in every phase `msb` runs. Do not rely on
+  the file existing at `path` in any command, including `install` commands.
+
+Shipped kit that uses it: `oci-engine` (root startup grant script and the
+storage helper it sources). `zscaler-ca-certificate` and `opendesign` do not; see
+their READMEs.
+
+The `install` phase still trusts `/home/agent` at create time: it runs before the
+agent has had a session, and `readonly` protects the startup code that runs on
+every later start.

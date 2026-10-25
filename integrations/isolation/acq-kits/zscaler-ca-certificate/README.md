@@ -94,6 +94,21 @@ If traffic can be signed by more than one internal proxy, add a `files` entry pe
 proxy CA (each a distinct `.crt` path); the single `startup`
 `update-ca-certificates` call picks up all of them.
 
+## Read-only startup code (not used)
+
+This kit does not mark the staged certificate `readonly: true`. The flag only
+helps a consumer that mounts kit files read-only (acq `msb`), and `msb` already
+skips this file-drop path through `trust_host_cas`, which trusts the host's CAs
+directly. Every consumer that runs the file-drop path ignores the flag and still
+hands the root `startup` command the agent-writable `/home/agent/zscaler-ca.crt`.
+The kit has no root-owned copy to use instead, because the certificate is staged
+at start (`initFiles`), not at create. Refusing an agent-home path would stop the
+certificate from being installed at all, so the kit keeps its existing behavior:
+a guest user with `sudo` could replace that file before the next start, and the
+sandbox, not the guest user boundary, is the security boundary (quickstart
+ADR-0035). Prefer `trust_host_cas` on `msb`. Revisit this if a consumer gains a
+create-time root-owned publish step for this file.
+
 ## Verifying
 
 ```bash

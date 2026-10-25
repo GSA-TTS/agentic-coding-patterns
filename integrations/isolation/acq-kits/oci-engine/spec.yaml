@@ -92,10 +92,14 @@ files:
     mode: "0755"
     source: files/home/oci-engine-install.sh
     description: Install + configure rootless podman (create-time, root). Idempotent, fails soft.
+  # readonly: true — root startup CODE. Only the startup grant command below
+  # invokes it (as a whole argv token), so a consumer that mounts kit code
+  # read-only can run it from that mount instead of a guest-writable copy.
   - path: /home/agent/oci-engine-grant-devs.sh
     mode: "0755"
     source: files/home/oci-engine-grant-devs.sh
-    description: Staged source for the root-owned startup grant script installed under /usr/local/lib/acq/oci-engine/.
+    readonly: true
+    description: Root startup grant script, run every start from a host-authoritative read-only mount when the consumer supports it; otherwise staged here and published under /usr/local/lib/acq/oci-engine/.
   - path: /home/agent/oci-engine-vfs-fallback.sh
     mode: "0755"
     source: files/home/oci-engine-vfs-fallback.sh
@@ -110,10 +114,15 @@ files:
     mode: "0644"
     source: files/home/oci-engine-config/01-acq-shortnames.conf
     description: podman short-name aliases (hello/hello-world -> docker.io). Installed to /etc/containers/registries.conf.d/.
+  # readonly: true — sourced as ROOT by the startup grant script on every start,
+  # so it is root startup code too. It is passed to the grant command as a whole
+  # argv token (never read by path from a script string), which is what lets a
+  # consumer swap in the read-only mount path.
   - path: /home/agent/oci-engine-config/oci-engine-storage-driver.sh
     mode: "0644"
     source: files/home/oci-engine-config/oci-engine-storage-driver.sh
-    description: Shared helper sourced by install + grant steps to (re)select the podman storage driver. Convergent vfs->overlay.
+    readonly: true
+    description: Shared helper sourced by the startup grant step (and by install when staged) to (re)select the podman storage driver. Convergent vfs->overlay.
   - path: /home/agent/oci-engine-config/docker
     mode: "0755"
     source: files/home/oci-engine-config/docker
@@ -130,6 +139,12 @@ commands:
   # only when the kit ran the install. Idempotent and best-effort (a missing mirror
   # or unsupported base exits 0 with a clear message rather than aborting
   # provision).
+  # The install script publishes the two readonly: true files (grant script,
+  # storage helper) into the root-owned directory ONLY when a consumer that does
+  # not honor `readonly` copied them under /home/agent. Where `readonly` is
+  # honored they are absent there and the startup step runs them from the
+  # read-only mount instead. This command's argv stays the plain `sh -c <script>`
+  # form: the sbx translator only passes that form through intact.
   - phase: install
     user: "0"
     description: Install + configure the rootless podman OCI engine (create-time, root).
@@ -145,9 +160,20 @@ commands:
         fi
         echo "oci-engine: WARNING: could not publish trusted install script; OCI setup unavailable." >&2
         exit 0
-  # STARTUP phase — every start, as root (uid "0"). Executes the root-owned copy
-  # installed under /usr/local/lib/acq/oci-engine/ during create, not an
-  # agent-writable staging file. GATED ON PODMAN: revokes any stale device grant
+  # STARTUP phase — every start, as root (uid "0"). The two trailing argv tokens
+  # are the readonly: true files above, passed as WHOLE tokens ($1 grant script,
+  # $2 storage helper). A consumer that mounts kit code read-only rewrites them to
+  # its read-only mount path (/var/lib/acq/host/kit-files/...), and this command
+  # then runs them from there: a sudo guest cannot edit that mount. A consumer
+  # that does not know `readonly` leaves the tokens as /home/agent paths and
+  # copies the files there as before. Each token is checked INDEPENDENTLY: it is
+  # used only if it sits under /var/lib/acq/host/kit-files/ (and has no `..`);
+  # anything else, including an /home/agent token, is replaced by the root-owned
+  # copy the install step published under /usr/local/lib/acq/oci-engine/. So a
+  # mixed rewrite (one token mounted, one not) never runs an agent-home path. A
+  # mounted path that does not exist (staging failed) also falls back. If
+  # neither a mounted nor a published grant script exists it warns loudly and
+  # skips (scripts/verify fails in that state). GATED ON PODMAN: revokes any stale device grant
   # and exits if podman is absent (install fell soft, or the base had its own
   # engine and the kit early-outed) — no engine, no device grant (finding #3).
   # Otherwise re-grants /dev/net/tun + /dev/fuse to the agent (/dev is a devtmpfs
@@ -164,11 +190,25 @@ commands:
       - sh
       - -c
       - |
-        if [ -f /usr/local/lib/acq/oci-engine/oci-engine-grant-devs.sh ]; then
-          exec sh /usr/local/lib/acq/oci-engine/oci-engine-grant-devs.sh
+        mount=/var/lib/acq/host/kit-files/
+        trusted=/usr/local/lib/acq/oci-engine
+        pick() {
+          case "$1" in
+            *..*) printf '%s\n' "$2" ;;
+            "$mount"?*) if [ -f "$1" ]; then printf '%s\n' "$1"; else printf '%s\n' "$2"; fi ;;
+            *) printf '%s\n' "$2" ;;
+          esac
+        }
+        grant=$(pick "$1" "$trusted/oci-engine-grant-devs.sh")
+        helper=$(pick "$2" "$trusted/oci-engine-storage-driver.sh")
+        if [ -f "$grant" ]; then
+          exec sh "$grant" "$helper"
         fi
-        echo "oci-engine: trusted startup script missing; skipping device grant + storage re-eval." >&2
+        echo "oci-engine: WARNING: no trusted startup script (not on the read-only mount, not published under $trusted); device grant and storage re-evaluation NOT applied." >&2
         exit 0
+      - oci-engine-startup
+      - /home/agent/oci-engine-grant-devs.sh
+      - /home/agent/oci-engine-config/oci-engine-storage-driver.sh
   # STARTUP phase — every start, as the AGENT user (uid "1000"). Reproduces the
   # reference adapter's rootless recovery path: run a real rootless layer-mount
   # self-test (podman build FROM scratch) and, if it fails, write a user-level

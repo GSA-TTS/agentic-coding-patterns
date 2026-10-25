@@ -55,9 +55,29 @@ if ! command -v podman >/dev/null 2>&1; then
   exit 0
 fi
 
-# Root-owned helper installed by oci-engine-install.sh. Do not source helper code
-# from the agent-writable staging path on startup.
-TRUSTED_STORAGE_HELPER="/usr/local/lib/acq/oci-engine/oci-engine-storage-driver.sh"
+# Storage helper to source, passed by the startup command as $1: a path on acq's
+# host-authoritative read-only mount (the helper is a `readonly: true` kit file)
+# or the root-owned copy oci-engine-install.sh publishes. It is sourced as ROOT, so
+# it is validated HERE, independent of the caller: only those two locations are
+# accepted (no `..`); anything else, notably an agent-writable path, is refused
+# loudly and the root-owned copy is used instead. Defaults to the root-owned copy
+# when run without arguments.
+OCI_ENGINE_TRUSTED_DIR="/usr/local/lib/acq/oci-engine"
+OCI_ENGINE_RO_MOUNT_PREFIX="/var/lib/acq/host/kit-files/"
+TRUSTED_STORAGE_HELPER="$OCI_ENGINE_TRUSTED_DIR/oci-engine-storage-driver.sh"
+if [ "$#" -ge 1 ] && [ -n "$1" ]; then
+  case "$1" in
+    *..*)
+      echo "oci-engine: WARNING: refusing storage helper path containing '..': $1; using $TRUSTED_STORAGE_HELPER." >&2
+      ;;
+    "$OCI_ENGINE_RO_MOUNT_PREFIX"?*|"$OCI_ENGINE_TRUSTED_DIR"/?*)
+      TRUSTED_STORAGE_HELPER="$1"
+      ;;
+    *)
+      echo "oci-engine: WARNING: refusing storage helper outside the read-only mount and $OCI_ENGINE_TRUSTED_DIR: $1; using $TRUSTED_STORAGE_HELPER." >&2
+      ;;
+  esac
+fi
 
 # The unprivileged user the engine runs as. Non-secret; overridable via the
 # OCI_ENGINE_AGENT_USER env var (declared in spec.yaml environment) for a base
