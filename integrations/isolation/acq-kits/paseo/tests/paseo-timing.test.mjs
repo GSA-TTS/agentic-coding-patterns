@@ -137,7 +137,7 @@ test("diagnostic overlay opts in without enabling the normal kit", async () => {
 test("startup records configuration and existing-supervisor path without starting services", async (t) => {
   const { env, stub } = await fixture(t);
   await stub("npm", 'printf "%s\\n" "$HOME/npm"');
-  await stub("paseo", 'case "$*" in --version) printf "0.12.0\\n" ;; esac');
+  await stub("paseo", 'case "$*" in --version) printf "0.13.0\\n" ;; esac');
   await stub("pgrep", "exit 0");
   const script = await readFile(new URL("paseo-start.sh", payload), "utf8");
   const result = run(script, { ...env, PASEO_KIT_TIMING: "1" });

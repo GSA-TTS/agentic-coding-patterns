@@ -118,6 +118,11 @@ in_sbx() {
     *)   sbx exec "$SBX_NAME" -- sh -c "$_wrapped" </dev/null 2>/dev/null || true ;;
   esac
 }
+
+daemon_status_is_running() {
+  node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try { const v=JSON.parse(s); const running=v.status === "running" || v.state === "running" || v.localDaemon === "running" || v.localDaemon?.status === "running" || v.localDaemon?.state === "running"; process.exit(running ? 0 : 1); } catch { process.exit(1); }})'
+}
+
 sbx_ports_out() {
   case "${DRIVER:-}" in
     acq) acq ports "$SBX_NAME" 2>/dev/null || true ;;
@@ -397,7 +402,7 @@ fi
 
 info "5a. Default local CLI discovery uses the running daemon"
 local_status="$(in_sbx 'paseo daemon status --home "${PASEO_HOME:-$HOME/.paseo}" --json 2>/dev/null')"
-if printf '%s' "$local_status" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try { const v=JSON.parse(s); const running=v.status === "running" || v.state === "running" || v.localDaemon?.status === "running" || v.localDaemon?.state === "running"; process.exit(running ? 0 : 1); } catch { process.exit(1); }})'; then
+if printf '%s' "$local_status" | daemon_status_is_running; then
   ok "local daemon status reports running without an explicit host"
 else
   bad "local daemon status did not report running: ${local_status:-no output}"
