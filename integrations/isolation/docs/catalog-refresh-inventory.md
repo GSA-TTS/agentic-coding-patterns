@@ -27,6 +27,10 @@ guest-writable file is never an authority for model state. Until ADR 0002 is
 accepted, this inventory proposes no guest-writable aggregate and authorizes no
 implementation.
 
+ADR 0002 is not on the default branch yet, so this inventory cites it by path and
+not by link. The ADR 0002 change merges first and this inventory merges after it;
+the path can become a link then.
+
 ## Current Paths
 
 ### Legacy provider refresh
