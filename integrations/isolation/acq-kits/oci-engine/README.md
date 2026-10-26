@@ -41,8 +41,10 @@ On **every start** (the `startup` phase, run as root) — **only if podman is
 installed** — it group-scopes `/dev/net/tun` and `/dev/fuse` to the agent
 (`root:agent`, `0660`) so rootless podman networking and the fuse-overlayfs
 storage mount work, and it **re-evaluates the system storage driver**. The elevated install and startup scripts, plus the storage helper sourced by
-them, are copied into `/usr/local/lib/acq/oci-engine/` and executed/sourced only
-from those root-owned copies, not from the agent-home staging files. `/dev` is a devtmpfs
+them, run only from a host-authoritative read-only mount (when the consumer honors
+`readonly`; a missing mount file is a refusal, not a fallback) or, for a consumer
+that ignores `readonly`, from root-owned copies under `/usr/local/lib/acq/oci-engine/`,
+never from the agent-home staging files. `/dev` is a devtmpfs
 re-created each boot, so both must re-run on restart, not just at create;
 re-evaluating the driver each boot lets it **converge from `vfs` to `overlay`**
 once `fuse-overlayfs` and `/dev/fuse` are both available (a transient `/dev/fuse`
@@ -96,8 +98,11 @@ engine")** decision, declaratively:
   inside the sandbox, which is itself the security boundary.
 - **Trusted elevated code.** Files are staged in the agent home by the neutral
   kit mechanism, but root phases do not execute or source those mutable copies.
-  The root command wrappers publish the install script, startup script, and sourced
-  helper into `/usr/local/lib/acq/oci-engine/` and use only those root-owned files.
+  The root command wrappers publish the install script into
+  `/usr/local/lib/acq/oci-engine/`; the startup script and sourced helper run from
+  the read-only mount when the consumer honors `readonly` (failing closed if the
+  file is missing), else from root-owned copies published there for a consumer
+  that ignores `readonly`. Neither runs from the mutable staging copies.
 - **Least-privilege registry resolution.** `short-name-mode` defaults to
   **`enforcing`**, not `permissive`. Because there is a single search registry
   (`docker.io`), unqualified names still resolve deterministically to Docker Hub
@@ -110,6 +115,59 @@ engine")** decision, declaratively:
   which explicitly removes that guardrail.
 
 Nothing in this kit is a secret. podman needs no credentials to run rootless.
+
+### Read-only startup code
+
+The root `startup` step runs two kit files: `oci-engine-grant-devs.sh` and the
+`oci-engine-storage-driver.sh` helper it sources. Both are declared
+`readonly: true` and passed to the step as whole argv elements. A consumer that
+honors the flag (acq `msb`, quickstart ADR-0035) runs them from a
+host-authoritative read-only mount, so a guest user with `sudo` cannot edit what
+root executes on each start. A consumer that ignores the flag copies them under
+`/home/agent` as before (the *legacy* case), and the step then runs the
+root-owned copy that `oci-engine-install.sh` published.
+
+The step **fails closed**. It classifies the two tokens together:
+
+| Tokens | Behavior |
+|---|---|
+| Both under `/var/lib/acq/host/kit-files/` | Run exactly those files. If either file is missing: error on stderr, run nothing as root, exit 1. It does **not** fall back to the root-owned copy, which came from `/home/agent` at create time and is not host-authoritative across restarts. |
+| Both under `/home/agent/` | Legacy: run the root-owned copy that install published. If install published nothing, warn and exit 0, as before. |
+| Anything else (one mounted and one not, `..`, an unknown prefix, an empty token) | Refuse: error on stderr, exit 1. |
+
+`oci-engine-grant-devs.sh` applies the same rule to the helper it sources: a
+missing selected mount helper is a refusal, not a fallback. A refusal costs only
+the device grant and storage re-evaluation for that boot. Quickstart reports a
+failing startup command as a warning and continues; it never treats it as an
+escalation. `scripts/verify` fails in that state.
+
+Pairing with Quickstart: GSA-TTS/agentic-coding-quickstart#637 makes the
+decision to use the read-only mount a host-side record, so a guest cannot force
+the legacy downgrade by tampering with a guest probe. When staging a read-only
+file fails on the host, the consumer falls back to a guest copy for that file and
+leaves its `/home/agent` token in argv. If both files fall back, that is the
+legacy row above. If only one does, the pair is mixed (one mount token, one
+`/home/agent` token) and the step refuses, so one failed host copy costs the
+device grant and storage re-evaluation for that boot. The consumer's create-time
+startup script derives its rewrite table without checking whether staging
+succeeded, so it can name a mount file that was never staged; the step refuses
+that case too.
+
+The mount is enforced by the backend. A guest user with `sudo` who can unmount or
+bind-mount over `/var/lib/acq/host/kit-files` is outside what token validation
+can defend against; the read-only property rests on the backend's mount
+enforcement.
+
+The install step still trusts `/home/agent` at create time (it publishes the
+staged copies into the root-owned directory, before the agent's first session).
+The read-only mount protects the startup code on every later start.
+
+Not marked `readonly`, on purpose: `oci-engine-install.sh` (an inline install
+command copies it by path), `oci-engine-vfs-fallback.sh` (runs as the agent,
+not root), and the `docker` wrapper and `01-acq-shortnames.conf` (the install
+script copies them by path, which needs them at `/home/agent`). When the flag is
+honored, the install step does not publish the grant script or helper; the
+`startup` step configures the storage driver on that same boot.
 
 ## Network egress
 
