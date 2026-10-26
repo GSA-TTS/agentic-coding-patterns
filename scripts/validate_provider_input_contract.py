@@ -161,7 +161,11 @@ def validate_bundle(
             raise ContractError(f"{bundle_path}: declared artifact paths must be regular files inside the provider kit")
     if not facts_path.is_file() or not snapshot_path.is_file() or not normalizer_path.is_file():
         raise ContractError(f"{bundle_path}: declared artifact paths must be regular files")
-    if not normalizer_path.stat().st_mode & 0o111:
+    # POSIX expresses executability through mode bits, but Windows reports no
+    # exec bits (os.stat().st_mode & 0o111 is always 0) and os.access(X_OK) is
+    # trivially true there. Enforce the mode-bit check only on POSIX hosts; the
+    # X_OK check below remains the sole executability signal on Windows.
+    if os.name != "nt" and not normalizer_path.stat().st_mode & 0o111:
         raise ContractError(f"{bundle_path}: normalizerPath must be an executable file")
     if not os.access(normalizer_path, os.X_OK):
         raise ContractError(f"{bundle_path}: normalizerPath is not executable by the validator")

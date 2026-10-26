@@ -19,6 +19,7 @@ Verifies:
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -1310,6 +1311,7 @@ def test_runtime_validator_accepts_keyenv_among_multiple_credentials(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX exec bits do not exist on Windows")
 def test_runtime_validator_rejects_non_executable_normalizer(tmp_path):
     """normalizerPath pointing at a non-executable file (mode 0644) must be rejected."""
     bundle_dir = tmp_path / "provider"
