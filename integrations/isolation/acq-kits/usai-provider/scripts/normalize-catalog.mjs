@@ -74,6 +74,9 @@ const PROVIDER_ID = "usai"
 const MODEL_ID_PATTERN = /^[^\u0000-\u001F\u007F\u2028\u2029]+$/
 const MODEL_NAME_PATTERN = /^[^\u0000-\u001F\u007F\u2028\u2029]+$/
 const MAX_MODELS = 500
+// Closed allowlist; must match the INPUT_MODALITIES enum in
+// acq-neutral-model-catalog.schema.json and usai catalog.schema.json.
+export const INPUT_MODALITIES = ["text", "image", "audio", "video", "pdf"]
 
 /**
  * Re-shape one usai-model-catalog/v1 model entry into the neutral
@@ -81,8 +84,8 @@ const MAX_MODELS = 500
  * integrations/providers/usai/catalog.schema.json (contextWindow,
  * maxOutputTokens, cost.{input,output,cacheRead,cacheWrite}) — this function
  * does not invent new names, only narrows the shape to the fields the neutral
- * schema models today (drops vendor/reasoning/
- * inputModalities, which the neutral v1 shape does not carry).
+ * schema models (drops vendor, which the neutral shape does not carry;
+ * reasoning and inputModalities are validated and carried through unchanged).
  * @param {object} model - one entry from the source catalog's `models[]`
  * @returns {{id: string, contextWindow?: number, maxOutputTokens?: number, cost?: object}}
  */
@@ -172,6 +175,29 @@ function normalizeModel(model, index) {
     if (Object.keys(tieredCost).length > 0) {
       out.costAbove200kContext = tieredCost
     }
+  }
+  // Capability metadata is copied only when present and valid. Absent stays
+  // absent (UNKNOWN); false / ["text"] stay as stated (known). Nothing is
+  // defaulted, inferred from the id or name, or coerced from truthy values.
+  if (model.reasoning !== undefined) {
+    if (typeof model.reasoning !== "boolean") {
+      throw new Error(`${prefix}.reasoning must be a boolean (got ${describe(model.reasoning)})`)
+    }
+    out.reasoning = model.reasoning
+  }
+  if (model.inputModalities !== undefined) {
+    const list = model.inputModalities
+    if (
+      !Array.isArray(list) ||
+      list.length === 0 ||
+      new Set(list).size !== list.length ||
+      !list.every((entry) => INPUT_MODALITIES.includes(entry))
+    ) {
+      throw new Error(
+        `${prefix}.inputModalities must be a non-empty array of unique values from ${INPUT_MODALITIES.join(", ")} (got ${describe(list)})`,
+      )
+    }
+    out.inputModalities = INPUT_MODALITIES.filter((modality) => list.includes(modality))
   }
   return out
 }

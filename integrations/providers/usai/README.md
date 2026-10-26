@@ -40,6 +40,22 @@ drift indistinguishable from the noise.
   `usai-model-catalog/v1`. Defines the catalog shape.
 - `catalog.json` — the generated catalog.
 
+## Capability metadata
+
+`reasoning` (boolean) and `inputModalities` (subset of `text`, `image`, `audio`,
+`video`, `pdf`) are optional per-model fields. **Absent means unknown**; `false`
+and `["text"]` mean known-unsupported and known text-only. The builder does
+**not** copy them by default. Passing `--include-capabilities` to a live-feed
+build copies them from the matched models.dev entry and labels that provenance
+in `sources.capabilities`; models.dev describes the upstream provider, not
+necessarily the USAi gateway, so that output must not be committed until each
+value is confirmed against the gateway with per-model, per-field evidence (a
+data PR description plus a committed evidence file; see the ADR). The
+`sources.capabilitiesVerified` string (`<date>; opencode <version>`) is only a
+catalog-wide release reminder, not evidence. Malformed upstream values are
+treated as unknown with a warning. Nothing is inferred from model ids or names. See
+[ADR 0006](../../isolation/docs/decisions/0006-neutral-model-capability-metadata.md).
+
 ## Safety guarantee
 
 A byte-exact round-trip test against the durable OpenCode renderer contract is the safety
