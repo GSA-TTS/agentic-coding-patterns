@@ -1,9 +1,9 @@
 ---
 title: "Provider-Neutral Catalog Refresh Inventory"
-description: "Maps current model catalog refresh paths and defines the safe boundary for later provider-neutral drift detection."
-status: canonical
+description: "Maps current model catalog refresh paths and proposes a safe boundary for later provider-neutral drift detection."
+status: draft
 tier: 2
-last_updated: "2026-10-26"
+last_updated: "2026-10-27"
 ---
 
 # Provider-Neutral Catalog Refresh Inventory
@@ -15,21 +15,26 @@ and the boundary for a later provider-neutral refresh capability. It is a design
 and sequencing document only. It does not add a runtime orchestrator, network
 fetch, scheduler, emitter, or harness configuration writer.
 
-The intended architecture is documented in
-[ADR 0004](decisions/0004-neutral-model-provider-discovery.md), as it would be
-amended by the proposed Patterns ADR 0002,
-`docs/decisions/0002-runtime-model-refresh-aggregation.md`, if that ADR is
-accepted. Provider kits publish neutral inputs; each harness renders only its own
-native configuration. ADR 0002 would supersede in part ADR 0004's guest-local,
-writable model aggregate and the in-guest orchestrator that writes it. Any future
-refresh, cache, or projection is host-owned and read-only to the guest, and a
-guest-writable file is never an authority for model state. Until ADR 0002 is
-accepted, this inventory proposes no guest-writable aggregate and authorizes no
-implementation.
+The **Current Paths** and **Duplicate Logic And Consumer Artifacts** sections are
+an inventory of what exists today, with constraints carried over from ADR 0004. The accepted architecture remains
+[ADR 0004](decisions/0004-neutral-model-provider-discovery.md); this document
+does not change it and is not an authority over it.
 
-ADR 0002 is not on the default branch yet, so this inventory cites it by path and
-not by link. The ADR 0002 change merges first and this inventory merges after it;
-the path can become a link then.
+Everything about a *later* design below (ownership, the bounded host-owned step,
+the upstream gate, the test plan, and the planned order) is a **proposal**. It
+depends on the proposed Patterns ADR 0002,
+`docs/decisions/0002-runtime-model-refresh-aggregation.md`, which would
+supersede in part ADR 0004's guest-local, writable model aggregate and the
+in-guest orchestrator that writes it, if that ADR is accepted. Until ADR 0002 is
+accepted and merged, ADR 0004 stands as written, and this document proposes no
+guest-writable aggregate and authorizes no implementation. This document is a
+draft and stays one until ADR 0002 is accepted; it can then be promoted.
+
+ADR 0002 is not on the default branch yet, so this document cites it by path, not
+by link. Once the ADR 0002 change is merged, the path can become a link. Merge
+order does not change this document's draft status; promotion depends on ADR 0002
+being accepted. Bare "ADR 0002" in this document means that Patterns ADR, not the
+isolation network egress ADR of the same number.
 
 ## Current Paths
 
@@ -120,9 +125,9 @@ The duplicate legacy paths must not be expanded. Removing or migrating them is
 separate compatibility work because existing authoring and regression tests use
 them.
 
-## Ownership Boundary
+## Proposed Ownership Boundary
 
-The later design has three separate owners:
+The proposed later design has three separate owners:
 
 | Layer | Owns | Must not own |
 | --- | --- | --- |
@@ -130,25 +135,29 @@ The later design has three separate owners:
 | Host-owned refresh and projection (future, not approved) | Discovery, bounded fetch, validation, last-known-good fallback, deterministic aggregation, provenance, and a read-only projection for the guest | Harness-native configuration, provider-specific rendering rules, or any state the guest can write |
 | Harness kit | Its native configuration rendering from the read-only projection and authoritative facts | Provider discovery, provider-specific normalization, model-state authority, or another harness's configuration |
 
-Host authority is the rule. The host decides lifecycle state and eligibility;
-the guest and the harness get a read-only view and cannot create, change,
-promote, or invalidate it. A file the guest can write, even one the host first
-produced, cannot be treated as authoritative.
+In the proposed design, host authority is the rule. The host decides lifecycle
+state and eligibility; the guest and the harness get a read-only view and cannot
+create, change, promote, or invalidate it. A file the guest can write, even one
+the host first produced, cannot be treated as authoritative. Under accepted ADR
+0004, the guest-local aggregate is trusted for model metadata within its own
+sandbox and never for routing or credential fields.
 
 Any projection must carry model metadata and refresh provenance only. It must
 not carry `host`, `baseUrl`, `modelsUrl`, `keyEnv`, credential values, or any
 other routing authority. Harnesses must read routing and credential-name facts
-only from the host-authoritative provider-input mount.
+only from the host-authoritative provider-input mount (also required by ADR
+0004).
 
 Refresh and projection code must not render or write configuration for OpenCode,
 Prime Agent, Goose, Codex, Claude, Copilot, or any other harness. It must not
 import a harness emitter or use a harness configuration file as an input or
-output.
+output (also required by ADR 0004).
 
 ## Bounded Shape For A Later Host-Owned Step
 
-ADR 0002 defers any refresh component, so there is no approved entrypoint. The
-smallest shape that stays inside the host-owned boundary is a provider-neutral
+ADR 0002 (proposed) would defer any refresh component, so there is no approved
+entrypoint. If it is accepted, the smallest shape that stays inside the
+host-owned boundary is a provider-neutral
 refresh step that runs on the host, not in the guest. Its design is bounded by
 these steps and is still subject to ADR 0002's decision criteria:
 
@@ -162,7 +171,7 @@ these steps and is still subject to ADR 0002's decision criteria:
    implementation, with credentials held only by the host-side fetcher.
 5. Where a provider normalizer would run is unresolved. ADR 0004 rejected
    running provider-shipped normalizer code on the host, next to real
-   credentials, and neither this inventory nor ADR 0002 reverses that. Any
+   credentials, and neither this document nor ADR 0002 reverses that. Any
    placement needs its own review. Wherever it runs, it is a file-to-file
    transform, and only when its containment requirements are mechanically
    enforced.
@@ -177,7 +186,7 @@ these steps and is still subject to ADR 0002's decision criteria:
    publish a valid explicitly empty projection so "no providers configured" is
    distinguishable from "refresh did not run".
 
-The step must fail closed on invalid provider identity, malformed facts, invalid
+In the proposed step, it must fail closed on invalid provider identity, malformed facts, invalid
 normalizer output, invalid snapshots, duplicate provider IDs, or duplicate model
 identities within a provider. It must never substitute a default provider,
 silently omit a rejected provider, or replace the last-known-good projection
@@ -186,12 +195,12 @@ control is unavailable, it must refuse to run that normalizer and fall back as i
 step 7.
 
 Running the refresh in the guest at startup, and having it write a guest file
-that harnesses read, is the design ADR 0002 supersedes. It is not a fallback
-option here.
+that harnesses read, is the accepted ADR 0004 design that ADR 0002 would
+supersede. It is not proposed here as a fallback.
 
-## Required Upstream Gate
+## Proposed Upstream Gate
 
-No runtime refresh implementation may merge until the sandbox backend provides
+Proposed: no runtime refresh implementation should merge until the sandbox backend provides
 the host-authoritative provider-input lifecycle. That lifecycle must:
 
 - Validate all provider bundles on the host before materialization.
@@ -207,19 +216,26 @@ the host-authoritative provider-input lifecycle. That lifecycle must:
   generation identifier, and provide a readiness barrier so a harness cannot read
   a projection that is not yet complete.
 
-No guest-owned or guest-written path is an acceptable substitute for this gate,
-including a guest-local aggregate.
+The provider-input items above follow accepted ADR 0004. The final item (the
+host-owned projection and its readiness barrier) is proposed. If ADR 0002 is accepted, no guest-owned or
+guest-written path would be an acceptable substitute for this gate, including a
+guest-local aggregate.
 The sandbox agent can have elevated guest privileges, so guest ownership does
 not make provider facts, normalizer code, or snapshot provenance authoritative.
 
-The normalizer execution boundary is a separate gate. Before a normalizer runs
+As already required by ADR 0004, the normalizer execution boundary is a separate
+gate. Before a normalizer runs
 over live data, the runtime must mechanically enforce network denial, an
 explicitly minimized environment without credentials, process-tree-wide timeout
 termination, and streamed output caps for both standard output and standard
 error. A documented expectation without enforcement is insufficient; the safe
 behavior is snapshot fallback.
 
-## Offline Fixture And Test Plan
+## Proposed Offline Fixture And Test Plan
+
+This plan is proposed. Items 2 and 4 to 8 apply to either ADR 0004's in-guest
+aggregate or the ADR 0002 projection. Items 3 and 9 to 11 apply only if ADR 0002
+is accepted.
 
 All catalog-refresh tests must use committed fixtures and must not make network
 requests or require credentials.
@@ -255,7 +271,7 @@ part of the offline regression set. Legacy emitter round-trip tests remain
 consumer compatibility tests; they are not acceptance tests for the later
 provider-neutral entrypoint.
 
-## Planned Order
+## Proposed Order
 
 1. Complete the host-authoritative provider-input lifecycle in the sandbox
    backend, including its offline and live backend verification.
