@@ -16,9 +16,14 @@ and sequencing document only. It does not add a runtime orchestrator, network
 fetch, scheduler, emitter, or harness configuration writer.
 
 The intended architecture is documented in
-[ADR 0004](decisions/0004-neutral-model-provider-discovery.md): provider kits
-publish neutral inputs; a future orchestrator refreshes model metadata; each
-harness renders only its own native configuration.
+[ADR 0004](decisions/0004-neutral-model-provider-discovery.md) as amended by the
+proposed Patterns ADR 0002, `docs/decisions/0002-runtime-model-refresh-aggregation.md`.
+Provider kits publish neutral inputs; each harness renders only its own native
+configuration. ADR 0002 supersedes in part ADR 0004's guest-local, writable model
+aggregate and the in-guest orchestrator that writes it. Any future refresh,
+cache, or projection is host-owned and read-only to the guest, and a guest-writable
+file is never an authority for model state. This inventory follows ADR 0002 and
+proposes no guest-writable aggregate.
 
 ## Current Paths
 
@@ -116,49 +121,63 @@ The later design has three separate owners:
 | Layer | Owns | Must not own |
 | --- | --- | --- |
 | Provider kit | Static facts, vendored snapshot, and a pure normalizer | Harness configuration, cross-provider aggregation, or credential routing decisions outside its facts |
-| Provider-neutral refresh entrypoint | Discovery, bounded fetch, validation, fallback, deterministic aggregation, and provenance | Harness-native configuration or provider-specific rendering rules |
-| Harness kit | Its native configuration rendering from neutral metadata and authoritative facts | Provider discovery, provider-specific normalization, or another harness's configuration |
+| Host-owned refresh and projection (future, not approved) | Discovery, bounded fetch, validation, last-known-good fallback, deterministic aggregation, provenance, and a read-only projection for the guest | Harness-native configuration, provider-specific rendering rules, or any state the guest can write |
+| Harness kit | Its native configuration rendering from the read-only projection and authoritative facts | Provider discovery, provider-specific normalization, model-state authority, or another harness's configuration |
 
-The aggregate catalog must carry model metadata and refresh provenance only. It
-must not carry `host`, `baseUrl`, `modelsUrl`, `keyEnv`, credential values, or
-any other routing authority. Harnesses must read routing and credential-name
-facts only from the host-authoritative provider-input mount.
+Host authority is the rule. The host decides lifecycle state and eligibility;
+the guest and the harness get a read-only view and cannot create, change,
+promote, or invalidate it. A file the guest can write, even one the host first
+produced, cannot be treated as authoritative.
 
-The later refresh entrypoint must not render or write configuration for OpenCode,
+Any projection must carry model metadata and refresh provenance only. It must
+not carry `host`, `baseUrl`, `modelsUrl`, `keyEnv`, credential values, or any
+other routing authority. Harnesses must read routing and credential-name facts
+only from the host-authoritative provider-input mount.
+
+Refresh and projection code must not render or write configuration for OpenCode,
 Prime Agent, Goose, Codex, Claude, Copilot, or any other harness. It must not
 import a harness emitter or use a harness configuration file as an input or
 output.
 
 ## Safe Later Entrypoint
 
-The smallest later entrypoint is one provider-neutral models-orchestrator
-startup program. It receives a backend-supplied provider-input root and performs
-only these steps:
+ADR 0002 defers any refresh component, so there is no approved entrypoint. The
+smallest shape that stays inside the host-owned boundary is a provider-neutral
+refresh step that runs on the host, not in the guest. Its design is bounded by
+these steps and is still subject to ADR 0002's decision criteria:
 
 1. Treat a missing provider-input root as not ready, not as an empty provider
    set.
 2. Discover validated provider directories below
    `models/providers/<providerId>`.
-3. Read facts, snapshot, and normalizer from the read-only provider-input mount.
+3. Read facts, snapshot, and normalizer from the pinned, host-validated provider
+   inputs.
 4. Fetch each provider's model-list response through one shared bounded-fetch
-   implementation.
+   implementation, with credentials held only by the host-side fetcher.
 5. Run the provider normalizer as a file-to-file transform only when its
    containment requirements are mechanically enforced.
 6. Validate every normalized result against the neutral catalog schema.
 7. On an individual refresh failure, validate and use only that provider's
-   vendored snapshot.
-8. Aggregate providers in a documented stable order, record per-provider
-   `live` or `snapshot` provenance, and atomically write a guest-local aggregate.
-9. When an authoritative root contains no provider directories, atomically write
-   a valid explicitly empty aggregate.
+   vendored snapshot, and keep the host's last-known-good state for that
+   provider rather than erasing it.
+8. Aggregate providers in a documented stable order and record per-provider
+   `live`, `snapshot`, or stale provenance with a single generation identifier.
+9. Publish the result as an immutable, host-owned, read-only projection that the
+   guest can read. When an authoritative root contains no provider directories,
+   publish a valid explicitly empty projection so "no providers configured" is
+   distinguishable from "refresh did not run".
 
-The entrypoint must fail closed on invalid provider identity, malformed facts,
-invalid normalizer output, invalid snapshots, duplicate provider IDs, or
-duplicate model identities within a provider. It must never substitute a default
-provider, silently omit a rejected provider, or replace a prior catalog after an
-incomplete discovery result. When a required normalizer containment control is
-unavailable, the entrypoint must refuse to run that normalizer and use only that
+The step must fail closed on invalid provider identity, malformed facts, invalid
+normalizer output, invalid snapshots, duplicate provider IDs, or duplicate model
+identities within a provider. It must never substitute a default provider,
+silently omit a rejected provider, or replace the last-known-good projection
+after an incomplete discovery result. When a required normalizer containment
+control is unavailable, it must refuse to run that normalizer and use only that
 provider's validated snapshot.
+
+Running the refresh in the guest at startup, and having it write a guest file
+that harnesses read, is the design ADR 0002 supersedes. It is not a fallback
+option here.
 
 ## Required Upstream Gate
 
@@ -174,10 +193,12 @@ the host-authoritative provider-input lifecycle. That lifecycle must:
 - Preserve the distinction between a missing root and an authoritative empty
   root.
 - Complete trusted setup before a consumer can interpret the inputs.
-- Provide a startup-completion or readiness barrier so a harness cannot read an
-  aggregate before the refresh entrypoint has completed its atomic write.
+- Publish any model projection as host-owned and read-only to the guest, with a
+  generation identifier, and provide a readiness barrier so a harness cannot read
+  a projection that is not yet complete.
 
-No guest-owned or guest-written path is an acceptable substitute for this gate.
+No guest-owned or guest-written path is an acceptable substitute for this gate,
+including a guest-local aggregate.
 The sandbox agent can have elevated guest privileges, so guest ownership does
 not make provider facts, normalizer code, or snapshot provenance authoritative.
 
@@ -198,18 +219,25 @@ requests or require credentials.
    `integrations/isolation/schemas/fixtures/usai/` as separate materialized
    provider directories containing facts, normalizer, snapshot, and source data.
 2. Verify discovery is independent of filesystem enumeration order and produces
-   byte-identical aggregate output on repeated runs.
-3. Verify a missing root is not ready and leaves an existing aggregate unchanged.
-4. Verify an existing empty root produces a valid explicit empty aggregate.
+   byte-identical projection output on repeated runs.
+3. Verify a missing root is not ready and leaves the existing projection
+   unchanged.
+4. Verify an existing empty root produces a valid explicit empty projection.
 5. Verify one provider can fall back to its snapshot while another contributes
    normalized fixture output, with correct per-provider provenance.
 6. Verify invalid facts, identity mismatches, malformed normalizer output,
    malformed snapshots, duplicate IDs, and dangling recommendations fail closed.
-7. Verify aggregate output contains no routing fields, credential names, or
+7. Verify projection output contains no routing fields, credential names, or
    credential values.
-8. Verify the entrypoint contains no harness-native identifiers, imports, or
+8. Verify the refresh code contains no harness-native identifiers, imports, or
    output paths.
-9. Verify atomic-write failure preserves the prior aggregate.
+9. Verify a failed or partial refresh leaves the host's last-known-good
+   projection and generation unchanged, and marks the affected source stale
+   rather than current.
+10. Verify the guest-facing view is read-only: a consumer attempt to modify the
+    projection, its provenance, or its freshness is rejected and has no effect.
+11. Verify a consumer sees one coherent generation, and a mixed partial update is
+    detected and rejected.
 
 Existing provider-input contract validation and provider-normalizer tests remain
 part of the offline regression set. Legacy emitter round-trip tests remain
@@ -221,11 +249,12 @@ provider-neutral entrypoint.
 1. Complete the host-authoritative provider-input lifecycle in the sandbox
    backend, including its offline and live backend verification.
 2. Confirm the normalizer containment mechanism is implemented and fail-closed.
-3. Provide the upstream startup-completion or readiness barrier required before
-   a harness may consume the aggregate.
+3. Provide the upstream readiness barrier required before a harness may consume
+   a model projection.
 4. Migrate each participating provider normalizer to the pure fetched-bytes to
    neutral-catalog interface, with offline fixtures and no harness output.
-5. Add the provider-neutral models-orchestrator and aggregate contract with the
+5. Only if ADR 0002's prerequisites are met and its design is approved, add the
+   host-owned provider-neutral refresh and read-only projection contract with the
    offline fixture matrix described above.
 6. Add or update harness-owned renderers in separate, harness-specific work.
 7. Migrate or retire legacy provider-owned refresh paths only after all shipped
