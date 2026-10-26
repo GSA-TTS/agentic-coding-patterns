@@ -165,7 +165,11 @@ Rules for kit authors:
   honored the argv element is still the original `path`, which is
   agent-writable. A root command must validate **each** such token on its own
   against the allowed prefix (the read-only mount, `/var/lib/acq/host/kit-files/`)
-  and otherwise substitute a root-owned copy or refuse, as `oci-engine` does.
+  and otherwise refuse, as `oci-engine` does. Substitute a root-owned copy only
+  for the explicit legacy case (the token is still the agent path). If a token
+  names the mount but the file is missing, fail closed with an error and a
+  non-zero exit; do not fall back, because a root-owned copy published from the
+  agent home at create time is not host-authoritative across restarts.
   Checking only one token lets a partial rewrite slip an agent path through the
   other. A kit with no root-owned copy to fall back on (the file is staged at
   start, so nothing publishes it at create) should not use the flag; see

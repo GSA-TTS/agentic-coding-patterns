@@ -9,9 +9,10 @@ equals the file's path. These tests lock in:
     command reference (the flag would be inert);
   - the shipped root-run startup scripts declare it, and every root startup
     command still works when a consumer ignores the flag (backward compat);
-  - the root scripts are exercised for real (tmp-rooted /bin/sh runs): each argv
-    token is validated independently, the grant script re-validates the helper it
-    sources, and the install script tolerates a read-only (unstaged) layout;
+  - the root scripts are exercised for real (tmp-rooted /bin/sh runs): the two
+    argv tokens are classified together and fail closed, the grant script
+    re-validates the helper it sources, and the install script tolerates a
+    read-only (unstaged) layout;
   - files the kit or user must modify at runtime are NOT marked.
 """
 
@@ -158,6 +159,11 @@ def _run_oci_startup(tmp_path, grant_arg, helper_arg, *, publish_trusted=True):
         (tmp_path / "trusted" / "oci-engine-grant-devs.sh").write_text('echo "ran TRUSTED grant helper=$1"\n')
     (tmp_path / "mount" / "grant.1").write_text('echo "ran MOUNT grant helper=$1"\n')
     (tmp_path / "mount" / "helper.2").write_text("# helper\n")
+    # Agent-writable files that exist in a real sandbox. If the command ever ran
+    # or sourced one as root, "ran AGENT" would show in stdout.
+    (tmp_path / "home-agent" / "oci-engine-config").mkdir(parents=True)
+    (tmp_path / "home-agent" / "oci-engine-grant-devs.sh").write_text('echo "ran AGENT grant helper=$1"\n')
+    (tmp_path / "home-agent" / "oci-engine-config" / "oci-engine-storage-driver.sh").write_text("# agent helper\n")
     body = _reroot(_startup_body(), tmp_path)
     fix = lambda a: a.replace("@MOUNT@", f"{tmp_path}/mount").replace("@HOME@", f"{tmp_path}/home-agent")  # noqa: E731
     shims = _shim_bin(tmp_path)
@@ -176,47 +182,32 @@ HOME_GRANT = "@HOME@/oci-engine-grant-devs.sh"
 HOME_HELPER = "@HOME@/oci-engine-config/oci-engine-storage-driver.sh"
 
 
+def _assert_refused(result, tmp_path):
+    """Fail closed: non-zero, loud stderr, and nothing ran as root."""
+    assert result.returncode != 0
+    assert "ERROR" in result.stderr
+    assert "NOT applied" in result.stderr
+    assert "ran " not in result.stdout
+    assert "AGENT" not in result.stdout
+
+
 def test_oci_startup_runs_mount_script_and_passes_the_mount_helper(tmp_path):
     result = _run_oci_startup(tmp_path, "@MOUNT@/grant.1", "@MOUNT@/helper.2")
     assert result.returncode == 0
     assert f"ran MOUNT grant helper={tmp_path}/mount/helper.2" in result.stdout
 
 
-def test_oci_startup_ignores_agent_home_tokens_from_older_consumers(tmp_path):
+def test_oci_startup_legacy_agent_home_tokens_use_the_root_owned_copy(tmp_path):
+    # A consumer that ignores `readonly` (or made no selection) leaves the
+    # /home/agent tokens. That legacy case keeps the root-owned fallback.
     result = _run_oci_startup(tmp_path, HOME_GRANT, HOME_HELPER)
     assert result.returncode == 0
     assert f"ran TRUSTED grant helper={tmp_path}/trusted/oci-engine-storage-driver.sh" in result.stdout
     assert "home-agent" not in result.stdout
 
 
-def test_oci_startup_refuses_agent_helper_in_a_mixed_rewrite(tmp_path):
-    # $1 is on the mount (rewritten), $2 is still the agent path (e.g. one staging
-    # call failed). The agent path must not reach the root-sourced helper.
-    result = _run_oci_startup(tmp_path, "@MOUNT@/grant.1", HOME_HELPER)
-    assert result.returncode == 0
-    assert "ran MOUNT grant" in result.stdout
-    assert f"helper={tmp_path}/trusted/oci-engine-storage-driver.sh" in result.stdout
-    assert "home-agent" not in result.stdout
-
-
-def test_oci_startup_refuses_agent_grant_in_the_other_mixed_rewrite(tmp_path):
-    result = _run_oci_startup(tmp_path, HOME_GRANT, "@MOUNT@/helper.2")
-    assert result.returncode == 0
-    assert "ran TRUSTED grant" in result.stdout
-    assert "home-agent" not in result.stdout
-
-
-@pytest.mark.parametrize(
-    "bad",
-    ["@MOUNT@/../home-agent/x.sh", "@MOUNT@-evil/grant.1", "@MOUNT@/missing.9", "/opt/elsewhere.sh", "relative.sh", ""],
-)
-def test_oci_startup_rejects_paths_outside_the_mount(tmp_path, bad):
-    result = _run_oci_startup(tmp_path, bad, bad)
-    assert result.returncode == 0
-    assert "ran TRUSTED grant" in result.stdout
-
-
-def test_oci_startup_warns_loudly_when_no_trusted_script_exists(tmp_path):
+def test_oci_startup_legacy_without_a_published_copy_warns_and_exits_zero(tmp_path):
+    # Install fell soft or the base had its own engine: nothing to run, as before.
     result = _run_oci_startup(tmp_path, HOME_GRANT, HOME_HELPER, publish_trusted=False)
     assert result.returncode == 0
     assert "WARNING" in result.stderr
@@ -224,13 +215,72 @@ def test_oci_startup_warns_loudly_when_no_trusted_script_exists(tmp_path):
     assert result.stdout == ""
 
 
-def _run_grant(tmp_path, helper_arg):
+def test_oci_startup_fails_closed_when_the_selected_mount_grant_is_missing(tmp_path):
+    # The mount was selected but the file is gone. A root-owned copy IS published
+    # here and must NOT be used.
+    result = _run_oci_startup(tmp_path, "@MOUNT@/missing.9", "@MOUNT@/helper.2")
+    _assert_refused(result, tmp_path)
+    assert "grant script is missing" in result.stderr
+
+
+def test_oci_startup_fails_closed_when_the_selected_mount_helper_is_missing(tmp_path):
+    result = _run_oci_startup(tmp_path, "@MOUNT@/grant.1", "@MOUNT@/missing.9")
+    _assert_refused(result, tmp_path)
+    assert "storage helper is missing" in result.stderr
+
+
+def test_oci_startup_fails_closed_when_both_selected_mount_files_are_missing(tmp_path):
+    result = _run_oci_startup(tmp_path, "@MOUNT@/missing.8", "@MOUNT@/missing.9")
+    _assert_refused(result, tmp_path)
+
+
+def test_oci_startup_fails_closed_without_a_published_copy_too(tmp_path):
+    result = _run_oci_startup(tmp_path, "@MOUNT@/missing.9", "@MOUNT@/helper.2", publish_trusted=False)
+    _assert_refused(result, tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("grant", "helper"),
+    [
+        ("@MOUNT@/grant.1", HOME_HELPER),  # grant selected, helper not
+        (HOME_GRANT, "@MOUNT@/helper.2"),  # helper selected, grant not
+        ("@MOUNT@/missing.9", HOME_HELPER),
+        (HOME_GRANT, "@MOUNT@/missing.9"),
+    ],
+)
+def test_oci_startup_refuses_a_mixed_selection(tmp_path, grant, helper):
+    # One token on the mount and one still an agent path: a partial selection must
+    # never fall back to a root-owned copy or run the agent path.
+    result = _run_oci_startup(tmp_path, grant, helper)
+    _assert_refused(result, tmp_path)
+    assert "home-agent" not in result.stdout
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "@MOUNT@/../home-agent/x.sh",
+        "@MOUNT@-evil/grant.1",
+        "@MOUNT@/",
+        "/opt/elsewhere.sh",
+        "relative.sh",
+        "",
+        "@HOME@/../etc/x.sh",
+    ],
+)
+def test_oci_startup_refuses_unrecognized_tokens(tmp_path, bad):
+    result = _run_oci_startup(tmp_path, bad, bad)
+    _assert_refused(result, tmp_path)
+
+
+def _run_grant(tmp_path, helper_arg, *, publish_trusted_helper=True):
     """Run oci-engine-grant-devs.sh with a shim podman and a stub helper."""
     root = tmp_path
     for d in ("trusted", "mount", "home-agent/oci-engine-config", "dev"):
         (root / d).mkdir(parents=True, exist_ok=True)
     stub = 'oci_engine_write_storage_conf() { echo "SOURCED $0:$STUB_ID"; }\n'
-    (root / "trusted/oci-engine-storage-driver.sh").write_text(stub.replace("$STUB_ID", "trusted"))
+    if publish_trusted_helper:
+        (root / "trusted/oci-engine-storage-driver.sh").write_text(stub.replace("$STUB_ID", "trusted"))
     (root / "mount/helper.2").write_text(stub.replace("$STUB_ID", "mount"))
     (root / "home-agent/oci-engine-config/oci-engine-storage-driver.sh").write_text(stub.replace("$STUB_ID", "AGENT"))
     shims = _shim_bin(root, podman="exit 0", chown="exit 0", chmod="exit 0")
@@ -251,20 +301,34 @@ def test_grant_script_sources_the_trusted_copy_by_default(tmp_path):
     assert ":trusted" in r.stdout
 
 
+def test_grant_script_accepts_an_explicit_trusted_path_for_the_legacy_layout(tmp_path):
+    r = _run_grant(tmp_path, "@ROOT@/trusted/oci-engine-storage-driver.sh")
+    assert r.returncode == 0, r.stderr
+    assert ":trusted" in r.stdout
+
+
+def test_grant_script_fails_closed_when_the_selected_mount_helper_is_missing(tmp_path):
+    # A root-owned copy exists and must not be substituted.
+    r = _run_grant(tmp_path, "@ROOT@/mount/missing.9")
+    assert r.returncode != 0
+    assert "missing" in r.stderr
+    assert "SOURCED" not in r.stdout
+
+
 @pytest.mark.parametrize(
     "bad",
     [
         "@ROOT@/home-agent/oci-engine-config/oci-engine-storage-driver.sh",
         "@ROOT@/mount/../home-agent/oci-engine-config/oci-engine-storage-driver.sh",
         "/etc/passwd",
+        "",
     ],
 )
 def test_grant_script_refuses_a_helper_outside_the_allowlist(tmp_path, bad):
     r = _run_grant(tmp_path, bad)
-    assert r.returncode == 0, r.stderr
+    assert r.returncode != 0
     assert "refusing" in r.stderr
-    assert "AGENT" not in r.stdout
-    assert ":trusted" in r.stdout
+    assert "SOURCED" not in r.stdout
 
 
 def _run_install(tmp_path, *, stage_helper, stage_grant, mount_present):

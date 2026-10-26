@@ -55,26 +55,44 @@ if ! command -v podman >/dev/null 2>&1; then
   exit 0
 fi
 
-# Storage helper to source, passed by the startup command as $1: a path on acq's
-# host-authoritative read-only mount (the helper is a `readonly: true` kit file)
-# or the root-owned copy oci-engine-install.sh publishes. It is sourced as ROOT, so
-# it is validated HERE, independent of the caller: only those two locations are
-# accepted (no `..`); anything else, notably an agent-writable path, is refused
-# loudly and the root-owned copy is used instead. Defaults to the root-owned copy
-# when run without arguments.
+# Storage helper to source, passed by the startup command as $1. It is sourced as
+# ROOT, so it is validated HERE, independent of the caller, and this script FAILS
+# CLOSED:
+#   - a path under the host-authoritative read-only mount (the helper is a
+#     `readonly: true` kit file): used only if that file exists; if it is missing
+#     the script refuses (error on stderr, exit 1) and does NOT fall back to the
+#     root-owned copy, which came from /home/agent at create time;
+#   - a path under the root-owned directory (the LEGACY layout, where the consumer
+#     ignored `readonly`): used if present, else storage re-evaluation is skipped
+#     with a warning, as before;
+#   - anything else, notably an agent-writable path or any `..`: refused.
+# With no argument (run by hand) it defaults to the root-owned copy.
 OCI_ENGINE_TRUSTED_DIR="/usr/local/lib/acq/oci-engine"
 OCI_ENGINE_RO_MOUNT_PREFIX="/var/lib/acq/host/kit-files/"
 TRUSTED_STORAGE_HELPER="$OCI_ENGINE_TRUSTED_DIR/oci-engine-storage-driver.sh"
-if [ "$#" -ge 1 ] && [ -n "$1" ]; then
+if [ "$#" -ge 1 ]; then
   case "$1" in
-    *..*)
-      echo "oci-engine: WARNING: refusing storage helper path containing '..': $1; using $TRUSTED_STORAGE_HELPER." >&2
+    "")
+      echo "oci-engine: ERROR: empty storage helper path; refusing." >&2
+      exit 1
       ;;
-    "$OCI_ENGINE_RO_MOUNT_PREFIX"?*|"$OCI_ENGINE_TRUSTED_DIR"/?*)
+    *..*)
+      echo "oci-engine: ERROR: storage helper path contains '..': $1; refusing." >&2
+      exit 1
+      ;;
+    "$OCI_ENGINE_RO_MOUNT_PREFIX"?*)
+      if [ ! -f "$1" ]; then
+        echo "oci-engine: ERROR: selected read-only storage helper is missing: $1; refusing (no fallback to a root-owned copy)." >&2
+        exit 1
+      fi
+      TRUSTED_STORAGE_HELPER="$1"
+      ;;
+    "$OCI_ENGINE_TRUSTED_DIR"/?*)
       TRUSTED_STORAGE_HELPER="$1"
       ;;
     *)
-      echo "oci-engine: WARNING: refusing storage helper outside the read-only mount and $OCI_ENGINE_TRUSTED_DIR: $1; using $TRUSTED_STORAGE_HELPER." >&2
+      echo "oci-engine: ERROR: storage helper outside the read-only mount and $OCI_ENGINE_TRUSTED_DIR: $1; refusing." >&2
+      exit 1
       ;;
   esac
 fi

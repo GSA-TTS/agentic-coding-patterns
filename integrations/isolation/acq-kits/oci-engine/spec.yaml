@@ -143,7 +143,8 @@ commands:
   # storage helper) into the root-owned directory ONLY when a consumer that does
   # not honor `readonly` copied them under /home/agent. Where `readonly` is
   # honored they are absent there and the startup step runs them from the
-  # read-only mount instead. This command's argv stays the plain `sh -c <script>`
+  # read-only mount instead (and refuses, rather than using these copies, if a
+  # selected mount file is missing). This command's argv stays the plain `sh -c <script>`
   # form: the sbx translator only passes that form through intact.
   - phase: install
     user: "0"
@@ -162,18 +163,25 @@ commands:
         exit 0
   # STARTUP phase — every start, as root (uid "0"). The two trailing argv tokens
   # are the readonly: true files above, passed as WHOLE tokens ($1 grant script,
-  # $2 storage helper). A consumer that mounts kit code read-only rewrites them to
-  # its read-only mount path (/var/lib/acq/host/kit-files/...), and this command
-  # then runs them from there: a sudo guest cannot edit that mount. A consumer
-  # that does not know `readonly` leaves the tokens as /home/agent paths and
-  # copies the files there as before. Each token is checked INDEPENDENTLY: it is
-  # used only if it sits under /var/lib/acq/host/kit-files/ (and has no `..`);
-  # anything else, including an /home/agent token, is replaced by the root-owned
-  # copy the install step published under /usr/local/lib/acq/oci-engine/. So a
-  # mixed rewrite (one token mounted, one not) never runs an agent-home path. A
-  # mounted path that does not exist (staging failed) also falls back. If
-  # neither a mounted nor a published grant script exists it warns loudly and
-  # skips (scripts/verify fails in that state). GATED ON PODMAN: revokes any stale device grant
+  # $2 storage helper). The command classifies them and FAILS CLOSED:
+  #   - Both under /var/lib/acq/host/kit-files/ (a consumer that mounts kit code
+  #     read-only rewrote them): run exactly those files. If either file is
+  #     missing, refuse: print an error to stderr, run nothing as root, exit 1. It
+  #     never falls back to a root-owned copy, because those copies came from
+  #     /home/agent at create time and are not host-authoritative across restarts.
+  #   - Both under /home/agent/ (a consumer that ignores `readonly`, or made no
+  #     selection): the LEGACY case. Run the root-owned copies the install step
+  #     published under /usr/local/lib/acq/oci-engine/, as before. If those are
+  #     absent it warns and exits 0 (install fell soft or the base had its own
+  #     engine).
+  #   - Anything else (one token mounted and one not, `..`, an unknown prefix, an
+  #     empty token): refuse, exit 1. A mixed pair means the consumer selected the
+  #     read-only mount for one file but not the other; guessing would run a
+  #     guest-writable copy.
+  # A non-zero exit is safe for the consumer: acq's msb backend reports a failing
+  # startup command as a warning and carries on; it never escalates. So a refusal
+  # costs only the device grant and storage re-evaluation, and `scripts/verify`
+  # fails in that state. GATED ON PODMAN: revokes any stale device grant
   # and exits if podman is absent (install fell soft, or the base had its own
   # engine and the kit early-outed) — no engine, no device grant (finding #3).
   # Otherwise re-grants /dev/net/tun + /dev/fuse to the agent (/dev is a devtmpfs
@@ -192,20 +200,35 @@ commands:
       - |
         mount=/var/lib/acq/host/kit-files/
         trusted=/usr/local/lib/acq/oci-engine
-        pick() {
+        refuse() {
+          echo "oci-engine: ERROR: $1; refusing to run root startup code (device grant and storage re-evaluation NOT applied)." >&2
+          exit 1
+        }
+        case "$1|$2" in
+          *..*) refuse "path traversal in startup tokens" ;;
+        esac
+        kind() {
           case "$1" in
-            *..*) printf '%s\n' "$2" ;;
-            "$mount"?*) if [ -f "$1" ]; then printf '%s\n' "$1"; else printf '%s\n' "$2"; fi ;;
-            *) printf '%s\n' "$2" ;;
+            "$mount"?*) echo mount ;;
+            /home/agent/?*) echo legacy ;;
+            *) echo bad ;;
           esac
         }
-        grant=$(pick "$1" "$trusted/oci-engine-grant-devs.sh")
-        helper=$(pick "$2" "$trusted/oci-engine-storage-driver.sh")
-        if [ -f "$grant" ]; then
-          exec sh "$grant" "$helper"
+        g=$(kind "$1")
+        h=$(kind "$2")
+        if [ "$g" = mount ] && [ "$h" = mount ]; then
+          [ -f "$1" ] || refuse "selected read-only grant script is missing: $1"
+          [ -f "$2" ] || refuse "selected read-only storage helper is missing: $2"
+          exec sh "$1" "$2"
         fi
-        echo "oci-engine: WARNING: no trusted startup script (not on the read-only mount, not published under $trusted); device grant and storage re-evaluation NOT applied." >&2
-        exit 0
+        if [ "$g" = legacy ] && [ "$h" = legacy ]; then
+          if [ -f "$trusted/oci-engine-grant-devs.sh" ]; then
+            exec sh "$trusted/oci-engine-grant-devs.sh" "$trusted/oci-engine-storage-driver.sh"
+          fi
+          echo "oci-engine: WARNING: no root-owned startup script under $trusted (install did not publish it); device grant and storage re-evaluation NOT applied." >&2
+          exit 0
+        fi
+        refuse "unrecognized or mixed startup tokens ($g, $h)"
       - oci-engine-startup
       - /home/agent/oci-engine-grant-devs.sh
       - /home/agent/oci-engine-config/oci-engine-storage-driver.sh
