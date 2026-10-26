@@ -3,7 +3,7 @@ title: "Provider-Neutral Catalog Refresh Inventory"
 description: "Maps current model catalog refresh paths and defines the safe boundary for later provider-neutral drift detection."
 status: canonical
 tier: 2
-last_updated: "2026-10-25"
+last_updated: "2026-10-26"
 ---
 
 # Provider-Neutral Catalog Refresh Inventory
@@ -16,14 +16,16 @@ and sequencing document only. It does not add a runtime orchestrator, network
 fetch, scheduler, emitter, or harness configuration writer.
 
 The intended architecture is documented in
-[ADR 0004](decisions/0004-neutral-model-provider-discovery.md) as amended by the
-proposed Patterns ADR 0002, `docs/decisions/0002-runtime-model-refresh-aggregation.md`.
-Provider kits publish neutral inputs; each harness renders only its own native
-configuration. ADR 0002 supersedes in part ADR 0004's guest-local, writable model
-aggregate and the in-guest orchestrator that writes it. Any future refresh,
-cache, or projection is host-owned and read-only to the guest, and a guest-writable
-file is never an authority for model state. This inventory follows ADR 0002 and
-proposes no guest-writable aggregate.
+[ADR 0004](decisions/0004-neutral-model-provider-discovery.md), as it would be
+amended by the proposed Patterns ADR 0002,
+`docs/decisions/0002-runtime-model-refresh-aggregation.md`, if that ADR is
+accepted. Provider kits publish neutral inputs; each harness renders only its own
+native configuration. ADR 0002 would supersede in part ADR 0004's guest-local,
+writable model aggregate and the in-guest orchestrator that writes it. Any future
+refresh, cache, or projection is host-owned and read-only to the guest, and a
+guest-writable file is never an authority for model state. Until ADR 0002 is
+accepted, this inventory proposes no guest-writable aggregate and authorizes no
+implementation.
 
 ## Current Paths
 
@@ -139,7 +141,7 @@ Prime Agent, Goose, Codex, Claude, Copilot, or any other harness. It must not
 import a harness emitter or use a harness configuration file as an input or
 output.
 
-## Safe Later Entrypoint
+## Bounded Shape For A Later Host-Owned Step
 
 ADR 0002 defers any refresh component, so there is no approved entrypoint. The
 smallest shape that stays inside the host-owned boundary is a provider-neutral
@@ -154,12 +156,16 @@ these steps and is still subject to ADR 0002's decision criteria:
    inputs.
 4. Fetch each provider's model-list response through one shared bounded-fetch
    implementation, with credentials held only by the host-side fetcher.
-5. Run the provider normalizer as a file-to-file transform only when its
-   containment requirements are mechanically enforced.
+5. Where a provider normalizer would run is unresolved. ADR 0004 rejected
+   running provider-shipped normalizer code on the host, next to real
+   credentials, and neither this inventory nor ADR 0002 reverses that. Any
+   placement needs its own review. Wherever it runs, it is a file-to-file
+   transform, and only when its containment requirements are mechanically
+   enforced.
 6. Validate every normalized result against the neutral catalog schema.
-7. On an individual refresh failure, validate and use only that provider's
-   vendored snapshot, and keep the host's last-known-good state for that
-   provider rather than erasing it.
+7. On an individual refresh failure, keep the host's last-known-good state for
+   that provider, marked stale. Use that provider's validated vendored snapshot
+   only when no last-known-good state exists.
 8. Aggregate providers in a documented stable order and record per-provider
    `live`, `snapshot`, or stale provenance with a single generation identifier.
 9. Publish the result as an immutable, host-owned, read-only projection that the
@@ -172,8 +178,8 @@ normalizer output, invalid snapshots, duplicate provider IDs, or duplicate model
 identities within a provider. It must never substitute a default provider,
 silently omit a rejected provider, or replace the last-known-good projection
 after an incomplete discovery result. When a required normalizer containment
-control is unavailable, it must refuse to run that normalizer and use only that
-provider's validated snapshot.
+control is unavailable, it must refuse to run that normalizer and fall back as in
+step 7.
 
 Running the refresh in the guest at startup, and having it write a guest file
 that harnesses read, is the design ADR 0002 supersedes. It is not a fallback
@@ -232,8 +238,9 @@ requests or require credentials.
 8. Verify the refresh code contains no harness-native identifiers, imports, or
    output paths.
 9. Verify a failed or partial refresh leaves the host's last-known-good
-   projection and generation unchanged, and marks the affected source stale
-   rather than current.
+   projection and generation unchanged and marks the affected source stale
+   rather than current, and that the vendored snapshot is used only when no
+   last-known-good state exists.
 10. Verify the guest-facing view is read-only: a consumer attempt to modify the
     projection, its provenance, or its freshness is rejected and has no effect.
 11. Verify a consumer sees one coherent generation, and a mixed partial update is
@@ -248,7 +255,8 @@ provider-neutral entrypoint.
 
 1. Complete the host-authoritative provider-input lifecycle in the sandbox
    backend, including its offline and live backend verification.
-2. Confirm the normalizer containment mechanism is implemented and fail-closed.
+2. Confirm the normalizer containment mechanism is implemented and fail-closed
+   (useful for any normalizer placement, whatever ADR 0002 decides).
 3. Provide the upstream readiness barrier required before a harness may consume
    a model projection.
 4. Migrate each participating provider normalizer to the pure fetched-bytes to
