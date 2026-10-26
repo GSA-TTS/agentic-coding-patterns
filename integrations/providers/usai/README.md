@@ -48,11 +48,12 @@ and `["text"]` mean known-unsupported and known text-only. The builder does
 **not** copy them by default. Passing `--include-capabilities` to a live-feed
 build copies them from the matched models.dev entry and labels that provenance
 in `sources.capabilities`; models.dev describes the upstream provider, not
-necessarily the USAi gateway, so that output must not be committed until it is
-confirmed against the gateway (then record `sources.capabilitiesVerified` as
-`<date>; opencode <version>`). Malformed upstream values are treated as unknown
-with a warning. Nothing is inferred from
-model ids or names. See
+necessarily the USAi gateway, so that output must not be committed until each
+value is confirmed against the gateway with per-model, per-field evidence (a
+data PR description plus a committed evidence file; see the ADR). The
+`sources.capabilitiesVerified` string (`<date>; opencode <version>`) is only a
+catalog-wide release reminder, not evidence. Malformed upstream values are
+treated as unknown with a warning. Nothing is inferred from model ids or names. See
 [ADR 0006](../../isolation/docs/decisions/0006-neutral-model-capability-metadata.md).
 
 ## Safety guarantee

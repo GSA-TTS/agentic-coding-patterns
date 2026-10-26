@@ -58,7 +58,7 @@ Conclusions:
 - The harm risk is wrong values: rendering `["text"]` wrongly (for example
   from a mis-mapped upstream entry) disables images the gateway accepts, on
   every OpenCode line. That is why **unknown must stay absent** in committed
-  data until verified, and why the renderer never defaults a value. This
+  data until per-model evidence exists, and why the renderer never defaults a value. This
   record makes the data expressible; it does not commit any values.
 
 Image-reading accuracy also varied by model family on a hard synthetic task
@@ -81,7 +81,8 @@ photos, other harnesses, repeat runs and OpenCode 1.x were not tested.
   default. The flag matches each USAi id to a models.dev entry with the
   builder's precision-guarded id matching, so "never inferred from id or name"
   applies to the renderer and normalizer; the flag's output is unverified until
-  the live synthetic-image run.
+  per-model, per-field evidence exists (see
+  [Evidence required before a value is published](#evidence-required-before-a-value-is-published)).
 - Declaring a capability must not silently turn on request-time behavior
   (reasoning effort, thinking budgets, variants). The renderer emits none of
   these; note that OpenCode itself may derive selectable variants from
@@ -101,7 +102,12 @@ photos, other harnesses, repeat runs and OpenCode 1.x were not tested.
    additive, optional change.
 3. **Put harness-native syntax (OpenCode `modalities`) in the provider's
    snapshot.** Violates the Layer 3 boundary: provider inputs must not carry
-   harness-specific options, and the snapshot lives on an agent-writable path.
+   harness-specific options, and the provider-neutral snapshot would then be
+   usable by only one harness. The snapshot's trust properties are not the
+   argument: under ADR 0004 (Layer 1 and Security model) it is
+   host-materialized and read-only to the guest.
+   Only the OpenCode config the renderer writes in the guest is guest-writable,
+   and it is not an authority for model state.
 4. **Infer capabilities in the renderer from model ids or names.** Rejected:
    unverifiable and wrong for renamed or gateway-specific deployments.
 
@@ -123,11 +129,57 @@ leaves the harness-specific translation inside the OpenCode kit.
   The one sanctioned exception is the USAi catalog builder's explicit
   `--include-capabilities` flag, which is off by default, labels its output
   `sources.capabilities` as unverified, and whose output must not be committed
-  until the synthetic-image procedure has verified it.
+  until each value it carries has the evidence described under
+  [Evidence required before a value is published](#evidence-required-before-a-value-is-published).
+  Values without that evidence stay absent.
+- A present `inputModalities` array asserts the listed modalities only. A
+  modality that was not probed is not asserted, but the OpenCode mapping treats
+  an unlisted modality as disabled, so publishing a partial list narrows what
+  OpenCode will send. The review must accept that narrowing for each model, or
+  the field stays absent for it.
 - A capability field is a statement of fact only. It does not select a
   reasoning effort, budget, variant, or any other request setting.
 - Both the USAi catalog schema and the neutral schema carry the same enum; a
   test asserts they cannot diverge.
+
+### Evidence required before a value is published
+
+Evidence is specific to a model, a field, and (for `inputModalities`) a
+modality. Evidence for one does not carry over to another, and a value without
+its own evidence stays **absent** (unknown). The synthetic-image procedure
+substantiates image input only.
+
+| Value | Evidence required before it is published |
+|---|---|
+| `inputModalities` includes `image` | The synthetic-image procedure for that model: an exact-token read, repeated over several independently generated images, and a text-only control (explicit `["text"]`), repeated on the same images, that never returns the token. A single run is not enough. |
+| `inputModalities` includes `audio`, `video`, or `pdf` | Its own probe, with a known-content input of that type that cannot be answered from text or the model id, repeated samples, and a text-only control. An image probe says nothing about these. No such probe exists yet, so these values are not published. |
+| `inputModalities: ["text"]` (known text-only) | A negative result is also a claim. Record the failed attempts and the exact rejection or error, so a transient outage is not published as "unsupported". |
+| `reasoning: true` or `false` | A separate procedure that checks the **target OpenCode version's** behavior, not just the gateway's: whether the model reasons at all, which variants OpenCode derives from the field (1.x derives low/medium/high variants for openai-compatible models), and request-time effects such as effort or thinking-budget parameters sent to the gateway. An image probe says nothing about this. No such procedure exists yet, so `reasoning` is not published. |
+
+### Evidence record
+
+`sources.capabilitiesVerified` is a catalog-wide string shaped like
+`<date>; opencode <version>`. It is a **release reminder**, not evidence: it
+cannot show which model, field, or modality was verified. The guard test only
+checks its shape, so a well-formed string proves nothing about the data.
+
+The data-change review is therefore required to find, for every populated
+`reasoning` and `inputModalities` value, a traceable per-model, per-field record:
+
+- The data pull request description states each model id, field, and value, with
+  the procedure used, the sample count, the control result, the OpenCode version,
+  and the date.
+- A durable evidence file is committed in the same pull request at
+  `integrations/isolation/acq-kits/opencode/docs/capability-evidence/<YYYY-MM-DD>-opencode-<version>.md`.
+  It holds one table row per model, field, and value with the same facts. It
+  holds verbatim results, not credentials or raw transcripts.
+- The date in `sources.capabilitiesVerified` matches the date of the most recent
+  evidence file, and every populated value has a row in some evidence file. A
+  value with no row is removed in review.
+
+This is a review requirement. The guard test does not parse the evidence file,
+because that would add an unvalidated file format; a later change may validate
+it once the format has been used.
 
 ### OpenCode mapping (kit-owned)
 
@@ -170,9 +222,9 @@ rollout order, not on negotiation machinery:
    neutral schema (including Quickstart's provider-input fixtures and any
    Prime Agent consumer, both outside this change) must adopt the new schema
    before step 3.
-3. Only then commit capability values into the USAi snapshot, after the
-   gateway-side synthetic-image validation has recorded which models
-   actually accept images.
+3. Only then commit capability values into the USAi snapshot, and only those
+   values that have per-model, per-field evidence under the section above.
+   Anything else stays absent.
 
 No `schemaVersion` bump is made. If a later change is *not* additive (renames,
 required fields, changed meaning of absence) it needs a new version and a new
@@ -192,12 +244,14 @@ record.
 - Strict `additionalProperties: false` makes rollout order matter (above).
 - models.dev is the only automated source; it can be wrong for the gateway.
   The builder therefore does not copy it unless `--include-capabilities` is
-  passed, labels that output in `sources.capabilities`, and a guard test
-  refuses capability values in any committed catalog or snapshot unless
-  `sources.capabilitiesVerified` holds a structured record
-  (`<date>; opencode <version>`). A malformed upstream entry is treated as
-  unknown with a warning; malformed data in this repository's own committed
-  inputs fails the build.
+  passed, and labels that output in `sources.capabilities`. A guard test refuses
+  capability values in any committed catalog or snapshot unless
+  `sources.capabilitiesVerified` has the shape `<date>; opencode <version>`.
+  That string is a catalog-wide release reminder, not evidence of any
+  per-model, per-field verification. Evidence is required in the data-change
+  review (see [Evidence record](#evidence-record)). A malformed upstream entry is
+  treated as unknown with a warning; malformed data in this repository's own
+  committed inputs fails the build.
 - The legacy `emitters/opencode.mjs` GENERATED-block emitter does not emit the
   new fields. It exists only as a byte-exact contract check for the retired
   config and is intentionally left as is.
@@ -218,6 +272,7 @@ record.
 - `../provider-input-contract.md` — host validation invocation and the
   pinned-release rule.
 - `../../acq-kits/opencode/docs/synthetic-image-validation.md` — the live
-  procedure that must precede any capability value being committed.
+  procedure for image input only. Other fields and modalities need their own
+  evidence.
 - Tracking: GSA-TTS/agentic-coding-patterns#366 within
   GSA-TTS/agentic-coding-patterns#357.

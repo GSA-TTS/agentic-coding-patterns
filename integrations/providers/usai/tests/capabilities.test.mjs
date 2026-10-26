@@ -256,22 +256,27 @@ test("the three code copies of the modality allowlist (builder, normalizer, rend
   assert.deepEqual([...RENDERER_MODALITIES], [...INPUT_MODALITIES])
 })
 
-// A structured record, not any truthy string: "<YYYY-MM-DD>; opencode <version>".
-// sources values are strings in the catalog schema, so the structure is a
+// A release reminder shaped "<YYYY-MM-DD>; opencode <version>", not any truthy
+// string. It is catalog-wide, so it does NOT prove that any model, field, or
+// modality was verified: that evidence lives in the data PR description and a
+// committed evidence file (ADR 0006, "Evidence record"), checked by a reviewer.
+// sources values are strings in the catalog schema, so the shape is a
 // documented format (see the opencode kit's synthetic-image-validation.md).
-const VERIFIED_RECORD = /^\d{4}-\d{2}-\d{2}; opencode v?\d+\.\d+\.\d+\S*$/
+const RELEASE_REMINDER = /^\d{4}-\d{2}-\d{2}; opencode v?\d+\.\d+\.\d+\S*$/
 
-test("capabilitiesVerified must be a structured record (date; opencode version)", () => {
-  assert.match("2026-10-25; opencode 2.0.30", VERIFIED_RECORD)
+test("capabilitiesVerified release reminder must have the shape date; opencode version", () => {
+  assert.match("2026-10-25; opencode 2.0.30", RELEASE_REMINDER)
   for (const bad of ["true", "yes", "verified", "2026-10-25", "opencode 2.0.30", ""]) {
-    assert.doesNotMatch(bad, VERIFIED_RECORD)
+    assert.doesNotMatch(bad, RELEASE_REMINDER)
   }
 })
 
-test("no committed catalog or snapshot carries capability claims without a structured verification record", () => {
-  // Capability data is only committed after gateway-side synthetic-image
-  // validation. Until then every model is UNKNOWN; this guard fails loudly if
-  // values appear in ANY committed artifact without that record in catalog.json.
+test("no committed catalog or snapshot carries capability claims without the release reminder", () => {
+  // Capability data is only committed with per-model, per-field evidence (ADR
+  // 0006). Until then every model is UNKNOWN. This guard is a tripwire only: it
+  // fails loudly if values appear in ANY committed artifact while catalog.json
+  // lacks the release-reminder string. It cannot verify the evidence itself;
+  // the data-change review must.
   const artifacts = {
     "providers/usai/catalog.json": path.join(HERE, "../catalog.json"),
     "usai-provider shipped snapshot": path.join(ISOLATION, "acq-kits/usai-provider/files/home/usai-config/model-catalog-snapshot.json"),
@@ -280,14 +285,14 @@ test("no committed catalog or snapshot carries capability claims without a struc
   }
   const catalog = JSON.parse(readFileSync(artifacts["providers/usai/catalog.json"], "utf8"))
   const verified = catalog.sources?.capabilitiesVerified
-  const hasRecord = typeof verified === "string" && VERIFIED_RECORD.test(verified)
+  const hasReminder = typeof verified === "string" && RELEASE_REMINDER.test(verified)
   for (const [label, file] of Object.entries(artifacts)) {
     const data = JSON.parse(readFileSync(file, "utf8"))
     const populated = data.models.filter((m) => "reasoning" in m || "inputModalities" in m)
     if (populated.length > 0) {
       assert.ok(
-        hasRecord,
-        `${label}: ${populated.length} model(s) carry capability fields but catalog.json sources.capabilitiesVerified is not a structured "<date>; opencode <version>" record`,
+        hasReminder,
+        `${label}: ${populated.length} model(s) carry capability fields but catalog.json sources.capabilitiesVerified is not a "<date>; opencode <version>" release reminder`,
       )
     }
   }

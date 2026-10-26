@@ -8,9 +8,18 @@ recognition works or is fixed.
 ## Purpose
 
 Establish, per USAi model, whether the gateway actually accepts and uses an
-image, so that `inputModalities` values are committed from observation rather
-than from upstream (models.dev) data or model names. See
+image, so that the `image` entry of `inputModalities` is committed from
+observation rather than from upstream (models.dev) data or model names. See
 `../../../docs/decisions/0006-neutral-model-capability-metadata.md`.
+
+## Scope: image input only
+
+This procedure can substantiate **image input and nothing else**. It cannot show
+that a model supports `reasoning`, `audio`, `video`, or `pdf` input, and a pass
+here must not be used to publish any of those. Each of them needs its own
+procedure and evidence, as set out in the "Evidence required before a value is
+published" section of the ADR. Until such a procedure has been run for a given
+model and field, that value stays **absent** (unknown).
 
 ## Preconditions
 
@@ -20,7 +29,8 @@ than from upstream (models.dev) data or model names. See
   it into a command, prompt, file, or log; never print the environment.
 - Network egress exactly as the kits already allow-list; TLS verification
   unchanged.
-- Human approval to spend a handful of requests per model.
+- Human approval to spend roughly ten or more requests per model (at least
+  three images across each configuration).
 
 ## What unset means
 
@@ -41,7 +51,7 @@ On v2, "unset" is therefore not a control for "no image support"; it already
 behaves like the image-capable configuration, so the text-only control must use
 an explicit `["text"]`. Explicit `modalities` give version-independent behavior
 and are the safe contract for any consumer still on 1.x, but unknown models stay
-absent in committed data until verified here.
+absent in committed data until evidenced here.
 
 ## The synthetic image
 
@@ -61,51 +71,71 @@ not in the prompt.
 2. **Text control.** Send a plain text prompt; expect a normal answer. A
    failure here is an auth/routing problem, not an image problem — stop.
 3. **Image probe.** Attach the synthetic image and ask: "Reply with only the
-   characters shown in the image." Record the model's reply verbatim.
+   characters shown in the image." Record the model's reply verbatim. Repeat
+   with at least three independently generated images (a new random token each
+   time); one correct reply is not enough, because a single run can be luck or a
+   cached answer.
 4. **Classify** the outcome:
    - *Accepted and correct* — reply equals the token.
    - *Accepted, wrong* — reply is fluent but not the token (image ignored or
      hallucinated). Treat as **not** image-capable.
    - *Rejected* — OpenCode or the gateway returns an error or strips the
      attachment. Record the exact message.
-5. **Configurations.** Run steps 3–4 with `modalities.input` unset (the
+5. **Configurations.** Repeat steps 3–4 (on the full set of at least three
+   images) with `modalities.input` unset (the
    current committed state; on v2 this already means text and image, on 1.x
    it would mean text only), with
    `["text","image"]` set explicitly, and with `["text"]` set explicitly via
    throwaway local overrides. Unset versus explicit `["text","image"]` should
    match; the explicit `["text"]` run is the control that shows the metadata,
    rather than the gateway, governs OpenCode's behavior.
-6. **Negative control.** The explicit `["text"]` run must not return the
-   token. A model that returns the token under `["text"]` indicates the
+6. **Negative control.** The explicit `["text"]` run, repeated on the same
+   images, must never return the token. A model that returns the token under `["text"]` indicates the
    probe or harness is not honoring the setting; stop and investigate.
 
 ## Evidence to record
 
 For each model: model id, OpenCode version, step-1 config facts, the verbatim
-replies, the classification, and the date. Keep the evidence table in a
-durable, self-contained place: the pull request description or tracking issue
-that records the run, with enough detail to be understood on its own (fully
-qualified references, no bare issue numbers). Only the resulting
-`sources.capabilitiesVerified` record, not the raw transcript, is committed.
+replies for every sample, the classification, the text-only control result, and
+the date. The evidence is per model and per field. Record it in two places, both
+self-contained (fully qualified references, no bare issue numbers):
+
+- The data pull request description that commits the values.
+- A committed evidence file, at
+  `capability-evidence/<YYYY-MM-DD>-opencode-<version>.md` in this kit's `docs`
+  directory (the convention the ADR defines), with one table row per model,
+  field, and value. It holds results and verbatim replies, not credentials or
+  raw transcripts.
+
+`sources.capabilitiesVerified` is only a catalog-wide release reminder shaped
+`<date>; opencode <version>`. It is not evidence, and committing it does not make
+any value verified. The reviewer checks each populated value against the
+evidence file.
 
 ## Decision rule
 
-- Commit `inputModalities` including `image` only for models classified
-  *Accepted and correct* with explicit `["text","image"]`. Accuracy matters:
-  a model that reads the image but misreads the token is *Accepted, wrong* and
+- Commit `image` in `inputModalities` only for models classified *Accepted and
+  correct* on every repeated sample with explicit `["text","image"]`, and whose
+  explicit `["text"]` control did not return the token. Accuracy matters: a
+  model that reads the image but misreads the token is *Accepted, wrong* and
   stays absent.
-- Models that fail, or were not tested, stay **absent** (unknown).
-- When capability values are committed, record the verification in
+- Models that fail, or were not tested, stay **absent** (unknown). This
+  procedure publishes `image` only: do not add `audio`, `video`, `pdf`, or
+  `reasoning` from it.
+- When capability values are committed, also record the catalog-wide reminder in
   `sources.capabilitiesVerified` of the USAi catalog as
   `<YYYY-MM-DD>; opencode <version>` (for example `2026-10-25; opencode
-  2.0.30`) so the repository guard test passes honestly. The test requires
-  this structure, not any non-empty string.
-- Before any `reasoning: true` value is committed, check how the target
-  OpenCode version treats it: in OpenCode 1.x, `reasoning: true` on an
-  openai-compatible model makes OpenCode derive selectable low/medium/high
-  reasoning-effort variants. Confirm that is acceptable (or not wanted) first.
+  2.0.30`) so the repository guard test passes. The test requires this shape,
+  not any non-empty string, and it does not check the evidence file. The
+  evidence file and pull request description are what substantiate the values.
+- `reasoning` needs a separate procedure that checks the **target OpenCode
+  version's** behavior: whether the model reasons, which variants OpenCode
+  derives from the field (1.x derives low/medium/high reasoning-effort variants
+  for openai-compatible models), and request-time effects such as effort or
+  thinking-budget parameters. Do not publish `reasoning: true` or `false` until
+  that procedure exists and has been run for the model.
 - Generate candidate values with the catalog builder's opt-in
-  `--include-capabilities` flag, then keep only the verified ones.
+  `--include-capabilities` flag, then keep only the values that have evidence.
 
 ## Stop conditions
 

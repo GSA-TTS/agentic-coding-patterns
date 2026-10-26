@@ -31,10 +31,12 @@
 //                           matched models.dev entry into live-feed output. Off by
 //                           default because models.dev describes the upstream
 //                           provider, not what the USAi gateway forwards; output
-//                           produced with this flag must not be committed until it
-//                           is confirmed by the live synthetic-image procedure
-//                           (see the opencode kit's synthetic-image-validation.md)
-//                           and sources.capabilitiesVerified is recorded. With the
+//                           produced with this flag must not be committed until each
+//                           value has per-model, per-field evidence (the synthetic-
+//                           image procedure covers image input only; see ADR 0006
+//                           and the opencode kit's synthetic-image-validation.md).
+//                           sources.capabilitiesVerified is a catalog-wide release
+//                           reminder, not that evidence. With the
 //                           flag, --check against a capability-free catalog.json
 //                           reports drift by design.
 //
