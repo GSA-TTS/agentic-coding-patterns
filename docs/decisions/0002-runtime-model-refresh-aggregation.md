@@ -5,7 +5,7 @@ date: "2026-10-25"
 decision_makers: ["Patterns maintainers"]
 category: "runtime-models"
 impact_level: "moderate"
-supersedes_in_part:
+proposes_to_supersede_in_part:  # takes effect only if this record is accepted
   - "integrations/isolation/docs/decisions/0004-neutral-model-provider-discovery.md"
 ---
 
@@ -22,7 +22,12 @@ provenance, and a second authority over a host-owned lifecycle.
 This decision records the conditions for considering runtime model refresh or
 aggregation. It does not authorize an implementation.
 
-Once accepted, it **supersedes in part** the accepted isolation ADR 0004
+This record is **proposed**. Nothing in it has effect until it is accepted. It
+does not bind implementers, and it does not change any accepted record,
+including isolation ADR 0004, before then. Every directive below describes what
+this decision would require if accepted.
+
+If accepted, it would **supersede in part** the accepted isolation ADR 0004
 (`integrations/isolation/docs/decisions/0004-neutral-model-provider-discovery.md`),
 which specifies a per-sandbox, guest-local, writable model aggregate. That design
 makes a guest-writable file the home of model state, which conflicts with this
@@ -31,10 +36,12 @@ decision's rule that guest-writable state is never an authority. See
 
 ## Decision
 
-Do not implement a runtime models orchestrator, provider fetcher, cache,
-scheduler, harness renderer, or guest-writable aggregate at this time.
+If this decision is accepted, it would require that no runtime models
+orchestrator, provider fetcher, cache, scheduler, harness renderer, or
+guest-writable aggregate be implemented at this time.
 
-Revisit the need only after both prerequisites are complete:
+If accepted, the need would be revisited only after both prerequisites are
+complete:
 
 1. The Quickstart host-authoritative lifecycle migration is complete and its
    host-owned model lifecycle behavior is available to consumers.
@@ -42,20 +49,22 @@ Revisit the need only after both prerequisites are complete:
    provider-independent contract for freshness, normalization, failures,
    provenance, and consumer behavior.
 
-Until then, consumers should use the host-authoritative model state and should
-not infer a need for a second discovery or aggregation path from missing
-convenience data alone.
+Until then, if accepted, consumers would be expected to use the host-authoritative
+model state and would not infer a need for a second discovery or aggregation path
+from missing convenience data alone.
 
 ## Relationship to ADR 0004
 
-Isolation ADR 0004 is accepted. This decision is proposed, so the supersession
-below is **pending**: it takes effect when this decision is accepted. Until then
-ADR 0004 stands, but this decision's Decision section still applies: no
-orchestrator, cache, or guest-writable aggregate is to be implemented. As of this
-decision, no kit in this repository implements the orchestrator or writes the
-guest aggregate path, so superseding these parts changes no shipped behavior.
+Isolation ADR 0004 is accepted and remains the accepted design until this
+decision is accepted. This decision is proposed, so the supersession below is
+**pending**: it would take effect only on acceptance. Until then nothing here
+restricts implementing ADR 0004, and no separate moratorium on ADR 0004's
+orchestrator or guest aggregate is claimed or exists under this record. As of
+this decision, no kit in this repository implements the orchestrator or writes
+the guest aggregate path, so superseding these parts would change no shipped
+behavior.
 
-**Superseded when this decision is accepted:**
+**Would be superseded if this decision is accepted:**
 
 - The guest-local, per-sandbox, read-write aggregate at
   `/var/lib/acq/models/catalog.json`: Layer 2 steps 5 and 6, the "catalog is
@@ -80,7 +89,7 @@ guest aggregate path, so superseding these parts changes no shipped behavior.
   must not treat a guest-writable file as a source of model state, and no source
   of model metadata for Layer 3 is defined until a host-owned design is approved.
 
-**Remains valid:**
+**Would remain valid:**
 
 - The neutral catalog schema (`acq-neutral-model-catalog/v1`) and the
   provenance and empty-list rules for the aggregate shape
@@ -101,16 +110,20 @@ guest aggregate path, so superseding these parts changes no shipped behavior.
   state; the default is that last-known-good, marked stale, wins and the
   snapshot is used only when none exists.
 
-Any future cache or projection is host-owned and read-only to the guest, and on
-failure the host keeps its last-known-good state. ADR 0004 carries a short
-pointer to this decision. Isolation `provider-input-contract.md` also tells
-consumers to build an empty aggregate after authoritative discovery; that wording
-is affected by the same supersession and should be updated when this decision is
-accepted. ADR 0004 also reserves moving catalog materialization host-side to a
-human-review decision; accepting this decision is that review for the aggregate
-location only.
+If accepted, any future cache or projection would be host-owned and read-only to
+the guest, and on failure the host would keep its last-known-good state. ADR 0004
+carries a short pointer to this proposal that does not change its accepted text.
+Isolation `provider-input-contract.md` also tells consumers to build an empty
+aggregate after authoritative discovery; that wording would be affected by the
+same supersession and should be updated if this decision is accepted. ADR 0004
+also reserves moving catalog materialization host-side to a human-review
+decision; acceptance of this decision, through that review, would be the decision
+for the aggregate location only.
 
 ## Decision Criteria
+
+The criteria in this and the later sections apply only if this decision is
+accepted.
 
 An implementation proposal may proceed only when evidence shows that the host
 model state cannot satisfy a concrete consumer need without weakening authority
@@ -251,7 +264,7 @@ contract.
 
 **Positive:**
 
-- Preserves one lifecycle authority while migration work completes.
+- Would preserve one lifecycle authority while migration work completes.
 - Avoids duplicating provider access, caching, and scheduling before a consumer
   need and provider-neutral contract are demonstrated.
 - Establishes testable safety and provenance requirements for any later work.
@@ -265,6 +278,6 @@ contract.
 
 ## Review Trigger
 
-Reopen this decision only after both stated prerequisites are complete and a
+If accepted, reopen this decision only after both stated prerequisites are complete and a
 proposal includes a documented consumer need, a threat-boundary review, the
 required semantics, and the offline fixture matrix.
