@@ -22,7 +22,7 @@ provenance, and a second authority over a host-owned lifecycle.
 This decision records the conditions for considering runtime model refresh or
 aggregation. It does not authorize an implementation.
 
-It also **supersedes in part** the accepted isolation ADR 0004
+Once accepted, it **supersedes in part** the accepted isolation ADR 0004
 (`integrations/isolation/docs/decisions/0004-neutral-model-provider-discovery.md`),
 which specifies a per-sandbox, guest-local, writable model aggregate. That design
 makes a guest-writable file the home of model state, which conflicts with this
@@ -48,26 +48,37 @@ convenience data alone.
 
 ## Relationship to ADR 0004
 
-Isolation ADR 0004 is accepted and remains in force except for the parts listed
-as superseded below. This decision is proposed, so the supersession takes effect
-when it is accepted; until then no implementation of either design is authorized. A search of this repository finds no kit that implements the
-orchestrator or writes the guest aggregate path, so superseding these parts
-changes no shipped behavior.
+Isolation ADR 0004 is accepted. This decision is proposed, so the supersession
+below is **pending**: it takes effect when this decision is accepted. Until then
+ADR 0004 stands, but this decision's Decision section still applies: no
+orchestrator, cache, or guest-writable aggregate is to be implemented. As of this
+decision, no kit in this repository implements the orchestrator or writes the
+guest aggregate path, so superseding these parts changes no shipped behavior.
 
-**Superseded by this decision:**
+**Superseded when this decision is accepted:**
 
 - The guest-local, per-sandbox, read-write aggregate at
-  `/var/lib/acq/models/catalog.json` (Layer 2 steps 5 and 6, the "catalog is
-  guest-local and per-sandbox" text, and the security-model bullets that describe
-  a guest-writable catalog).
+  `/var/lib/acq/models/catalog.json`: Layer 2 steps 5 and 6, the "catalog is
+  guest-local and per-sandbox" paragraphs, the Security-model bullets that
+  describe a guest-writable catalog, the "Atomic writes" rule for the aggregate
+  (the facts half of that rule is unaffected), and the matching parts of the
+  trust-boundary flow and diagram, Consequences, and Alternatives.
 - The models orchestrator kit as the component that writes that aggregate in the
   guest at `startup`, including its explicitly-empty `models: []` write when no
-  provider is present, and the temp-file-plus-rename aggregate write in the
-  guest. The distinction ADR 0004 draws (no providers configured versus discovery
-  did not run) is still required of any future design, but it must be carried by
-  a host-owned, read-only record, not a guest file.
-- Layer 3's reading of model metadata from that guest file. A harness must not
-  treat a guest-writable file as a source of model state.
+  provider is present, and ADR 0004's goal of refreshing model lists in the
+  sandbox at startup. The distinction ADR 0004 draws (no providers configured
+  versus discovery did not run) is still required of any future design, but it
+  must be carried by a host-owned, read-only record, not a guest file.
+- The in-guest *placement* of Layer 2 steps 1 to 4 (bounded fetch holding the
+  credential, normalizer execution, schema validation, snapshot fallback) as a
+  guest startup activity. Their *rules* remain requirements, as listed below; only
+  where they run is superseded. This decision does not choose the new placement.
+  ADR 0004 rejected running provider-shipped normalizer code on the host, and
+  this decision does not reverse that. Any placement needs its own review.
+- Layer 3's reading of model metadata from that guest file, and the "open
+  ordering risk" callout to the extent it concerns the catalog write. A harness
+  must not treat a guest-writable file as a source of model state, and no source
+  of model metadata for Layer 3 is defined until a host-owned design is approved.
 
 **Remains valid:**
 
@@ -79,18 +90,25 @@ changes no shipped behavior.
   SSRF host cross-check, schema checks), and the immutable per-sandbox
   projection of those facts onto a read-only mount.
 - Harness-owned rendering (Layer 3): each harness kit renders its own native
-  config. Only the source of its model metadata changes, and routing and
-  credential fields continue to come from the read-only facts only.
-- The containment requirements for fetching and normalizing (helper-only
-  fetching, no network or credential for the normalizer, timeout and size
-  bounds, failure falls back to the vendored snapshot). They are not
-  implemented now; any future host-owned refresh must meet or exceed them.
-- The vendored per-provider snapshot as the last-known-good fallback, which is
-  host-materialized and read-only.
+  config. Routing and credential fields continue to come from the read-only
+  facts only.
+- The containment rules for fetching and normalizing (helper-only fetching, no
+  network or credential for the normalizer, timeout and size bounds, failure is a
+  fallback and never a pass). Any future host-owned refresh must meet or exceed
+  them.
+- The vendored per-provider snapshot, which is host-materialized and read-only.
+  A future design must define its precedence against the host's last-known-good
+  state; the default is that last-known-good, marked stale, wins and the
+  snapshot is used only when none exists.
 
 Any future cache or projection is host-owned and read-only to the guest, and on
-failure the host keeps its last-known-good snapshot. ADR 0004 carries a short
-pointer to this decision; its other text is unchanged.
+failure the host keeps its last-known-good state. ADR 0004 carries a short
+pointer to this decision. Isolation `provider-input-contract.md` also tells
+consumers to build an empty aggregate after authoritative discovery; that wording
+is affected by the same supersession and should be updated when this decision is
+accepted. ADR 0004 also reserves moving catalog materialization host-side to a
+human-review decision; accepting this decision is that review for the aggregate
+location only.
 
 ## Decision Criteria
 
