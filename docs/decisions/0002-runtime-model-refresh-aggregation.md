@@ -5,6 +5,8 @@ date: "2026-10-25"
 decision_makers: ["Patterns maintainers"]
 category: "runtime-models"
 impact_level: "moderate"
+supersedes_in_part:
+  - "integrations/isolation/docs/decisions/0004-neutral-model-provider-discovery.md"
 ---
 
 # ADR 0002 - Defer Runtime Model Refresh and Aggregation Until Host Authority Is Established
@@ -19,6 +21,13 @@ provenance, and a second authority over a host-owned lifecycle.
 
 This decision records the conditions for considering runtime model refresh or
 aggregation. It does not authorize an implementation.
+
+It also **supersedes in part** the accepted isolation ADR 0004
+(`integrations/isolation/docs/decisions/0004-neutral-model-provider-discovery.md`),
+which specifies a per-sandbox, guest-local, writable model aggregate. That design
+makes a guest-writable file the home of model state, which conflicts with this
+decision's rule that guest-writable state is never an authority. See
+[Relationship to ADR 0004](#relationship-to-adr-0004).
 
 ## Decision
 
@@ -36,6 +45,52 @@ Revisit the need only after both prerequisites are complete:
 Until then, consumers should use the host-authoritative model state and should
 not infer a need for a second discovery or aggregation path from missing
 convenience data alone.
+
+## Relationship to ADR 0004
+
+Isolation ADR 0004 is accepted and remains in force except for the parts listed
+as superseded below. This decision is proposed, so the supersession takes effect
+when it is accepted; until then no implementation of either design is authorized. A search of this repository finds no kit that implements the
+orchestrator or writes the guest aggregate path, so superseding these parts
+changes no shipped behavior.
+
+**Superseded by this decision:**
+
+- The guest-local, per-sandbox, read-write aggregate at
+  `/var/lib/acq/models/catalog.json` (Layer 2 steps 5 and 6, the "catalog is
+  guest-local and per-sandbox" text, and the security-model bullets that describe
+  a guest-writable catalog).
+- The models orchestrator kit as the component that writes that aggregate in the
+  guest at `startup`, including its explicitly-empty `models: []` write when no
+  provider is present, and the temp-file-plus-rename aggregate write in the
+  guest. The distinction ADR 0004 draws (no providers configured versus discovery
+  did not run) is still required of any future design, but it must be carried by
+  a host-owned, read-only record, not a guest file.
+- Layer 3's reading of model metadata from that guest file. A harness must not
+  treat a guest-writable file as a source of model state.
+
+**Remains valid:**
+
+- The neutral catalog schema (`acq-neutral-model-catalog/v1`) and the
+  provenance and empty-list rules for the aggregate shape
+  (`acq-neutral-model-aggregate/v1`). A future host-owned projection may reuse
+  these shapes; this decision does not choose that.
+- Layer 1: per-provider static facts, host-side validation (env-var ownership,
+  SSRF host cross-check, schema checks), and the immutable per-sandbox
+  projection of those facts onto a read-only mount.
+- Harness-owned rendering (Layer 3): each harness kit renders its own native
+  config. Only the source of its model metadata changes, and routing and
+  credential fields continue to come from the read-only facts only.
+- The containment requirements for fetching and normalizing (helper-only
+  fetching, no network or credential for the normalizer, timeout and size
+  bounds, failure falls back to the vendored snapshot). They are not
+  implemented now; any future host-owned refresh must meet or exceed them.
+- The vendored per-provider snapshot as the last-known-good fallback, which is
+  host-materialized and read-only.
+
+Any future cache or projection is host-owned and read-only to the guest, and on
+failure the host keeps its last-known-good snapshot. ADR 0004 carries a short
+pointer to this decision; its other text is unchanged.
 
 ## Decision Criteria
 
