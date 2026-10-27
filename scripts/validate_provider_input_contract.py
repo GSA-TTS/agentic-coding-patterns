@@ -267,6 +267,20 @@ def discovered_bundles() -> list[Path]:
     )
 
 
+def split_discovered_bundles(bundles: list[Path]) -> tuple[list[Path], list[Path]]:
+    """Split discovered bundles into (fixture_bundles, kit_bundles).
+
+    Classification is path-based rather than string-based so it is independent of
+    the host's path separator (a naive ``"/schemas/fixtures/" in str(bundle)``
+    check never matches Windows ``\\`` separators). Fixtures live under
+    ``schemas/fixtures``; everything else discovered is a canonical provider kit.
+    """
+    fixtures_root = SCHEMAS / "fixtures"
+    fixture_bundles = [bundle for bundle in bundles if fixtures_root in bundle.parents]
+    kit_bundles = [bundle for bundle in bundles if bundle not in fixture_bundles]
+    return fixture_bundles, kit_bundles
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bundle", action="append", type=Path, help="explicit manifest (repeatable)")
@@ -288,8 +302,7 @@ def main(argv: list[str] | None = None) -> int:
             for bundle in bundles:
                 validate_bundle(bundle, credential_bindings, seen_provider_ids, args.schema_dir)
         else:
-            fixture_bundles = [bundle for bundle in bundles if "/schemas/fixtures/" in str(bundle)]
-            kit_bundles = [bundle for bundle in bundles if bundle not in fixture_bundles]
+            fixture_bundles, kit_bundles = split_discovered_bundles(bundles)
             for bundle in fixture_bundles:
                 validate_bundle(bundle, credential_bindings, schema_dir=args.schema_dir)
             seen_provider_ids = set()
