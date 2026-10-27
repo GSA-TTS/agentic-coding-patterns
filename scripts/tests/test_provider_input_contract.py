@@ -1307,20 +1307,69 @@ def test_runtime_validator_accepts_keyenv_among_multiple_credentials(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# normalizerPath — must be an executable regular file, not a symlink or mode 0644
+# normalizerPath — executable regular file: POSIX mode bits / Windows launcher
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX exec bits do not exist on Windows")
 def test_runtime_validator_rejects_non_executable_normalizer(tmp_path):
-    """normalizerPath pointing at a non-executable file (mode 0644) must be rejected."""
+    """normalizerPath without a runnable association must be rejected.
+
+    On POSIX the validator proves executability with mode bits, so stripping
+    every execute bit (0644) is rejected. On Windows there are no mode bits and
+    os.access(X_OK) is trivially true, so the validator instead enforces an
+    extension + shebang launcher contract; a regular file with no shebang is a
+    data file with no runnable association and must be rejected.
+    """
     bundle_dir = tmp_path / "provider"
     shutil.copytree(FIXTURES_DIR / "acme-ai", bundle_dir)
     normalizer_path = bundle_dir / "normalize.py"
-    # Strip all execute bits to simulate the pre-fix 0644 state.
-    normalizer_path.chmod(0o644)
-    with pytest.raises(ContractError, match="executable"):
-        validate_bundle(bundle_dir / "bundle.json", {"acme-ai": "ACME_AI_API_KEY"})
+    if os.name == "nt":
+        normalizer_path.write_text("plain data, not a runnable normalizer\n")
+        with pytest.raises(ContractError, match="shebang"):
+            validate_bundle(bundle_dir / "bundle.json", {"acme-ai": "ACME_AI_API_KEY"})
+    else:
+        # Strip all execute bits to simulate the pre-fix 0644 state.
+        normalizer_path.chmod(0o644)
+        with pytest.raises(ContractError, match="executable"):
+            validate_bundle(bundle_dir / "bundle.json", {"acme-ai": "ACME_AI_API_KEY"})
+
+
+@pytest.mark.skipif(os.name != "nt", reason="launcher contract is Windows-only")
+def test_runtime_validator_rejects_unrecognized_normalizer_extension(tmp_path):
+    """Windows rejects a regular file whose extension has no runnable association."""
+    bundle_dir = tmp_path / "provider"
+    shutil.copytree(FIXTURES_DIR / "acme-ai", bundle_dir)
+    normalizer_path = bundle_dir / "normalize.txt"
+    (bundle_dir / "normalize.py").unlink()
+    normalizer_path.write_text("#!/usr/bin/env python3\nprint('not a supported launcher')\n")
+    bundle_path = bundle_dir / "bundle.json"
+    bundle = json.loads(bundle_path.read_text())
+    bundle["normalizerPath"] = "normalize.txt"
+    bundle_path.write_text(json.dumps(bundle))
+    with pytest.raises(ContractError, match="supported launcher extension"):
+        validate_bundle(bundle_path, {"acme-ai": "ACME_AI_API_KEY"})
+
+
+@pytest.mark.skipif(os.name != "nt", reason="launcher contract is Windows-only")
+@pytest.mark.parametrize(
+    "suffix,shebang",
+    [
+        (".py", "#!/usr/bin/env python3\n"),
+        (".mjs", "#!/usr/bin/env node\n"),
+    ],
+)
+def test_runtime_validator_accepts_normalizer_launcher_contract(tmp_path, suffix, shebang):
+    """An allowed extension with a matching shebang satisfies the Windows contract."""
+    bundle_dir = tmp_path / "provider"
+    shutil.copytree(FIXTURES_DIR / "acme-ai", bundle_dir)
+    normalizer_path = bundle_dir / f"normalize{suffix}"
+    (bundle_dir / "normalize.py").unlink()
+    normalizer_path.write_text(shebang + "content\n")
+    bundle_path = bundle_dir / "bundle.json"
+    bundle = json.loads(bundle_path.read_text())
+    bundle["normalizerPath"] = f"normalize{suffix}"
+    bundle_path.write_text(json.dumps(bundle))
+    validate_bundle(bundle_path, {"acme-ai": "ACME_AI_API_KEY"})
 
 
 def test_runtime_validator_rejects_normalizer_symlink(tmp_path):

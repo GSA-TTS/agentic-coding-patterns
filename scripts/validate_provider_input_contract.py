@@ -23,6 +23,18 @@ SUPPORTED_BUNDLE_SCHEMAS = {
 }
 HOST_CREDENTIAL_BINDINGS = SCHEMAS / "provider-credential-bindings.json"
 
+# The normalizer is run by the host at materialization time. POSIX expresses its
+# executability through mode bits (st_mode & 0o111) and os.access(X_OK). Windows
+# reports no mode bits and os.access(X_OK) is trivially true there, so those
+# checks are a no-op and must be replaced by a content-based contract instead:
+# an allowed extension paired with a shebang naming a supported interpreter. The
+# currently supported normalizer types are .mjs (run via Node) and .py (run via
+# the selected Python).
+NORMALIZER_LAUNCHERS = {
+    ".mjs": "node",
+    ".py": "python",
+}
+
 
 class ContractError(ValueError):
     """A provider input bundle is not safe to materialize."""
@@ -130,6 +142,42 @@ def reject_symlink_components(package_root: Path, relative: str, label: str) -> 
             raise ContractError(f"{label}: path components must not be symlinks")
 
 
+def normalizer_shebang_interpreter(path: Path) -> str:
+    """Return the interpreter basename declared by a normalizer's shebang.
+
+    Returns an empty string when the file has no shebang, is not decodable text,
+    or cannot be read. The last whitespace-separated token is taken as the
+    interpreter so both ``#!/usr/bin/env python3`` and ``#!/usr/bin/python3``
+    resolve to ``python3``.
+    """
+    try:
+        with path.open("rb") as handle:
+            first_line = handle.readline()
+    except OSError:
+        return ""
+    try:
+        shebang = first_line.decode("utf-8").strip()
+    except UnicodeDecodeError:
+        return ""
+    if not shebang.startswith("#!"):
+        return ""
+    tokens = shebang[2:].split()
+    if not tokens:
+        return ""
+    return Path(tokens[-1]).name
+
+
+def validate_normalizer_launcher(normalizer_path: Path, bundle_path: Path) -> None:
+    """Enforce the Windows-verifiable normalizer launcher contract."""
+    expected = NORMALIZER_LAUNCHERS.get(normalizer_path.suffix.lower())
+    if expected is None:
+        allowed = ", ".join(sorted(NORMALIZER_LAUNCHERS))
+        raise ContractError(f"{bundle_path}: normalizerPath must end in a supported launcher extension ({allowed})")
+    interpreter = normalizer_shebang_interpreter(normalizer_path)
+    if not interpreter.startswith(expected):
+        raise ContractError(f"{bundle_path}: normalizerPath must declare a {expected} shebang on its first line")
+
+
 def validate_bundle(
     bundle_path: Path,
     credential_bindings: dict[str, str] | None = None,
@@ -161,14 +209,20 @@ def validate_bundle(
             raise ContractError(f"{bundle_path}: declared artifact paths must be regular files inside the provider kit")
     if not facts_path.is_file() or not snapshot_path.is_file() or not normalizer_path.is_file():
         raise ContractError(f"{bundle_path}: declared artifact paths must be regular files")
-    # POSIX expresses executability through mode bits, but Windows reports no
-    # exec bits (os.stat().st_mode & 0o111 is always 0) and os.access(X_OK) is
-    # trivially true there. Enforce the mode-bit check only on POSIX hosts; the
-    # X_OK check below remains the sole executability signal on Windows.
-    if os.name != "nt" and not normalizer_path.stat().st_mode & 0o111:
-        raise ContractError(f"{bundle_path}: normalizerPath must be an executable file")
-    if not os.access(normalizer_path, os.X_OK):
-        raise ContractError(f"{bundle_path}: normalizerPath is not executable by the validator")
+    # POSIX expresses executability through mode bits; Windows reports no exec
+    # bits and os.access(X_OK) is trivially true there, so those checks cannot
+    # prove executability on Windows. Keep the POSIX mode-bit + X_OK checks as
+    # the executability contract there, and on Windows enforce the
+    # extension + shebang launcher contract instead (see NORMALIZER_LAUNCHERS),
+    # so a data file without a runnable association is rejected rather than
+    # materialized as trusted executable code.
+    if os.name != "nt":
+        if not normalizer_path.stat().st_mode & 0o111:
+            raise ContractError(f"{bundle_path}: normalizerPath must be an executable file")
+        if not os.access(normalizer_path, os.X_OK):
+            raise ContractError(f"{bundle_path}: normalizerPath is not executable by the validator")
+    else:
+        validate_normalizer_launcher(normalizer_path, bundle_path)
     facts = load_json(facts_path)
     validate_schema(facts, "acq-provider-facts.schema.json", str(facts_path), schema_dir)
     provider_id = facts["providerId"]
