@@ -29,6 +29,7 @@ import pytest
 from validate_provider_input_contract import (
     ContractError,
     load_json,
+    split_discovered_bundles,
     validate_bundle,
     validate_catalog,
 )
@@ -363,6 +364,36 @@ def test_validator_cli_rejects_malformed_credential_bindings(tmp_path):
     assert result.returncode == 1
     assert "providers must be an object" in result.stderr
     assert "Traceback" not in result.stderr
+
+
+def test_split_discovered_bundles_classifies_fixtures_vs_kits():
+    """Discovery classification is path-based, not separator-string-based."""
+    fixture = FIXTURES_DIR / "usai" / "bundle.json"
+    kit = ROOT / "integrations" / "isolation" / "acq-kits" / "usai-provider" / "provider-input.json"
+    fixture_bundles, kit_bundles = split_discovered_bundles([fixture, kit])
+    assert fixture_bundles == [fixture]
+    assert kit_bundles == [kit]
+
+
+def test_validator_cli_discovery_mode_validates_repository():
+    """Discovery mode (no --bundle) separates fixtures from kits, so the shared
+    `usai` providerId across the fixture and the usai-provider kit is not a
+    duplicate. Regression for the Windows path-separator bug."""
+    result = subprocess.run(
+        [
+            "python3",
+            str(VALIDATOR_PATH),
+            "--schema-dir",
+            str(SCHEMAS_DIR),
+            "--credential-bindings",
+            str(SCHEMAS_DIR / "provider-credential-bindings.json"),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "duplicate providerId" not in result.stderr
 
 
 # ---------------------------------------------------------------------------
