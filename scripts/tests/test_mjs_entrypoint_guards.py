@@ -28,6 +28,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -207,3 +208,37 @@ def test_paseo_assert_daemon_config_entrypoint_fails_closed(tmp_path):
     accepted = _run_node(ASSERT_DAEMON_CONFIG, "--paseo-home", paseo_home, "--listen", "127.0.0.1:6767")
     assert accepted.returncode == 0, accepted.stderr
     assert accepted.stderr == ""
+
+
+# ---------------------------------------------------------------------------
+# Fixture normalizers must produce LF on every platform
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("fixture_name", ["usai", "acme-ai"])
+def test_fixture_normalizer_emits_lf_only_bytes(tmp_path, fixture_name):
+    """The normalizer output must match its committed snapshot byte for byte."""
+    fixture_dir = FIXTURES_DIR / fixture_name
+    out = tmp_path / f"{fixture_name}-catalog.json"
+
+    result = subprocess.run(  # noqa: S603 - fixed interpreter, no shell, repo-local script
+        [
+            sys.executable,
+            str(fixture_dir / "normalize.py"),
+            "--source",
+            str(fixture_dir / "source.json"),
+            "--out",
+            str(out),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    produced = out.read_bytes()
+    snapshot = (fixture_dir / "snapshot.json").read_bytes()
+    assert produced.count(b"\r") == 0, f"{fixture_name} normalizer emitted CR bytes (CRLF line endings)"
+    assert produced == snapshot, f"{fixture_name} normalizer output diverged from its committed snapshot"
