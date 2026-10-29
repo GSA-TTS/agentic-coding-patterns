@@ -5,6 +5,7 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 function resolvePaseoHome(explicit) {
   if (explicit && explicit.trim()) return path.resolve(explicit.trim());
@@ -58,7 +59,14 @@ export function assertDaemonConfig({ paseoHome, listen }) {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Compare URL against URL so the check is portable: on Windows
+// `process.argv[1]` is a `C:\...` path, which a `file://${...}` template turns
+// into `file://C:\...`, while `import.meta.url` is `file:///C:/...`. Those never
+// match, so this script would exit 0 without checking anything.
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href
+) {
   try {
     assertDaemonConfig(parseArgs(process.argv.slice(2)));
   } catch (err) {
