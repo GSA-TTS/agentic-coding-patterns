@@ -15,7 +15,8 @@
 #      byte-complete over the host port (identity encoding; integrity guard), the
 #      in-guest 0.0.0.0 bind (reachable via create-time publish) over the host port, the
 #      install ran with lifecycle scripts disabled (hardening #2), the npm cache
-#      remains agent-owned, the respawn supervisor, the PID-1 hold, the
+#      remains agent-owned, the respawn supervisor, the PID-1 hold's source
+#      structure (live hold requires a separate interactive observation), the
 #      worktree-root pin, daemon self-heal, and that projects are pre-populated
 #      from the mounted host dirs — including that a read-write extra workspace IS
 #      registered and a ":ro" one is SKIPPED.
@@ -635,9 +636,9 @@ info "8. Entrypoint structure and non-PID-1 behavior (PID-1 runtime requires a s
 #       the hold; outside PID 1 it execs the real OpenCode binary;
 #   (b) the shim discriminates on `$$ -eq 1` and calls hold_pid1 on that branch;
 #       these source checks do NOT demonstrate the live PID-1 handoff;
-#   (c) live: run the wrapper no-arg without a TTY (NOT PID 1) and confirm it
-#       does not print the Paseo connect banner, enter PID-1 hold, or alter the
-#       daemon config. A non-TTY exit cannot prove the TUI opened: skip if so.
+#   (c) the offline wrapper tests exercise no-arg non-PID-1 passthrough with a
+#       fake real binary. Do NOT run the real TUI from a read-write guest mount
+#       merely to verify its routing; real TUI behavior remains unverified here.
 wrapper_src="$(in_sbx 'cat ~/.local/bin/opencode 2>/dev/null')"
 shim_src="$(in_sbx 'cat ~/paseo-agent-shim 2>/dev/null')"
 if [ -z "$wrapper_src" ]; then
@@ -662,25 +663,7 @@ else
     bad "shim does not call hold_pid1 — the acq run entrypoint could return and stop the sandbox"
   fi
 fi
-wrapper_probe="$(in_sbx '
-  if command -v timeout >/dev/null 2>&1; then
-    before=$(cat "${PASEO_HOME:-$HOME/.paseo}/config.json" 2>/dev/null)
-    timeout 20 opencode </dev/null 2>&1
-    echo "probe_rc=$?"
-    after=$(cat "${PASEO_HOME:-$HOME/.paseo}/config.json" 2>/dev/null)
-    if [ "$before" = "$after" ]; then echo "root_unchanged=yes"; else echo "root_unchanged=no"; fi
-  else
-    echo "probe_rc=notimeout"
-  fi
-')"
-case "$wrapper_probe" in
-  *"Connect from your HOST"*) bad "bare opencode outside PID 1 still runs the Paseo shim" ;;
-  *root_unchanged=no*)   bad "bare opencode outside PID 1 changed Paseo configuration" ;;
-  *probe_rc=notimeout*) skip "could not run the wrapper probe (no 'timeout' in sandbox)" ;;
-  *probe_rc=124*)       skip "bare OpenCode did not exit without a TTY; cannot verify passthrough here" ;;
-  *probe_rc=127*)       bad "real OpenCode binary not found outside PID 1" ;;
-  *)                    skip "non-TTY exit does not identify the invoked binary; offline wrapper test covers exec branch" ;;
-esac
+skip "real TUI routing not run in this verifier; offline wrapper fixtures cover the non-PID-1 branch"
 
 info "9. Worktree root pinned under the project + daemon self-heals — regression guards"
 # (a) worktree-root pin: the startup-seeded config should retain the primary
@@ -702,16 +685,18 @@ if [ -z "$GUEST_WS" ]; then
 fi
 # Startup owns the initial root; read only worktrees.root, not an unrelated
 # object with a matching root key.
+check_worktrees_root() {
+  local expected="$1" actual="$2"
+  if [ "$actual" = "$expected" ]; then
+    ok "worktrees.root pinned under the project ($expected)"
+  elif [ -n "$actual" ]; then
+    bad "worktrees.root ('$actual') differs from primary guest workspace '$expected'"
+  else
+    bad "worktrees.root missing or config unreadable; expected '$expected'"
+  fi
+}
 pin_out="$(in_sbx "node -e 'try { const c = JSON.parse(require(\"fs\").readFileSync((process.env.PASEO_HOME || process.env.HOME + \"/.paseo\") + \"/config.json\", \"utf8\")); if (typeof c?.worktrees?.root === \"string\") process.stdout.write(c.worktrees.root); } catch {}'")"
-if [ "$pin_out" = "$GUEST_WS/.paseo-worktrees" ]; then
-  ok "worktrees.root pinned under the project ($GUEST_WS/.paseo-worktrees)"
-elif [ -n "$pin_out" ]; then
-  # Startup may preserve an older user config. That is not proof that the
-  # primary workspace is used; do not turn an unrelated root into a PASS.
-  bad "worktrees.root ('$pin_out') differs from primary guest workspace '$GUEST_WS'"
-else
-  bad "worktrees.root missing or config unreadable; expected '$GUEST_WS/.paseo-worktrees'"
-fi
+check_worktrees_root "$GUEST_WS/.paseo-worktrees" "$pin_out"
 
 # (b) daemon self-heal: if the daemon dies, supervisor:paseo-daemon must relaunch
 #     it. Kill ONLY the daemon tree (argv matches "paseo daemon run" but NOT the

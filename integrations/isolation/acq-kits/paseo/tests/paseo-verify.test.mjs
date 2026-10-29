@@ -9,6 +9,10 @@ const verify = await readFile(new URL("../scripts/verify", import.meta.url), "ut
 const start = verify.indexOf("daemon_status_is_running() {");
 const end = verify.indexOf("\nsbx_ports_out() {", start);
 const statusCheck = verify.slice(start, end);
+const rootCheckStart = verify.indexOf("check_worktrees_root() {");
+const rootCheckEnd = verify.indexOf("\npin_out=", rootCheckStart);
+assert.ok(rootCheckStart > 0 && rootCheckEnd > rootCheckStart);
+const rootCheck = verify.slice(rootCheckStart, rootCheckEnd);
 
 function isRunning(status) {
   const result = spawnSync("bash", ["-c", `${statusCheck}\ndaemon_status_is_running`], {
@@ -58,8 +62,18 @@ test("worktree check reads the exact nested root, not a matching unrelated field
   }
   await writeFile(config, JSON.stringify({ other: { root: "/primary/.paseo-worktrees" }, worktrees: { root: "/wrong/.paseo-worktrees" } }));
   assert.equal(root(), "/wrong/.paseo-worktrees");
+  function verdict() {
+    const result = spawnSync("bash", ["-c", `${rootCheck}\nfail=0; ok() { printf 'PASS:%s\\n' "$1"; }; bad() { fail=$((fail+1)); printf 'FAIL:%s\\n' "$1"; }; check_worktrees_root "/primary/.paseo-worktrees" "${root()}"; exit "$fail"`], { encoding: "utf8", timeout: 5000 });
+    assert.ifError(result.error);
+    return result;
+  }
+  assert.equal(verdict().status, 1);
+  assert.match(verdict().stdout, /FAIL:worktrees.root/);
   await writeFile(config, JSON.stringify({ worktrees: { root: "/primary/.paseo-worktrees" } }));
   assert.equal(root(), "/primary/.paseo-worktrees");
+  assert.equal(verdict().status, 0);
+  assert.match(verdict().stdout, /PASS:worktrees.root/);
   await writeFile(config, "{invalid");
   assert.equal(root(), "");
+  assert.equal(verdict().status, 1);
 });
