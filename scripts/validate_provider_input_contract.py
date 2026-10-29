@@ -6,6 +6,7 @@ import argparse
 import ipaddress
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from urllib.parse import urlparse
@@ -29,11 +30,15 @@ HOST_CREDENTIAL_BINDINGS = SCHEMAS / "provider-credential-bindings.json"
 # checks are a no-op and must be replaced by a content-based contract instead:
 # an allowed extension paired with a shebang naming a supported interpreter. The
 # currently supported normalizer types are .mjs (run via Node) and .py (run via
-# the selected Python).
+# the selected Python). Interpreters are matched exactly (after lower-casing and
+# dropping a trailing ".exe"), never by prefix, so look-alike names are refused.
 NORMALIZER_LAUNCHERS = {
-    ".mjs": "node",
-    ".py": "python",
+    ".mjs": frozenset({"node"}),
+    ".py": frozenset({"python", "python3", "py"}),
 }
+# Directories a shebang command may live in; a bare command name is also allowed.
+SHEBANG_DIRECTORIES = frozenset({"/usr/bin", "/usr/local/bin", "/bin"})
+MAX_SHEBANG_BYTES = 4096
 
 
 class ContractError(ValueError):
@@ -142,40 +147,66 @@ def reject_symlink_components(package_root: Path, relative: str, label: str) -> 
             raise ContractError(f"{label}: path components must not be symlinks")
 
 
-def normalizer_shebang_interpreter(path: Path) -> str:
-    """Return the interpreter basename declared by a normalizer's shebang.
+def _is_windows() -> bool:
+    """Platform seam so the Windows launcher branch can be exercised on any host."""
+    return os.name == "nt"
 
-    Returns an empty string when the file has no shebang, is not decodable text,
-    or cannot be read. The last whitespace-separated token is taken as the
-    interpreter so both ``#!/usr/bin/env python3`` and ``#!/usr/bin/python3``
-    resolve to ``python3``.
+
+def _launcher_name(token: str, *, fold: bool = True) -> str:
+    """Return the command name of a shebang token, or "" if its directory is untrusted.
+
+    A token with a slash must name one of SHEBANG_DIRECTORIES (so "/python3" is
+    refused); a token without a slash is a bare command. With ``fold`` the name
+    is lower-cased and one trailing ".exe" is dropped.
+    """
+    directory, slash, name = token.rpartition("/")
+    if (slash and not directory) or (slash and directory not in SHEBANG_DIRECTORIES):
+        return ""
+    return name.lower().removesuffix(".exe") if fold else name
+
+
+def normalizer_shebang_interpreter(path: Path) -> str:
+    """Return the normalized interpreter named by a normalizer's shebang.
+
+    Handles ``#!/usr/bin/python3`` and ``#!/usr/bin/env python3`` (extra
+    arguments after the interpreter are ignored). The result is lower-cased,
+    has any trailing ``.exe`` removed, and is compared against the allowlist by
+    exact match. As with a kernel, ``#!`` must be the first two bytes and tokens
+    are separated by ASCII spaces or tabs only. Returns an empty string when the
+    file has no shebang, is not decodable text, cannot be read, or names an
+    interpreter in an untrusted directory or behind an unsupported ``env`` form
+    (options, assignments).
     """
     try:
         with path.open("rb") as handle:
-            first_line = handle.readline()
+            first_line = handle.readline(MAX_SHEBANG_BYTES)
     except OSError:
         return ""
+    if not first_line.startswith(b"#!"):
+        return ""
     try:
-        shebang = first_line.decode("utf-8").strip()
+        shebang = first_line[2:].decode("utf-8")
     except UnicodeDecodeError:
         return ""
-    if not shebang.startswith("#!"):
-        return ""
-    tokens = shebang[2:].split()
+    tokens = [token for token in re.split(r"[ \t]+", shebang.strip(" \t\r\n")) if token]
     if not tokens:
         return ""
-    return Path(tokens[-1]).name
+    if _launcher_name(tokens[0], fold=False) == "env":
+        if len(tokens) < 2:
+            return ""
+        return _launcher_name(tokens[1])
+    return _launcher_name(tokens[0])
 
 
 def validate_normalizer_launcher(normalizer_path: Path, bundle_path: Path) -> None:
     """Enforce the Windows-verifiable normalizer launcher contract."""
-    expected = NORMALIZER_LAUNCHERS.get(normalizer_path.suffix.lower())
-    if expected is None:
-        allowed = ", ".join(sorted(NORMALIZER_LAUNCHERS))
-        raise ContractError(f"{bundle_path}: normalizerPath must end in a supported launcher extension ({allowed})")
-    interpreter = normalizer_shebang_interpreter(normalizer_path)
-    if not interpreter.startswith(expected):
-        raise ContractError(f"{bundle_path}: normalizerPath must declare a {expected} shebang on its first line")
+    allowed = NORMALIZER_LAUNCHERS.get(normalizer_path.suffix.lower())
+    if allowed is None:
+        extensions = ", ".join(sorted(NORMALIZER_LAUNCHERS))
+        raise ContractError(f"{bundle_path}: normalizerPath must end in a supported launcher extension ({extensions})")
+    if normalizer_shebang_interpreter(normalizer_path) not in allowed:
+        names = ", ".join(sorted(allowed))
+        raise ContractError(f"{bundle_path}: normalizerPath must declare a shebang naming one of: {names}")
 
 
 def validate_bundle(
@@ -216,7 +247,7 @@ def validate_bundle(
     # extension + shebang launcher contract instead (see NORMALIZER_LAUNCHERS),
     # so a data file without a runnable association is rejected rather than
     # materialized as trusted executable code.
-    if os.name != "nt":
+    if not _is_windows():
         if not normalizer_path.stat().st_mode & 0o111:
             raise ContractError(f"{bundle_path}: normalizerPath must be an executable file")
         if not os.access(normalizer_path, os.X_OK):
