@@ -34,6 +34,25 @@ comparing it would fail every offline run regardless of real drift — and a
 detector that always fires is one everybody learns to ignore, leaving genuine
 drift indistinguishable from the noise.
 
+## Role defaults (`recommendations`)
+
+`recommendations` maps a role (`primary`, `small`, `compaction`, `summary`,
+`title`) to a model id. A person chooses these; the feeds do not. So a
+regeneration carries the existing values forward from the catalog at `--out`
+rather than recomputing them.
+
+- Every value must name a model in `models[]`. A role name outside the schema,
+  or an id that is not in `models[]`, fails validation.
+- If a recommended model is no longer in the regenerated list, the build **fails**
+  and names each missing role and id. Nothing is written and nothing is
+  re-picked automatically. Choose a replacement, edit `recommendations` in
+  `catalog.json`, and re-run.
+- If the existing catalog file cannot be read as JSON, the build fails instead
+  of dropping the roles.
+- `--check` applies the same rules: a recommended model that left the feed makes
+  it fail with the message above, and `describeDrift` also names any role whose
+  value differs between the two catalogs it compares.
+
 ## Files
 
 - `catalog.schema.json` — JSON Schema (draft 2020-12), id
