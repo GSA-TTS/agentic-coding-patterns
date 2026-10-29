@@ -12,7 +12,7 @@
 # (see docs/decisions/paseo-mixin-generic-wrapper.md).
 #
 # INVOCATION CONTRACT: the thin wrapper must `exec` this shim (not run it as a
-# child) on the no-arg path. That way the shim INHERITS the wrapper's process id —
+# child) on the PID-1 no-arg entrypoint path. The shim inherits that process id —
 # so when the wrapper was the sandbox entrypoint, the shim is PID 1, and the
 # PID-1 hold below actually keeps the sandbox alive. Running it as a child would
 # give the shim a non-1 pid and the hold would never trigger.

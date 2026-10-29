@@ -88,9 +88,10 @@ printf 'gitdir: /tmp/paseo-verify-repo-b.git\n' > "$RW_CHILD_REPO_B/.git"
 
 pass=0
 fail=0
+skipped=0
 ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass+1)); }
 bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail+1)); }
-skip() { printf '  \033[33mSKIP\033[0m %s\n' "$1"; }
+skip() { printf '  \033[33mSKIP\033[0m %s\n' "$1"; skipped=$((skipped+1)); }
 warn() { printf '  \033[33mWARN\033[0m %s\n' "$1"; }
 info() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 
@@ -686,9 +687,11 @@ fi
 # Startup owns the initial root; read only worktrees.root, not an unrelated
 # object with a matching root key.
 check_worktrees_root() {
-  local expected="$1" actual="$2"
+  local expected="$1" actual="$2" seed_available="$3"
   if [ "$actual" = "$expected" ]; then
     ok "worktrees.root pinned under the project ($expected)"
+  elif [ "$seed_available" != yes ]; then
+    skip "startup had no usable ACQ_WORKSPACE; pre-attach worktree root is unverified"
   elif [ -n "$actual" ]; then
     bad "worktrees.root ('$actual') differs from primary guest workspace '$expected'"
   else
@@ -696,7 +699,8 @@ check_worktrees_root() {
   fi
 }
 pin_out="$(in_sbx "node -e 'try { const c = JSON.parse(require(\"fs\").readFileSync((process.env.PASEO_HOME || process.env.HOME + \"/.paseo\") + \"/config.json\", \"utf8\")); if (typeof c?.worktrees?.root === \"string\") process.stdout.write(c.worktrees.root); } catch {}'")"
-check_worktrees_root "$GUEST_WS/.paseo-worktrees" "$pin_out"
+seed_available="$(in_sbx 'case "${ACQ_WORKSPACE:-}" in /*) if [ -d "$ACQ_WORKSPACE" ]; then printf yes; fi ;; esac')"
+check_worktrees_root "$GUEST_WS/.paseo-worktrees" "$pin_out" "$seed_available"
 
 # (b) daemon self-heal: if the daemon dies, supervisor:paseo-daemon must relaunch
 #     it. Kill ONLY the daemon tree (argv matches "paseo daemon run" but NOT the
@@ -870,6 +874,12 @@ else
 fi
 
 info "Summary"
-[ "$fail" -eq 0 ] && printf '  \033[32mAll checks passed.\033[0m\n' || printf '  \033[31mSome checks failed — see notes above.\033[0m\n'
+if [ "$fail" -gt 0 ]; then
+  printf '  \033[31mSome checks failed — see notes above.\033[0m\n'
+elif [ "$skipped" -gt 0 ]; then
+  printf '  \033[33mMeasured checks passed; %s skipped/unverified (including live PID-1 hold and real TUI).\033[0m\n' "$skipped"
+else
+  printf '  \033[32mAll measured checks passed.\033[0m\n'
+fi
 
 [ "$fail" -eq 0 ]

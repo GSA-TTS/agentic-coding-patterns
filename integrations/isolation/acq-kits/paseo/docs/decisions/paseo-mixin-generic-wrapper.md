@@ -95,7 +95,7 @@ mechanical step rather than speculative code we don't exercise.
 - No shared terminal↔browser session, by design — surfaced in `agentContext`,
   README, and TROUBLESHOOTING.
 - All reusable logic is in one agent-neutral file (`paseo-agent-shim`); the
-  agent-specific surface is a ~25-line wrapper.
+  agent-specific surface remains a thin wrapper.
 
 ## Links
 

@@ -62,13 +62,15 @@ test("worktree check reads the exact nested root, not a matching unrelated field
   }
   await writeFile(config, JSON.stringify({ other: { root: "/primary/.paseo-worktrees" }, worktrees: { root: "/wrong/.paseo-worktrees" } }));
   assert.equal(root(), "/wrong/.paseo-worktrees");
-  function verdict() {
-    const result = spawnSync("bash", ["-c", `${rootCheck}\nfail=0; ok() { printf 'PASS:%s\\n' "$1"; }; bad() { fail=$((fail+1)); printf 'FAIL:%s\\n' "$1"; }; check_worktrees_root "/primary/.paseo-worktrees" "${root()}"; exit "$fail"`], { encoding: "utf8", timeout: 5000 });
+  function verdict(seedAvailable = "yes") {
+    const result = spawnSync("bash", ["-c", `${rootCheck}\nfail=0; ok() { printf 'PASS:%s\\n' "$1"; }; bad() { fail=$((fail+1)); printf 'FAIL:%s\\n' "$1"; }; skip() { printf 'SKIP:%s\\n' "$1"; }; check_worktrees_root "/primary/.paseo-worktrees" "${root()}" "${seedAvailable}"; exit "$fail"`], { encoding: "utf8", timeout: 5000 });
     assert.ifError(result.error);
     return result;
   }
   assert.equal(verdict().status, 1);
   assert.match(verdict().stdout, /FAIL:worktrees.root/);
+  assert.equal(verdict("no").status, 0);
+  assert.match(verdict("no").stdout, /SKIP:startup had no usable ACQ_WORKSPACE/);
   await writeFile(config, JSON.stringify({ worktrees: { root: "/primary/.paseo-worktrees" } }));
   assert.equal(root(), "/primary/.paseo-worktrees");
   assert.equal(verdict().status, 0);
