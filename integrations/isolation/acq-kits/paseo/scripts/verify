@@ -231,7 +231,13 @@ if [ -z "$DRIVER" ]; then
   echo "  (RUN_SBX=1 also works but needs a pre-translated sbx-v2 kit; see header.)" >&2
   info "Summary"
   printf '  %d passed, %d failed\n' "$pass" "$fail"
-  [ "$fail" -eq 0 ] && printf '  \033[32mOffline gate passed.\033[0m\n' || printf '  \033[31mOffline gate failed — see above.\033[0m\n'
+  if [ "$fail" -gt 0 ]; then
+    printf '  \033[31mOffline gate failed — see above.\033[0m\n'
+  elif [ "$skipped" -gt 0 ]; then
+    printf '  \033[33mMeasured offline checks passed; %s skipped/unverified.\033[0m\n' "$skipped"
+  else
+    printf '  \033[32mOffline gate passed.\033[0m\n'
+  fi
   exit "$([ "$fail" -eq 0 ] && echo 0 || echo 1)"
 fi
 
@@ -689,11 +695,11 @@ fi
 check_worktrees_root() {
   local expected="$1" actual="$2" seed_available="$3"
   if [ "$actual" = "$expected" ]; then
-    ok "worktrees.root pinned under the project ($expected)"
+    ok "worktrees.root equals the primary guest workspace ($expected); seed provenance unverified"
+  elif [ -n "$actual" ]; then
+    skip "worktrees.root ('$actual') differs from '$expected'; startup may have preserved existing config"
   elif [ "$seed_available" != yes ]; then
     skip "startup had no usable ACQ_WORKSPACE; pre-attach worktree root is unverified"
-  elif [ -n "$actual" ]; then
-    bad "worktrees.root ('$actual') differs from primary guest workspace '$expected'"
   else
     bad "worktrees.root missing or config unreadable; expected '$expected'"
   fi

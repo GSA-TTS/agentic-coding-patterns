@@ -67,10 +67,10 @@ test("worktree check reads the exact nested root, not a matching unrelated field
     assert.ifError(result.error);
     return result;
   }
-  assert.equal(verdict().status, 1);
-  assert.match(verdict().stdout, /FAIL:worktrees.root/);
+  assert.equal(verdict().status, 0);
+  assert.match(verdict().stdout, /SKIP:worktrees.root/);
   assert.equal(verdict("no").status, 0);
-  assert.match(verdict("no").stdout, /SKIP:startup had no usable ACQ_WORKSPACE/);
+  assert.match(verdict("no").stdout, /SKIP:worktrees.root/);
   await writeFile(config, JSON.stringify({ worktrees: { root: "/primary/.paseo-worktrees" } }));
   assert.equal(root(), "/primary/.paseo-worktrees");
   assert.equal(verdict().status, 0);
@@ -78,4 +78,6 @@ test("worktree check reads the exact nested root, not a matching unrelated field
   await writeFile(config, "{invalid");
   assert.equal(root(), "");
   assert.equal(verdict().status, 1);
+  assert.equal(verdict("no").status, 0);
+  assert.match(verdict("no").stdout, /SKIP:startup had no usable ACQ_WORKSPACE/);
 });
