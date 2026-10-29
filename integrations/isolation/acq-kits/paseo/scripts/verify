@@ -710,7 +710,7 @@ check_worktrees_root() {
     *) bad "Paseo config is unreadable, invalid JSON, or has no valid worktrees.root" ;;
   esac
 }
-pin_out="$(in_sbx "node -e 'const fs = require(\"fs\"); const p = (process.env.PASEO_HOME || process.env.HOME + \"/.paseo\") + \"/config.json\"; try { const c = JSON.parse(fs.readFileSync(p, \"utf8\")); const root = c?.worktrees?.root; process.stdout.write(typeof root === \"string\" && /^\\/[^\\s]+$/.test(root) ? \"valid:\" + root : \"invalid\"); } catch (e) { process.stdout.write(e.code === \"ENOENT\" ? \"missing\" : \"invalid\"); }' && printf PROBE_DONE")"
+pin_out="$(in_sbx "node -e 'const fs = require(\"fs\"); const p = (process.env.PASEO_HOME || process.env.HOME + \"/.paseo\") + \"/config.json\"; try { const c = JSON.parse(fs.readFileSync(p, \"utf8\")); const root = c?.worktrees?.root; process.stdout.write(typeof root === \"string\" && root.startsWith(\"/\") && !/[\\u0000-\\u001f\\u007f]/.test(root) ? \"valid:\" + root : \"invalid\"); } catch (e) { process.stdout.write(e.code === \"ENOENT\" ? \"missing\" : \"invalid\"); }' && printf PROBE_DONE")"
 case "$pin_out" in *PROBE_DONE) pin_out="${pin_out%PROBE_DONE}" ;; *) pin_out=transport ;; esac
 check_worktrees_root "$GUEST_WS/.paseo-worktrees" "$pin_out"
 

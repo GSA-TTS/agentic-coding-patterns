@@ -157,15 +157,11 @@ node --test integrations/isolation/acq-kits/paseo/tests/paseo-timing.test.mjs
 
 ## Keep it running
 
-**Use `acq run`, and keep its terminal open.** A session-less sandbox is
-auto-stopped shortly after its last session disconnects. `acq run` holds a session
-for as long as its terminal is attached, which is what keeps the sandbox — and the
-Paseo web UI — alive.
-
-A detached `acq create` **does not** keep the sandbox running: with nothing
-attached it is auto-stopped soon after. You may still use `acq create` to
-pre-create a sandbox, but you must then `acq run --name <sandbox>` to actually use
-it.
+On a backend that runs the wrapper as **PID 1**, `acq run` holds its terminal
+open so the sandbox and Paseo web UI stay up. A detached `acq create` can instead
+use its own keepalive process and run the startup-supervised daemon without an
+attached terminal; check `acq ls` and `acq ports <sandbox>` before assuming it
+stopped. The wrapper's PID-1 hold is not a prerequisite for a detached sandbox.
 
 If you don't want to tie up your working terminal, run `acq run` in a separate
 terminal tab or a `tmux`/`screen` window and leave it attached.
@@ -174,9 +170,10 @@ terminal tab or a `tmux`/`screen` window and leave it attached.
 
 The kit exposes **container** port `6767` (the Paseo daemon API + WebSocket +
 bundled web UI), declared via the neutral `publishedPorts` field in `spec.yaml`.
-`acq` publishes it to an **ephemeral `127.0.0.1` host port per sandbox** at create
-time, so several sandboxes running this kit at once don't collide. Look up the
-mapping:
+`acq` publishes it to a host-loopback port at create time. Allocation is
+backend-dependent: one MSB build maps guest 6767 to host 6767, so a second
+listener can collide; other backends may allocate an ephemeral port. Look up
+the actual mapping rather than assuming multiple sandboxes never collide:
 
 ```bash
 acq ports <sandbox>

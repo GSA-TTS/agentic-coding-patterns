@@ -73,6 +73,8 @@ test("worktree check reads the exact nested root, not a matching unrelated field
   assert.equal(root(), "valid:/primary/.paseo-worktrees");
   assert.equal(verdict().status, 0);
   assert.match(verdict().stdout, /PASS:worktrees.root/);
+  await writeFile(config, JSON.stringify({ worktrees: { root: "/primary/my project/.paseo-worktrees" } }));
+  assert.equal(root(), "valid:/primary/my project/.paseo-worktrees");
   await writeFile(config, "{invalid");
   assert.equal(root(), "invalid");
   assert.equal(verdict().status, 1);
@@ -80,6 +82,9 @@ test("worktree check reads the exact nested root, not a matching unrelated field
   assert.equal(root(), "invalid");
   assert.equal(verdict().status, 1);
   await writeFile(config, JSON.stringify({ worktrees: { root: "  " } }));
+  assert.equal(root(), "invalid");
+  assert.equal(verdict().status, 1);
+  await writeFile(config, JSON.stringify({ worktrees: { root: "/primary/.paseo-worktrees\u0000" } }));
   assert.equal(root(), "invalid");
   assert.equal(verdict().status, 1);
   await rm(config);
