@@ -53,7 +53,7 @@ test("worktree check reads the exact nested root, not a matching unrelated field
   const pinLine = verify.split("\n").find((line) => line.startsWith('pin_out="$(in_sbx '));
   assert.ok(pinLine, "verifier must have an executable root query");
   function root() {
-    const result = spawnSync("bash", ["-c", `in_sbx() { bash -c "$1"; }\n${pinLine}\nprintf '%s' "$pin_out"`], {
+    const result = spawnSync("bash", ["-c", `in_sbx() { bash -c "$1"; }\n${pinLine}\npin_out="${"${pin_out%PROBE_DONE}"}"\nprintf '%s' "$pin_out"`], {
       env: { HOME: home, PATH: process.env.PATH }, encoding: "utf8", timeout: 5000,
     });
     assert.ifError(result.error);
@@ -76,8 +76,19 @@ test("worktree check reads the exact nested root, not a matching unrelated field
   await writeFile(config, "{invalid");
   assert.equal(root(), "invalid");
   assert.equal(verdict().status, 1);
+  await writeFile(config, JSON.stringify({ worktrees: { root: "relative/path" } }));
+  assert.equal(root(), "invalid");
+  assert.equal(verdict().status, 1);
+  await writeFile(config, JSON.stringify({ worktrees: { root: "  " } }));
+  assert.equal(root(), "invalid");
+  assert.equal(verdict().status, 1);
   await rm(config);
   assert.equal(root(), "missing");
   assert.equal(verdict().status, 3);
   assert.match(verdict().stdout, /SKIP:no config exists/);
+  const guestProbe = verify.split("\n").find((line) => line.startsWith('pin_out="$(in_sbx '));
+  assert.ok(guestProbe);
+  const transport = spawnSync("bash", ["-c", `in_sbx() { return 1; }\n${guestProbe}\ncase "$pin_out" in *PROBE_DONE) : ;; *) pin_out=transport ;; esac\nprintf '%s' "$pin_out"`], { encoding: "utf8", timeout: 5000 });
+  assert.ifError(transport.error);
+  assert.equal(transport.stdout, "transport");
 });

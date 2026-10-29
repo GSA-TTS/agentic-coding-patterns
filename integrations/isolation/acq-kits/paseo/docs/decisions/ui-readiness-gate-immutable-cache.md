@@ -81,7 +81,9 @@ does not depend on the host `curl`'s codec support.
   (2,506,699) equals the `Accept-Encoding: br` wire bytes → ready.
 - Node `brotliDecompressSync` decodes the served bundle to 15,779,639 bytes;
   a truncated `.br` yields `ERR:unexpected end of file` (negative test).
-- `sh -n` / `bash -n` clean on the shim and `verify`; offline gate passes.
+- `sh -n` / `bash -n` clean on the shim and `verify`; measured offline checks
+  passed in this verification. The detached verifier now returns exit 3 if
+  checks are skipped; this historical evidence is not a live PID-1 assertion.
 
 ## Links
 

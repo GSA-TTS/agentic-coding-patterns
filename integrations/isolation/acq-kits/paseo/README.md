@@ -325,6 +325,11 @@ python ../validate-kits.py
 # sandbox run), daemon self-heal, and the startup worktree-root value).
 RUN_ACQ=1 ./scripts/verify
 
+# The default detached verifier exits 3 when checks are skipped or unverified;
+# exit 0 means all applicable measured checks passed. A live run still cannot
+# demonstrate the PID-1 hold or real TUI routing without a separate interactive
+# sandbox observation. Exit 1 means a measured check failed.
+
 # Keep the sandbox afterward to inspect it:
 KEEP=1 RUN_ACQ=1 ./scripts/verify
 

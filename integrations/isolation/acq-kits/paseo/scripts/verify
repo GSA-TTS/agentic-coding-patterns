@@ -706,10 +706,12 @@ check_worktrees_root() {
   case "$observed" in
     valid:*) skip "worktrees.root differs from '$expected'; startup may have preserved existing config" ;;
     missing) skip "no config exists; optional startup seed not measured" ;;
+    transport) skip "could not query guest config; root state unverified" ;;
     *) bad "Paseo config is unreadable, invalid JSON, or has no valid worktrees.root" ;;
   esac
 }
-pin_out="$(in_sbx "node -e 'const fs = require(\"fs\"); const p = (process.env.PASEO_HOME || process.env.HOME + \"/.paseo\") + \"/config.json\"; try { const c = JSON.parse(fs.readFileSync(p, \"utf8\")); process.stdout.write(typeof c?.worktrees?.root === \"string\" && c.worktrees.root.length ? \"valid:\" + c.worktrees.root : \"invalid\"); } catch (e) { process.stdout.write(e.code === \"ENOENT\" ? \"missing\" : \"invalid\"); }'")"
+pin_out="$(in_sbx "node -e 'const fs = require(\"fs\"); const p = (process.env.PASEO_HOME || process.env.HOME + \"/.paseo\") + \"/config.json\"; try { const c = JSON.parse(fs.readFileSync(p, \"utf8\")); const root = c?.worktrees?.root; process.stdout.write(typeof root === \"string\" && /^\\/[^\\s]+$/.test(root) ? \"valid:\" + root : \"invalid\"); } catch (e) { process.stdout.write(e.code === \"ENOENT\" ? \"missing\" : \"invalid\"); }' && printf PROBE_DONE")"
+case "$pin_out" in *PROBE_DONE) pin_out="${pin_out%PROBE_DONE}" ;; *) pin_out=transport ;; esac
 check_worktrees_root "$GUEST_WS/.paseo-worktrees" "$pin_out"
 
 # (b) daemon self-heal: if the daemon dies, supervisor:paseo-daemon must relaunch
