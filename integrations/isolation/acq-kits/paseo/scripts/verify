@@ -643,7 +643,7 @@ shim_src="$(in_sbx 'cat ~/paseo-agent-shim 2>/dev/null')"
 if [ -z "$wrapper_src" ]; then
   bad "could not read ~/.local/bin/opencode from the sandbox"
 elif printf '%s\n' "$wrapper_src" | grep -Eq 'exec[[:space:]]+sh[[:space:]]+"?\$SHIM"?|exec[[:space:]]+sh[[:space:]]+.*paseo-agent-shim'; then
-  ok "thin wrapper execs the generic shim on the PID-1 path"
+  skip "wrapper source contains exec-to-shim; actual PID-1 branch not observed"
 else
   bad "thin wrapper does not exec the shim — no-arg path won't inherit PID 1, breaking the hold"
 fi
@@ -652,12 +652,12 @@ if [ -z "$shim_src" ]; then
   bad "could not read ~/paseo-agent-shim from the sandbox to check the PID-1 discriminator"
 else
   if printf '%s\n' "$shim_src" | grep -Eq '\$\$"?[[:space:]]*-eq[[:space:]]*1'; then
-    ok "shim discriminates on PID 1 (\$\$ -eq 1) before deciding to hold vs. exit"
+    skip "shim source checks PID 1; actual sandbox entrypoint hold not observed"
   else
     bad "shim has no \$\$ -eq 1 check — it cannot tell the acq run (PID 1) path from acq exec"
   fi
   if printf '%s\n' "$shim_src" | grep -Eq '^[[:space:]]*hold_pid1[[:space:]]*$'; then
-    ok "shim calls hold_pid1 on the PID-1 branch"
+    skip "shim source contains hold_pid1; runtime hold not observed"
   else
     bad "shim does not call hold_pid1 — the acq run entrypoint could return and stop the sandbox"
   fi
@@ -700,18 +700,17 @@ if [ -z "$GUEST_WS" ]; then
   GUEST_WS="$(in_sbx 'cat /var/lib/acq/workspace 2>/dev/null')"
   [ -n "$GUEST_WS" ] || GUEST_WS="$WORK"
 fi
-# Startup owns the initial root; querying must not change it.
-pin_out="$(in_sbx 'cat "${PASEO_HOME:-$HOME/.paseo}/config.json" 2>/dev/null')"
-if printf '%s' "$pin_out" | grep -Fq "\"root\": \"$GUEST_WS/.paseo-worktrees\""; then
+# Startup owns the initial root; read only worktrees.root, not an unrelated
+# object with a matching root key.
+pin_out="$(in_sbx "node -e 'try { const c = JSON.parse(require(\"fs\").readFileSync((process.env.PASEO_HOME || process.env.HOME + \"/.paseo\") + \"/config.json\", \"utf8\")); if (typeof c?.worktrees?.root === \"string\") process.stdout.write(c.worktrees.root); } catch {}'")"
+if [ "$pin_out" = "$GUEST_WS/.paseo-worktrees" ]; then
   ok "worktrees.root pinned under the project ($GUEST_WS/.paseo-worktrees)"
-elif printf '%s' "$pin_out" | grep -Eq '"root": *"[^"]*/\.paseo-worktrees"'; then
+elif [ -n "$pin_out" ]; then
   # Startup may preserve an older user config. That is not proof that the
   # primary workspace is used; do not turn an unrelated root into a PASS.
-  _actual="$(printf '%s' "$pin_out" | grep -Eo '"root": *"[^"]*/\.paseo-worktrees"' | head -1)"
-  bad "worktrees.root ($_actual) differs from primary guest workspace '$GUEST_WS'"
+  bad "worktrees.root ('$pin_out') differs from primary guest workspace '$GUEST_WS'"
 else
-  bad "worktrees.root not pinned to any <project>/.paseo-worktrees — config.json was:"
-  printf '%s\n' "$pin_out" | sed 's/^/    | /'
+  bad "worktrees.root missing or config unreadable; expected '$GUEST_WS/.paseo-worktrees'"
 fi
 
 # (b) daemon self-heal: if the daemon dies, supervisor:paseo-daemon must relaunch

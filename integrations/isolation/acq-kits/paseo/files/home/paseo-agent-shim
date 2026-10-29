@@ -43,8 +43,8 @@
 #   PID 1 exits and the sandbox transitions running -> stopped (taking the Paseo
 #   daemon/UI with it). So when `$$` is 1 the shim ends by BLOCKING FOREVER in
 #   hold_pid1. On a detached `acq create` PID 1 is instead a tini keepalive shim
-#   and this shim is NOT PID 1 (it is reached from a shell / `acq exec`), so it
-#   exits cleanly.
+#   and this shim is non-PID-1 only if invoked directly. The opencode wrapper
+#   sends bare shell / `acq exec` calls to the real TUI instead.
 #
 # The Paseo daemon is UNSECURED (no PASEO_PASSWORD): the sandbox — an ephemeral
 # container with proxied, allow-listed egress and no host FS — is the security
@@ -300,10 +300,9 @@ EOF
 # Are WE PID 1? This discriminates the two no-arg situations:
 #   - PID 1 (we ARE the sandbox entrypoint, i.e. the `acq run` path): we MUST NOT
 #     return, or PID 1 exits and the sandbox stops. Hold forever (hold_pid1).
-#   - NOT PID 1 (a detached `acq create` is already keeping the sandbox alive via
-#     its tini keepalive shim, and we were reached from a shell / `acq exec`): the
-#     daemon + UI are already supervised by the startup script, so there is
-#     nothing for us to hold — EXIT CLEANLY and give the terminal back.
+#   - NOT PID 1 (direct shim invocation only; the opencode wrapper instead opens
+#     the real TUI): the daemon + UI are already supervised by the startup
+#     script, so there is nothing for us to hold — EXIT CLEANLY.
 is_pid1() { [ "$$" -eq 1 ]; }
 paseo_timing shim_end
 

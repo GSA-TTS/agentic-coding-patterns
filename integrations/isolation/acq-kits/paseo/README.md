@@ -321,7 +321,8 @@ python ../validate-kits.py
 
 # Live end-to-end via acq (translates + applies the kit, publishes the port, and
 # asserts the wrapper, the daemon + web UI, the port, the supervisor, the PID-1
-# hold, daemon self-heal, and the worktree-root pin).
+# hold's source structure (live PID-1 hold requires a separate interactive
+# sandbox run), daemon self-heal, and the startup worktree-root value).
 RUN_ACQ=1 ./scripts/verify
 
 # Keep the sandbox afterward to inspect it:
