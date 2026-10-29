@@ -466,9 +466,10 @@ Check what's configured and whether the daemon has it:
 acq exec <sandbox> -- sh -c 'cat "${PASEO_HOME:-$HOME/.paseo}/config.json"'
 ```
 
-- `worktrees.root` still absent or `$PASEO_HOME/worktrees` → you haven't run the
-  wrapper yet on `acq run` (a detached `acq create` alone won't pin it). Run
-  `acq run opencode <project>` once.
+- `worktrees.root` still absent or `$PASEO_HOME/worktrees` → startup normally
+  seeds it from an absolute `ACQ_WORKSPACE`, when one is available. Check the
+  startup log and guest workspace first. The PID-1 `acq run` path may pin it;
+  a bare `opencode` typed in a shell will not.
 - `worktrees.root` points at `<project>/.paseo-worktrees` but new worktrees still
   land elsewhere → the daemon may not have restarted to pick it up. The wrapper
   restarts the daemon only when the value **changes**; force a restart with the

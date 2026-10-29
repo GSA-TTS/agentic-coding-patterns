@@ -34,15 +34,19 @@ SHIM="$HOME_DIR/paseo-agent-shim"
 # We are ~/.local/bin/opencode and are first on PATH, so `command -v opencode`
 # would find US. Search PATH entries explicitly and skip our own path.
 self_dir="$HOME_DIR/.local/bin"
-canon() { ( cd "$(dirname "$1")" 2>/dev/null && printf '%s/%s\n' "$(pwd -P)" "$(basename "$1")" ); }
-self_canon="$(canon "$self_dir/opencode")"
+# Resolve the executable itself as well as its parent: another PATH entry may
+# symlink to this wrapper. A directory-only comparison would exec ourselves
+# recursively on the non-PID-1 bare path.
+canon() { readlink -f "$1" 2>/dev/null || return 1; }
+self_canon="$(canon "$self_dir/opencode")" || exit 127
 real_opencode=""
 _ifs="$IFS"; IFS=:
 for _dir in $PATH; do
   [ -n "$_dir" ] || continue
   _cand="$_dir/opencode"
   { [ -x "$_cand" ] && [ ! -d "$_cand" ]; } || continue
-  [ "$(canon "$_cand")" = "$self_canon" ] && continue
+  _resolved="$(canon "$_cand")" || continue
+  [ "$_resolved" = "$self_canon" ] && continue
   real_opencode="$_cand"
   break
 done

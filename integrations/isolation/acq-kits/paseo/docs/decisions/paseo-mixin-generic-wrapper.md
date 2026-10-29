@@ -38,8 +38,10 @@ agent-neutral shim.**
   discriminates on `$$`:
   - **PID 1** (the `acq run` entrypoint): `hold_pid1` — block forever so the
     session's sandbox stays up.
-  - **not PID 1** (if invoked directly): report status and return. The thin
-    wrapper no longer sends shell or `acq exec` invocations to this path.
+  - **not PID 1** (if invoked directly): it still runs the root-pinning and
+    daemon checks before reporting status and returning. The thin wrapper no
+    longer sends shell or `acq exec` invocations to this path; do not call the
+    shim directly from an unrelated project directory.
   - Offers **no** TUI attach — there is no shared Paseo session to attach to
     (`paseo-single-port-daemon.md`).
 

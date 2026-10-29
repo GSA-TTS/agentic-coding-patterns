@@ -284,8 +284,9 @@ agentContext: |
   **Worktrees.** Paseo keeps agent git worktrees under a single global root. This
   kit can initialize an absent config from the primary guest `ACQ_WORKSPACE`
   before installation, preserving existing configuration during initialization.
-  The `opencode` wrapper reconciles the root with its physical working directory
-  plus `/.paseo-worktrees` and restarts only when that value changes. See the kit's
+  Only the PID-1 `opencode` wrapper path reconciles the root with its physical
+  working directory plus `/.paseo-worktrees` and restarts when it changes. See
+  the kit's
   `docs/decisions/supervisor-owns-daemon-wrapper-pins-worktrees.md`.
 
   **Projects.** Every read-write host directory mounted into the sandbox is

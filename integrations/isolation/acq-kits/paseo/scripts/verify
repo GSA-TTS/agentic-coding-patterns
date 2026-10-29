@@ -635,7 +635,8 @@ info "8. Entrypoint holds PID 1; bare opencode outside PID 1 opens the real TUI"
 #       the hold; outside PID 1 it execs the real OpenCode binary;
 #   (b) the shim discriminates on `$$ -eq 1` and calls hold_pid1 on that branch;
 #   (c) live: run the wrapper no-arg without a TTY (NOT PID 1) and confirm it
-#       does not print the Paseo connect banner or enter the PID-1 hold.
+#       does not print the Paseo connect banner, enter PID-1 hold, or alter the
+#       daemon config. A non-TTY exit cannot prove the TUI opened: skip if so.
 wrapper_src="$(in_sbx 'cat ~/.local/bin/opencode 2>/dev/null')"
 shim_src="$(in_sbx 'cat ~/paseo-agent-shim 2>/dev/null')"
 if [ -z "$wrapper_src" ]; then
@@ -676,12 +677,7 @@ case "$wrapper_probe" in
   *probe_rc=notimeout*) skip "could not run the wrapper probe (no 'timeout' in sandbox)" ;;
   *probe_rc=124*)       skip "bare OpenCode did not exit without a TTY; cannot verify passthrough here" ;;
   *probe_rc=127*)       bad "real OpenCode binary not found outside PID 1" ;;
-  *)
-    if printf '%s\n' "$wrapper_src" | grep -Fq 'exec "$real_opencode"'; then
-      ok "bare opencode outside PID 1 execs the real OpenCode binary"
-    else
-      bad "bare opencode exited without proof it execs the real binary"
-    fi ;;
+  *)                    skip "non-TTY exit does not identify the invoked binary; offline wrapper test covers exec branch" ;;
 esac
 
 info "9. Worktree root pinned under the project + daemon self-heals — regression guards"
