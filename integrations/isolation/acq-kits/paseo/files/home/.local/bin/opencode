@@ -53,8 +53,8 @@ done
 IFS="$_ifs"
 
 # --- Passthrough: any arguments go straight to the real opencode. ------------
-# (If the real opencode is missing, only fail on the passthrough path — the
-# no-arg shim path below does not need opencode at all.)
+# (The PID-1 no-arg shim path does not require the real binary. A shell's
+# no-arg invocation and all calls with arguments do require it.)
 if [ "$#" -gt 0 ]; then
   if [ -z "$real_opencode" ]; then
     echo "opencode wrapper: could not locate the real opencode binary on PATH" >&2
