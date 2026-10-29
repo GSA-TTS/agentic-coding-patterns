@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
@@ -72,7 +72,7 @@ test("worktree check reads the exact nested root, not a matching unrelated field
   await writeFile(config, JSON.stringify({ worktrees: { root: "/primary/.paseo-worktrees" } }));
   assert.equal(root(), "valid:/primary/.paseo-worktrees");
   assert.equal(verdict().status, 0);
-  assert.match(verdict().stdout, /PASS:worktrees.root/);
+  assert.match(verdict().stdout, /PASS:configured worktrees.root/);
   await writeFile(config, JSON.stringify({ worktrees: { root: "/primary/my project/.paseo-worktrees" } }));
   assert.equal(root(), "valid:/primary/my project/.paseo-worktrees");
   await writeFile(config, "{invalid");
@@ -96,4 +96,25 @@ test("worktree check reads the exact nested root, not a matching unrelated field
   const transport = spawnSync("bash", ["-c", `in_sbx() { return 1; }\n${guestProbe}\ncase "$pin_out" in *PROBE_DONE) : ;; *) pin_out=transport ;; esac\nprintf '%s' "$pin_out"`], { encoding: "utf8", timeout: 5000 });
   assert.ifError(transport.error);
   assert.equal(transport.stdout, "transport");
+});
+
+test("project comparison keeps spaced and canonicalized guest paths literal", async (t) => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "paseo-verify-project-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const physical = path.join(home, "physical");
+  const alias = path.join(home, "alias");
+  const project = path.join(alias, "a space", "it's-repo");
+  await mkdir(path.join(physical, "a space", "it's-repo"), { recursive: true });
+  await symlink(physical, alias);
+  const source = verify.split("\n");
+  const first = source.findIndex((line) => line.includes("quote_guest_path()"));
+  const last = source.findIndex((line, at) => at > first && line.includes('guest_rw_a="$(guest_physical_path'));
+  assert.ok(first > 0 && last > first, "verifier must resolve guest paths before comparison");
+  const helpers = source.slice(first, last).join("\n");
+  const script = `${helpers}\nin_sbx() { bash -c "$1"; }\nexpected=$(guest_physical_path "$1")\n[ "$expected" = "$2" ] || exit 1\nprintf '%s\\n' "$2" | grep -Fqx -- "$expected"`;
+  const result = spawnSync("bash", ["-c", script, "test", project, path.join(physical, "a space", "it's-repo")], {
+    encoding: "utf8", timeout: 5000,
+  });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
 });

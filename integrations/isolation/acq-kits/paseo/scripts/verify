@@ -700,7 +700,7 @@ fi
 check_worktrees_root() {
   local expected="$1" observed="$2"
   if [ "$observed" = "valid:$expected" ]; then
-    ok "worktrees.root equals the primary guest workspace ($expected); seed provenance unverified"
+    ok "configured worktrees.root equals the primary guest workspace ($expected); physical containment and seed provenance unverified"
     return
   fi
   case "$observed" in
@@ -846,8 +846,17 @@ else
     fi
 
     # POSITIVE: child repos under the read-write parent fixture must be registered.
-    if printf '%s\n' "$project_roots" | grep -Fqx -- "$RW_CHILD_REPO_A" && \
-       printf '%s\n' "$project_roots" | grep -Fqx -- "$RW_CHILD_REPO_B"; then
+    # Quote the host spelling as one shell operand, then obtain its *physical*
+    # guest spelling before comparing it with the API's projectRootPath.
+    quote_guest_path() { printf "'%s'" "${1//\'/\'\\\'\'}"; }
+    guest_physical_path() { in_sbx "cd $(quote_guest_path "$1") 2>/dev/null && pwd -P"; }
+    guest_rw_a="$(guest_physical_path "$RW_CHILD_REPO_A")"
+    guest_rw_b="$(guest_physical_path "$RW_CHILD_REPO_B")"
+    guest_rw_parent="$(guest_physical_path "$RW_FIXTURE")"
+    guest_ro="$(guest_physical_path "$RO_FIXTURE")"
+    if [ -n "$guest_rw_a" ] && [ -n "$guest_rw_b" ] &&
+       printf '%s\n' "$project_roots" | grep -Fqx -- "$guest_rw_a" &&
+       printf '%s\n' "$project_roots" | grep -Fqx -- "$guest_rw_b"; then
       ok "child repos under read-write parent fixture ($rw_base) registered as projects"
     else
       bad "child repos under read-write parent fixture ($rw_base) were NOT registered"
@@ -855,7 +864,9 @@ else
 
     # NEGATIVE: the parent fixture should not be registered when direct child repos
     # were found and registered instead.
-    if printf '%s\n' "$project_roots" | grep -Fqx -- "$RW_FIXTURE"; then
+    if [ -z "$guest_rw_parent" ]; then
+      skip "read-write parent mount not resolvable in guest; expansion unverified"
+    elif printf '%s\n' "$project_roots" | grep -Fqx -- "$guest_rw_parent"; then
       bad "read-write parent fixture ($rw_base) was registered instead of only its child repos"
     else
       ok "read-write parent fixture ($rw_base) correctly expanded to child repos"
@@ -866,7 +877,9 @@ else
     # :ro — in which case we skip rather than falsely fail).
     ro_is_ro="$(in_sbx "awk '\$3==\"virtiofs\" && \$4 ~ /^ro/ && \$2 ~ /${ro_base}\$/ {print \"yes\"}' /proc/mounts | head -1")"
     if [ "$ro_is_ro" = "yes" ]; then
-      if printf '%s\n' "$project_roots" | grep -Fqx -- "$RO_FIXTURE"; then
+      if [ -z "$guest_ro" ]; then
+        skip "read-only mount not resolvable in guest; exclusion unverified"
+      elif printf '%s\n' "$project_roots" | grep -Fqx -- "$guest_ro"; then
         bad "read-only fixture ($ro_base) was wrongly registered (should be skipped)"
       else
         ok "read-only fixture ($ro_base) correctly skipped"

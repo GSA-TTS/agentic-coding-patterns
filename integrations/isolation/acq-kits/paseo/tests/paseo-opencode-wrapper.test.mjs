@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { link, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import os from "node:os";
@@ -70,6 +70,16 @@ test("an alias-only PATH fails visibly without recursion", async (t) => {
   const result = f.run([], { PATH: `${path.join(f.home, ".local/bin")}:${alias}:/usr/bin:/bin` });
   assert.equal(result.status, 127);
   assert.match(result.stderr, /could not locate the real opencode binary/);
+});
+
+test("a later hard-link alias cannot cause recursive wrapper execution", async (t) => {
+  const f = await fixture(t);
+  const alias = path.join(f.home, "hardlink-bin");
+  await mkdir(alias);
+  await link(path.join(f.home, ".local/bin/opencode"), path.join(alias, "opencode"));
+  const result = f.run([], { PATH: `${path.join(f.home, ".local/bin")}:${alias}:${path.join(f.home, "real/bin")}:/usr/bin:/bin` });
+  assert.equal(result.status, 23);
+  assert.equal(result.stdout, "real:\n");
 });
 
 test("PID-1 shim handoff precedes any readlink dependency", async () => {

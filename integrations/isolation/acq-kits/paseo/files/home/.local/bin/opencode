@@ -50,6 +50,8 @@ self_dir="$HOME_DIR/.local/bin"
 # recursively on the non-PID-1 bare path.
 canon() { readlink -f "$1" 2>/dev/null || return 1; }
 self_canon="$(canon "$self_dir/opencode")" || exit 127
+self_inode="$(stat -Lc '%d:%i' "$self_canon" 2>/dev/null || stat -f '%d:%i' "$self_canon" 2>/dev/null)" || exit 127
+[ -n "$self_inode" ] || exit 127
 real_opencode=""
 _ifs="$IFS"; IFS=:
 for _dir in $PATH; do
@@ -58,6 +60,8 @@ for _dir in $PATH; do
   { [ -x "$_cand" ] && [ ! -d "$_cand" ]; } || continue
   _resolved="$(canon "$_cand")" || continue
   [ "$_resolved" = "$self_canon" ] && continue
+  _inode="$(stat -Lc '%d:%i' "$_resolved" 2>/dev/null || stat -f '%d:%i' "$_resolved" 2>/dev/null)" || continue
+  [ "$_inode" = "$self_inode" ] && continue
   real_opencode="$_cand"
   break
 done
