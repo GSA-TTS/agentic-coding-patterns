@@ -413,13 +413,11 @@ acq exec <sandbox> -- sh -c '
 
 ## "The sandbox stopped" shortly after `acq create`
 
-A session-less sandbox is **auto-stopped shortly after** the last session
-disconnects. A detached `acq create` with nothing attached is stopped, taking the
-daemon/UI down.
-
-**Fix:** use `acq run` and keep its terminal open (the wrapper holds PID 1 for as
-long as the terminal is attached). Use a separate tab or `tmux`/`screen` if you
-don't want to tie up your working terminal. See the README "Keep it running".
+Check `acq ls` and `acq ports <sandbox>` first. A detached create may have a
+backend keepalive and a startup-supervised daemon; the PID-1 wrapper is not
+required on that path. If the selected backend stopped the sandbox, run it in a
+separate attached terminal and keep that terminal open while using the UI. See
+the README "Keep it running" and inspect the startup log for any daemon failure.
 
 ## The Paseo CLI didn't install (UI unavailable, sandbox healthy)
 

@@ -30,6 +30,17 @@ set -eu
 HOME_DIR="${HOME:-/home/agent}"
 SHIM="$HOME_DIR/paseo-agent-shim"
 
+# The PID-1 entrypoint needs only the shim. Do not depend on PATH traversal or
+# readlink -f here: neither the real OpenCode binary nor its resolver is needed
+# to keep the sandbox alive.
+if [ "$#" -eq 0 ] && [ "$$" -eq 1 ]; then
+  if [ ! -f "$SHIM" ]; then
+    echo "opencode wrapper: kit shim not found at $SHIM" >&2
+    exit 127
+  fi
+  exec sh "$SHIM"
+fi
+
 # --- Resolve the REAL opencode (never ourselves). ---------------------------
 # We are ~/.local/bin/opencode and are first on PATH, so `command -v opencode`
 # would find US. Search PATH entries explicitly and skip our own path.
@@ -71,10 +82,3 @@ if [ "$$" -ne 1 ]; then
   fi
   exec "$real_opencode"
 fi
-
-# --- PID 1: hand off to the generic shim (exec preserves PID for the hold). --
-if [ ! -f "$SHIM" ]; then
-  echo "opencode wrapper: kit shim not found at $SHIM" >&2
-  exit 127
-fi
-exec sh "$SHIM"

@@ -29,16 +29,16 @@ as shown below.
    export ACQ_EXTRA_KITS="git+https://github.com/GSA-TTS/agentic-coding-patterns.git#ref=<sha>&dir=integrations/isolation/acq-kits/paseo"
    ```
 
-2. **Start the sandbox with `acq run`** (not `acq create` — see
+2. **Start the sandbox with `acq run`** for a held PID-1 session, or use
+   detached `acq create` if your backend provides a keepalive (see
    [Keep it running](#keep-it-running)):
 
    ```bash
    acq run opencode /path/to/your/project
    ```
 
-   Leave this terminal open. It pins Paseo's worktree root under your project,
-   prints connect instructions, and holds the session open. Closing this terminal
-   stops the sandbox.
+    On a PID-1 entrypoint, leave this terminal open: the shim pins Paseo's
+    worktree root, prints connect instructions, and holds that session open.
 
 3. **Open the browser UI.** Find the mapped host port and open it:
 

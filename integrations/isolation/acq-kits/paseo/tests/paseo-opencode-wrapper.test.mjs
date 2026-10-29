@@ -71,3 +71,11 @@ test("an alias-only PATH fails visibly without recursion", async (t) => {
   assert.equal(result.status, 127);
   assert.match(result.stderr, /could not locate the real opencode binary/);
 });
+
+test("PID-1 shim handoff precedes any readlink dependency", async () => {
+  const source = await readFile(wrapper, "utf8");
+  const pidBranch = source.indexOf('if [ "$#" -eq 0 ] && [ "$$" -eq 1 ]; then');
+  const selfResolution = source.indexOf('self_canon="$(canon');
+  assert.ok(pidBranch > 0 && selfResolution > pidBranch);
+  assert.match(source.slice(pidBranch, selfResolution), /exec sh "\$SHIM"/);
+});
