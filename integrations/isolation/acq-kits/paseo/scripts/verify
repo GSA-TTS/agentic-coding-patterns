@@ -793,8 +793,6 @@ else
   }
 
   rw_base="$(basename "$RW_FIXTURE")"
-  rw_child_a_base="$(basename "$RW_CHILD_REPO_A")"
-  rw_child_b_base="$(basename "$RW_CHILD_REPO_B")"
   ro_base="$(basename "$RO_FIXTURE")"
 
   # Expected set: qualifying rw virtiofs mounts, expanded by the actual registrar
@@ -831,9 +829,10 @@ else
     while :; do
       project_roots="$(list_project_roots)"
       missing=""
-      for m in $expected_projects; do
-        printf '%s\n' "$project_roots" | grep -qx "$m" || missing="$missing $m"
-      done
+      while IFS= read -r m; do
+        [ -n "$m" ] || continue
+        printf '%s\n' "$project_roots" | grep -Fqx -- "$m" || missing="${missing}${missing:+, }$m"
+      done <<< "$expected_projects"
       [ -z "$missing" ] && break
       [ "$(date +%s)" -ge "$reg_deadline" ] && break
       sleep "$POLL_INTERVAL"
@@ -847,8 +846,8 @@ else
     fi
 
     # POSITIVE: child repos under the read-write parent fixture must be registered.
-    if printf '%s\n' "$project_roots" | grep -q "${rw_base}/${rw_child_a_base}\$" && \
-       printf '%s\n' "$project_roots" | grep -q "${rw_base}/${rw_child_b_base}\$"; then
+    if printf '%s\n' "$project_roots" | grep -Fqx -- "$RW_CHILD_REPO_A" && \
+       printf '%s\n' "$project_roots" | grep -Fqx -- "$RW_CHILD_REPO_B"; then
       ok "child repos under read-write parent fixture ($rw_base) registered as projects"
     else
       bad "child repos under read-write parent fixture ($rw_base) were NOT registered"
@@ -856,7 +855,7 @@ else
 
     # NEGATIVE: the parent fixture should not be registered when direct child repos
     # were found and registered instead.
-    if printf '%s\n' "$project_roots" | grep -q "${rw_base}\$"; then
+    if printf '%s\n' "$project_roots" | grep -Fqx -- "$RW_FIXTURE"; then
       bad "read-write parent fixture ($rw_base) was registered instead of only its child repos"
     else
       ok "read-write parent fixture ($rw_base) correctly expanded to child repos"
@@ -867,7 +866,7 @@ else
     # :ro — in which case we skip rather than falsely fail).
     ro_is_ro="$(in_sbx "awk '\$3==\"virtiofs\" && \$4 ~ /^ro/ && \$2 ~ /${ro_base}\$/ {print \"yes\"}' /proc/mounts | head -1")"
     if [ "$ro_is_ro" = "yes" ]; then
-      if printf '%s\n' "$project_roots" | grep -q "${ro_base}\$"; then
+      if printf '%s\n' "$project_roots" | grep -Fqx -- "$RO_FIXTURE"; then
         bad "read-only fixture ($ro_base) was wrongly registered (should be skipped)"
       else
         ok "read-only fixture ($ro_base) correctly skipped"

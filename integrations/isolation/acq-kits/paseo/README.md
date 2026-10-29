@@ -185,7 +185,9 @@ self-advertised local daemon on `localhost:<port>`, so a `127.0.0.1` address bar
 can leave it showing "no hosts" with a `ws://…/ws` reconnect loop (see
 TROUBLESHOOTING.md).
 
-Want a **fixed** host port instead of the ephemeral one? Publish it explicitly:
+Need a **different** host port? Publish it explicitly if the backend supports
+remapping; this is a separate transport from the create-time mapping that the
+verifier checks:
 
 ```bash
 acq ports <sandbox> --publish 6767:6767          # this sandbox → host 6767
