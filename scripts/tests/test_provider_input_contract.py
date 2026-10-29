@@ -1303,6 +1303,7 @@ def test_runtime_validator_rejects_undeclared_credential_name(tmp_path):
         validate_bundle(bundle_dir / "bundle.json", {"acme-ai": "ACME_AI_API_KEY"})
 
 
+@requires_symlink_support
 def test_runtime_validator_rejects_artifact_symlink(tmp_path):
     """Package-relative artifact names cannot escape through a symlink."""
     bundle_dir = tmp_path / "provider"
@@ -1578,6 +1579,7 @@ def test_windows_contract_keeps_symlink_and_inside_root_checks(tmp_path):
         validate_bundle(bundle_dir / "bundle.json", {"acme-ai": "ACME_AI_API_KEY"})
 
 
+@requires_symlink_support
 def test_runtime_validator_rejects_normalizer_symlink(tmp_path):
     """normalizerPath that is a symlink (even to an executable) must be rejected."""
     bundle_dir = tmp_path / "provider"
