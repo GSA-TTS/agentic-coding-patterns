@@ -12,8 +12,9 @@ sandbox.
 ## What It Does
 
 - **Cloud Foundry CLI** - uses an existing `cf` binary when the base image already
-  has one. If `cf` is missing, installs Cloud Foundry CLI v8.19.0 from pinned
-  upstream release tarballs with committed SHA-256 checks.
+  has one. If `cf` is missing, installs Cloud Foundry CLI v8.19.0 into
+  `~/.local/bin` at sandbox startup from pinned upstream release tarballs with
+  committed SHA-256 checks.
 - **cloud.gov egress** - allow-lists exact cloud.gov control-plane and
   documentation hosts: the Cloud Foundry API, login/UAA, log-stream hosts, and
   user-facing cloud.gov documentation. Public app routes and custom domains stay
@@ -28,7 +29,7 @@ sandbox.
 ## Backend Parity
 
 The kit declares `sbx` and `msb` support. Both backends consume the neutral kit
-fields: `caps.network.allow`, file drops, and create-time/startup commands. There
+fields: `caps.network.allow`, file drops, and startup commands. There
 is no backend shortcut.
 
 The Cloud Foundry token is not a kit field. The user stores it in the acq secret
@@ -50,6 +51,18 @@ acq run --kit <path-to-this-kit> opencode /path/to/project
 
 The kit is a `mixin`, so it composes with the other acq-kits.
 
+**On a TLS-intercepting network (for example Zscaler), the CA-trust kit must
+come before this kit.** Startup commands run in kit order and the CF CLI
+download is HTTPS. The global kit bundle applies `zscaler-ca-certificate` before
+`ACQ_EXTRA_KITS`, so the default needs no action. Do **not** add the CA kit to
+`ACQ_EXTRA_KITS` when the global bundle already has it: sbx rejects a
+composition with two kits of the same name (`duplicate kit name`). Only if your
+bundle has no CA-trust kit, list one before this kit:
+
+```bash
+export ACQ_EXTRA_KITS="<path>/your-ca-kit <path>/cloud-gov"
+```
+
 ## CF CLI Installation Pin
 
 If the base image already has `cf`, the install step exits successfully without
@@ -58,9 +71,20 @@ CLI v8.19.0 from the upstream GitHub release tarball for `linux_x86-64` or
 `linux_arm64`, then verifies the archive SHA-256 before installing it. Unsupported
 architectures fail closed.
 
+The install is a **startup** step (as the agent user, into `~/.local/bin`), not
+an install-phase step. An install-phase command runs at create time, before a
+CA-trust kit's startup step has trusted an intercepting proxy's CA, so the HTTPS
+fetch failed with `curl` exit 60 and failed the whole create. The startup step is
+non-fatal and idempotent: a failed download logs a warning and is retried on the
+next start.
+
 To update the CLI, change the version and both SHA-256 constants in
 `files/home/cloud-gov-install-cf-cli.sh` together after reviewing the upstream
 release metadata.
+
+`cf` is installed in `~/.local/bin`. A bare `acq exec` runs a non-login shell
+that may not have that directory on `PATH`; prepend it
+(`PATH="$HOME/.local/bin:$PATH"`) when probing from the host.
 
 ## Prerequisites
 
@@ -106,7 +130,7 @@ The kit allow-lists:
 | `doppler.fr.cloud.gov`, `log-cache.fr.cloud.gov` | Cloud Foundry log streaming/control-plane endpoints |
 | `cloud.gov`, `www.cloud.gov`, `docs.cloud.gov` | cloud.gov public documentation |
 | `docs.cloudfoundry.org`, `cli.cloudfoundry.org` | Cloud Foundry documentation |
-| `github.com`, `objects.githubusercontent.com` | Pinned Cloud Foundry CLI release tarball download during kit install; if runtime access to these hosts is not acceptable for a deployment context, use a base image with `cf` preinstalled or a project-specific vetted artifact source. |
+| `github.com`, `objects.githubusercontent.com`, `release-assets.githubusercontent.com` | Pinned Cloud Foundry CLI release tarball download during the startup install; if runtime access to these hosts is not acceptable for a deployment context, use a base image with `cf` preinstalled or a project-specific vetted artifact source. |
 
 The kit intentionally does not allow `*.cloud.gov`. If the project needs a
 specific app route, route service, or custom domain, add that exact host in a
@@ -153,8 +177,17 @@ Run the bundled check:
 
 By default it runs offline checks only: repository kit validation, shell syntax
 for kit scripts, auth-script guard tests with synthetic placeholders, and exact
-egress allow-list assertions. Set `RUN_ACQ=1` to create a throwaway sandbox and
+egress allow-list assertions, and that the CF CLI fetch is not an install-phase
+command. Set `RUN_ACQ=1` to create a throwaway sandbox and
 verify that `cf` is installed, cloud.gov/docs endpoints are reachable, and the
 injected placeholder reaches the CF API through a direct HTTPS request.
-`RUN_ACQ=1` requires a global `cloud-gov` acq secret. Set `KEEP=1` with
+`RUN_ACQ=1` requires a global `cloud-gov` acq secret. On an
+intercepted network, run it as is: the global bundle supplies the CA kit ahead
+of this one, which is the live regression for the CA-before-fetch ordering. Set
+`CA_KIT=<path>` only if your bundle has no CA-trust kit (a kit with the same
+name as one already in the bundle is rejected by sbx). Set
+`ACQ_BACKEND=sbx` (or `msb`) to pass `--backend` to `acq` without changing your
+persisted default; the CA-before-fetch failure only reproduces on sbx, because
+msb trusts host CAs natively. The script prints which backend the create log
+names and fails if it differs from the one requested. Set `KEEP=1` with
 `RUN_ACQ=1` to keep the sandbox for inspection.

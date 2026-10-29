@@ -1,7 +1,7 @@
 # spec.yaml - cloud-gov (a neutral acq mixin kit, hybrid/v1)
 #
 # Configures a sandbox for cloud.gov work:
-#   - install/verify the Cloud Foundry CLI (`cf`) at create time;
+#   - install/verify the Cloud Foundry CLI (`cf`) at startup, after CA trust;
 #   - allow-list exact cloud.gov control-plane and documentation hosts;
 #   - document the acq secret binding needed for CF OAuth token injection without
 #     placing the real token in files readable by the agent.
@@ -42,24 +42,40 @@ caps:
       # Pinned CF CLI release tarballs used by cloud-gov-install-cf-cli.sh.
       - github.com:443
       - objects.githubusercontent.com:443
+      # github.com redirects release downloads to this host (observed for the
+      # pinned v8.19.0 tarballs); without it the redirect hop is blocked.
+      - release-assets.githubusercontent.com:443
 
 files:
   - path: /home/agent/cloud-gov-install-cf-cli.sh
     mode: "0755"
     source: files/home/cloud-gov-install-cf-cli.sh
-    description: Install or verify the Cloud Foundry CLI at sandbox create time
+    description: Install or verify the Cloud Foundry CLI at sandbox startup
   - path: /home/agent/cloud-gov-configure-cf-auth.sh
     mode: "0755"
     source: files/home/cloud-gov-configure-cf-auth.sh
     description: Target cloud.gov and validate any injected token placeholder
 
 commands:
-  - phase: install
-    user: "0"
-    description: Install the Cloud Foundry CLI if it is missing
+  # Startup, NOT install: the CF CLI download is HTTPS, and on an intercepted
+  # network it needs the CA-trust kit's CA, which that kit installs in its own
+  # startup step. An install-phase command runs at create time before that, so
+  # the fetch failed (curl exit 60) and failed the whole create. Kit order runs
+  # zscaler-ca-certificate (the global bundle lists it first) before this step.
+  # Runs as the agent user and installs into ~/.local/bin. Non-fatal: a failed
+  # download is logged by the script and must not block sandbox start; the step
+  # is idempotent (no-op once `cf` exists) so replaying each start retries a
+  # failed fetch.
+  - phase: startup
+    user: "1000"
+    description: Install the Cloud Foundry CLI if it is missing (after CA trust)
     command:
       - sh
-      - /home/agent/cloud-gov-install-cf-cli.sh
+      - -c
+      - |
+        sh /home/agent/cloud-gov-install-cf-cli.sh \
+          || echo "cloud-gov: WARNING: cf CLI is not installed; see TROUBLESHOOTING.md" >&2
+        exit 0
   - phase: startup
     user: "1000"
     description: Target cloud.gov and validate the injected placeholder
@@ -70,7 +86,8 @@ commands:
 agentContext: |
   ## cloud.gov
 
-  This sandbox has the Cloud Foundry CLI (`cf`) available for cloud.gov work and
+  This sandbox has the Cloud Foundry CLI (`cf`, in `~/.local/bin`) available for
+  cloud.gov work once startup has installed it, and
   egress allow-listed for exact cloud.gov API, login/UAA, log streaming, and
   cloud.gov / Cloud Foundry documentation hosts. Public app routes and custom
   domains require project-specific exact host allow-list entries.

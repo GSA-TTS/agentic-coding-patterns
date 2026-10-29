@@ -4,6 +4,19 @@
 #
 # By default this runs offline checks only. Set RUN_ACQ=1 to create a throwaway
 # sandbox and verify the CF CLI plus exact cloud.gov/docs network reachability.
+#
+# On a TLS-intercepting network (for example Zscaler) the CF CLI download only
+# works if the CA-trust kit is applied BEFORE this kit. The global kit bundle
+# already applies zscaler-ca-certificate first, so run on an intercepted network
+# without CA_KIT to reproduce that create. CA_KIT is only for a bundle that has
+# NO CA-trust kit: sbx rejects a second kit with the same name as a bundled one
+# ("duplicate kit name"), so do not point it at a kit the bundle already has.
+#
+# The CA-before-fetch failure is specific to the sbx file-drop path: msb trusts
+# host CAs natively (--trust-host-cas), so an msb run cannot reproduce it. Set
+# ACQ_BACKEND=sbx (or msb) to pass `--backend` to acq for the sandbox create,
+# exec, and rm calls without changing your persisted default backend. Unset uses
+# acq's own selection.
 
 set -uo pipefail
 
@@ -14,6 +27,20 @@ WORK="$(mktemp -d "${TMPDIR:-/tmp}/cloud-gov-verify.XXXXXX")"
 CREATE_LOG="$WORK/create.log"
 KEEP="${KEEP:-0}"
 RUN_ACQ="${RUN_ACQ:-0}"
+CA_KIT="${CA_KIT:-}"
+ACQ_BACKEND="${ACQ_BACKEND:-}"
+ACQ_BACKEND_ARGS=()
+case "$ACQ_BACKEND" in
+  "") ;;
+  sbx|msb) ACQ_BACKEND_ARGS=(--backend "$ACQ_BACKEND") ;;
+  *)
+    printf 'ACQ_BACKEND must be sbx or msb (got: %s)\n' "$ACQ_BACKEND" >&2
+    exit 2
+    ;;
+esac
+# Bash 3.2 (macOS) treats an empty array as unset under `set -u`; the +"..."
+# form expands to nothing when no backend was requested.
+acq_b() { acq ${ACQ_BACKEND_ARGS[@]+"${ACQ_BACKEND_ARGS[@]}"} "$@"; }
 
 pass=0
 fail=0
@@ -27,12 +54,12 @@ cleanup() {
     printf '\nKEEP=1 set; leaving sandbox %s and %s in place.\n' "$SBX_NAME" "$WORK" >&2
     return
   fi
-  acq rm "$SBX_NAME" >/dev/null 2>&1 || true
+  acq_b rm "$SBX_NAME" >/dev/null 2>&1 || true
   rm -rf "$WORK" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM
 
-in_acq() { acq exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true; }
+in_acq() { acq_b exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true; }
 
 info "0. Offline preconditions"
 if [ -f "$KIT_DIR/spec.yaml" ]; then
@@ -64,6 +91,25 @@ if command -v bash >/dev/null 2>&1; then
   done
 else
   skip "bash not on PATH - skipped shell parse checks"
+fi
+
+info "0b. CF CLI fetch ordering"
+if ! python3 -c 'import yaml' >/dev/null 2>&1; then
+  skip "fetch-ordering check needs python3 + pyyaml"
+elif python3 - "$KIT_DIR/spec.yaml" <<'PY'
+import sys
+import yaml
+
+spec = yaml.safe_load(open(sys.argv[1]))
+for cmd in spec.get("commands", []):
+    if "cloud-gov-install-cf-cli.sh" in " ".join(cmd["command"]):
+        sys.exit(0 if cmd.get("phase") == "startup" else 1)
+sys.exit(1)
+PY
+then
+  ok "CF CLI fetch runs in startup (after CA trust), not install"
+else
+  bad "CF CLI fetch must run in a startup phase so CA trust is available first"
 fi
 
 info "1. Auth placeholder guard"
@@ -128,6 +174,7 @@ docs.cloudfoundry.org:443
 cli.cloudfoundry.org:443
 github.com:443
 objects.githubusercontent.com:443
+release-assets.githubusercontent.com:443
 HOSTS
 python3 - "$KIT_DIR/spec.yaml" >"$ACTUAL_HOSTS" <<'PY'
 import sys
@@ -205,10 +252,24 @@ else
 fi
 
 info "5. Create sandbox with the kit"
-printf '  creating %s (workspace %s)...\n' "$SBX_NAME" "$WORK"
-# ACQ_EXTRA_KITS bypasses acq's interactive configured-kit picker.
-if ACQ_EXTRA_KITS="$KIT_DIR" acq create --name "$SBX_NAME" opencode "$WORK" >"$CREATE_LOG" 2>&1; then
+printf '  creating %s (workspace %s, backend %s)...\n' "$SBX_NAME" "$WORK" "${ACQ_BACKEND:-default}"
+# ACQ_EXTRA_KITS bypasses acq's interactive configured-kit picker. It is
+# whitespace-separated and ordered: the CA kit (if any) must come first so its
+# startup step trusts the intercepting CA before this kit fetches the CF CLI.
+EXTRA_KITS="$KIT_DIR"
+if [ -n "$CA_KIT" ]; then
+  EXTRA_KITS="$CA_KIT $KIT_DIR"
+  printf '  CA kit first: %s\n' "$CA_KIT"
+fi
+if ACQ_EXTRA_KITS="$EXTRA_KITS" acq_b create --name "$SBX_NAME" opencode "$WORK" >"$CREATE_LOG" 2>&1; then
   ok "sandbox created with cloud-gov kit"
+  # acq names the backend that actually ran (for example `acq(msb): ...`); show it
+  # so a run is never cited as sbx evidence when it ran on msb.
+  used="$(grep -oE 'acq\((sbx|msb)\)' "$CREATE_LOG" | head -1)"
+  printf '  backend in create log: %s\n' "${used:-<not stated>}"
+  if [ -n "$ACQ_BACKEND" ] && [ "$used" != "acq($ACQ_BACKEND)" ]; then
+    bad "requested backend $ACQ_BACKEND but create log reports ${used:-no backend}"
+  fi
 else
   bad "acq create failed"
   sed 's/^/  | /' "$CREATE_LOG" >&2
@@ -217,6 +278,12 @@ fi
 
 info "6. CF CLI installed"
 cf_version="$(in_acq 'cf version')"
+if [ -z "$cf_version" ]; then
+  # A bare non-login exec may lack ~/.local/bin; retry so the failure message
+  # says whether cf is missing or only off PATH.
+  cf_version="$(in_acq 'PATH="$HOME/.local/bin:$PATH" cf version')"
+  [ -n "$cf_version" ] && printf '  note: cf is installed but ~/.local/bin is not on this exec PATH\n'
+fi
 printf '  %s\n' "${cf_version:-<no output>}"
 case "$cf_version" in
   *"cf version"*) ok "cf CLI reports a version" ;;

@@ -8,6 +8,16 @@ These are failure modes specific to the cloud-gov acq mixin kit.
 
 **Causes and fixes:**
 
+- **TLS chain untrusted at install (`curl exit 60`).** On a network that
+  intercepts TLS, the CF CLI download needs the intercepting CA. The install
+  runs in the startup phase so a CA-trust kit's startup step can run first, but
+  only if that kit comes **before** `cloud-gov`. The global bundle already does
+  this. Only if your bundle has no CA-trust kit, list one before `cloud-gov` in
+  `ACQ_EXTRA_KITS`; do not add a second copy of a kit the bundle already has
+  (sbx fails the create with `duplicate kit name`). Fix the order, then
+  `acq restart <sandbox>`: the install step is idempotent and retries on every
+  start. A failed download never blocks sandbox start; it logs
+  `cloud-gov: WARNING: cf CLI is not installed`.
 - **Install egress blocked.** Check the sandbox policy log and confirm the CF CLI
   package hosts in `spec.yaml` are allowed.
 - **Unsupported architecture.** The install script supports upstream Linux
@@ -28,7 +38,8 @@ These are failure modes specific to the cloud-gov acq mixin kit.
 - **Egress blocked by org policy.** Check `acq policy log <sandbox>` or the
   active backend's policy log for `api.fr.cloud.gov`.
 - **TLS trust issue.** If your network uses TLS inspection, compose this kit with
-  `zscaler-ca-certificate` or the local equivalent CA-trust kit.
+  `zscaler-ca-certificate` or the local equivalent CA-trust kit, ordered before
+  this one (the global bundle already does this for Zscaler).
 
 ## CF Authentication Fails
 

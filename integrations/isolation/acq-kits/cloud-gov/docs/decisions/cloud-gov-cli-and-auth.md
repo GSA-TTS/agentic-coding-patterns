@@ -19,8 +19,9 @@ interactive `cf` authentication works.
 
 Create a neutral `cloud-gov` acq mixin kit for sbx and msb that:
 
-1. Installs `cf` at create time from pinned Cloud Foundry CLI release tarballs
-   with committed SHA-256 values.
+1. Installs `cf` at sandbox startup (agent user, `~/.local/bin`) from pinned
+   Cloud Foundry CLI release tarballs with committed SHA-256 values. See
+   "Install phase" below for why this is not a create-time install.
 2. Allow-lists exact cloud.gov control-plane/documentation hosts and Cloud
    Foundry docs domains, without wildcard semantics.
 3. Uses acq's custom secret binding for a host-side token captured with
@@ -42,6 +43,24 @@ active backend's secret/proxy mechanism. The kit does not write a placeholder to
 `~/.cf/config.json`; authenticated `cf` command support requires a separately
 live-tested path because the stock CLI may parse cached tokens locally.
 
+### Install phase
+
+The tarball download is HTTPS. On a TLS-intercepting network the CA-trust kit
+(`zscaler-ca-certificate`) installs the intercepting CA in its `startup` step.
+A `phase: install` command runs at create time, before that CA is trusted, so
+`curl -fsSL` failed with exit 60 and the sandbox create failed. The fetch is
+therefore a `startup` command, which kit order runs after the CA kit's startup
+step because the global bundle lists it first. It runs as the agent user, so it installs
+into `~/.local/bin` (first on the image PATH) instead of `/usr/local/bin`, and no
+root step executes the agent-writable script. The agent can replace
+`~/.local/bin/cf`; the SHA-256 check covers the download only. It is non-fatal (a failed fetch
+logs a warning and leaves the sandbox usable) and idempotent (retried on each
+start). Rejected alternative: bundling the binaries in the kit, since kit file
+delivery is for text and a pinned download with a SHA-256 check is the
+reviewable form. Regression coverage: `scripts/tests/test_cloud_gov_kit_ordering.py`
+(simulated intercepted network, offline) and `scripts/verify` with `RUN_ACQ=1`
+on an intercepted network with `ACQ_BACKEND=sbx` (live).
+
 ## Consequences
 
 - Agents can use `cf` for Cloud Foundry targeting and unauthenticated inspection.
@@ -49,6 +68,11 @@ live-tested path because the stock CLI may parse cached tokens locally.
   live-tested path for authenticated stock `cf` commands exists.
 - The real token remains outside the sandbox; the sandbox may contain only a
   backend-generated placeholder.
+- The CA-trust kit must precede this kit on an intercepted network (the global
+  bundle already orders `zscaler-ca-certificate` first; a second copy in
+  `ACQ_EXTRA_KITS` is rejected by sbx as a duplicate kit name). If no CA kit
+  precedes it, the startup install logs a warning and `cf` is absent until the
+  order is fixed and the sandbox restarted.
 - The install currently supports Linux x86_64/amd64 and arm64/aarch64 release
   tarballs. Other architectures should either preinstall `cf` or add a pinned,
   integrity-checked install path before being supported.

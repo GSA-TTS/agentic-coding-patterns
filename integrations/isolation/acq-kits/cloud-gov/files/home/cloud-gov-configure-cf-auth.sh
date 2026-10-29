@@ -6,6 +6,9 @@ set -eu
 # parses AccessToken locally, so this script deliberately does not write a
 # placeholder into ~/.cf/config.json and overclaim authenticated cf CLI support.
 
+# The install step puts cf in ~/.local/bin; startup shells may not have it on PATH.
+PATH="$HOME/.local/bin:$PATH"
+
 log() { printf '%s\n' "cloud-gov: $*" >&2; }
 
 mkdir -p "$HOME/.cf"
