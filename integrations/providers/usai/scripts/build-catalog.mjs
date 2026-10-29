@@ -27,6 +27,18 @@
 //   --opencode-jsonc <path> override the bootstrap source path.
 //   --out <path>            override the output catalog.json path.
 //   --check                 do not write; fail if catalog.json has drifted.
+//   --include-capabilities  OPT-IN: copy reasoning/input-modality values from the
+//                           matched models.dev entry into live-feed output. Off by
+//                           default because models.dev describes the upstream
+//                           provider, not what the USAi gateway forwards; output
+//                           produced with this flag must not be committed until each
+//                           value has per-model, per-field evidence (the synthetic-
+//                           image procedure covers image input only; see ADR 0006
+//                           and the opencode kit's synthetic-image-validation.md).
+//                           sources.capabilitiesVerified is a catalog-wide release
+//                           reminder, not that evidence. With the
+//                           flag, --check against a capability-free catalog.json
+//                           reports drift by design.
 //
 // What --check compares: the SUBSTANTIVE catalog — schemaVersion, gateway,
 // vendors, and models. It deliberately IGNORES the `sources` block, which
@@ -440,6 +452,68 @@ function normalizeLimit(value, fallback) {
 }
 
 // -----------------------------------------------------------------------------
+// Capability metadata (reasoning, input modalities).
+//
+// Three states are kept distinct on purpose: field ABSENT = unknown, `false` /
+// ["text"] = known unsupported / text-only, `true` / [..."image"...] = known
+// supported. Nothing here is inferred from a model id or name; a model with no
+// precise models.dev match carries no capability fields at all.
+//
+// models.dev describes the UPSTREAM provider's deployment, not necessarily what
+// the USAi gateway forwards. Copying it is therefore OPT-IN (--include-capabilities)
+// and provenance-labelled (sources.capabilities); the values must be confirmed
+// against the gateway by the live synthetic-image procedure before being
+// committed or relied on.
+//
+// The allowlist mirrors the modality names OpenCode's model config accepts and
+// the neutral/USAi catalog schemas. Canonical order keeps output deterministic.
+// -----------------------------------------------------------------------------
+const INPUT_MODALITIES = ["text", "image", "audio", "video", "pdf"]
+
+function normalizeInputModalities(value, where) {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(`${where} must be a non-empty array of modality names`)
+  }
+  for (const entry of value) {
+    if (!INPUT_MODALITIES.includes(entry)) {
+      throw new Error(`${where} contains unsupported modality ${JSON.stringify(entry)}; allowed: ${INPUT_MODALITIES.join(", ")}`)
+    }
+  }
+  if (new Set(value).size !== value.length) throw new Error(`${where} must not contain duplicates`)
+  return INPUT_MODALITIES.filter((modality) => value.includes(modality))
+}
+
+// Upstream data is untrusted and not ours to fail on: a malformed models.dev
+// capability field is treated as UNKNOWN (omitted) with a stderr warning, so one
+// bad upstream entry cannot abort the whole catalog build. Our own committed
+// data (bootstrap block, catalog.json) stays fail-closed.
+function capabilitiesFromModelsDev(data, id) {
+  const out = {}
+  let malformed = false
+  const unknown = (why) => {
+    malformed = true
+    process.stderr.write(`  WARNING models.dev ${id}: ${why}; capability treated as unknown\n`)
+  }
+  if (data.reasoning !== undefined) {
+    if (typeof data.reasoning === "boolean") out.reasoning = data.reasoning
+    else unknown("reasoning is not a boolean")
+  }
+  const modalities = data.modalities
+  if (modalities !== undefined) {
+    if (!modalities || typeof modalities !== "object" || Array.isArray(modalities)) {
+      unknown("modalities is not an object")
+    } else if (modalities.input !== undefined) {
+      try {
+        out.inputModalities = normalizeInputModalities(modalities.input, `modalities.input`)
+      } catch (error) {
+        unknown(error.message)
+      }
+    }
+  }
+  return { capabilities: out, malformed }
+}
+
+// -----------------------------------------------------------------------------
 // Bounded fetch + shape validation (mirrors the monolith hardening).
 // -----------------------------------------------------------------------------
 async function readBodyCapped(response, ref) {
@@ -694,6 +768,16 @@ function bootstrapModelsFromBlock(entries) {
       }
       if (Object.keys(above).length > 0) model.costAbove200kContext = above
     }
+    if (obj.reasoning !== undefined) {
+      if (typeof obj.reasoning !== "boolean") throw new Error(`bootstrap: ${id}.reasoning must be a boolean`)
+      model.reasoning = obj.reasoning
+    }
+    if (obj.modalities !== undefined && (obj.modalities === null || typeof obj.modalities !== "object" || Array.isArray(obj.modalities))) {
+      throw new Error(`bootstrap: ${id}.modalities must be an object`)
+    }
+    if (obj.modalities?.input !== undefined) {
+      model.inputModalities = normalizeInputModalities(obj.modalities.input, `bootstrap: ${id}.modalities.input`)
+    }
     models.push(model)
   }
   reportExclusions(excluded)
@@ -769,7 +853,7 @@ export function reportUnenriched(unenriched, enrichmentAttempted) {
   }
 }
 
-function shapeFromFeeds(usaiList, modelsDevCatalog) {
+function shapeFromFeeds(usaiList, modelsDevCatalog, { includeCapabilities = false } = {}) {
   usaiList = extractUsaiList(usaiList)
   // Chat models only, preserve incoming list order but group by vendor display
   // order for a stable catalog.
@@ -800,6 +884,8 @@ function shapeFromFeeds(usaiList, modelsDevCatalog) {
   const vendorOrder = []
   const models = []
   const unenriched = []
+  let capabilityMatches = 0
+  let capabilityMalformed = 0
   for (const p of parsed) {
     if (!vendorOrder.includes(p.vendor)) vendorOrder.push(p.vendor)
     const model = { id: p.id, vendor: p.vendor, name: p.name }
@@ -807,6 +893,7 @@ function shapeFromFeeds(usaiList, modelsDevCatalog) {
     let output = Number.isInteger(p.raw.max_output_tokens) && p.raw.max_output_tokens > 0 ? p.raw.max_output_tokens : null
     let baseCost = null
     let above = null
+    let capabilities = {}
     let matched = false
     if (modelsDevCatalog) {
       for (const { models: providerModels } of providerModelMaps(p.vendor, modelsDevCatalog)) {
@@ -822,6 +909,12 @@ function shapeFromFeeds(usaiList, modelsDevCatalog) {
           const norm = normalizeCostFromModelsDev(match.data.cost)
           baseCost = norm.cost
           above = norm.costAbove200kContext
+          if (includeCapabilities) {
+            const result = capabilitiesFromModelsDev(match.data, match.id)
+            capabilities = result.capabilities
+            capabilityMatches += 1
+            if (result.malformed) capabilityMalformed += 1
+          }
           break
         }
       }
@@ -838,9 +931,14 @@ function shapeFromFeeds(usaiList, modelsDevCatalog) {
     model.maxOutputTokens = normalizeLimit(output, FALLBACK_LIMITS.output)
     if (baseCost) model.cost = baseCost
     if (above) model.costAbove200kContext = above
+    if (capabilities.reasoning !== undefined) model.reasoning = capabilities.reasoning
+    if (capabilities.inputModalities !== undefined) model.inputModalities = capabilities.inputModalities
     models.push(model)
   }
   reportUnenriched(unenriched, Boolean(modelsDevCatalog))
+  if (capabilityMalformed > 0) {
+    process.stderr.write(`${capabilityMalformed} of ${capabilityMatches} matched models had malformed capability data\n`)
+  }
   return { models, vendorOrder }
 }
 
@@ -947,6 +1045,15 @@ function validateCatalog(catalog, schema) {
       if ("maxOutputTokens" in m) assert(Number.isInteger(m.maxOutputTokens) && m.maxOutputTokens > 0, `models[${idx}].maxOutputTokens must be a positive integer`, errors)
       validateCost(m.cost, `models[${idx}]`, errors)
       validateCost(m.costAbove200kContext, `models[${idx}]`, errors)
+      if ("reasoning" in m) assert(typeof m.reasoning === "boolean", `models[${idx}].reasoning must be a boolean`, errors)
+      if ("inputModalities" in m) {
+        const list = m.inputModalities
+        assert(
+          Array.isArray(list) && list.length > 0 && new Set(list).size === list.length && list.every((entry) => INPUT_MODALITIES.includes(entry)),
+          `models[${idx}].inputModalities must be a non-empty, unique array of ${INPUT_MODALITIES.join("|")}`,
+          errors,
+        )
+      }
     }
   }
   return errors
@@ -1010,7 +1117,7 @@ function parseArgs(argv) {
   const args = { flags: new Set(), opts: {} }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
-    if (a === "--no-enrichment" || a === "--bootstrap" || a === "--check") {
+    if (a === "--no-enrichment" || a === "--bootstrap" || a === "--check" || a === "--include-capabilities") {
       args.flags.add(a)
     } else if (a === "--models-url" || a === "--models-dev" || a === "--opencode-jsonc" || a === "--out" || a === "--schema") {
       args.opts[a] = argv[++i]
@@ -1031,6 +1138,9 @@ async function buildCatalog(args) {
   const modelsUrl = args.opts["--models-url"]
   const noEnrichment = args.flags.has("--no-enrichment")
   const forceBootstrap = args.flags.has("--bootstrap")
+  if (args.flags.has("--include-capabilities") && (!modelsUrl || forceBootstrap)) {
+    throw new Error("--include-capabilities requires --models-url and cannot be combined with --bootstrap")
+  }
 
   let catalog
   if (modelsUrl && !forceBootstrap) {
@@ -1044,13 +1154,16 @@ async function buildCatalog(args) {
       if (raw && typeof raw === "object" && !Array.isArray(raw)) modelsDevCatalog = raw
       else throw new Error("models.dev source has unexpected shape (expected provider-keyed object)")
     }
-    const { models, vendorOrder } = shapeFromFeeds(usaiList, modelsDevCatalog)
+    const includeCapabilities = args.flags.has("--include-capabilities")
+    if (includeCapabilities && !modelsDevCatalog) throw new Error("--include-capabilities requires models.dev enrichment (omit --no-enrichment)")
+    const { models, vendorOrder } = shapeFromFeeds(usaiList, modelsDevCatalog, { includeCapabilities })
     catalog = {
       schemaVersion: SCHEMA_VERSION,
       generatedBy: GENERATED_MARKER,
       sources: {
         modelsList: modelsUrl,
         enrichment: noEnrichment ? "(none)" : (args.opts["--models-dev"] || MODELS_DEV_URL),
+        ...(includeCapabilities ? { capabilities: "models.dev upstream provider data; not verified against the USAi gateway" } : {}),
       },
       gateway: buildGateway(),
       vendors: buildVendors(vendorOrder),
@@ -1178,6 +1291,7 @@ export {
   classifyVendor,
   nonChatReason,
   NON_CHAT_MODELS,
+  INPUT_MODALITIES,
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

@@ -92,10 +92,14 @@ files:
     mode: "0755"
     source: files/home/oci-engine-install.sh
     description: Install + configure rootless podman (create-time, root). Idempotent, fails soft.
+  # readonly: true — root startup CODE. Only the startup grant command below
+  # invokes it (as a whole argv token), so a consumer that mounts kit code
+  # read-only can run it from that mount instead of a guest-writable copy.
   - path: /home/agent/oci-engine-grant-devs.sh
     mode: "0755"
     source: files/home/oci-engine-grant-devs.sh
-    description: Staged source for the root-owned startup grant script installed under /usr/local/lib/acq/oci-engine/.
+    readonly: true
+    description: Root startup grant script, run every start from a host-authoritative read-only mount when the consumer supports it; otherwise staged here and published under /usr/local/lib/acq/oci-engine/.
   - path: /home/agent/oci-engine-vfs-fallback.sh
     mode: "0755"
     source: files/home/oci-engine-vfs-fallback.sh
@@ -110,10 +114,15 @@ files:
     mode: "0644"
     source: files/home/oci-engine-config/01-acq-shortnames.conf
     description: podman short-name aliases (hello/hello-world -> docker.io). Installed to /etc/containers/registries.conf.d/.
+  # readonly: true — sourced as ROOT by the startup grant script on every start,
+  # so it is root startup code too. It is passed to the grant command as a whole
+  # argv token (never read by path from a script string), which is what lets a
+  # consumer swap in the read-only mount path.
   - path: /home/agent/oci-engine-config/oci-engine-storage-driver.sh
     mode: "0644"
     source: files/home/oci-engine-config/oci-engine-storage-driver.sh
-    description: Shared helper sourced by install + grant steps to (re)select the podman storage driver. Convergent vfs->overlay.
+    readonly: true
+    description: Shared helper sourced by the startup grant step (and by install when staged) to (re)select the podman storage driver. Convergent vfs->overlay.
   - path: /home/agent/oci-engine-config/docker
     mode: "0755"
     source: files/home/oci-engine-config/docker
@@ -130,6 +139,13 @@ commands:
   # only when the kit ran the install. Idempotent and best-effort (a missing mirror
   # or unsupported base exits 0 with a clear message rather than aborting
   # provision).
+  # The install script publishes the two readonly: true files (grant script,
+  # storage helper) into the root-owned directory ONLY when a consumer that does
+  # not honor `readonly` copied them under /home/agent. Where `readonly` is
+  # honored they are absent there and the startup step runs them from the
+  # read-only mount instead (and refuses, rather than using these copies, if a
+  # selected mount file is missing). This command's argv stays the plain `sh -c <script>`
+  # form: the sbx translator only passes that form through intact.
   - phase: install
     user: "0"
     description: Install + configure the rootless podman OCI engine (create-time, root).
@@ -145,9 +161,27 @@ commands:
         fi
         echo "oci-engine: WARNING: could not publish trusted install script; OCI setup unavailable." >&2
         exit 0
-  # STARTUP phase — every start, as root (uid "0"). Executes the root-owned copy
-  # installed under /usr/local/lib/acq/oci-engine/ during create, not an
-  # agent-writable staging file. GATED ON PODMAN: revokes any stale device grant
+  # STARTUP phase — every start, as root (uid "0"). The two trailing argv tokens
+  # are the readonly: true files above, passed as WHOLE tokens ($1 grant script,
+  # $2 storage helper). The command classifies them and FAILS CLOSED:
+  #   - Both under /var/lib/acq/host/kit-files/ (a consumer that mounts kit code
+  #     read-only rewrote them): run exactly those files. If either file is
+  #     missing, refuse: print an error to stderr, run nothing as root, exit 1. It
+  #     never falls back to a root-owned copy, because those copies came from
+  #     /home/agent at create time and are not host-authoritative across restarts.
+  #   - Both under /home/agent/ (a consumer that ignores `readonly`, or made no
+  #     selection): the LEGACY case. Run the root-owned copies the install step
+  #     published under /usr/local/lib/acq/oci-engine/, as before. If those are
+  #     absent it warns and exits 0 (install fell soft or the base had its own
+  #     engine).
+  #   - Anything else (one token mounted and one not, `..`, an unknown prefix, an
+  #     empty token): refuse, exit 1. A mixed pair means the consumer selected the
+  #     read-only mount for one file but not the other; guessing would run a
+  #     guest-writable copy.
+  # A non-zero exit is safe for the consumer: acq's msb backend reports a failing
+  # startup command as a warning and carries on; it never escalates. So a refusal
+  # costs only the device grant and storage re-evaluation, and `scripts/verify`
+  # fails in that state. GATED ON PODMAN: revokes any stale device grant
   # and exits if podman is absent (install fell soft, or the base had its own
   # engine and the kit early-outed) — no engine, no device grant (finding #3).
   # Otherwise re-grants /dev/net/tun + /dev/fuse to the agent (/dev is a devtmpfs
@@ -164,11 +198,40 @@ commands:
       - sh
       - -c
       - |
-        if [ -f /usr/local/lib/acq/oci-engine/oci-engine-grant-devs.sh ]; then
-          exec sh /usr/local/lib/acq/oci-engine/oci-engine-grant-devs.sh
+        mount=/var/lib/acq/host/kit-files/
+        trusted=/usr/local/lib/acq/oci-engine
+        refuse() {
+          echo "oci-engine: ERROR: $1; refusing to run root startup code (device grant and storage re-evaluation NOT applied)." >&2
+          exit 1
+        }
+        case "$1|$2" in
+          *..*) refuse "path traversal in startup tokens" ;;
+        esac
+        kind() {
+          case "$1" in
+            "$mount"?*) echo mount ;;
+            /home/agent/?*) echo legacy ;;
+            *) echo bad ;;
+          esac
+        }
+        g=$(kind "$1")
+        h=$(kind "$2")
+        if [ "$g" = mount ] && [ "$h" = mount ]; then
+          [ -f "$1" ] || refuse "selected read-only grant script is missing: $1"
+          [ -f "$2" ] || refuse "selected read-only storage helper is missing: $2"
+          exec sh "$1" "$2"
         fi
-        echo "oci-engine: trusted startup script missing; skipping device grant + storage re-eval." >&2
-        exit 0
+        if [ "$g" = legacy ] && [ "$h" = legacy ]; then
+          if [ -f "$trusted/oci-engine-grant-devs.sh" ]; then
+            exec sh "$trusted/oci-engine-grant-devs.sh" "$trusted/oci-engine-storage-driver.sh"
+          fi
+          echo "oci-engine: WARNING: no root-owned startup script under $trusted (install did not publish it); device grant and storage re-evaluation NOT applied." >&2
+          exit 0
+        fi
+        refuse "unrecognized or mixed startup tokens ($g, $h)"
+      - oci-engine-startup
+      - /home/agent/oci-engine-grant-devs.sh
+      - /home/agent/oci-engine-config/oci-engine-storage-driver.sh
   # STARTUP phase — every start, as the AGENT user (uid "1000"). Reproduces the
   # reference adapter's rootless recovery path: run a real rootless layer-mount
   # self-test (podman build FROM scratch) and, if it fails, write a user-level

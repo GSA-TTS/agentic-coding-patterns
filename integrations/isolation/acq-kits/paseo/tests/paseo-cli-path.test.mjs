@@ -102,7 +102,7 @@ test("publication stays outside install-only branch and leaves opencode intact",
 test("real startup publishes on version-match resume without npm installation", async (t) => {
   const f = await fixture(t);
   const target = await f.install();
-  await writeFile(target, '#!/bin/sh\nprintf "0.12.0\\n"\n', { mode: 0o755 });
+  await writeFile(target, '#!/bin/sh\nprintf "0.13.0\\n"\n', { mode: 0o755 });
   const bin = path.join(f.home, "stubs");
   await mkdir(bin);
   for (const [name, body] of Object.entries({

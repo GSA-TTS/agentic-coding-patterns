@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.18.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.17.0...v1.18.0) (2026-10-28)
+
+
+### Features
+
+* **kits:** run oci-engine root startup scripts from the read-only host mount ([#543](https://github.com/GSA-TTS/agentic-coding-patterns/issues/543)) ([94f807a](https://github.com/GSA-TTS/agentic-coding-patterns/commit/94f807a294c7ed0202fc0783980e82499d18017e))
+* **opencode:** carry reasoning and input-modality metadata in the neutral catalog ([#542](https://github.com/GSA-TTS/agentic-coding-patterns/issues/542)) ([918e46d](https://github.com/GSA-TTS/agentic-coding-patterns/commit/918e46db4a8e10da3ea2f475bf98d4979e66b064))
+
+
+### Bug Fixes
+
+* **devenv-image:** take devenv 2.4.0 from a pinned nixos-unstable rev ([#550](https://github.com/GSA-TTS/agentic-coding-patterns/issues/550)) ([ae0a921](https://github.com/GSA-TTS/agentic-coding-patterns/commit/ae0a9214e02fdec26d7ffb6c4aa0dbdc7cd2ac8c))
+* **opencode:** allow five-minute stream idle gaps ([#533](https://github.com/GSA-TTS/agentic-coding-patterns/issues/533)) ([9fe6440](https://github.com/GSA-TTS/agentic-coding-patterns/commit/9fe644008ff300eae48e2ebe95c5c4da5a461d15))
+* **paseo-kit:** improve startup readiness and CLI discovery ([#535](https://github.com/GSA-TTS/agentic-coding-patterns/issues/535)) ([3fcab2d](https://github.com/GSA-TTS/agentic-coding-patterns/commit/3fcab2d43476ac5d25f931e35238d7b55d1bd81e))
+* **paseo:** bump pinned CLI to 0.13.0 ([#536](https://github.com/GSA-TTS/agentic-coding-patterns/issues/536)) ([a290d5d](https://github.com/GSA-TTS/agentic-coding-patterns/commit/a290d5d80737fc739e7ec139da0eeaf438631631))
+
 ## [1.17.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.16.1...v1.17.0) (2026-10-23)
 
 

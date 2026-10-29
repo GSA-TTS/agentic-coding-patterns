@@ -50,6 +50,19 @@ as the catalog for this milestone. It intentionally does not invoke provider
 normalizers or aggregate snapshots; acq has already selected and materialized
 the current generation.
 
+Per-model capability metadata is translated here, not in the provider kit:
+neutral `reasoning` becomes OpenCode `reasoning`, and neutral `inputModalities`
+becomes `modalities.input`. Absent neutral fields stay absent (unknown), values
+outside the closed modality allowlist fail the render. The renderer emits no
+reasoning effort or variants, but OpenCode may derive selectable variants from
+`reasoning: true` (1.x does so for openai-compatible models: low/medium/high
+reasoning-effort variants, per v1.18.35 `transform.ts` `variants()`); check
+this before any `reasoning: true` value is committed; the synthetic-image
+procedure covers image input only and cannot substantiate `reasoning`, `audio`,
+`video`, or `pdf`. See
+[ADR 0006](../../docs/decisions/0006-neutral-model-capability-metadata.md) and
+the [synthetic-image validation procedure](docs/synthetic-image-validation.md).
+
 The provider renderer preserves unrelated user configuration and removes only
 the provider IDs and default model roles recorded in its previous ownership
 metadata. Startup runs after acq materializes `current`; no provider kit writes

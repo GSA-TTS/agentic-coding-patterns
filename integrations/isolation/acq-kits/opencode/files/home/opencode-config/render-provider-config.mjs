@@ -38,6 +38,10 @@ const API_PROTOCOLS = Object.freeze({
     }),
   }),
 })
+// Closed allowlist of input modalities. OpenCode v2.0.30 drops the ENTIRE
+// provider block (not just the model) when modalities.input contains a value
+// outside this set, so unknown values must fail here rather than at runtime.
+export const INPUT_MODALITIES = Object.freeze(["text", "image", "audio", "video", "pdf"])
 const LOCK_FILENAME = ".acq-provider-config.lock"
 const STATE_COMMENT = "// acq-provider-config-state: "
 const MAX_WRITE_RETRIES = 8
@@ -214,6 +218,25 @@ function optionalCost(value, label) {
   return cost
 }
 
+// Capability metadata keeps three states: absent (unknown), false / ["text"]
+// (known-unsupported / text-only) and true / [... "image" ...]. Nothing is
+// inferred from the model id or name; invalid values fail closed.
+function optionalReasoning(value, label) {
+  if (value === undefined) return undefined
+  if (typeof value !== "boolean") throw new Error(`${label} must be a boolean`)
+  return value
+}
+
+function optionalInputModalities(value, label) {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.length === 0) throw new Error(`${label} must be a non-empty array`)
+  for (const entry of value) {
+    if (!INPUT_MODALITIES.includes(entry)) throw new Error(`${label} contains unsupported modality ${JSON.stringify(entry)}`)
+  }
+  if (new Set(value).size !== value.length) throw new Error(`${label} must not contain duplicates`)
+  return INPUT_MODALITIES.filter((modality) => value.includes(modality))
+}
+
 function renameToSnakeCase(cost) {
   if (cost === undefined) return undefined
   const result = { ...cost }
@@ -278,8 +301,12 @@ export function renderProviderConfig(inputs) {
       }
       delete cost?.cacheRead
       delete cost?.cacheWrite
+      const reasoning = optionalReasoning(model.reasoning, `reasoning for '${reference}'`)
+      const inputModalities = optionalInputModalities(model.inputModalities, `input modalities for '${reference}'`)
       models[modelId] = {
         name: model.name === undefined ? modelId : string(model.name, `model name for '${reference}'`),
+        ...(reasoning === undefined ? {} : { reasoning }),
+        ...(inputModalities === undefined ? {} : { modalities: { input: inputModalities } }),
         ...(contextWindow === undefined ? {} : { limit: { context: contextWindow, ...(maxOutputTokens === undefined ? {} : { output: maxOutputTokens }) } }),
         ...(cost === undefined ? {} : { cost: { ...cost, ...(model.costAbove200kContext === undefined ? {} : { context_over_200k: renameToSnakeCase(optionalCost(model.costAbove200kContext, `tiered cost for '${reference}'`)) }) } }),
       }

@@ -214,3 +214,46 @@ test("shipped snapshot: envelope matches the normalizer and carries no credentia
     }
   }
 })
+
+// ---------------------------------------------------------------------------
+// Capability metadata (reasoning, inputModalities): carried through losslessly,
+// with unknown (absent) kept distinct from known-false / text-only.
+// ---------------------------------------------------------------------------
+
+const capabilityCatalog = (...models) => ({
+  models: models.map((model) => ({ vendor: "anthropic", name: "N", ...model })),
+})
+
+test("normalizeCatalog carries reasoning and inputModalities, canonically ordered", () => {
+  const { models } = normalizeCatalog(capabilityCatalog(
+    { id: "vision", reasoning: true, inputModalities: ["pdf", "image", "text"] },
+  ))
+  assert.equal(models[0].reasoning, true)
+  assert.deepEqual(models[0].inputModalities, ["text", "image", "pdf"])
+})
+
+test("normalizeCatalog keeps known-false and text-only distinct from unknown", () => {
+  const { models } = normalizeCatalog(capabilityCatalog(
+    { id: "known-no", reasoning: false, inputModalities: ["text"] },
+    { id: "unknown" },
+  ))
+  assert.equal(models[0].reasoning, false)
+  assert.deepEqual(models[0].inputModalities, ["text"])
+  assert.equal("reasoning" in models[1], false, "absent source must stay absent, never default to false")
+  assert.equal("inputModalities" in models[1], false, "absent source must stay absent, never default to text-only")
+})
+
+test("normalizeCatalog rejects malformed capability metadata instead of coercing it", () => {
+  for (const reasoning of ["true", 1, null]) {
+    assert.throws(() => normalizeCatalog(capabilityCatalog({ id: "m", reasoning })), /reasoning must be a boolean/)
+  }
+  for (const inputModalities of [[], "image", ["image", "hologram"], ["text", "text"], [1], null]) {
+    assert.throws(() => normalizeCatalog(capabilityCatalog({ id: "m", inputModalities })), /inputModalities must be a non-empty array/)
+  }
+})
+
+test("normalizeCatalog does not infer capabilities from the model id or name", () => {
+  const { models } = normalizeCatalog(capabilityCatalog({ id: "gpt-4-vision-reasoning", name: "Vision Reasoning" }))
+  assert.equal("reasoning" in models[0], false)
+  assert.equal("inputModalities" in models[0], false)
+})
