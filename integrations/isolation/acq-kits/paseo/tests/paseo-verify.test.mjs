@@ -61,23 +61,23 @@ test("worktree check reads the exact nested root, not a matching unrelated field
     return result.stdout;
   }
   await writeFile(config, JSON.stringify({ other: { root: "/primary/.paseo-worktrees" }, worktrees: { root: "/wrong/.paseo-worktrees" } }));
-  assert.equal(root(), "/wrong/.paseo-worktrees");
-  function verdict(seedAvailable = "yes") {
-    const result = spawnSync("bash", ["-c", `${rootCheck}\nfail=0; ok() { printf 'PASS:%s\\n' "$1"; }; bad() { fail=$((fail+1)); printf 'FAIL:%s\\n' "$1"; }; skip() { printf 'SKIP:%s\\n' "$1"; }; check_worktrees_root "/primary/.paseo-worktrees" "${root()}" "${seedAvailable}"; exit "$fail"`], { encoding: "utf8", timeout: 5000 });
+  assert.equal(root(), "valid:/wrong/.paseo-worktrees");
+  function verdict() {
+    const result = spawnSync("bash", ["-c", `${rootCheck}\nfail=0; skipped=0; ok() { printf 'PASS:%s\\n' "$1"; }; bad() { fail=$((fail+1)); printf 'FAIL:%s\\n' "$1"; }; skip() { skipped=$((skipped+1)); printf 'SKIP:%s\\n' "$1"; }; check_worktrees_root "/primary/.paseo-worktrees" "${root()}"; [ "$fail" -eq 0 ] || exit 1; [ "$skipped" -eq 0 ] || exit 3`], { encoding: "utf8", timeout: 5000 });
     assert.ifError(result.error);
     return result;
   }
-  assert.equal(verdict().status, 0);
+  assert.equal(verdict().status, 3);
   assert.match(verdict().stdout, /SKIP:worktrees.root/);
-  assert.equal(verdict("no").status, 0);
-  assert.match(verdict("no").stdout, /SKIP:worktrees.root/);
   await writeFile(config, JSON.stringify({ worktrees: { root: "/primary/.paseo-worktrees" } }));
-  assert.equal(root(), "/primary/.paseo-worktrees");
+  assert.equal(root(), "valid:/primary/.paseo-worktrees");
   assert.equal(verdict().status, 0);
   assert.match(verdict().stdout, /PASS:worktrees.root/);
   await writeFile(config, "{invalid");
-  assert.equal(root(), "");
+  assert.equal(root(), "invalid");
   assert.equal(verdict().status, 1);
-  assert.equal(verdict("no").status, 0);
-  assert.match(verdict("no").stdout, /SKIP:startup had no usable ACQ_WORKSPACE/);
+  await rm(config);
+  assert.equal(root(), "missing");
+  assert.equal(verdict().status, 3);
+  assert.match(verdict().stdout, /SKIP:no config exists/);
 });

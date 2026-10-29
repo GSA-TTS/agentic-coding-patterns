@@ -227,6 +227,7 @@ fi
 
 if [ -z "$DRIVER" ]; then
   info "Live sandbox checks (2-9): SKIPPED"
+  skipped=$((skipped+1))
   echo "  Set RUN_ACQ=1 to run the live end-to-end check via acq (preferred)." >&2
   echo "  (RUN_SBX=1 also works but needs a pre-translated sbx-v2 kit; see header.)" >&2
   info "Summary"
@@ -238,11 +239,14 @@ if [ -z "$DRIVER" ]; then
   else
     printf '  \033[32mOffline gate passed.\033[0m\n'
   fi
-  exit "$([ "$fail" -eq 0 ] && echo 0 || echo 1)"
+  [ "$fail" -eq 0 ] || exit 1
+  [ "$skipped" -eq 0 ] || exit 3
+  exit 0
 fi
 
 if ! command -v "$DRIVER" >/dev/null 2>&1; then
-  echo "  RUN_${DRIVER^^}=1 set but '$DRIVER' not on PATH. Install it and retry." >&2
+  case "$DRIVER" in acq) driver_label=ACQ ;; sbx) driver_label=SBX ;; esac
+  echo "  RUN_${driver_label}=1 set but '$DRIVER' not on PATH. Install it and retry." >&2
   exit 1
 fi
 echo "  driver: $DRIVER"
@@ -326,14 +330,15 @@ if [ "$DRIVER" = "acq" ]; then
 else
   if [ -z "$SBX_KIT_DIR" ]; then
     info "Live sandbox checks (2-9): SKIPPED"
+    skipped=$((skipped+1))
     echo "  RUN_SBX=1 needs a PRE-TRANSLATED sbx-v2 kit dir in SBX_KIT_DIR." >&2
     echo "  sbx cannot parse the neutral hybrid/v1 spec directly. Prefer RUN_ACQ=1," >&2
     echo "  which translates automatically." >&2
     info "Summary"
     printf '  %d passed, %d failed\n' "$pass" "$fail"
-    [ "$fail" -eq 0 ] && printf '  \033[32mOffline gate passed; live checks skipped.\033[0m\n' \
-      || printf '  \033[31mOffline gate failed — see above.\033[0m\n'
-    exit "$([ "$fail" -eq 0 ] && echo 0 || echo 1)"
+    [ "$fail" -eq 0 ] || { printf '  \033[31mOffline gate failed — see above.\033[0m\n'; exit 1; }
+    printf '  \033[33mMeasured offline checks passed; live checks skipped/unverified.\033[0m\n'
+    exit 3
   fi
   create_kits=(--kit "$SBX_KIT_DIR")
   if [ -n "$ZSCALER_KIT_DIR" ] && [ -f "$ZSCALER_KIT_DIR/spec.yaml" ]; then
@@ -693,20 +698,19 @@ fi
 # Startup owns the initial root; read only worktrees.root, not an unrelated
 # object with a matching root key.
 check_worktrees_root() {
-  local expected="$1" actual="$2" seed_available="$3"
-  if [ "$actual" = "$expected" ]; then
+  local expected="$1" observed="$2"
+  if [ "$observed" = "valid:$expected" ]; then
     ok "worktrees.root equals the primary guest workspace ($expected); seed provenance unverified"
-  elif [ -n "$actual" ]; then
-    skip "worktrees.root ('$actual') differs from '$expected'; startup may have preserved existing config"
-  elif [ "$seed_available" != yes ]; then
-    skip "startup had no usable ACQ_WORKSPACE; pre-attach worktree root is unverified"
-  else
-    bad "worktrees.root missing or config unreadable; expected '$expected'"
+    return
   fi
+  case "$observed" in
+    valid:*) skip "worktrees.root differs from '$expected'; startup may have preserved existing config" ;;
+    missing) skip "no config exists; optional startup seed not measured" ;;
+    *) bad "Paseo config is unreadable, invalid JSON, or has no valid worktrees.root" ;;
+  esac
 }
-pin_out="$(in_sbx "node -e 'try { const c = JSON.parse(require(\"fs\").readFileSync((process.env.PASEO_HOME || process.env.HOME + \"/.paseo\") + \"/config.json\", \"utf8\")); if (typeof c?.worktrees?.root === \"string\") process.stdout.write(c.worktrees.root); } catch {}'")"
-seed_available="$(in_sbx 'case "${ACQ_WORKSPACE:-}" in /*) if [ -d "$ACQ_WORKSPACE" ]; then printf yes; fi ;; esac')"
-check_worktrees_root "$GUEST_WS/.paseo-worktrees" "$pin_out" "$seed_available"
+pin_out="$(in_sbx "node -e 'const fs = require(\"fs\"); const p = (process.env.PASEO_HOME || process.env.HOME + \"/.paseo\") + \"/config.json\"; try { const c = JSON.parse(fs.readFileSync(p, \"utf8\")); process.stdout.write(typeof c?.worktrees?.root === \"string\" && c.worktrees.root.length ? \"valid:\" + c.worktrees.root : \"invalid\"); } catch (e) { process.stdout.write(e.code === \"ENOENT\" ? \"missing\" : \"invalid\"); }'")"
+check_worktrees_root "$GUEST_WS/.paseo-worktrees" "$pin_out"
 
 # (b) daemon self-heal: if the daemon dies, supervisor:paseo-daemon must relaunch
 #     it. Kill ONLY the daemon tree (argv matches "paseo daemon run" but NOT the
@@ -888,4 +892,5 @@ else
   printf '  \033[32mAll measured checks passed.\033[0m\n'
 fi
 
-[ "$fail" -eq 0 ]
+[ "$fail" -eq 0 ] || exit 1
+[ "$skipped" -eq 0 ] || exit 3
