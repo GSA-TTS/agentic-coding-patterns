@@ -15,13 +15,10 @@
 #                       AND for Paseo itself, which launches `opencode` as a child
 #                       process when opencode is the selected provider. Dropping
 #                       passthrough would break Paseo's opencode provider.
-#   opencode          → (no args) exec the generic, agent-neutral shim
-#                       (paseo-agent-shim), which does all the Paseo/kit work
-#                       (pin worktree root, print connect info, hold PID 1 on the
-#                       `acq run` path). We `exec` it — NOT run it as a child — so
-#                       the shim INHERITS this process's id; when this wrapper was
-#                       the sandbox entrypoint (PID 1), the shim becomes PID 1 and
-#                       its hold actually keeps the sandbox alive.
+#   opencode          → when PID 1, exec the generic shim to hold the sandbox
+#                       entrypoint open. Otherwise exec the real opencode TUI;
+#                       a command typed in a shell must not repin Paseo's root
+#                       or replace the TUI with connect instructions.
 #
 # REUSE FOR ANOTHER AGENT: copy this file to ~/.local/bin/<other-agent> and change
 # only the agent name in the "resolve the real binary" block below. All shared
@@ -62,7 +59,16 @@ if [ "$#" -gt 0 ]; then
   exec "$real_opencode" "$@"
 fi
 
-# --- No args: hand off to the generic shim (exec, to preserve PID for the hold).
+# --- No args in a shell/exec session: open the real TUI. ----------------------
+if [ "$$" -ne 1 ]; then
+  if [ -z "$real_opencode" ]; then
+    echo "opencode wrapper: could not locate the real opencode binary on PATH" >&2
+    exit 127
+  fi
+  exec "$real_opencode"
+fi
+
+# --- PID 1: hand off to the generic shim (exec preserves PID for the hold). --
 if [ ! -f "$SHIM" ]; then
   echo "opencode wrapper: kit shim not found at $SHIM" >&2
   exit 127

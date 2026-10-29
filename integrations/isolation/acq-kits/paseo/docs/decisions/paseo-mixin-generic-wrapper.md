@@ -27,15 +27,19 @@ agent-neutral shim.**
 
 - **Thin wrapper** (`~/.local/bin/opencode`) — the ONLY agent-specific file:
   - **With arguments:** `exec`s the real opencode unchanged.
-  - **With no arguments:** `exec`s the generic shim (`~/paseo-agent-shim`).
+  - **With no arguments as PID 1:** `exec`s the generic shim
+    (`~/paseo-agent-shim`) to hold the sandbox entrypoint open.
+  - **With no arguments outside PID 1:** `exec`s the real OpenCode TUI. A
+    shell or `acq exec` invocation must not repin the global worktree root or
+    restart the daemon.
 - **Generic shim** (`~/paseo-agent-shim`) — knows nothing about any agent. It
   pins Paseo's worktree root to `<PWD>/.paseo-worktrees` (see
   `worktrees-root-global-only.md`), prints host-connect instructions, then
   discriminates on `$$`:
   - **PID 1** (the `acq run` entrypoint): `hold_pid1` — block forever so the
     session's sandbox stays up.
-  - **not PID 1** (a shell / `acq exec`, with a detached `acq create` holding the
-    sandbox): exit cleanly and return the terminal.
+  - **not PID 1** (if invoked directly): report status and return. The thin
+    wrapper no longer sends shell or `acq exec` invocations to this path.
   - Offers **no** TUI attach — there is no shared Paseo session to attach to
     (`paseo-single-port-daemon.md`).
 

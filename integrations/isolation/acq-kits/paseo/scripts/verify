@@ -626,22 +626,22 @@ case "${daemon_sup:-0}" in
   *) bad "found ${daemon_sup} paseo-daemon supervisors (expected 1 — duplicate respawner?)" ;;
 esac
 
-info "8. Entrypoint holds PID 1 when it IS the entrypoint, exits cleanly otherwise — regression guard"
+info "8. Entrypoint holds PID 1; bare opencode outside PID 1 opens the real TUI"
 # The kit's entrypoint behavior is split: a thin per-agent wrapper
 # (~/.local/bin/opencode) that either passes through to the real agent binary or
 # EXECs the generic shim (~/paseo-agent-shim), and the shim, which carries the
 # PID-1 hold. We check three invariants:
-#   (a) the thin wrapper EXECs the shim on the no-arg path (so the shim inherits
-#       the wrapper's pid — PID 1 on the `acq run` path; a child would break hold);
+#   (a) the thin wrapper EXECs the shim only as PID 1, preserving the pid for
+#       the hold; outside PID 1 it execs the real OpenCode binary;
 #   (b) the shim discriminates on `$$ -eq 1` and calls hold_pid1 on that branch;
-#   (c) live: run the wrapper no-arg + no-TTY via exec (NOT PID 1) and confirm it
-#       RETURNS promptly rather than hanging.
+#   (c) live: run the wrapper no-arg without a TTY (NOT PID 1) and confirm it
+#       does not print the Paseo connect banner or enter the PID-1 hold.
 wrapper_src="$(in_sbx 'cat ~/.local/bin/opencode 2>/dev/null')"
 shim_src="$(in_sbx 'cat ~/paseo-agent-shim 2>/dev/null')"
 if [ -z "$wrapper_src" ]; then
   bad "could not read ~/.local/bin/opencode from the sandbox"
 elif printf '%s\n' "$wrapper_src" | grep -Eq 'exec[[:space:]]+sh[[:space:]]+"?\$SHIM"?|exec[[:space:]]+sh[[:space:]]+.*paseo-agent-shim'; then
-  ok "thin wrapper execs the generic shim on the no-arg path (preserves PID for the hold)"
+  ok "thin wrapper execs the generic shim on the PID-1 path"
 else
   bad "thin wrapper does not exec the shim — no-arg path won't inherit PID 1, breaking the hold"
 fi
@@ -661,21 +661,32 @@ else
 fi
 wrapper_probe="$(in_sbx '
   if command -v timeout >/dev/null 2>&1; then
-    timeout 20 opencode </dev/null >/dev/null 2>&1
-    echo "rc=$?"
+    before=$(cat "${PASEO_HOME:-$HOME/.paseo}/config.json" 2>/dev/null)
+    timeout 20 opencode </dev/null 2>&1
+    echo "probe_rc=$?"
+    after=$(cat "${PASEO_HOME:-$HOME/.paseo}/config.json" 2>/dev/null)
+    if [ "$before" = "$after" ]; then echo "root_unchanged=yes"; else echo "root_unchanged=no"; fi
   else
-    echo "rc=notimeout"
+    echo "probe_rc=notimeout"
   fi
 ')"
 case "$wrapper_probe" in
-  *rc=124*)      bad "entrypoint HUNG when NOT PID 1 (via exec); it should exit cleanly on that path" ;;
-  *rc=notimeout*) skip "could not run the wrapper-exit probe (no 'timeout' in sandbox)" ;;
-  *)             ok "wrapper exits cleanly when NOT PID 1 (${wrapper_probe})" ;;
+  *"Connect from your HOST"*) bad "bare opencode outside PID 1 still runs the Paseo shim" ;;
+  *root_unchanged=no*)   bad "bare opencode outside PID 1 changed Paseo configuration" ;;
+  *probe_rc=notimeout*) skip "could not run the wrapper probe (no 'timeout' in sandbox)" ;;
+  *probe_rc=124*)       skip "bare OpenCode did not exit without a TTY; cannot verify passthrough here" ;;
+  *probe_rc=127*)       bad "real OpenCode binary not found outside PID 1" ;;
+  *)
+    if printf '%s\n' "$wrapper_src" | grep -Fq 'exec "$real_opencode"'; then
+      ok "bare opencode outside PID 1 execs the real OpenCode binary"
+    else
+      bad "bare opencode exited without proof it execs the real binary"
+    fi ;;
 esac
 
 info "9. Worktree root pinned under the project + daemon self-heals — regression guards"
-# (a) worktree-root pin: running the wrapper no-arg from the PRIMARY WORKSPACE cwd
-#     should set worktrees.root to <workspace>/.paseo-worktrees in config.json.
+# (a) worktree-root pin: the startup-seeded config should retain the primary
+#     workspace root. A non-PID-1 wrapper must not repin it from its own cwd.
 #
 #     WHERE IS THE PRIMARY WORKSPACE INSIDE THE GUEST? acq bind-mounts the first
 #     positional path at the SAME (canonicalized) absolute path in the guest, and
@@ -685,14 +696,14 @@ info "9. Worktree root pinned under the project + daemon self-heals — regressi
 #     file /var/lib/acq/workspace; that is the cwd the real entrypoint gets. On
 #     macOS the canonical path differs from $WORK only by the /var -> /private/var
 #     symlink, so we read the guest's recorded value (authoritative) and fall back
-#     to $WORK. Run the wrapper from that cwd, then read back config.json.
+#     to $WORK. Read back config.json without invoking the non-PID-1 wrapper.
 GUEST_WS="${GUEST_WS:-}"
 if [ -z "$GUEST_WS" ]; then
   GUEST_WS="$(in_sbx 'cat /var/lib/acq/workspace 2>/dev/null')"
   [ -n "$GUEST_WS" ] || GUEST_WS="$WORK"
 fi
-# Run the wrapper from the guest workspace cwd, then read back config.json.
-pin_out="$(in_sbx "cd '$GUEST_WS' 2>/dev/null && (command -v timeout >/dev/null 2>&1 && timeout 30 opencode </dev/null >/dev/null 2>&1; true); cat \"\${PASEO_HOME:-\$HOME/.paseo}/config.json\" 2>/dev/null")"
+# Startup owns the initial root; querying must not change it.
+pin_out="$(in_sbx 'cat "${PASEO_HOME:-$HOME/.paseo}/config.json" 2>/dev/null')"
 if printf '%s' "$pin_out" | grep -q "\"root\": \"$GUEST_WS/.paseo-worktrees\""; then
   ok "worktrees.root pinned under the project ($GUEST_WS/.paseo-worktrees)"
 elif printf '%s' "$pin_out" | grep -Eq '"root": *"[^"]*/\.paseo-worktrees"'; then

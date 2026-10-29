@@ -553,8 +553,9 @@ acq exec <sandbox> -- sh -c 'rm -f "${PASEO_HOME:-$HOME/.paseo}/paseo.pid"'
 
 The kit's `opencode` at `~/.local/bin/opencode` is a **thin wrapper** that shadows
 the real binary. With arguments it `exec`s the real opencode unchanged; with no
-arguments it `exec`s the generic kit shim (`~/paseo-agent-shim`), which pins
-worktrees + holds PID 1. Confirm the shadow and that the real binary resolves:
+arguments it `exec`s the shim only when the wrapper is PID 1; from a shell or
+`acq exec` it opens the real OpenCode TUI without changing Paseo's worktree
+root. Confirm the shadow and that the real binary resolves:
 
 ```bash
 acq exec <sandbox> -- sh -c 'command -v opencode'          # should be ~/.local/bin/opencode

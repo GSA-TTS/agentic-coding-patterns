@@ -235,10 +235,10 @@ worktrees inside each project directory is not natively possible.
 Startup can seed an absent config with a root beneath the **primary guest
 workspace**, using `ACQ_WORKSPACE` before installation. Initialization preserves
 every existing config entry. The `opencode` wrapper's shim then reconciles
-`worktrees.root` with `<physical-attach-directory>/.paseo-worktrees` and restarts
-the daemon worker only if the value changes. If startup seeds first, ordinary
-attach avoids a premature restart; attach-directory overrides can still require
-one. See [the lifecycle decision](docs/decisions/supervisor-owns-daemon-wrapper-pins-worktrees.md).
+`worktrees.root` with `<physical-attach-directory>/.paseo-worktrees` only when
+the wrapper is the PID-1 entrypoint, and restarts the daemon worker only if the
+value changes. A bare `opencode` typed in a shell does not repin it. See
+[the lifecycle decision](docs/decisions/supervisor-owns-daemon-wrapper-pins-worktrees.md).
 
 To override the location, pre-set `worktrees.root` to an absolute path in
 `config.json`; the shim only rewrites it when the value actually differs from
@@ -261,7 +261,8 @@ as one of Paseo's provider CLIs.
 > real binary for **all** in-sandbox invocations. Calls with arguments pass
 > straight through to the real opencode unchanged, so normal flows (including
 > Paseo spawning `opencode` as a provider CLI) are unaffected; only a **no-arg**
-> `opencode` is redirected to the kit shim (pin worktree root, hold PID 1). This
+> `opencode` is redirected to the kit shim only at PID 1 (pin worktree root,
+> hold the sandbox open). Outside PID 1 it opens the real OpenCode TUI. This
 > applies only inside a sandbox with the kit enabled — it does not touch your host
 > opencode.
 
@@ -342,7 +343,7 @@ Validate and drive the kit through `acq`, which translates the neutral
 paseo/
 ├── spec.yaml                       # the kit (caps, files, startup command, publishedPorts, env)
 ├── files/home/
-│   ├── .local/bin/opencode         # thin agent-named wrapper: passthrough to real opencode, else exec the shim
+│   ├── .local/bin/opencode         # thin wrapper: real TUI outside PID 1, kit shim at PID 1
 │   ├── paseo-agent-shim            # generic kit logic: pins worktree root, prints connect info, holds PID 1 on acq run
 │   ├── paseo-start.sh              # installs + supervises the Paseo daemon + web UI; runs the mount registrar
 │   ├── paseo-set-worktrees-root.mjs # idempotent worktrees.root merge into config.json
