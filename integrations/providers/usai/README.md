@@ -37,7 +37,9 @@ drift indistinguishable from the noise.
 ## Files
 
 - `catalog.schema.json` — JSON Schema (draft 2020-12), id
-  `usai-model-catalog/v1`. Defines the catalog shape.
+  `usai-model-catalog/v1`. Defines the catalog shape, including the advisory
+  `recommendations` roles (`primary`, `small`, `compaction`, `summary`, `title`),
+  which match the neutral catalog contract and the OpenCode kit renderer.
 - `catalog.json` — the generated catalog.
 
 ## Capability metadata

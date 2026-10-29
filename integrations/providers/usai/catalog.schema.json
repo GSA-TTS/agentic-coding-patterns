@@ -30,7 +30,9 @@
       "properties": {
         "primary": { "type": "string", "minLength": 1 },
         "small": { "type": "string", "minLength": 1 },
-        "compaction": { "type": "string", "minLength": 1 }
+        "compaction": { "type": "string", "minLength": 1 },
+        "summary": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 1 }
       }
     },
     "gateway": {
