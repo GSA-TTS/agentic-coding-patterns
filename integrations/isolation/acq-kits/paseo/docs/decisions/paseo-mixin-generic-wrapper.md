@@ -51,8 +51,9 @@ The PID-1 hold works because the shim inherits the wrapper's process id: when th
 wrapper was the sandbox entrypoint (PID 1), `exec`ing the shim makes the shim
 PID 1, so its `$$ -eq 1` branch fires and the hold keeps the sandbox alive.
 Running the shim as a child would give it a non-1 pid and the hold would never
-trigger. The verify script asserts the wrapper `exec`s the shim, and that the
-shim carries the `$$ -eq 1` check + `hold_pid1`.
+trigger. The verify script finds these statements in the shipped sources and
+reports them as structural checks, not a live PID-1 observation. A separate
+interactive `acq run` must demonstrate the actual entrypoint hold.
 
 ## Why passthrough cannot be dropped
 
@@ -88,9 +89,9 @@ mechanical step rather than speculative code we don't exercise.
 
 ## Consequences
 
-- The kit keeps openchamber's proven PID-1 semantics (so `acq run` keeps the
-  sandbox alive), now living in the shim; the verify script's regression guards
-  assert both the exec-into-shim seam and the shim's hold.
+- The kit retains the intended PID-1 hold semantics in the shim; the detached
+  verifier checks only source structure and marks live PID-1 behavior unverified
+  until a separate interactive `acq run` establishes it.
 - No shared terminal↔browser session, by design — surfaced in `agentContext`,
   README, and TROUBLESHOOTING.
 - All reusable logic is in one agent-neutral file (`paseo-agent-shim`); the
