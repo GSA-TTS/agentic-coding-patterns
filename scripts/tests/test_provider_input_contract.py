@@ -24,6 +24,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -92,6 +93,27 @@ def requires_symlink_support(test):
     if reason is None:
         return test
     return pytest.mark.skip(reason=reason)(test)
+
+
+def _normalizer_argv(script_path: Path) -> list[str]:
+    """Return the argv that launches a normalizer the way the runtime does.
+
+    A POSIX host can execute a shebang script directly, but Windows' CreateProcess
+    cannot: it only loads PE images, so running the file itself fails with
+    ``WinError 193``. Name the interpreter explicitly instead — ``node`` for .mjs
+    and the current interpreter for .py — so the test exercises the normalizer's
+    behaviour rather than the host's script-launching support.
+    """
+    suffix = script_path.suffix.lower()
+    if suffix == ".py":
+        interpreter = sys.executable
+    elif suffix == ".mjs":
+        interpreter = shutil.which("node")
+        if interpreter is None:
+            pytest.skip("node is not installed, so .mjs normalizers cannot be launched")
+    else:
+        raise AssertionError(f"no interpreter is known for normalizer suffix {suffix!r}")
+    return [interpreter, str(script_path)]
 
 
 def _bundle(relative: str) -> dict:
@@ -1249,7 +1271,7 @@ def test_usai_normalizer_output_satisfies_runtime_contract(tmp_path):
     script_path = ROOT / "integrations/isolation/acq-kits/usai-provider/scripts/normalize-catalog.mjs"
     source_path = ROOT / "integrations/providers/usai/catalog.json"
     subprocess.run(
-        [str(script_path), "--source", str(source_path), "--out", str(output_path)],
+        [*_normalizer_argv(script_path), "--source", str(source_path), "--out", str(output_path)],
         check=True,
         capture_output=True,
         text=True,
@@ -1281,6 +1303,7 @@ def test_runtime_validator_rejects_undeclared_credential_name(tmp_path):
         validate_bundle(bundle_dir / "bundle.json", {"acme-ai": "ACME_AI_API_KEY"})
 
 
+@requires_symlink_support
 def test_runtime_validator_rejects_artifact_symlink(tmp_path):
     """Package-relative artifact names cannot escape through a symlink."""
     bundle_dir = tmp_path / "provider"
@@ -1556,6 +1579,7 @@ def test_windows_contract_keeps_symlink_and_inside_root_checks(tmp_path):
         validate_bundle(bundle_dir / "bundle.json", {"acme-ai": "ACME_AI_API_KEY"})
 
 
+@requires_symlink_support
 def test_runtime_validator_rejects_normalizer_symlink(tmp_path):
     """normalizerPath that is a symlink (even to an executable) must be rejected."""
     bundle_dir = tmp_path / "provider"
@@ -1575,7 +1599,7 @@ def test_fixture_normalizers_are_directly_invocable(tmp_path):
         normalizer = fixture_dir / "normalize.py"
         out = tmp_path / f"{fixture_name}-catalog.json"
         result = subprocess.run(
-            [str(normalizer), "--source", str(fixture_dir / "source.json"), "--out", str(out)],
+            [*_normalizer_argv(normalizer), "--source", str(fixture_dir / "source.json"), "--out", str(out)],
             check=True,
             capture_output=True,
             text=True,
