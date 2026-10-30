@@ -799,7 +799,16 @@ else
   # return that spelling or its physical guest path. Require a resolvable guest
   # directory, then compare either exact spelling (never a suffix or regex).
   quote_guest_path() { printf "'%s'" "${1//\'/\'\\\'\'}"; }
-  guest_physical_path() { in_sbx "cd $(quote_guest_path "$1") 2>/dev/null && pwd -P"; }
+  host_physical_path() { (cd -P -- "$1" 2>/dev/null && pwd -P); }
+  guest_physical_path() {
+    local target="$1"
+    # Host /var may be /private/var in the guest. For host-owned fixtures,
+    # resolve the host spelling before passing it across the mount boundary.
+    if [ "${2:-}" = host ]; then
+      target="$(host_physical_path "$target")" || return 1
+    fi
+    in_sbx "cd $(quote_guest_path "$target") 2>/dev/null && pwd -P"
+  }
   registered_fixture_path() {
     [ -n "$2" ] && { printf '%s\n' "$project_roots" | grep -Fqx -- "$1" ||
                        printf '%s\n' "$project_roots" | grep -Fqx -- "$2"; }
@@ -858,10 +867,10 @@ else
 
     # POSITIVE: child repos under the read-write parent fixture must be registered.
     # Compare the child fixtures by the same rule as the aggregate set.
-    guest_rw_a="$(guest_physical_path "$RW_CHILD_REPO_A")"
-    guest_rw_b="$(guest_physical_path "$RW_CHILD_REPO_B")"
-    guest_rw_parent="$(guest_physical_path "$RW_FIXTURE")"
-    guest_ro="$(guest_physical_path "$RO_FIXTURE")"
+    guest_rw_a="$(guest_physical_path "$RW_CHILD_REPO_A" host)"
+    guest_rw_b="$(guest_physical_path "$RW_CHILD_REPO_B" host)"
+    guest_rw_parent="$(guest_physical_path "$RW_FIXTURE" host)"
+    guest_ro="$(guest_physical_path "$RO_FIXTURE" host)"
     if registered_fixture_path "$RW_CHILD_REPO_A" "$guest_rw_a" &&
        registered_fixture_path "$RW_CHILD_REPO_B" "$guest_rw_b"; then
       ok "child repos under read-write parent fixture ($rw_base) registered as projects"

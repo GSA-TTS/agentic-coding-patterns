@@ -132,4 +132,13 @@ test("project comparison keeps spaced and canonicalized guest paths literal", as
     assert.ifError(result.error);
     assert.equal(result.status, missing ? 1 : 0, result.stderr);
   }
+  // Simulate a guest that mounts only the physical host spelling: the alias
+  // itself is absent across the boundary, just like host /var vs guest
+  // /private/var on macOS.
+  const hostMapScript = `${helpers}\nin_sbx() { case "$1" in *"$GUEST_ALIAS"*) return 1;; esac; bash -c "$1"; }\nexpected=$(guest_physical_path "$1" host)\n[ "$expected" = "$2" ] || exit 1\nproject_roots="$2"\nregistered_fixture_path "$1" "$expected"`;
+  const hostMap = spawnSync("bash", ["-c", hostMapScript, "test", project, canonical], {
+    env: { ...process.env, GUEST_ALIAS: alias }, encoding: "utf8", timeout: 5000,
+  });
+  assert.ifError(hostMap.error);
+  assert.equal(hostMap.status, 0, hostMap.stderr);
 });
