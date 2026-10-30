@@ -18,10 +18,13 @@ Verifies:
 
 from __future__ import annotations
 
+import errno
+import functools
 import json
 import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import jsonschema
@@ -44,6 +47,51 @@ CATALOG_SCHEMA_PATH = SCHEMAS_DIR / "acq-neutral-model-catalog.schema.json"
 BUNDLE_SCHEMA_PATH = SCHEMAS_DIR / "acq-provider-input-bundle.schema.json"
 BUNDLE_V2_SCHEMA_PATH = SCHEMAS_DIR / "acq-provider-input-bundle-v2.schema.json"
 VALIDATOR_PATH = ROOT / "scripts" / "validate_provider_input_contract.py"
+
+
+@functools.cache
+def _symlink_skip_reason() -> str | None:
+    """Return None if this host can create symlinks, else the reason it cannot.
+
+    Probed once by attempting a real symlink in a temporary directory: the
+    unprivileged Windows default is ``WinError 1314``, and a filesystem without
+    symlink support raises NotImplementedError. Any other failure is a genuine
+    problem and is re-raised rather than silently turning into a skip.
+    """
+    with tempfile.TemporaryDirectory() as probe_dir:
+        target = Path(probe_dir) / "target"
+        link = Path(probe_dir) / "link"
+        target.write_text("symlink capability probe\n")
+        try:
+            link.symlink_to(target)
+        except NotImplementedError as error:
+            return f"this platform cannot create symlinks: {error}"
+        except OSError as error:
+            privilege_missing = getattr(error, "winerror", None) == 1314
+            unsupported = error.errno in {errno.EPERM, errno.EACCES, errno.ENOSYS, errno.ENOTSUP}
+            if not (privilege_missing or unsupported):
+                raise
+            return (
+                "creating symlinks requires SeCreateSymbolicLinkPrivilege on Windows "
+                "(enable Developer Mode or run elevated) or a symlink-capable filesystem "
+                f"on this host: {error}"
+            )
+        if not link.is_symlink():
+            return "this host reported success but did not create a symlink"
+    return None
+
+
+def requires_symlink_support(test):
+    """Skip a test only when the OS/account genuinely cannot create symlinks.
+
+    The symlink tests assert a real containment boundary, so they must run
+    wherever a link can be made — including a Windows CI runner with Developer
+    Mode enabled — rather than being skipped by platform name.
+    """
+    reason = _symlink_skip_reason()
+    if reason is None:
+        return test
+    return pytest.mark.skip(reason=reason)(test)
 
 
 def _bundle(relative: str) -> dict:
@@ -1414,7 +1462,6 @@ def test_windows_contract_rejects_unrecognized_normalizer_extension(tmp_path):
         (".mjs", "#!/usr/bin/env node\n"),
         (".mjs", "#!/usr/bin/node\n"),
         (".mjs", "#!/usr/bin/env node.exe\n"),
-        (".py", "#!/usr/bin/env python3 -u\n"),
         (".py", "#!/usr/local/bin/python3\n"),
         (".py", "#!python3\n"),
         (".MJS", "#!/usr/bin/env node\n"),
@@ -1443,6 +1490,12 @@ def test_windows_contract_accepts_supported_normalizer(tmp_path, suffix, shebang
         (".py", "#!/tmp/evil/env python3\n"),
         (".py", "#!C:\\evil\\python3\n"),
         (".py", "#!/usr/bin/env -S python3\n"),
+        (".py", "#!/usr/bin/env python3 -u\n"),
+        (".py", "#!/usr/bin/env python3 extra\n"),
+        (".py", "#!/usr/bin/env FOO=bar python3\n"),
+        (".py", "#!/usr/bin/python3 -u\n"),
+        (".mjs", "#!/usr/bin/env node --no-warnings\n"),
+        (".mjs", "#!/usr/bin/node --no-warnings\n"),
         (".py", "#!/usr/bin/env evil python3\n"),
         (".py", "#!/usr/bin/env\n"),
         (".py", "#!/python3\n"),
@@ -1490,6 +1543,7 @@ def test_windows_contract_accepts_every_shipped_bundle():
 
 
 @pytest.mark.usefixtures("windows_platform")
+@requires_symlink_support
 def test_windows_contract_keeps_symlink_and_inside_root_checks(tmp_path):
     """Windows branch does not relax the symlink and inside-root checks that precede it."""
     bundle_dir = tmp_path / "provider"
