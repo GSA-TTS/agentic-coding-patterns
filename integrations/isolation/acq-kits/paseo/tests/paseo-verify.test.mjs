@@ -148,7 +148,7 @@ test("port override rejects guest shell source and out-of-range ports", () => {
   const end = verify.indexOf('\nREMOVED_DAEMON_LAUNCH_PATTERN=', start);
   assert.ok(start > 0 && end > start);
   const guard = verify.slice(start, end);
-  for (const [port, status, normalized] of [["6767", 0, "6767"], ["00080", 0, "80"], ["0", 1], ["65536", 1], ["6767;id", 1], ["1$(id)", 1], ["-1", 1]]) {
+  for (const [port, status, normalized] of [["6767", 0, "6767"], ["06767", 0, "6767"], ["00080", 1], ["0", 1], ["65536", 1], ["6767;id", 1], ["1$(id)", 1], ["-1", 1]]) {
     const result = spawnSync("bash", ["-c", `${guard}\nprintf 'port=%s\\n' "$PASEO_PORT"`], {
       env: { ...process.env, PASEO_PORT: port }, encoding: "utf8", timeout: 5000,
     });
@@ -182,5 +182,18 @@ test("host reachability is not credited without an in-guest identity baseline", 
     const result = spawnSync("bash", ["-c", script, "test", baseline, hostSize], { encoding: "utf8", timeout: 5000 });
     assert.ifError(result.error);
     assert.equal(result.stdout, verdict === "PASS" ? "PASS:REACHABLE" : verdict);
+  }
+});
+
+test("guest identity baseline requires successful curl completion", () => {
+  const start = verify.indexOf('    g_stat="$(in_sbx "curl -fsS');
+  const end = verify.indexOf('    g_code="${g_stat%% *}"', start);
+  assert.ok(start > 0 && end > start);
+  const probe = verify.slice(start, end);
+  for (const [response, expected] of [["200 15000000", ""], ["200 15000000 GUEST_FETCH_DONE", "200 15000000"]]) {
+    const script = `in_sbx() { printf '%s' "$RESPONSE"; };\n${probe}\nprintf 'result=%s' "$g_stat"`;
+    const result = spawnSync("bash", ["-c", script], { env: { ...process.env, RESPONSE: response }, encoding: "utf8", timeout: 5000 });
+    assert.ifError(result.error);
+    assert.equal(result.stdout, `result=${expected}`);
   }
 });

@@ -82,6 +82,10 @@ if [[ ! "$PASEO_PORT" =~ ^[0-9]{1,5}$ ]] ||
   exit 1
 fi
 PASEO_PORT="$((10#$PASEO_PORT))"
+if [ "$PASEO_PORT" -ne 6767 ]; then
+  printf 'Invalid PASEO_PORT (kit spec publishes container port 6767)\n' >&2
+  exit 1
+fi
 REMOVED_DAEMON_LAUNCH_PATTERN='paseo[[:space:]]+daemon[[:space:]]+start|paseo[[:space:]]+daemon[[:space:]]+(start|run)[^#]*--(listen|web-ui|foreground)'
 # How long to wait for the background startup, which on FIRST boot also installs
 # the Paseo CLI (npm). Override with READY_TIMEOUT.
@@ -487,7 +491,8 @@ else
     skip "could not find the /_expo/static/js/web/index-<hash>.js bundle in index.html; large-asset integrity unverified"
   else
     # In-guest identity baseline (isolates the daemon from the transport).
-    g_stat="$(in_sbx "curl -fsS -H 'Accept-Encoding: identity' -o /dev/null -w '%{http_code} %{size_download}' 'http://127.0.0.1:$PASEO_PORT$bundle' 2>/dev/null")"
+    g_stat="$(in_sbx "curl -fsS -H 'Accept-Encoding: identity' -o /dev/null -w '%{http_code} %{size_download}' 'http://127.0.0.1:$PASEO_PORT$bundle' 2>/dev/null && printf ' GUEST_FETCH_DONE'")"
+    case "$g_stat" in *' GUEST_FETCH_DONE') g_stat="${g_stat% GUEST_FETCH_DONE}" ;; *) g_stat="" ;; esac
     g_code="${g_stat%% *}"; g_size="${g_stat##* }"
     if [ "$g_code" = "200" ] && [ "${g_size:-0}" -gt 1000000 ] 2>/dev/null; then
       ok "in-guest: daemon serves the full identity bundle ($g_size bytes)"
@@ -630,7 +635,7 @@ info "6d. Hardening: npm cache remains agent-owned"
 # root-owned files under ~/.npm and later blocks ordinary agent npm commands. Run
 # this even when install fails, because stale root-owned cache files may be the
 # reason install failed.
-cache_probe="$(in_sbx 'if [ ! -d "$HOME/.npm" ]; then printf CACHE_ABSENT; exit; fi; owner=$(id -u) || exit; [ -r "$HOME/.npm" ] && [ -x "$HOME/.npm" ] || exit; result=$(find "$HOME/.npm" -not -user "$owner" -print -quit 2>/dev/null) || exit; printf "%s\n" "$result"; printf CACHE_PROBE_DONE')"
+cache_probe="$(in_sbx 'if [ ! -d "$HOME/.npm" ]; then printf CACHE_ABSENT; exit; fi; owner=$(id -u) || exit; [ -r "$HOME/.npm" ] && [ -x "$HOME/.npm" ] || exit; errors=$(mktemp) || exit; result=$(find "$HOME/.npm" -not -user "$owner" -print -quit 2>"$errors"); rc=$?; if [ "$rc" -ne 0 ] || [ -s "$errors" ]; then rm -f "$errors"; exit; fi; rm -f "$errors"; printf "%s\n" "$result"; printf CACHE_PROBE_DONE')"
 case "$cache_probe" in
   CACHE_ABSENT) skip "npm cache directory absent; ownership unverified" ;;
   *CACHE_PROBE_DONE)
