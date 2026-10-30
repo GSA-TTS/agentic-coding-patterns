@@ -635,7 +635,7 @@ info "6d. Hardening: npm cache remains agent-owned"
 # root-owned files under ~/.npm and later blocks ordinary agent npm commands. Run
 # this even when install fails, because stale root-owned cache files may be the
 # reason install failed.
-cache_probe="$(in_sbx 'if [ ! -d "$HOME/.npm" ]; then printf CACHE_ABSENT; exit; fi; owner=$(id -u) || exit; [ -r "$HOME/.npm" ] && [ -x "$HOME/.npm" ] || exit; errors=$(mktemp) || exit; result=$(find "$HOME/.npm" -not -user "$owner" -print -quit 2>"$errors"); rc=$?; if [ "$rc" -ne 0 ] || [ -s "$errors" ]; then rm -f "$errors"; exit; fi; rm -f "$errors"; printf "%s\n" "$result"; printf CACHE_PROBE_DONE')"
+cache_probe="$(in_sbx 'if [ ! -d "$HOME/.npm" ]; then printf CACHE_ABSENT; exit; fi; owner=$(id -u) || exit; [ -r "$HOME/.npm" ] && [ -x "$HOME/.npm" ] || exit; errors=$(mktemp) || exit; result=$(find "$HOME/.npm" -not -user "$owner" -print -quit 2>"$errors"); rc=$?; if [ "$rc" -ne 0 ] || [ -s "$errors" ]; then rm -f "$errors"; exit; fi; rm -f "$errors"; [ -z "$result" ] || printf "%s\n" "$result"; printf CACHE_PROBE_DONE')"
 case "$cache_probe" in
   CACHE_ABSENT) skip "npm cache directory absent; ownership unverified" ;;
   *CACHE_PROBE_DONE)

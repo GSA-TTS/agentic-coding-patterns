@@ -172,6 +172,29 @@ test("cache ownership probe treats missing completion as unverified", () => {
   }
 });
 
+test("real cache ownership probe passes for an agent-owned cache", async (t) => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "paseo-verify-cache-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const start = verify.indexOf('cache_probe="$(in_sbx ');
+  const end = verify.indexOf('\ninfo "7. Respawn supervisor', start);
+  assert.ok(start > 0 && end > start);
+  const check = verify.slice(start, end);
+  const script = `in_sbx() { bash -c "$1"; }\nok() { printf 'PASS'; }; bad() { printf 'FAIL'; }; skip() { printf 'SKIP'; };\n${check}`;
+  function verdict() {
+    const result = spawnSync("bash", ["-c", script], {
+      env: { ...process.env, HOME: home }, encoding: "utf8", timeout: 5000,
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout;
+  }
+  assert.equal(verdict(), "SKIP");
+  await mkdir(path.join(home, ".npm"));
+  assert.equal(verdict(), "PASS");
+  await writeFile(path.join(home, ".npm", "owned-cache-entry"), "fixture");
+  assert.equal(verdict(), "PASS");
+});
+
 test("host reachability is not credited without an in-guest identity baseline", () => {
   const start = verify.indexOf('    if [ "$h_rc" -eq 0 ] && [ "$h_code" = "200" ]');
   const end = verify.indexOf('\n    # BROWSER-ACCURATE check:', start);
