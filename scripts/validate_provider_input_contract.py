@@ -168,14 +168,18 @@ def _launcher_name(token: str, *, fold: bool = True) -> str:
 def normalizer_shebang_interpreter(path: Path) -> str:
     """Return the normalized interpreter named by a normalizer's shebang.
 
-    Handles ``#!/usr/bin/python3`` and ``#!/usr/bin/env python3`` (extra
-    arguments after the interpreter are ignored). The result is lower-cased,
-    has any trailing ``.exe`` removed, and is compared against the allowlist by
-    exact match. As with a kernel, ``#!`` must be the first two bytes and tokens
+    Handles ``#!/usr/bin/python3`` and ``#!/usr/bin/env python3`` and nothing
+    more: the shebang must be exactly the interpreter, or ``env`` plus the
+    interpreter. Trailing arguments are rejected in both forms. With ``env`` they
+    would make it search for an executable literally named ``python3 -u`` (exit
+    127), and in the direct form the kernel would pass them to the interpreter
+    as one unchecked argument (such as ``-c``) that this contract cannot
+    verify. The result is lower-cased, has any trailing ``.exe`` removed, and is
+    compared against the allowlist by exact match. As with a kernel, ``#!`` must be the first two bytes and tokens
     are separated by ASCII spaces or tabs only. Returns an empty string when the
     file has no shebang, is not decodable text, cannot be read, or names an
-    interpreter in an untrusted directory or behind an unsupported ``env`` form
-    (options, assignments).
+    interpreter in an untrusted directory, behind an unsupported ``env`` form
+    (options, assignments), or followed by extra tokens.
     """
     try:
         with path.open("rb") as handle:
@@ -192,9 +196,11 @@ def normalizer_shebang_interpreter(path: Path) -> str:
     if not tokens:
         return ""
     if _launcher_name(tokens[0], fold=False) == "env":
-        if len(tokens) < 2:
+        if len(tokens) != 2:
             return ""
         return _launcher_name(tokens[1])
+    if len(tokens) != 1:
+        return ""
     return _launcher_name(tokens[0])
 
 
