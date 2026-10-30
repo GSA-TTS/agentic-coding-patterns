@@ -111,10 +111,13 @@ test("project comparison keeps spaced and canonicalized guest paths literal", as
   const last = source.findIndex((line, at) => at > first && line.includes('guest_rw_a="$(guest_physical_path'));
   assert.ok(first > 0 && last > first, "verifier must resolve guest paths before comparison");
   const helpers = source.slice(first, last).join("\n");
-  const script = `${helpers}\nin_sbx() { bash -c "$1"; }\nexpected=$(guest_physical_path "$1")\n[ "$expected" = "$2" ] || exit 1\nprintf '%s\\n' "$2" | grep -Fqx -- "$expected"`;
-  const result = spawnSync("bash", ["-c", script, "test", project, path.join(physical, "a space", "it's-repo")], {
-    encoding: "utf8", timeout: 5000,
-  });
-  assert.ifError(result.error);
-  assert.equal(result.status, 0, result.stderr);
+  const script = `${helpers}\nin_sbx() { bash -c "$1"; }\nexpected=$(guest_physical_path "$1")\n[ "$expected" = "$2" ] || exit 1\nproject_roots="$3"\nregistered_fixture_path "$1" "$expected"`;
+  const canonical = path.join(physical, "a space", "it's-repo");
+  for (const [registered, status] of [[project, 0], [canonical, 0], [path.join(home, "other"), 1]]) {
+    const result = spawnSync("bash", ["-c", script, "test", project, canonical, registered], {
+      encoding: "utf8", timeout: 5000,
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, status, result.stderr);
+  }
 });

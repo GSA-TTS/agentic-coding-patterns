@@ -846,17 +846,21 @@ else
     fi
 
     # POSITIVE: child repos under the read-write parent fixture must be registered.
-    # Quote the host spelling as one shell operand, then obtain its *physical*
-    # guest spelling before comparing it with the API's projectRootPath.
+    # The registrar submits mount paths as spelled in /proc/mounts. Paseo may
+    # return that spelling or its physical equivalent in projectRootPath.
+    # Resolve inside the guest, but accept only these two exact spellings.
     quote_guest_path() { printf "'%s'" "${1//\'/\'\\\'\'}"; }
     guest_physical_path() { in_sbx "cd $(quote_guest_path "$1") 2>/dev/null && pwd -P"; }
+    registered_fixture_path() {
+      [ -n "$2" ] && { printf '%s\n' "$project_roots" | grep -Fqx -- "$1" ||
+                         printf '%s\n' "$project_roots" | grep -Fqx -- "$2"; }
+    }
     guest_rw_a="$(guest_physical_path "$RW_CHILD_REPO_A")"
     guest_rw_b="$(guest_physical_path "$RW_CHILD_REPO_B")"
     guest_rw_parent="$(guest_physical_path "$RW_FIXTURE")"
     guest_ro="$(guest_physical_path "$RO_FIXTURE")"
-    if [ -n "$guest_rw_a" ] && [ -n "$guest_rw_b" ] &&
-       printf '%s\n' "$project_roots" | grep -Fqx -- "$guest_rw_a" &&
-       printf '%s\n' "$project_roots" | grep -Fqx -- "$guest_rw_b"; then
+    if registered_fixture_path "$RW_CHILD_REPO_A" "$guest_rw_a" &&
+       registered_fixture_path "$RW_CHILD_REPO_B" "$guest_rw_b"; then
       ok "child repos under read-write parent fixture ($rw_base) registered as projects"
     else
       bad "child repos under read-write parent fixture ($rw_base) were NOT registered"
@@ -866,7 +870,7 @@ else
     # were found and registered instead.
     if [ -z "$guest_rw_parent" ]; then
       skip "read-write parent mount not resolvable in guest; expansion unverified"
-    elif printf '%s\n' "$project_roots" | grep -Fqx -- "$guest_rw_parent"; then
+    elif registered_fixture_path "$RW_FIXTURE" "$guest_rw_parent"; then
       bad "read-write parent fixture ($rw_base) was registered instead of only its child repos"
     else
       ok "read-write parent fixture ($rw_base) correctly expanded to child repos"
@@ -879,7 +883,7 @@ else
     if [ "$ro_is_ro" = "yes" ]; then
       if [ -z "$guest_ro" ]; then
         skip "read-only mount not resolvable in guest; exclusion unverified"
-      elif printf '%s\n' "$project_roots" | grep -Fqx -- "$guest_ro"; then
+      elif registered_fixture_path "$RO_FIXTURE" "$guest_ro"; then
         bad "read-only fixture ($ro_base) was wrongly registered (should be skipped)"
       else
         ok "read-only fixture ($ro_base) correctly skipped"
