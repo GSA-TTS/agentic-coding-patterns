@@ -795,6 +795,16 @@ else
   rw_base="$(basename "$RW_FIXTURE")"
   ro_base="$(basename "$RO_FIXTURE")"
 
+  # The registrar supplies the /proc/mounts spelling to Paseo; the API may
+  # return that spelling or its physical guest path. Require a resolvable guest
+  # directory, then compare either exact spelling (never a suffix or regex).
+  quote_guest_path() { printf "'%s'" "${1//\'/\'\\\'\'}"; }
+  guest_physical_path() { in_sbx "cd $(quote_guest_path "$1") 2>/dev/null && pwd -P"; }
+  registered_fixture_path() {
+    [ -n "$2" ] && { printf '%s\n' "$project_roots" | grep -Fqx -- "$1" ||
+                       printf '%s\n' "$project_roots" | grep -Fqx -- "$2"; }
+  }
+
   # Expected set: qualifying rw virtiofs mounts, expanded by the actual registrar
   # helper so this live check cannot drift from paseo-register-mounts.mjs.
   expected_projects="$(in_sbx '
@@ -831,7 +841,8 @@ else
       missing=""
       while IFS= read -r m; do
         [ -n "$m" ] || continue
-        printf '%s\n' "$project_roots" | grep -Fqx -- "$m" || missing="${missing}${missing:+, }$m"
+        physical_m="$(guest_physical_path "$m")"
+        registered_fixture_path "$m" "$physical_m" || missing="${missing}${missing:+, }$m"
       done <<< "$expected_projects"
       [ -z "$missing" ] && break
       [ "$(date +%s)" -ge "$reg_deadline" ] && break
@@ -846,15 +857,7 @@ else
     fi
 
     # POSITIVE: child repos under the read-write parent fixture must be registered.
-    # The registrar submits mount paths as spelled in /proc/mounts. Paseo may
-    # return that spelling or its physical equivalent in projectRootPath.
-    # Resolve inside the guest, but accept only these two exact spellings.
-    quote_guest_path() { printf "'%s'" "${1//\'/\'\\\'\'}"; }
-    guest_physical_path() { in_sbx "cd $(quote_guest_path "$1") 2>/dev/null && pwd -P"; }
-    registered_fixture_path() {
-      [ -n "$2" ] && { printf '%s\n' "$project_roots" | grep -Fqx -- "$1" ||
-                         printf '%s\n' "$project_roots" | grep -Fqx -- "$2"; }
-    }
+    # Compare the child fixtures by the same rule as the aggregate set.
     guest_rw_a="$(guest_physical_path "$RW_CHILD_REPO_A")"
     guest_rw_b="$(guest_physical_path "$RW_CHILD_REPO_B")"
     guest_rw_parent="$(guest_physical_path "$RW_FIXTURE")"

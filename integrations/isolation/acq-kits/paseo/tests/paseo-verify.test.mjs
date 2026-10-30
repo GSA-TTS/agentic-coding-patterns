@@ -110,7 +110,7 @@ test("project comparison keeps spaced and canonicalized guest paths literal", as
   const first = source.findIndex((line) => line.includes("quote_guest_path()"));
   const last = source.findIndex((line, at) => at > first && line.includes('guest_rw_a="$(guest_physical_path'));
   assert.ok(first > 0 && last > first, "verifier must resolve guest paths before comparison");
-  const helpers = source.slice(first, last).join("\n");
+  const helpers = source.slice(first, source.findIndex((line, at) => at > first && line.includes('  # Expected set:'))).join("\n");
   const script = `${helpers}\nin_sbx() { bash -c "$1"; }\nexpected=$(guest_physical_path "$1")\n[ "$expected" = "$2" ] || exit 1\nproject_roots="$3"\nregistered_fixture_path "$1" "$expected"`;
   const canonical = path.join(physical, "a space", "it's-repo");
   for (const [registered, status] of [[project, 0], [canonical, 0], [path.join(home, "other"), 1]]) {
@@ -119,5 +119,17 @@ test("project comparison keeps spaced and canonicalized guest paths literal", as
     });
     assert.ifError(result.error);
     assert.equal(result.status, status, result.stderr);
+  }
+  const loopStart = verify.indexOf('      while IFS= read -r m; do', verify.indexOf('  # Expected set:'));
+  const loopEnd = verify.indexOf('      done <<< "$expected_projects"', loopStart);
+  assert.ok(loopStart > 0 && loopEnd > loopStart, "aggregate check must read project paths line by line");
+  const loop = verify.slice(loopStart, loopEnd + '      done <<< "$expected_projects"'.length);
+  for (const [registered, missing] of [[project, false], [canonical, false], [path.join(home, "other"), true]]) {
+    const aggregateScript = `${helpers}\nin_sbx() { bash -c "$1"; }\nexpected_projects="$1"\nproject_roots="$2"\nmissing=""\n${loop}\n[ -z "$missing" ]`;
+    const result = spawnSync("bash", ["-c", aggregateScript, "test", project, registered], {
+      encoding: "utf8", timeout: 5000,
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, missing ? 1 : 0, result.stderr);
   }
 });
