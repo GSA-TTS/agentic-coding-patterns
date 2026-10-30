@@ -154,6 +154,30 @@ patterns:
       - compliance claim review
       - fedramp claim check
       - overclaim check
+  - path: skills/criticality-evidence-screening/SKILL.md
+    id: criticality-evidence-screening
+    title: System Criticality Evidence Screening
+    type: skill
+    status: experimental
+    categories:
+    - security
+    - compliance
+    - review
+    collection: security
+    routing:
+      task_types:
+      - analyze
+      - review
+      input_artifacts:
+      - compliance-claim
+      - documentation
+      output_artifacts:
+      - qa-report
+      - security-review
+      aliases:
+      - HVA evidence review
+      - asset criticality screening
+      - mission criticality review
   - path: skills/dependency-analysis/SKILL.md
     id: dependency-analysis
     title: Dependency Security Analysis
@@ -887,6 +911,7 @@ categories:
   - agentic-actions-auditor
   - backdoor-review
   - compliance-claim-checker
+  - criticality-evidence-screening
   - dependency-analysis
   - example-agentic-session
   - incident-evidence-review
@@ -907,6 +932,7 @@ categories:
   - accessibility-review
   - agentic-actions-auditor
   - backdoor-review
+  - criticality-evidence-screening
   - documentation-review
   - incident-evidence-review
   - issue-to-merge-request
@@ -943,6 +969,7 @@ categories:
   compliance:
   - accessibility-review
   - compliance-claim-checker
+  - criticality-evidence-screening
   - federal-service-blueprint
   - uswds-form-flow
   incident-response:
@@ -994,6 +1021,7 @@ collections:
   - agentic-actions-auditor
   - backdoor-review
   - compliance-claim-checker
+  - criticality-evidence-screening
   - dependency-analysis
   - incident-evidence-review
   - least-privilege-review
@@ -1009,6 +1037,7 @@ task_types:
   - agentic-value-analyst
   - backdoor-review
   - compliance-claim-checker
+  - criticality-evidence-screening
   - dependency-analysis
   - documentation-review
   - example-agentic-session
@@ -1068,6 +1097,7 @@ task_types:
   - artifact-qa
   - backdoor-review
   - compliance-claim-checker
+  - criticality-evidence-screening
   - dependency-analysis
   - design-artifact
   - documentation-agent
@@ -1125,6 +1155,7 @@ output_artifacts:
   qa-report:
   - accessibility-review
   - artifact-qa
+  - criticality-evidence-screening
   - documentation-review
   - over-engineering-review
   - plain-language-review
@@ -1135,6 +1166,7 @@ output_artifacts:
   - agentic-actions-auditor
   - backdoor-review
   - compliance-claim-checker
+  - criticality-evidence-screening
   - dependency-analysis
   - incident-evidence-review
   - least-privilege-review
@@ -1168,8 +1200,8 @@ output_artifacts:
   web-prototype:
   - uswds-prototype
 stats:
-  total_patterns: 41
-  skills: 30
+  total_patterns: 42
+  skills: 31
   prompts: 3
   agents: 3
   workflows: 4
