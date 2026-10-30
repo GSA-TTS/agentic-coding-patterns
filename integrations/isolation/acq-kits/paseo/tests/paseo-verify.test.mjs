@@ -164,10 +164,23 @@ test("cache ownership probe treats missing completion as unverified", () => {
   const end = verify.indexOf('\ninfo "7. Respawn supervisor', start);
   assert.ok(start > 0 && end > start);
   const check = verify.slice(start, end);
-  for (const [probe, verdict] of [["", "SKIP"], ["CACHE_PROBE_DONE", "PASS"], ["/foreign/file\nCACHE_PROBE_DONE", "FAIL"]]) {
+  for (const [probe, verdict] of [["", "SKIP"], ["CACHE_ABSENT", "SKIP"], ["CACHE_PROBE_DONE", "PASS"], ["/foreign/file\nCACHE_PROBE_DONE", "FAIL"]]) {
     const script = `in_sbx() { printf '%s' "$PROBE"; }\nok() { printf 'PASS'; }; bad() { printf 'FAIL'; }; skip() { printf 'SKIP'; };\n${check}`;
     const result = spawnSync("bash", ["-c", script], { env: { ...process.env, PROBE: probe }, encoding: "utf8", timeout: 5000 });
     assert.ifError(result.error);
     assert.equal(result.stdout, verdict);
+  }
+});
+
+test("host reachability is not credited without an in-guest identity baseline", () => {
+  const start = verify.indexOf('    if [ "$h_rc" -eq 0 ] && [ "$h_code" = "200" ]');
+  const end = verify.indexOf('\n    # BROWSER-ACCURATE check:', start);
+  assert.ok(start > 0 && end > start);
+  const check = verify.slice(start, end);
+  for (const [baseline, hostSize, verdict] of [["", "15000000", "SKIP"], ["15000000", "15000000", "PASS"], ["15000000", "14000000", "FAIL"]]) {
+    const script = `g_size="$1"; h_size="$2"; h_rc=0; h_code=200; h_out="200 $h_size"; g_stat="200 $g_size"; HOST_HP=127.0.0.1:6767; host_fetch_ok=""; ok() { printf 'PASS'; }; bad() { printf 'FAIL'; }; skip() { printf 'SKIP'; };\n${check}\n[ -z "$host_fetch_ok" ] || printf ':REACHABLE'`;
+    const result = spawnSync("bash", ["-c", script, "test", baseline, hostSize], { encoding: "utf8", timeout: 5000 });
+    assert.ifError(result.error);
+    assert.equal(result.stdout, verdict === "PASS" ? "PASS:REACHABLE" : verdict);
   }
 });
