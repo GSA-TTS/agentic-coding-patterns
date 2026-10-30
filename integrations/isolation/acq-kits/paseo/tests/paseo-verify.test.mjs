@@ -142,3 +142,32 @@ test("project comparison keeps spaced and canonicalized guest paths literal", as
   assert.ifError(hostMap.error);
   assert.equal(hostMap.status, 0, hostMap.stderr);
 });
+
+test("port override rejects guest shell source and out-of-range ports", () => {
+  const start = verify.indexOf('PASEO_PORT="${PASEO_PORT:-6767}"');
+  const end = verify.indexOf('\nREMOVED_DAEMON_LAUNCH_PATTERN=', start);
+  assert.ok(start > 0 && end > start);
+  const guard = verify.slice(start, end);
+  for (const [port, status, normalized] of [["6767", 0, "6767"], ["00080", 0, "80"], ["0", 1], ["65536", 1], ["6767;id", 1], ["1$(id)", 1], ["-1", 1]]) {
+    const result = spawnSync("bash", ["-c", `${guard}\nprintf 'port=%s\\n' "$PASEO_PORT"`], {
+      env: { ...process.env, PASEO_PORT: port }, encoding: "utf8", timeout: 5000,
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, status, port);
+    if (normalized) assert.equal(result.stdout, `port=${normalized}\n`);
+    else assert.equal(result.stdout, "");
+  }
+});
+
+test("cache ownership probe treats missing completion as unverified", () => {
+  const start = verify.indexOf('cache_probe="$(in_sbx ');
+  const end = verify.indexOf('\ninfo "7. Respawn supervisor', start);
+  assert.ok(start > 0 && end > start);
+  const check = verify.slice(start, end);
+  for (const [probe, verdict] of [["", "SKIP"], ["CACHE_PROBE_DONE", "PASS"], ["/foreign/file\nCACHE_PROBE_DONE", "FAIL"]]) {
+    const script = `in_sbx() { printf '%s' "$PROBE"; }\nok() { printf 'PASS'; }; bad() { printf 'FAIL'; }; skip() { printf 'SKIP'; };\n${check}`;
+    const result = spawnSync("bash", ["-c", script], { env: { ...process.env, PROBE: probe }, encoding: "utf8", timeout: 5000 });
+    assert.ifError(result.error);
+    assert.equal(result.stdout, verdict);
+  }
+});

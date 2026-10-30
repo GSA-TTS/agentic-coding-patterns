@@ -74,6 +74,14 @@ RUN_SBX="${RUN_SBX:-0}"
 SBX_KIT_DIR="${SBX_KIT_DIR:-}"
 # Container port the daemon binds (API + WS + web UI). Keep in sync with spec.
 PASEO_PORT="${PASEO_PORT:-6767}"
+# This value is embedded in guest shell source below. Reject every non-decimal
+# byte before constructing a command; bound length before numeric conversion.
+if [[ ! "$PASEO_PORT" =~ ^[0-9]{1,5}$ ]] ||
+   [ "$((10#$PASEO_PORT))" -lt 1 ] || [ "$((10#$PASEO_PORT))" -gt 65535 ]; then
+  printf 'Invalid PASEO_PORT (expected decimal 1..65535)\n' >&2
+  exit 1
+fi
+PASEO_PORT="$((10#$PASEO_PORT))"
 REMOVED_DAEMON_LAUNCH_PATTERN='paseo[[:space:]]+daemon[[:space:]]+start|paseo[[:space:]]+daemon[[:space:]]+(start|run)[^#]*--(listen|web-ui|foreground)'
 # How long to wait for the background startup, which on FIRST boot also installs
 # the Paseo CLI (npm). Override with READY_TIMEOUT.
@@ -247,7 +255,7 @@ fi
 if ! command -v "$DRIVER" >/dev/null 2>&1; then
   case "$DRIVER" in acq) driver_label=ACQ ;; sbx) driver_label=SBX ;; esac
   echo "  RUN_${driver_label}=1 set but '$DRIVER' not on PATH. Install it and retry." >&2
-  exit 1
+  exit 3
 fi
 echo "  driver: $DRIVER"
 
@@ -476,7 +484,7 @@ else
   bundle="$(in_sbx "curl -fsS http://127.0.0.1:$PASEO_PORT/ 2>/dev/null" \
             | grep -oE '/_expo/static/js/web/index-[0-9a-f]+\.js' | head -1)"
   if [ -z "$bundle" ]; then
-    warn "could not find the /_expo/static/js/web/index-<hash>.js bundle in index.html; skipping"
+    skip "could not find the /_expo/static/js/web/index-<hash>.js bundle in index.html; large-asset integrity unverified"
   else
     # In-guest identity baseline (isolates the daemon from the transport).
     g_stat="$(in_sbx "curl -fsS -H 'Accept-Encoding: identity' -o /dev/null -w '%{http_code} %{size_download}' 'http://127.0.0.1:$PASEO_PORT$bundle' 2>/dev/null")"
@@ -484,7 +492,7 @@ else
     if [ "$g_code" = "200" ] && [ "${g_size:-0}" -gt 1000000 ] 2>/dev/null; then
       ok "in-guest: daemon serves the full identity bundle ($g_size bytes)"
     else
-      warn "in-guest identity fetch was '$g_stat' (expected '200 <big>'); using >1MB heuristic for the host check"
+      skip "in-guest identity fetch was '$g_stat' (expected '200 <big>'); exact size comparison unverified"
       g_size=""
     fi
     # HOST end-to-end, identity, NO --compressed. Compare bytes to the baseline.
@@ -621,12 +629,17 @@ info "6d. Hardening: npm cache remains agent-owned"
 # root-owned files under ~/.npm and later blocks ordinary agent npm commands. Run
 # this even when install fails, because stale root-owned cache files may be the
 # reason install failed.
-bad_cache_owner="$(in_sbx 'if [ -d "$HOME/.npm" ]; then find "$HOME/.npm" -not -user "$(id -u)" -print -quit 2>/dev/null; fi')"
-if [ -n "$bad_cache_owner" ]; then
-  bad "npm cache contains files not owned by the agent user: $bad_cache_owner"
-else
-  ok "npm cache has no non-agent-owned files under ~/.npm"
-fi
+cache_probe="$(in_sbx 'if [ -d "$HOME/.npm" ]; then owner=$(id -u) || exit; result=$(find "$HOME/.npm" -not -user "$owner" -print -quit 2>/dev/null) || exit; printf "%s\n" "$result"; fi; printf CACHE_PROBE_DONE')"
+case "$cache_probe" in
+  *CACHE_PROBE_DONE)
+    bad_cache_owner="${cache_probe%CACHE_PROBE_DONE}"
+    if [ -n "$bad_cache_owner" ]; then
+      bad "npm cache contains files not owned by the agent user: $bad_cache_owner"
+    else
+      ok "npm cache has no non-agent-owned files under ~/.npm"
+    fi ;;
+  *) skip "npm cache ownership probe did not complete; ownership unverified" ;;
+esac
 
 info "7. Respawn supervisor running (auto-restart) — the daemon"
 # The daemon runs under a respawn loop marked "supervisor:paseo-daemon" in its
