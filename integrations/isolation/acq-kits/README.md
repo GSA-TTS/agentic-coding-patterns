@@ -20,6 +20,7 @@ not agent behavior. (Behavioral patterns live in `skills/`, `prompts/`, etc.)
 |-----|---------|
 | [`usai-provider/`](usai-provider/) | Configure the agent to use the GSA USAi model provider (OpenCode today), with egress allow-listed. |
 | [`agentic-coding-playbook/`](agentic-coding-playbook/) | Clone the GSA agentic-coding-playbook at startup and link its `AGENTS.md` + skills into each agent's search paths. |
+| [`cloud-gov/`](cloud-gov/) | Install the Cloud Foundry CLI and allow-list cloud.gov platform, dashboard, and docs domains, with auth supplied through acq secrets. |
 | [`zscaler-ca-certificate/`](zscaler-ca-certificate/) | Trust the public Zscaler Root CA in the sandbox (msb: native `--trust-host-cas`; sbx: file-drop + `update-ca-certificates`). |
 | [`git-ssh-sign/`](git-ssh-sign/) | Sign git commits and tags with the SSH key forwarded from the host agent (vendored from sbx-kits-contrib). |
 | [`openchamber/`](openchamber/) | Run OpenChamber, a browser UI for OpenCode, inside the sandbox alongside the terminal TUI. Opt-in (see its parity note). |
@@ -126,8 +127,8 @@ degrades the verdict to `3`; `skip` is *not applicable in this configuration*
 (e.g. a backend-specific check on the other backend) and does **not** degrade
 it; `warn` is advisory.
 
-**Unconverted kits** — `agentic-coding-playbook`, `oci-engine`, `opencode`,
-`openchamber`, `opendesign`, `paseo`, `pi-coding-agent`,
+**Unconverted kits** — `agentic-coding-playbook`, `cloud-gov`, `oci-engine`,
+`opencode`, `openchamber`, `opendesign`, `paseo`, `pi-coding-agent`,
 `zscaler-ca-certificate`. These still use the older two-state verdict, so nothing
 above applies to them. A non-zero exit means a check failed *or* a precondition
 could not be met — the two are not distinguished — and a `0` does **not**
