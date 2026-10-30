@@ -1159,9 +1159,14 @@ function parseArgs(argv) {
 /**
  * Role defaults are curated by a human, not derived from the feeds, so a
  * regeneration must carry them forward. Returns the existing catalog's
- * `recommendations` object, or undefined when there is no catalog yet. A file
- * that exists but cannot be read as a catalog is an error: dropping the roles
- * silently is the failure this guards against.
+ * `recommendations` object, or undefined when there is nothing to carry:
+ *   - the file does not exist (first generation), or
+ *   - the file is a catalog (right schemaVersion, models[] array) that has no
+ *     `recommendations` yet; there are no roles to lose.
+ * Anything else that exists at the output path is an error. In particular a
+ * file that parses as JSON but is not a catalog (`[]`, `null`, `123`, `{}`, a
+ * catalog with no models[]) must never be silently overwritten with a catalog
+ * that has no roles, because that is the failure this guards against.
  */
 async function readExistingRecommendations(catalogPath) {
   let raw
@@ -1171,16 +1176,27 @@ async function readExistingRecommendations(catalogPath) {
     if (error?.code === "ENOENT") return undefined
     throw error
   }
+  const refuse = (why) =>
+    new Error(
+      `cannot carry recommendations forward: ${catalogPath} ${why}.\n` +
+        `  Repair or remove it, then re-run. The catalog was NOT written.`,
+    )
   let existing
   try {
     existing = JSON.parse(raw)
   } catch {
-    throw new Error(
-      `cannot carry recommendations forward: ${catalogPath} exists but is not valid JSON.\n` +
-        `  Repair or remove it, then re-run. The catalog was NOT written.`,
-    )
+    throw refuse("exists but is not valid JSON")
   }
-  return existing?.recommendations
+  if (!existing || typeof existing !== "object" || Array.isArray(existing)) {
+    throw refuse("is valid JSON but not a catalog object")
+  }
+  if (existing.schemaVersion !== SCHEMA_VERSION) {
+    throw refuse(`is not a ${SCHEMA_VERSION} catalog (schemaVersion is ${JSON.stringify(existing.schemaVersion)})`)
+  }
+  if (!Array.isArray(existing.models)) {
+    throw refuse("is a catalog without a models[] array")
+  }
+  return existing.recommendations
 }
 
 /**

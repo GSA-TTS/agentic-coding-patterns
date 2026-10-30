@@ -51,6 +51,10 @@ function withTempDir(fn) {
   }
 }
 
+// A minimal existing catalog: right identity, no models. Enough for the
+// carry-forward shape check; the build replaces everything but the roles.
+const stubCatalog = (extra = {}) => JSON.stringify({ schemaVersion: "usai-model-catalog/v1", models: [], ...extra })
+
 // Role ids that exist in the offline fixture feed, so a fixture refresh can
 // keep them.
 const FIXTURE_ROLES = {
@@ -158,7 +162,7 @@ test("describeDrift is silent when roles match, and substantive() keeps them", (
 test("CLI: a fixture refresh carries the existing role defaults forward", () => {
   withTempDir((dir) => {
     const out = path.join(dir, "catalog.json")
-    writeFileSync(out, JSON.stringify({ recommendations: FIXTURE_ROLES }))
+    writeFileSync(out, stubCatalog({ recommendations: FIXTURE_ROLES }))
     const result = refresh(out)
     assert.equal(result.status, 0, result.stderr)
     assert.deepEqual(JSON.parse(readFileSync(out, "utf8")).recommendations, FIXTURE_ROLES)
@@ -168,7 +172,7 @@ test("CLI: a fixture refresh carries the existing role defaults forward", () => 
 test("CLI: a refresh is deterministic and --check against its own output is clean", () => {
   withTempDir((dir) => {
     const out = path.join(dir, "catalog.json")
-    writeFileSync(out, JSON.stringify({ recommendations: FIXTURE_ROLES }))
+    writeFileSync(out, stubCatalog({ recommendations: FIXTURE_ROLES }))
     assert.equal(refresh(out).status, 0)
     const first = readFileSync(out, "utf8")
     assert.equal(refresh(out).status, 0)
@@ -188,7 +192,7 @@ test("CLI: a refresh with no existing catalog writes no recommendations", () => 
 test("CLI: a recommended model that left the feed fails the refresh and leaves the file untouched", () => {
   withTempDir((dir) => {
     const out = path.join(dir, "catalog.json")
-    const before = JSON.stringify({ recommendations: { ...FIXTURE_ROLES, primary: "model-that-left-the-feed" } })
+    const before = stubCatalog({ recommendations: { ...FIXTURE_ROLES, primary: "model-that-left-the-feed" } })
     writeFileSync(out, before)
     const result = refresh(out)
     assert.notEqual(result.status, 0)
@@ -201,7 +205,7 @@ test("CLI: a recommended model that left the feed fails the refresh and leaves t
 test("CLI: --check also fails closed when a recommended model left the feed", () => {
   withTempDir((dir) => {
     const out = path.join(dir, "catalog.json")
-    writeFileSync(out, JSON.stringify({ recommendations: { primary: "model-that-left-the-feed" } }))
+    writeFileSync(out, stubCatalog({ recommendations: { primary: "model-that-left-the-feed" } }))
     const result = refresh(out, "--check")
     assert.notEqual(result.status, 0)
     assert.match(result.stderr, /model-that-left-the-feed/)
@@ -226,5 +230,41 @@ test("CLI: the default offline bootstrap no longer deletes the committed role de
     const result = spawnSync(process.execPath, [BUILD, "--out", out], { encoding: "utf8" })
     assert.equal(result.status, 0, result.stderr)
     assert.deepEqual(JSON.parse(readFileSync(out, "utf8")).recommendations, loadCatalog().recommendations)
+  })
+})
+
+// An existing output file that parses as JSON but is not a catalog must not be
+// read as "no catalog yet": the build would overwrite it with a role-less one.
+for (const [label, contents] of [
+  ["[]", "[]"],
+  ["null", "null"],
+  ["123", "123"],
+  ['"text"', '"text"'],
+  ["{} (no identity)", "{}"],
+  ["an object with the wrong schemaVersion", JSON.stringify({ schemaVersion: "other/v1", models: [] })],
+  ["a catalog with no models[]", JSON.stringify({ schemaVersion: "usai-model-catalog/v1", recommendations: FIXTURE_ROLES })],
+  ["a catalog whose models is not an array", JSON.stringify({ schemaVersion: "usai-model-catalog/v1", models: {} })],
+]) {
+  test(`CLI: an existing output of ${label} fails closed and is left untouched`, () => {
+    withTempDir((dir) => {
+      const out = path.join(dir, "catalog.json")
+      writeFileSync(out, contents)
+      const result = refresh(out)
+      assert.notEqual(result.status, 0, "write mode must not replace a non-catalog file")
+      assert.match(result.stderr, /cannot carry recommendations forward/)
+      assert.equal(readFileSync(out, "utf8"), contents)
+    })
+  })
+}
+
+test("CLI: an existing valid catalog with no recommendations yet is replaced, with no roles written", () => {
+  withTempDir((dir) => {
+    const out = path.join(dir, "catalog.json")
+    writeFileSync(out, stubCatalog())
+    const result = refresh(out)
+    assert.equal(result.status, 0, result.stderr)
+    const written = JSON.parse(readFileSync(out, "utf8"))
+    assert.ok(written.models.length > 0)
+    assert.equal("recommendations" in written, false)
   })
 })

@@ -1,7 +1,8 @@
 """Schema-level check that the shipped USAi catalog matches its own schema.
 
-The hand-written validateCatalog() in build-catalog.mjs does not enforce
-`recommendations` role names, so only a real JSON Schema validator catches
+The hand-written validateCatalog() in build-catalog.mjs enforces the
+`recommendations` role names and that each id exists in models[], but it is a
+structural subset of the schema. A real JSON Schema validator also catches
 drift between catalog.schema.json and catalog.json.
 """
 

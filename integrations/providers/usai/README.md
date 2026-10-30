@@ -47,8 +47,16 @@ rather than recomputing them.
   and names each missing role and id. Nothing is written and nothing is
   re-picked automatically. Choose a replacement, edit `recommendations` in
   `catalog.json`, and re-run.
-- If the existing catalog file cannot be read as JSON, the build fails instead
-  of dropping the roles.
+- The file at `--out` must be absent or a real catalog (a JSON object with
+  `schemaVersion` `usai-model-catalog/v1` and a `models` array). Anything else,
+  including invalid JSON, `[]`, `null`, a number, `{}`, or a catalog with no
+  `models`, fails the build and leaves the file untouched, instead of
+  overwriting it with a catalog that has no roles.
+- A real catalog that has no `recommendations` yet is accepted: there are no
+  roles to lose, so the new catalog is written without any. Roles are only ever
+  added by a person editing `recommendations`; the build never invents them.
+  The shipped catalog always carries them, so deleting the block from it is a
+  reviewable diff, not a silent build outcome.
 - `--check` applies the same rules: a recommended model that left the feed makes
   it fail with the message above, and `describeDrift` also names any role whose
   value differs between the two catalogs it compares.
