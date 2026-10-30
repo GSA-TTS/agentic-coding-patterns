@@ -6,6 +6,7 @@ import argparse
 import ipaddress
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from urllib.parse import urlparse
@@ -22,6 +23,22 @@ SUPPORTED_BUNDLE_SCHEMAS = {
     "acq-provider-input-bundle/v2": "acq-provider-input-bundle-v2.schema.json",
 }
 HOST_CREDENTIAL_BINDINGS = SCHEMAS / "provider-credential-bindings.json"
+
+# The normalizer is run by the host at materialization time. POSIX expresses its
+# executability through mode bits (st_mode & 0o111) and os.access(X_OK). Windows
+# reports no mode bits and os.access(X_OK) is trivially true there, so those
+# checks are a no-op and must be replaced by a content-based contract instead:
+# an allowed extension paired with a shebang naming a supported interpreter. The
+# currently supported normalizer types are .mjs (run via Node) and .py (run via
+# the selected Python). Interpreters are matched exactly (after lower-casing and
+# dropping a trailing ".exe"), never by prefix, so look-alike names are refused.
+NORMALIZER_LAUNCHERS = {
+    ".mjs": frozenset({"node"}),
+    ".py": frozenset({"python", "python3", "py"}),
+}
+# Directories a shebang command may live in; a bare command name is also allowed.
+SHEBANG_DIRECTORIES = frozenset({"/usr/bin", "/usr/local/bin", "/bin"})
+MAX_SHEBANG_BYTES = 4096
 
 
 class ContractError(ValueError):
@@ -130,6 +147,74 @@ def reject_symlink_components(package_root: Path, relative: str, label: str) -> 
             raise ContractError(f"{label}: path components must not be symlinks")
 
 
+def _is_windows() -> bool:
+    """Platform seam so the Windows launcher branch can be exercised on any host."""
+    return os.name == "nt"
+
+
+def _launcher_name(token: str, *, fold: bool = True) -> str:
+    """Return the command name of a shebang token, or "" if its directory is untrusted.
+
+    A token with a slash must name one of SHEBANG_DIRECTORIES (so "/python3" is
+    refused); a token without a slash is a bare command. With ``fold`` the name
+    is lower-cased and one trailing ".exe" is dropped.
+    """
+    directory, slash, name = token.rpartition("/")
+    if (slash and not directory) or (slash and directory not in SHEBANG_DIRECTORIES):
+        return ""
+    return name.lower().removesuffix(".exe") if fold else name
+
+
+def normalizer_shebang_interpreter(path: Path) -> str:
+    """Return the normalized interpreter named by a normalizer's shebang.
+
+    Handles ``#!/usr/bin/python3`` and ``#!/usr/bin/env python3`` and nothing
+    more: the shebang must be exactly the interpreter, or ``env`` plus the
+    interpreter. Trailing arguments are rejected in both forms. With ``env`` they
+    would make it search for an executable literally named ``python3 -u`` (exit
+    127), and in the direct form the kernel would pass them to the interpreter
+    as one unchecked argument (such as ``-c``) that this contract cannot
+    verify. The result is lower-cased, has any trailing ``.exe`` removed, and is
+    compared against the allowlist by exact match. As with a kernel, ``#!`` must be the first two bytes and tokens
+    are separated by ASCII spaces or tabs only. Returns an empty string when the
+    file has no shebang, is not decodable text, cannot be read, or names an
+    interpreter in an untrusted directory, behind an unsupported ``env`` form
+    (options, assignments), or followed by extra tokens.
+    """
+    try:
+        with path.open("rb") as handle:
+            first_line = handle.readline(MAX_SHEBANG_BYTES)
+    except OSError:
+        return ""
+    if not first_line.startswith(b"#!"):
+        return ""
+    try:
+        shebang = first_line[2:].decode("utf-8")
+    except UnicodeDecodeError:
+        return ""
+    tokens = [token for token in re.split(r"[ \t]+", shebang.strip(" \t\r\n")) if token]
+    if not tokens:
+        return ""
+    if _launcher_name(tokens[0], fold=False) == "env":
+        if len(tokens) != 2:
+            return ""
+        return _launcher_name(tokens[1])
+    if len(tokens) != 1:
+        return ""
+    return _launcher_name(tokens[0])
+
+
+def validate_normalizer_launcher(normalizer_path: Path, bundle_path: Path) -> None:
+    """Enforce the Windows-verifiable normalizer launcher contract."""
+    allowed = NORMALIZER_LAUNCHERS.get(normalizer_path.suffix.lower())
+    if allowed is None:
+        extensions = ", ".join(sorted(NORMALIZER_LAUNCHERS))
+        raise ContractError(f"{bundle_path}: normalizerPath must end in a supported launcher extension ({extensions})")
+    if normalizer_shebang_interpreter(normalizer_path) not in allowed:
+        names = ", ".join(sorted(allowed))
+        raise ContractError(f"{bundle_path}: normalizerPath must declare a shebang naming one of: {names}")
+
+
 def validate_bundle(
     bundle_path: Path,
     credential_bindings: dict[str, str] | None = None,
@@ -161,10 +246,20 @@ def validate_bundle(
             raise ContractError(f"{bundle_path}: declared artifact paths must be regular files inside the provider kit")
     if not facts_path.is_file() or not snapshot_path.is_file() or not normalizer_path.is_file():
         raise ContractError(f"{bundle_path}: declared artifact paths must be regular files")
-    if not normalizer_path.stat().st_mode & 0o111:
-        raise ContractError(f"{bundle_path}: normalizerPath must be an executable file")
-    if not os.access(normalizer_path, os.X_OK):
-        raise ContractError(f"{bundle_path}: normalizerPath is not executable by the validator")
+    # POSIX expresses executability through mode bits; Windows reports no exec
+    # bits and os.access(X_OK) is trivially true there, so those checks cannot
+    # prove executability on Windows. Keep the POSIX mode-bit + X_OK checks as
+    # the executability contract there, and on Windows enforce the
+    # extension + shebang launcher contract instead (see NORMALIZER_LAUNCHERS),
+    # so a data file without a runnable association is rejected rather than
+    # materialized as trusted executable code.
+    if not _is_windows():
+        if not normalizer_path.stat().st_mode & 0o111:
+            raise ContractError(f"{bundle_path}: normalizerPath must be an executable file")
+        if not os.access(normalizer_path, os.X_OK):
+            raise ContractError(f"{bundle_path}: normalizerPath is not executable by the validator")
+    else:
+        validate_normalizer_launcher(normalizer_path, bundle_path)
     facts = load_json(facts_path)
     validate_schema(facts, "acq-provider-facts.schema.json", str(facts_path), schema_dir)
     provider_id = facts["providerId"]
@@ -209,6 +304,20 @@ def discovered_bundles() -> list[Path]:
     )
 
 
+def split_discovered_bundles(bundles: list[Path]) -> tuple[list[Path], list[Path]]:
+    """Split discovered bundles into (fixture_bundles, kit_bundles).
+
+    Classification is path-based rather than string-based so it is independent of
+    the host's path separator (a naive ``"/schemas/fixtures/" in str(bundle)``
+    check never matches Windows ``\\`` separators). Fixtures live under
+    ``schemas/fixtures``; everything else discovered is a canonical provider kit.
+    """
+    fixtures_root = SCHEMAS / "fixtures"
+    fixture_bundles = [bundle for bundle in bundles if fixtures_root in bundle.parents]
+    kit_bundles = [bundle for bundle in bundles if bundle not in fixture_bundles]
+    return fixture_bundles, kit_bundles
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bundle", action="append", type=Path, help="explicit manifest (repeatable)")
@@ -230,8 +339,7 @@ def main(argv: list[str] | None = None) -> int:
             for bundle in bundles:
                 validate_bundle(bundle, credential_bindings, seen_provider_ids, args.schema_dir)
         else:
-            fixture_bundles = [bundle for bundle in bundles if "/schemas/fixtures/" in str(bundle)]
-            kit_bundles = [bundle for bundle in bundles if bundle not in fixture_bundles]
+            fixture_bundles, kit_bundles = split_discovered_bundles(bundles)
             for bundle in fixture_bundles:
                 validate_bundle(bundle, credential_bindings, schema_dir=args.schema_dir)
             seen_provider_ids = set()
