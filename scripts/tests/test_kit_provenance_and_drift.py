@@ -156,3 +156,45 @@ class TestRendererOwnership:
             assert not (root / "files/home/usai-config/opencode.jsonc").exists()
             assert not (root / "files/home/usai-config/merge-global-config.mjs").exists()
             assert not (root / "scripts/sync-usai-models.mjs").exists()
+
+    def test_orphaned_usai_model_list_fixtures_stay_removed(self):
+        # These feed fixtures belonged to the retired sync script's tests and
+        # have no remaining consumer.
+        for root in (ACQ_USAI, SBX_USAI):
+            assert not (root / "tests/fixtures/usai-models.json").exists()
+
+
+INTEGRATIONS = ROOT / "integrations"
+# Frozen byte-exact renderer-contract fixture: its comment is part of the
+# contract digest and must not be edited.
+FROZEN_FIXTURES = {
+    INTEGRATIONS / "providers/usai/tests/fixtures/opencode-production.jsonc",
+}
+
+
+def _integration_files(suffixes: tuple[str, ...]) -> list[Path]:
+    return [
+        p for p in INTEGRATIONS.rglob("*") if p.is_file() and p.suffix in suffixes and "node_modules" not in p.parts
+    ]
+
+
+class TestRetiredRefreshCommand:
+    def test_no_live_instruction_to_run_the_retired_npm_script(self):
+        offenders = [
+            str(p.relative_to(ROOT))
+            for p in _integration_files((".md", ".json", ".mjs", ".yaml", ".yml", ".sh", ""))
+            if p not in FROZEN_FIXTURES and re.search(r"sync:usai-models", p.read_text(errors="replace"))
+        ]
+        assert offenders == []
+
+    def test_node_test_scripts_have_tests(self):
+        # An npm "test" script over a glob that matches nothing passes with
+        # "tests 0", which reads as evidence when there is none.
+        offenders = []
+        for pkg in INTEGRATIONS.rglob("package.json"):
+            if "node_modules" in pkg.parts:
+                continue
+            script = json.loads(pkg.read_text()).get("scripts", {}).get("test", "")
+            if "node --test" in script and not list(pkg.parent.glob("tests/**/*.test.mjs")):
+                offenders.append(str(pkg.relative_to(ROOT)))
+        assert offenders == []
