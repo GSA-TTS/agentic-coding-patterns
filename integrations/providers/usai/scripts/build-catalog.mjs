@@ -991,6 +991,27 @@ function validateCatalog(catalog, schema) {
 
   assert(catalog.schemaVersion === SCHEMA_VERSION, `schemaVersion must be "${SCHEMA_VERSION}"`, errors)
 
+  // recommendations (optional): role names come from the schema, and every
+  // value must name a model that is actually in models[].
+  if ("recommendations" in catalog) {
+    const recs = catalog.recommendations
+    if (!recs || typeof recs !== "object" || Array.isArray(recs)) {
+      errors.push("recommendations must be an object")
+    } else {
+      const roles = new Set(Object.keys(schema.properties.recommendations.properties))
+      const ids = new Set(Array.isArray(catalog.models) ? catalog.models.map((m) => m?.id) : [])
+      for (const [role, modelId] of Object.entries(recs)) {
+        if (!roles.has(role)) {
+          errors.push(`recommendations: disallowed role "${role}" (allowed: ${[...roles].join(", ")})`)
+        } else if (typeof modelId !== "string" || modelId.length === 0) {
+          errors.push(`recommendations.${role} must be a non-empty string`)
+        } else if (!ids.has(modelId)) {
+          errors.push(`recommendations.${role} references "${modelId}", which is not in models[]`)
+        }
+      }
+    }
+  }
+
   // gateway
   const gw = catalog.gateway
   if (gw && typeof gw === "object") {
@@ -1064,7 +1085,8 @@ function validateCatalog(catalog, schema) {
 // newline. Order is stable so the committed catalog.json is reproducible.
 // -----------------------------------------------------------------------------
 const KEY_ORDER = {
-  root: ["schemaVersion", "generatedBy", "sources", "gateway", "vendors", "models"],
+  root: ["schemaVersion", "generatedBy", "sources", "recommendations", "gateway", "vendors", "models"],
+  recommendations: ["primary", "small", "compaction", "summary", "title"],
   gateway: ["host", "baseUrl", "api", "apiKeyEnv"],
   vendor: ["key", "label", "order", "usaiBackend"],
   model: ["id", "vendor", "name", "contextWindow", "maxOutputTokens", "cost", "costAbove200kContext", "reasoning", "inputModalities"],
@@ -1081,6 +1103,9 @@ function orderObject(obj, order) {
 
 function orderCatalog(catalog) {
   const out = orderObject(catalog, KEY_ORDER.root)
+  if (out.recommendations && typeof out.recommendations === "object" && !Array.isArray(out.recommendations)) {
+    out.recommendations = orderObject(out.recommendations, KEY_ORDER.recommendations)
+  }
   if (out.gateway) out.gateway = orderObject(out.gateway, KEY_ORDER.gateway)
   if (Array.isArray(out.vendors)) out.vendors = out.vendors.map((v) => orderObject(v, KEY_ORDER.vendor))
   if (Array.isArray(out.models)) {
@@ -1129,6 +1154,72 @@ function parseArgs(argv) {
     }
   }
   return args
+}
+
+/**
+ * Role defaults are curated by a human, not derived from the feeds, so a
+ * regeneration must carry them forward. Returns the existing catalog's
+ * `recommendations` object, or undefined when there is nothing to carry:
+ *   - the file does not exist (first generation), or
+ *   - the file is a catalog (right schemaVersion, models[] array) that has no
+ *     `recommendations` yet; there are no roles to lose.
+ * Anything else that exists at the output path is an error. In particular a
+ * file that parses as JSON but is not a catalog (`[]`, `null`, `123`, `{}`, a
+ * catalog with no models[]) must never be silently overwritten with a catalog
+ * that has no roles, because that is the failure this guards against.
+ */
+async function readExistingRecommendations(catalogPath) {
+  let raw
+  try {
+    raw = await readFile(catalogPath, "utf8")
+  } catch (error) {
+    if (error?.code === "ENOENT") return undefined
+    throw error
+  }
+  const refuse = (why) =>
+    new Error(
+      `cannot carry recommendations forward: ${catalogPath} ${why}.\n` +
+        `  Repair or remove it, then re-run. The catalog was NOT written.`,
+    )
+  let existing
+  try {
+    existing = JSON.parse(raw)
+  } catch {
+    throw refuse("exists but is not valid JSON")
+  }
+  if (!existing || typeof existing !== "object" || Array.isArray(existing)) {
+    throw refuse("is valid JSON but not a catalog object")
+  }
+  if (existing.schemaVersion !== SCHEMA_VERSION) {
+    throw refuse(`is not a ${SCHEMA_VERSION} catalog (schemaVersion is ${JSON.stringify(existing.schemaVersion)})`)
+  }
+  if (!Array.isArray(existing.models)) {
+    throw refuse("is a catalog without a models[] array")
+  }
+  return existing.recommendations
+}
+
+/**
+ * Keep the existing role defaults. If any recommended model is no longer in
+ * the regenerated model list, fail closed: a human must pick the replacement.
+ * No role is ever re-chosen automatically.
+ */
+function carryForwardRecommendations(recommendations, models, where = "catalog.json") {
+  if (recommendations === undefined) return undefined
+  if (!recommendations || typeof recommendations !== "object" || Array.isArray(recommendations)) {
+    throw new Error(`recommendations in ${where} must be an object. The catalog was NOT written.`)
+  }
+  const ids = new Set(models.map((m) => m.id))
+  const gone = Object.entries(recommendations).filter(([, id]) => !ids.has(id))
+  if (gone.length) {
+    throw new Error(
+      `recommended model(s) are no longer in the model list:\n` +
+        gone.map(([role, id]) => `  - ${role}: ${id}`).join("\n") +
+        `\n  Choose a replacement for each role, set it under "recommendations" in ${where}, ` +
+        `and re-run. The catalog was NOT written.`,
+    )
+  }
+  return { ...recommendations }
 }
 
 async function buildCatalog(args) {
@@ -1191,6 +1282,13 @@ async function buildCatalog(args) {
     }
   }
 
+  const carried = carryForwardRecommendations(
+    await readExistingRecommendations(args.opts["--out"] || DEFAULT_OUT),
+    catalog.models,
+    args.opts["--out"] || DEFAULT_OUT,
+  )
+  if (carried !== undefined) catalog.recommendations = carried
+
   const errors = validateCatalog(catalog, schema)
   if (errors.length) {
     throw new Error(`catalog failed schema validation:\n  - ${errors.join("\n  - ")}`)
@@ -1218,6 +1316,15 @@ function describeDrift(existing, fresh) {
   for (const key of ["schemaVersion", "generatedBy"]) {
     if (existing?.[key] !== fresh?.[key]) {
       lines.push(`${key}: ${JSON.stringify(existing?.[key])} -> ${JSON.stringify(fresh?.[key])}`)
+    }
+  }
+  const rolesBefore = existing?.recommendations ?? {}
+  const rolesAfter = fresh?.recommendations ?? {}
+  for (const role of [...new Set([...Object.keys(rolesBefore), ...Object.keys(rolesAfter)])].sort()) {
+    if (rolesBefore[role] !== rolesAfter[role]) {
+      lines.push(
+        `recommendations.${role}: ${JSON.stringify(rolesBefore[role] ?? "(none)")} -> ${JSON.stringify(rolesAfter[role] ?? "(none)")}`,
+      )
     }
   }
   if (JSON.stringify(existing?.gateway) !== JSON.stringify(fresh?.gateway)) {
@@ -1284,6 +1391,7 @@ export {
   serialize,
   substantive,
   describeDrift,
+  carryForwardRecommendations,
   parseBootstrapModels,
   bootstrapModelsFromBlock,
   shapeFromFeeds,
