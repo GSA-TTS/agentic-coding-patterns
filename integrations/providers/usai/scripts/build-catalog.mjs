@@ -71,7 +71,7 @@
 import { readFile, writeFile } from "node:fs/promises"
 import path from "node:path"
 import process from "node:process"
-import { fileURLToPath } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const USAI_DIR = path.resolve(HERE, "..")
@@ -1402,7 +1402,14 @@ export {
   INPUT_MODALITIES,
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Compare URL against URL so the check is portable: on Windows
+// `process.argv[1]` is a `C:\...` path, which a `file://${...}` template turns
+// into `file://C:\...`, while `import.meta.url` is `file:///C:/...`. Those never
+// match, so this script would exit 0 without doing anything.
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href
+) {
   main().catch((error) => {
     console.error(error.message)
     process.exit(1)

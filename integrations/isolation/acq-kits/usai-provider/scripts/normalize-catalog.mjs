@@ -56,7 +56,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import path from "node:path"
 import process from "node:process"
-import { fileURLToPath } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 
 // This file lives at <kit>/scripts/normalize-catalog.mjs. The USAi catalog
 // lives at <repo>/integrations/providers/usai/catalog.json, i.e.
@@ -270,7 +270,14 @@ async function main() {
   process.stdout.write(`Wrote ${neutralCatalog.models.length} normalized models to ${out}\n`)
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Compare URL against URL so the check is portable: on Windows
+// `process.argv[1]` is a `C:\...` path, which a `file://${...}` template turns
+// into `file://C:\...`, while `import.meta.url` is `file:///C:/...`. Those never
+// match, so this script would exit 0 without doing anything.
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href
+) {
   main().catch((error) => {
     console.error(`normalize-catalog: failed: ${error.message}`)
     process.exit(1)

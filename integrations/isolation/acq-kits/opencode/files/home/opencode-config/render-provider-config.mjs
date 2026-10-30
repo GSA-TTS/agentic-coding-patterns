@@ -7,6 +7,7 @@ import { createHash, randomBytes } from "node:crypto"
 import os from "node:os"
 import path from "node:path"
 import process from "node:process"
+import { pathToFileURL } from "node:url"
 
 const GLOBAL_FILENAMES = ["config.json", "opencode.json", "opencode.jsonc"]
 const CANONICAL_FILENAME = "opencode.jsonc"
@@ -828,7 +829,14 @@ function argument(name, fallback) {
   return index === -1 ? fallback : process.argv[index + 1]
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Compare URL against URL so the check is portable: on Windows
+// `process.argv[1]` is a `C:\...` path, which a `file://${...}` template turns
+// into `file://C:\...`, while `import.meta.url` is `file:///C:/...`. Those never
+// match, so this script would exit 0 without doing anything.
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href
+) {
   const providerRoot = argument("--provider-root", process.env.ACQ_PROVIDER_INPUT_ROOT ?? "/var/lib/acq/provider-input")
   const globalDir = argument("--global-dir", path.join(process.env.HOME ?? "/home/agent", ".config/opencode"))
   const baseConfigPath = argument("--base-config", "/home/agent/opencode-config/base-config.jsonc")
