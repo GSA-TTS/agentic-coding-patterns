@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.18.1](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.18.0...v1.18.1) (2026-10-31)
+
+
+### Bug Fixes
+
+* **paseo:** launch real opencode outside PID 1 ([#559](https://github.com/GSA-TTS/agentic-coding-patterns/issues/559)) ([ce4aa08](https://github.com/GSA-TTS/agentic-coding-patterns/commit/ce4aa08162b22858cda85e7fae0345326ea6f1a3))
+* **usai-catalog:** allow summary and title roles in catalog recommendations schema ([#551](https://github.com/GSA-TTS/agentic-coding-patterns/issues/551)) ([ad2aadd](https://github.com/GSA-TTS/agentic-coding-patterns/commit/ad2aaddd6c8a4239b665c8d192b1b4d9e260298d))
+* **usai:** retire stale references to the removed model sync script ([#552](https://github.com/GSA-TTS/agentic-coding-patterns/issues/552)) ([95be9b9](https://github.com/GSA-TTS/agentic-coding-patterns/commit/95be9b9bee6916cb69a93b60816ca292f9f3c6d5))
+
 ## [1.18.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.17.0...v1.18.0) (2026-10-28)
 
 
