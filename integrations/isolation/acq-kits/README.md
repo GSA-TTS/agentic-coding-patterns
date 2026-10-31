@@ -128,13 +128,15 @@ it; `warn` is advisory.
 
 **Unconverted kits** — `agentic-coding-playbook`, `oci-engine`, `opencode`,
 `openchamber`, `opendesign`, `paseo`, `pi-coding-agent`,
-`zscaler-ca-certificate`. These still use the older two-state verdict, so nothing
-above applies to them. A non-zero exit means a check failed *or* a precondition
+`zscaler-ca-certificate`. With the exception of `paseo`, these still use the
+older two-state verdict, so nothing above applies to them. A non-zero exit
+means a check failed *or* a precondition
 could not be met — the two are not distinguished — and a `0` does **not**
 establish that every check ran: these scripts report an unmet precondition with a
 bare message that increments no counter, then exit `0` on the strength of the
 checks that did run. Treat a `0` here as "nothing that ran failed", never as full
-coverage.
+coverage. `paseo` has its own three-state exit discipline (`0` measured pass,
+`1` failure, `3` skipped/unverified), but does not source the shared reporter.
 
 The authoritative classification is `scripts/tests/test_verify_contract.py`. It
 executes the verdict contract for converted kits, asserts each unconverted kit

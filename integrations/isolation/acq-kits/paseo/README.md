@@ -29,16 +29,16 @@ as shown below.
    export ACQ_EXTRA_KITS="git+https://github.com/GSA-TTS/agentic-coding-patterns.git#ref=<sha>&dir=integrations/isolation/acq-kits/paseo"
    ```
 
-2. **Start the sandbox with `acq run`** (not `acq create` — see
+2. **Start the sandbox with `acq run`** for a held PID-1 session, or use
+   detached `acq create` if your backend provides a keepalive (see
    [Keep it running](#keep-it-running)):
 
    ```bash
    acq run opencode /path/to/your/project
    ```
 
-   Leave this terminal open. It pins Paseo's worktree root under your project,
-   prints connect instructions, and holds the session open. Closing this terminal
-   stops the sandbox.
+    On a PID-1 entrypoint, leave this terminal open: the shim pins Paseo's
+    worktree root, prints connect instructions, and holds that session open.
 
 3. **Open the browser UI.** Find the mapped host port and open it:
 
@@ -157,15 +157,11 @@ node --test integrations/isolation/acq-kits/paseo/tests/paseo-timing.test.mjs
 
 ## Keep it running
 
-**Use `acq run`, and keep its terminal open.** A session-less sandbox is
-auto-stopped shortly after its last session disconnects. `acq run` holds a session
-for as long as its terminal is attached, which is what keeps the sandbox — and the
-Paseo web UI — alive.
-
-A detached `acq create` **does not** keep the sandbox running: with nothing
-attached it is auto-stopped soon after. You may still use `acq create` to
-pre-create a sandbox, but you must then `acq run --name <sandbox>` to actually use
-it.
+On a backend that runs the wrapper as **PID 1**, `acq run` holds its terminal
+open so the sandbox and Paseo web UI stay up. A detached `acq create` can instead
+use its own keepalive process and run the startup-supervised daemon without an
+attached terminal; check `acq ls` and `acq ports <sandbox>` before assuming it
+stopped. The wrapper's PID-1 hold is not a prerequisite for a detached sandbox.
 
 If you don't want to tie up your working terminal, run `acq run` in a separate
 terminal tab or a `tmux`/`screen` window and leave it attached.
@@ -174,9 +170,10 @@ terminal tab or a `tmux`/`screen` window and leave it attached.
 
 The kit exposes **container** port `6767` (the Paseo daemon API + WebSocket +
 bundled web UI), declared via the neutral `publishedPorts` field in `spec.yaml`.
-`acq` publishes it to an **ephemeral `127.0.0.1` host port per sandbox** at create
-time, so several sandboxes running this kit at once don't collide. Look up the
-mapping:
+`acq` publishes it to a host-loopback port at create time. Allocation is
+backend-dependent: one MSB build maps guest 6767 to host 6767, so a second
+listener can collide; other backends may allocate an ephemeral port. Look up
+the actual mapping rather than assuming multiple sandboxes never collide:
 
 ```bash
 acq ports <sandbox>
@@ -188,7 +185,9 @@ self-advertised local daemon on `localhost:<port>`, so a `127.0.0.1` address bar
 can leave it showing "no hosts" with a `ws://…/ws` reconnect loop (see
 TROUBLESHOOTING.md).
 
-Want a **fixed** host port instead of the ephemeral one? Publish it explicitly:
+Need a **different** host port? Publish it explicitly if the backend supports
+remapping; this is a separate transport from the create-time mapping that the
+verifier checks:
 
 ```bash
 acq ports <sandbox> --publish 6767:6767          # this sandbox → host 6767
@@ -235,10 +234,10 @@ worktrees inside each project directory is not natively possible.
 Startup can seed an absent config with a root beneath the **primary guest
 workspace**, using `ACQ_WORKSPACE` before installation. Initialization preserves
 every existing config entry. The `opencode` wrapper's shim then reconciles
-`worktrees.root` with `<physical-attach-directory>/.paseo-worktrees` and restarts
-the daemon worker only if the value changes. If startup seeds first, ordinary
-attach avoids a premature restart; attach-directory overrides can still require
-one. See [the lifecycle decision](docs/decisions/supervisor-owns-daemon-wrapper-pins-worktrees.md).
+`worktrees.root` with `<physical-attach-directory>/.paseo-worktrees` only when
+the wrapper is the PID-1 entrypoint, and restarts the daemon worker only if the
+value changes. A bare `opencode` typed in a shell does not repin it. See
+[the lifecycle decision](docs/decisions/supervisor-owns-daemon-wrapper-pins-worktrees.md).
 
 To override the location, pre-set `worktrees.root` to an absolute path in
 `config.json`; the shim only rewrites it when the value actually differs from
@@ -261,7 +260,8 @@ as one of Paseo's provider CLIs.
 > real binary for **all** in-sandbox invocations. Calls with arguments pass
 > straight through to the real opencode unchanged, so normal flows (including
 > Paseo spawning `opencode` as a provider CLI) are unaffected; only a **no-arg**
-> `opencode` is redirected to the kit shim (pin worktree root, hold PID 1). This
+> `opencode` is redirected to the kit shim only at PID 1 (pin worktree root,
+> hold the sandbox open). Outside PID 1 it opens the real OpenCode TUI. This
 > applies only inside a sandbox with the kit enabled — it does not touch your host
 > opencode.
 
@@ -320,8 +320,14 @@ python ../validate-kits.py
 
 # Live end-to-end via acq (translates + applies the kit, publishes the port, and
 # asserts the wrapper, the daemon + web UI, the port, the supervisor, the PID-1
-# hold, daemon self-heal, and the worktree-root pin).
+# hold's source structure (live PID-1 hold requires a separate interactive
+# sandbox run), daemon self-heal, and the startup worktree-root value).
 RUN_ACQ=1 ./scripts/verify
+
+# The default detached verifier exits 3 when checks are skipped or unverified;
+# exit 0 means all applicable measured checks passed. A live run still cannot
+# demonstrate the PID-1 hold or real TUI routing without a separate interactive
+# sandbox observation. Exit 1 means a measured check failed.
 
 # Keep the sandbox afterward to inspect it:
 KEEP=1 RUN_ACQ=1 ./scripts/verify
@@ -342,7 +348,7 @@ Validate and drive the kit through `acq`, which translates the neutral
 paseo/
 ├── spec.yaml                       # the kit (caps, files, startup command, publishedPorts, env)
 ├── files/home/
-│   ├── .local/bin/opencode         # thin agent-named wrapper: passthrough to real opencode, else exec the shim
+│   ├── .local/bin/opencode         # thin wrapper: real TUI outside PID 1, kit shim at PID 1
 │   ├── paseo-agent-shim            # generic kit logic: pins worktree root, prints connect info, holds PID 1 on acq run
 │   ├── paseo-start.sh              # installs + supervises the Paseo daemon + web UI; runs the mount registrar
 │   ├── paseo-set-worktrees-root.mjs # idempotent worktrees.root merge into config.json

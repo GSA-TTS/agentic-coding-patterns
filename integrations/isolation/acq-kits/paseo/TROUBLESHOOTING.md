@@ -413,13 +413,11 @@ acq exec <sandbox> -- sh -c '
 
 ## "The sandbox stopped" shortly after `acq create`
 
-A session-less sandbox is **auto-stopped shortly after** the last session
-disconnects. A detached `acq create` with nothing attached is stopped, taking the
-daemon/UI down.
-
-**Fix:** use `acq run` and keep its terminal open (the wrapper holds PID 1 for as
-long as the terminal is attached). Use a separate tab or `tmux`/`screen` if you
-don't want to tie up your working terminal. See the README "Keep it running".
+Check `acq ls` and `acq ports <sandbox>` first. A detached create may have a
+backend keepalive and a startup-supervised daemon; the PID-1 wrapper is not
+required on that path. If the selected backend stopped the sandbox, run it in a
+separate attached terminal and keep that terminal open while using the UI. See
+the README "Keep it running" and inspect the startup log for any daemon failure.
 
 ## The Paseo CLI didn't install (UI unavailable, sandbox healthy)
 
@@ -466,9 +464,10 @@ Check what's configured and whether the daemon has it:
 acq exec <sandbox> -- sh -c 'cat "${PASEO_HOME:-$HOME/.paseo}/config.json"'
 ```
 
-- `worktrees.root` still absent or `$PASEO_HOME/worktrees` → you haven't run the
-  wrapper yet on `acq run` (a detached `acq create` alone won't pin it). Run
-  `acq run opencode <project>` once.
+- `worktrees.root` still absent or `$PASEO_HOME/worktrees` → startup normally
+  seeds it from an absolute `ACQ_WORKSPACE`, when one is available. Check the
+  startup log and guest workspace first. The PID-1 `acq run` path may pin it;
+  a bare `opencode` typed in a shell will not.
 - `worktrees.root` points at `<project>/.paseo-worktrees` but new worktrees still
   land elsewhere → the daemon may not have restarted to pick it up. The wrapper
   restarts the daemon only when the value **changes**; force a restart with the
@@ -553,8 +552,9 @@ acq exec <sandbox> -- sh -c 'rm -f "${PASEO_HOME:-$HOME/.paseo}/paseo.pid"'
 
 The kit's `opencode` at `~/.local/bin/opencode` is a **thin wrapper** that shadows
 the real binary. With arguments it `exec`s the real opencode unchanged; with no
-arguments it `exec`s the generic kit shim (`~/paseo-agent-shim`), which pins
-worktrees + holds PID 1. Confirm the shadow and that the real binary resolves:
+arguments it `exec`s the shim only when the wrapper is PID 1; from a shell or
+`acq exec` it opens the real OpenCode TUI without changing Paseo's worktree
+root. Confirm the shadow and that the real binary resolves:
 
 ```bash
 acq exec <sandbox> -- sh -c 'command -v opencode'          # should be ~/.local/bin/opencode

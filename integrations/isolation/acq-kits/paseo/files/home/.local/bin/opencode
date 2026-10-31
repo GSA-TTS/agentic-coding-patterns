@@ -15,13 +15,10 @@
 #                       AND for Paseo itself, which launches `opencode` as a child
 #                       process when opencode is the selected provider. Dropping
 #                       passthrough would break Paseo's opencode provider.
-#   opencode          → (no args) exec the generic, agent-neutral shim
-#                       (paseo-agent-shim), which does all the Paseo/kit work
-#                       (pin worktree root, print connect info, hold PID 1 on the
-#                       `acq run` path). We `exec` it — NOT run it as a child — so
-#                       the shim INHERITS this process's id; when this wrapper was
-#                       the sandbox entrypoint (PID 1), the shim becomes PID 1 and
-#                       its hold actually keeps the sandbox alive.
+#   opencode          → when PID 1, exec the generic shim to hold the sandbox
+#                       entrypoint open. Otherwise exec the real opencode TUI;
+#                       a command typed in a shell must not repin Paseo's root
+#                       or replace the TUI with connect instructions.
 #
 # REUSE FOR ANOTHER AGENT: copy this file to ~/.local/bin/<other-agent> and change
 # only the agent name in the "resolve the real binary" block below. All shared
@@ -33,27 +30,46 @@ set -eu
 HOME_DIR="${HOME:-/home/agent}"
 SHIM="$HOME_DIR/paseo-agent-shim"
 
+# The PID-1 entrypoint needs only the shim. Do not depend on PATH traversal or
+# readlink -f here: neither the real OpenCode binary nor its resolver is needed
+# to keep the sandbox alive.
+if [ "$#" -eq 0 ] && [ "$$" -eq 1 ]; then
+  if [ ! -f "$SHIM" ]; then
+    echo "opencode wrapper: kit shim not found at $SHIM" >&2
+    exit 127
+  fi
+  exec sh "$SHIM"
+fi
+
 # --- Resolve the REAL opencode (never ourselves). ---------------------------
 # We are ~/.local/bin/opencode and are first on PATH, so `command -v opencode`
 # would find US. Search PATH entries explicitly and skip our own path.
 self_dir="$HOME_DIR/.local/bin"
-canon() { ( cd "$(dirname "$1")" 2>/dev/null && printf '%s/%s\n' "$(pwd -P)" "$(basename "$1")" ); }
-self_canon="$(canon "$self_dir/opencode")"
+# Resolve the executable itself as well as its parent: another PATH entry may
+# symlink to this wrapper. A directory-only comparison would exec ourselves
+# recursively on the non-PID-1 bare path.
+canon() { readlink -f "$1" 2>/dev/null || return 1; }
+self_canon="$(canon "$self_dir/opencode")" || exit 127
+self_inode="$(stat -Lc '%d:%i' "$self_canon" 2>/dev/null || stat -f '%d:%i' "$self_canon" 2>/dev/null)" || exit 127
+[ -n "$self_inode" ] || exit 127
 real_opencode=""
 _ifs="$IFS"; IFS=:
 for _dir in $PATH; do
   [ -n "$_dir" ] || continue
   _cand="$_dir/opencode"
   { [ -x "$_cand" ] && [ ! -d "$_cand" ]; } || continue
-  [ "$(canon "$_cand")" = "$self_canon" ] && continue
+  _resolved="$(canon "$_cand")" || continue
+  [ "$_resolved" = "$self_canon" ] && continue
+  _inode="$(stat -Lc '%d:%i' "$_resolved" 2>/dev/null || stat -f '%d:%i' "$_resolved" 2>/dev/null)" || continue
+  [ "$_inode" = "$self_inode" ] && continue
   real_opencode="$_cand"
   break
 done
 IFS="$_ifs"
 
 # --- Passthrough: any arguments go straight to the real opencode. ------------
-# (If the real opencode is missing, only fail on the passthrough path — the
-# no-arg shim path below does not need opencode at all.)
+# (The PID-1 no-arg shim path does not require the real binary. A shell's
+# no-arg invocation and all calls with arguments do require it.)
 if [ "$#" -gt 0 ]; then
   if [ -z "$real_opencode" ]; then
     echo "opencode wrapper: could not locate the real opencode binary on PATH" >&2
@@ -62,9 +78,11 @@ if [ "$#" -gt 0 ]; then
   exec "$real_opencode" "$@"
 fi
 
-# --- No args: hand off to the generic shim (exec, to preserve PID for the hold).
-if [ ! -f "$SHIM" ]; then
-  echo "opencode wrapper: kit shim not found at $SHIM" >&2
-  exit 127
+# --- No args in a shell/exec session: open the real TUI. ----------------------
+if [ "$$" -ne 1 ]; then
+  if [ -z "$real_opencode" ]; then
+    echo "opencode wrapper: could not locate the real opencode binary on PATH" >&2
+    exit 127
+  fi
+  exec "$real_opencode"
 fi
-exec sh "$SHIM"
