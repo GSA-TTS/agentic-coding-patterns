@@ -111,6 +111,26 @@ commands:
         OPENCODE_SHA256_LINUX_X64_BASELINE="c32f6fa1164ed09287519252f0c2d52ae356aec6dd5e32522e46c8fecba1bfcc" \
         OPENCODE_SHA256_LINUX_ARM64="96ead471c33ad1486c271d40486c438ff44eadabc25c1b65ee1437941e6ec9ce" \
           sh /home/agent/opencode-install.sh
+  # Root's install-time --version probe can create OpenCode's scratch directory.
+  # Prepare it on every start (including when /tmp was cleared), without
+  # recursively changing existing contents or following a pre-existing symlink.
+  - phase: startup
+    user: "0"
+    description: Prepare private OpenCode scratch directory for the agent user
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        if [ -L /tmp/opencode ]; then
+          echo "opencode-kit(startup): refusing symlink at /tmp/opencode" >&2
+          exit 1
+        fi
+        if [ -e /tmp/opencode ] && [ ! -d /tmp/opencode ]; then
+          echo "opencode-kit(startup): refusing non-directory at /tmp/opencode" >&2
+          exit 1
+        fi
+        install -d -o 1000 -g 1000 -m 0700 /tmp/opencode
   # acq supplies ACQ_PROVIDER_INPUT_ROOT. It resolves to the same read-only
   # models/providers layout for every backend. This is the sole acq-owned writer
   # of OpenCode's global config after the cutover.

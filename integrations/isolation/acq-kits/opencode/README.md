@@ -6,6 +6,18 @@ OpenCode v2 platform package tarball**. Replaces acq's older unpinned MSB
 fallback (`npm install -g opencode-ai`, resolves to the legacy 1.x line) with a
 deterministic, version-pinned install.
 
+## Agent scratch directory
+
+The install-time `opencode --version` checks run as root and can create
+`/tmp/opencode` with root ownership. On every sandbox startup, a root command
+creates or repairs that directory with agent ownership (`1000:1000`) and private
+permissions (`0700`). This also handles a cleared `/tmp` after a restart.
+
+The command changes only the directory itself, not existing contents, and
+refuses a pre-existing symlink or non-directory. It uses the same neutral
+startup command for both SBX and MSB. Existing sandboxes need the updated kit
+applied; this does not repair a sandbox merely by restarting OpenCode.
+
 ## Provider Renderer Ownership
 
 The kit stages its base policy at `/home/agent/opencode-config/base-config.jsonc`.
