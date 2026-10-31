@@ -1,20 +1,35 @@
-"""Regression tests for the cloud-gov kit's CF CLI fetch ordering.
+"""Offline regression tests for the cloud-gov kit's CF CLI install and auth guard.
 
-The CF CLI download is HTTPS. On a network that intercepts TLS, the CA-trust kit
-(zscaler-ca-certificate) installs its CA in a startup step. A `phase: install`
-fetch runs at create time, before that CA is trusted, so curl exits 60 and the
-whole sandbox create fails. These tests lock in that the fetch runs in a startup
-phase (after CA trust in kit order), is non-fatal, and behaves correctly with a
-simulated intercepted network (curl fails with exit 60 until the CA is trusted).
+What these tests DO cover:
+  - the CF CLI fetch is a non-fatal `startup` command run as the agent user, not
+    an `install`-phase command (which runs at create time, before any CA kit's
+    startup step);
+  - the install script's SHA-256 verification, against real fixture bytes, with a
+    changed-byte negative control (the script is copied with its pinned digests
+    rewritten to the fixture's real digest, because the real upstream tarball is
+    not available offline);
+  - composed startup against a fixture: the zscaler kit's REAL startup command
+    and the cloud-gov install wrapper, run in that order, install `cf` on a
+    simulated TLS-intercepting network (`curl` exits 60 until the fixture trust
+    bundle contains the CA), and run in the reverse order they do not;
+  - the auth script makes no filesystem change when the injected value is bad.
 
-The live path (a real intercepted host) is exercised by the kit's
-`scripts/verify` with RUN_ACQ=1 ACQ_BACKEND=sbx (no CA_KIT: the global bundle
-already supplies the CA kit); CI cannot nest sandboxes.
+What they do NOT cover:
+  - that acq actually runs the bundle's startup commands in kit order (the
+    harness here orders them itself);
+  - the pinned digests against the real upstream tarballs;
+  - post-install integrity (`~/.local/bin/cf` is agent-writable by design).
+
+The live check is `scripts/verify` with RUN_ACQ=1 ACQ_BACKEND=sbx on an
+intercepted network (no CA_KIT: the global bundle already supplies the CA kit);
+CI cannot nest sandboxes.
 """
 
 from __future__ import annotations
 
+import hashlib
 import os
+import re
 import stat
 import subprocess
 import tarfile
@@ -24,10 +39,12 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-KIT = ROOT / "integrations" / "isolation" / "acq-kits" / "cloud-gov"
-CA_KIT = ROOT / "integrations" / "isolation" / "acq-kits" / "zscaler-ca-certificate"
+KITS = ROOT / "integrations" / "isolation" / "acq-kits"
+KIT = KITS / "cloud-gov"
+CA_KIT = KITS / "zscaler-ca-certificate"
 INSTALL = KIT / "files" / "home" / "cloud-gov-install-cf-cli.sh"
-CF_X86_SHA = "98268ab3134bb3a1c97ffce797b4e6d35590a82e006cd098ad7a29f0a5cae7d8"
+AUTH = KIT / "files" / "home" / "cloud-gov-configure-cf-auth.sh"
+SYSTEM_PATH = "/usr/bin:/bin"
 
 
 def _spec() -> dict:
@@ -38,26 +55,10 @@ def _refs_install_script(cmd: dict) -> bool:
     return "cloud-gov-install-cf-cli.sh" in " ".join(cmd["command"])
 
 
-def test_cf_fetch_is_not_in_install_phase():
-    for cmd in _spec()["commands"]:
-        if cmd.get("phase") == "install":
-            assert not _refs_install_script(cmd), "network fetch must not run at create time"
-
-
-def test_cf_fetch_runs_in_startup_as_agent_and_is_non_fatal():
+def _install_cmd() -> dict:
     cmds = [c for c in _spec()["commands"] if _refs_install_script(c)]
     assert len(cmds) == 1
-    cmd = cmds[0]
-    assert cmd["phase"] == "startup"
-    assert cmd["user"] == "1000"
-    body = " ".join(cmd["command"])
-    assert "WARNING: cf CLI is not installed" in body and body.rstrip().endswith("exit 0")
-
-
-def test_install_precedes_auth_configure_in_startup():
-    startup = [c for c in _spec()["commands"] if c.get("phase") == "startup"]
-    names = [("install" if _refs_install_script(c) else "other") for c in startup]
-    assert names[0] == "install"
+    return cmds[0]
 
 
 def _stub(path: Path, body: str) -> None:
@@ -65,73 +66,23 @@ def _stub(path: Path, body: str) -> None:
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
 
-@pytest.fixture
-def intercepted(tmp_path):
-    """A fake host: curl exits 60 unless the CA marker file exists."""
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    home = tmp_path / "home"
-    home.mkdir()
-    ca_marker = tmp_path / "ca-trusted"
-    if Path("/usr/bin/cf").exists() or Path("/bin/cf").exists():
-        pytest.skip("host has a real cf on PATH")
-
-    payload = tmp_path / "payload"
-    payload.mkdir()
-    fake_cf = payload / "cf8"
-    fake_cf.write_text("#!/bin/sh\necho 'cf version 8.19.0-test'\n")
-    fake_cf.chmod(0o755)
-    tgz = tmp_path / "cf.tgz"
-    with tarfile.open(tgz, "w:gz") as t:
-        t.add(fake_cf, arcname="cf8")
-
-    _stub(
-        bin_dir / "curl",
-        f'''[ -e "{ca_marker}" ] || {{ echo "curl: (60) SSL certificate problem" >&2; exit 60; }}
-out=""
-while [ $# -gt 0 ]; do [ "$1" = "-o" ] && out="$2"; shift; done
-cp "{tgz}" "$out"
-''',
-    )
-    _stub(bin_dir / "uname", "echo x86_64\n")
-    _stub(bin_dir / "sha256sum", f'echo "${{FAKE_SHA:-{CF_X86_SHA}}}  $1"\n')
-    # `command -v cf` must not find a real cf on the host.
-    env = {
-        "HOME": str(home),
-        "PATH": f"{bin_dir}:/usr/bin:/bin",
-        "TMPDIR": str(tmp_path),
-    }
-    return env, home, ca_marker
+def test_cf_fetch_is_not_in_install_phase():
+    for cmd in _spec()["commands"]:
+        if cmd.get("phase") == "install":
+            assert not _refs_install_script(cmd), "network fetch must not run at create time"
 
 
-def _run(env):
-    return subprocess.run(["/bin/sh", str(INSTALL)], env=env, capture_output=True, text=True, timeout=30)
+def test_cf_fetch_runs_in_startup_as_agent_and_is_non_fatal():
+    cmd = _install_cmd()
+    assert cmd["phase"] == "startup"
+    assert cmd["user"] == "1000"
+    body = " ".join(cmd["command"])
+    assert "WARNING: cf CLI is not installed" in body and body.rstrip().endswith("exit 0")
 
 
-def test_untrusted_chain_fails_with_actionable_message_and_installs_nothing(intercepted):
-    env, home, _ = intercepted
-    res = _run(env)
-    assert res.returncode != 0
-    assert "(curl exit 60)" in res.stderr and "CA-trust kit" in res.stderr
-    assert not (home / ".local" / "bin" / "cf").exists()
-
-
-def test_install_succeeds_once_ca_is_trusted(intercepted):
-    env, home, ca_marker = intercepted
-    ca_marker.write_text("")
-    res = _run(env)
-    assert res.returncode == 0, res.stderr
-    cf = home / ".local" / "bin" / "cf"
-    assert cf.exists() and os.access(cf, os.X_OK)
-
-
-def test_sha_mismatch_refuses_install_once_ca_is_trusted(intercepted):
-    env, home, ca_marker = intercepted
-    ca_marker.write_text("")
-    res = _run({**env, "FAKE_SHA": "0" * 64})
-    assert res.returncode != 0
-    assert "SHA-256 mismatch" in res.stderr
-    assert not (home / ".local" / "bin" / "cf").exists()
+def test_install_is_first_startup_command():
+    startup = [c for c in _spec()["commands"] if c.get("phase") == "startup"]
+    assert _refs_install_script(startup[0])
 
 
 def test_ca_kit_trusts_in_startup_so_cf_fetch_must_follow_it():
@@ -140,11 +91,196 @@ def test_ca_kit_trusts_in_startup_so_cf_fetch_must_follow_it():
     assert ca["backend_shortcuts"]["msb"]["trust_host_cas"] is True
 
 
-def test_startup_wrapper_swallows_failure_on_untrusted_network(intercepted):
-    env, home, _ = intercepted
-    wrapper = next(c for c in _spec()["commands"] if _refs_install_script(c))["command"]
-    # Run the real wrapper argv with the install script path pointed at the repo copy.
-    script = wrapper[2].replace("/home/agent/cloud-gov-install-cf-cli.sh", str(INSTALL))
-    res = subprocess.run([wrapper[0], wrapper[1], script], env=env, capture_output=True, text=True, timeout=30)
-    assert res.returncode == 0
+def test_pinned_digests_are_well_formed_and_distinct():
+    text = INSTALL.read_text()
+    digests = re.findall(r'^CF_CLI_SHA256_\w+="([0-9a-f]+)"$', text, re.M)
+    assert len(digests) == 2
+    assert all(len(d) == 64 for d in digests) and len(set(digests)) == 2
+
+
+class Fixture:
+    def __init__(self, tmp_path: Path):
+        if Path("/usr/bin/cf").exists() or Path("/bin/cf").exists():
+            pytest.skip("host has a real cf on PATH")
+        self.root = tmp_path
+        self.bin = tmp_path / "bin"
+        self.bin.mkdir()
+        self.home = tmp_path / "home"
+        self.home.mkdir()
+        self.ca_src = tmp_path / "agent-home"  # stands in for /home/agent
+        self.ca_src.mkdir()
+        self.ca_dir = tmp_path / "ca-certificates"  # stands in for /usr/local/share/ca-certificates
+        self.ca_dir.mkdir()
+        self.bundle = tmp_path / "ca-bundle.crt"
+
+        payload = tmp_path / "cf8"
+        payload.write_text("#!/bin/sh\necho 'cf version 8.19.0-fixture'\n")
+        payload.chmod(0o755)
+        self.tgz = tmp_path / "cf.tgz"
+        with tarfile.open(self.tgz, "w:gz") as t:
+            t.add(payload, arcname="cf8")
+        self.digest = hashlib.sha256(self.tgz.read_bytes()).hexdigest()
+
+        # The real CA cert from the zscaler kit: the fixture "trusts" the proxy
+        # only once update-ca-certificates has folded this file into the bundle.
+        self.ca_pem = (CA_KIT / "files" / "home" / "zscaler-ca.crt").read_text()
+        marker = self.ca_pem.splitlines()[1]
+        self.serve = tmp_path / "serve.tgz"
+        self.serve.write_bytes(self.tgz.read_bytes())
+
+        _stub(
+            self.bin / "curl",
+            f'''grep -qF "{marker}" "{self.bundle}" 2>/dev/null || {{
+  echo "curl: (60) SSL certificate problem: unable to get local issuer certificate" >&2
+  exit 60
+}}
+out=""
+while [ $# -gt 0 ]; do [ "$1" = "-o" ] && out="$2"; shift; done
+cp "{self.serve}" "$out"
+''',
+        )
+        _stub(self.bin / "uname", "echo x86_64\n")
+        _stub(
+            self.bin / "update-ca-certificates",
+            f'cat "{self.ca_dir}"/*.crt > "{self.bundle}"\n',
+        )
+        (self.ca_src / "zscaler-ca.crt").write_text(self.ca_pem)
+
+        # Copy of the production install script with BOTH pinned digests replaced
+        # by the fixture's real digest, so sha256sum runs for real on real bytes.
+        text = INSTALL.read_text()
+        rewritten = re.sub(r'^(CF_CLI_SHA256_\w+=)"[0-9a-f]+"$', rf'\1"{self.digest}"', text, flags=re.M)
+        assert rewritten != text, "pinned digest lines not found; update this fixture"
+        self.install = tmp_path / "cloud-gov-install-cf-cli.sh"
+        self.install.write_text(rewritten)
+
+        self.env = {
+            "HOME": str(self.home),
+            "PATH": f"{self.bin}:{SYSTEM_PATH}",
+            "TMPDIR": str(tmp_path),
+        }
+
+    @property
+    def cf(self) -> Path:
+        return self.home / ".local" / "bin" / "cf"
+
+    def run_install(self, **extra_env):
+        return subprocess.run(
+            ["/bin/sh", str(self.install)],
+            env={**self.env, **extra_env},
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+    def run_ca_kit_startup(self):
+        """Run the zscaler kit's real startup command, paths pointed at the fixture."""
+        ca = yaml.safe_load((CA_KIT / "spec.yaml").read_text())
+        cmd = next(c for c in ca["commands"] if c["phase"] == "startup")["command"]
+        script = cmd[2]
+        assert "/home/agent/zscaler-ca.crt" in script and "update-ca-certificates" in script
+        script = script.replace("/home/agent/zscaler-ca.crt", str(self.ca_src / "zscaler-ca.crt"))
+        assert "/usr/local/share/ca-certificates/" in script
+        script = script.replace("/usr/local/share/ca-certificates/", f"{self.ca_dir}/")
+        assert "/usr/local/share" not in script, "fixture must never touch the real CA dir"
+        return subprocess.run([cmd[0], cmd[1], script], env=self.env, capture_output=True, text=True, timeout=30)
+
+    def run_cloud_gov_wrapper(self):
+        """Run the real cloud-gov install wrapper argv, script path pointed at the fixture."""
+        cmd = _install_cmd()["command"]
+        script = cmd[2].replace("/home/agent/cloud-gov-install-cf-cli.sh", str(self.install))
+        assert str(self.install) in script
+        return subprocess.run([cmd[0], cmd[1], script], env=self.env, capture_output=True, text=True, timeout=30)
+
+
+@pytest.fixture
+def fx(tmp_path):
+    return Fixture(tmp_path)
+
+
+def test_untrusted_chain_fails_with_actionable_message_and_installs_nothing(fx):
+    res = fx.run_install()
+    assert res.returncode != 0
+    assert "(curl exit 60)" in res.stderr and "CA-trust kit" in res.stderr
+    assert not fx.cf.exists()
+
+
+def test_real_digest_of_fixture_bytes_installs(fx):
+    fx.run_ca_kit_startup()
+    res = fx.run_install()
+    assert res.returncode == 0, res.stderr
+    assert fx.cf.exists() and os.access(fx.cf, os.X_OK)
+
+
+def test_changed_byte_in_archive_is_refused(fx):
+    fx.run_ca_kit_startup()
+    tampered = bytearray(fx.tgz.read_bytes())
+    tampered[-1] ^= 0xFF
+    fx.serve.write_bytes(bytes(tampered))
+    assert hashlib.sha256(bytes(tampered)).hexdigest() != fx.digest
+    res = fx.run_install()
+    assert res.returncode != 0
+    assert "SHA-256 mismatch" in res.stderr
+    assert not fx.cf.exists()
+
+
+def test_ca_kit_then_cloud_gov_startup_installs_cf(fx):
+    ca = fx.run_ca_kit_startup()
+    assert ca.returncode == 0, ca.stderr
+    res = fx.run_cloud_gov_wrapper()
+    assert res.returncode == 0, res.stderr
+    assert fx.cf.exists() and os.access(fx.cf, os.X_OK)
+
+
+def test_cloud_gov_before_ca_kit_does_not_install_and_stays_non_fatal(fx):
+    res = fx.run_cloud_gov_wrapper()
+    assert res.returncode == 0, "the wrapper must not fail sandbox start"
     assert "WARNING: cf CLI is not installed" in res.stderr
+    assert not fx.cf.exists()
+    fx.run_ca_kit_startup()
+    assert fx.run_cloud_gov_wrapper().returncode == 0
+    assert fx.cf.exists(), "the idempotent step retries successfully once CA trust exists"
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        "bearer TOKEN_HEADER.TOKEN_BODY.TOKEN_SIGNATURE",
+        "bearerTOKENMATERIAL",
+        "BearerTOKENMATERIAL",
+        "TOKEN_HEADER.TOKEN_BODY.TOKEN_SIGNATURE",
+        "not-a-placeholder",
+        "acq_placeholder_abc\tdef",
+    ],
+)
+def test_auth_script_rejects_bad_token_before_any_side_effect(tmp_path, token):
+    home = tmp_path / "home"
+    home.mkdir()
+    res = subprocess.run(
+        ["/bin/sh", str(AUTH)],
+        env={"HOME": str(home), "PATH": SYSTEM_PATH, "CF_OAUTH_TOKEN": token},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert res.returncode != 0
+    assert list(home.iterdir()) == [], "no ~/.cf (or anything else) before validation passes"
+    assert token not in res.stderr
+
+
+def test_auth_script_accepts_known_placeholder_shape_and_then_creates_config_dir(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    res = subprocess.run(
+        ["/bin/sh", str(AUTH)],
+        env={
+            "HOME": str(home),
+            "PATH": SYSTEM_PATH,
+            "CF_OAUTH_TOKEN": "acq_placeholder_abcdefghijklmnopqrstuvwxyz012345",
+        },
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert res.returncode == 0, res.stderr
+    assert (home / ".cf").is_dir()

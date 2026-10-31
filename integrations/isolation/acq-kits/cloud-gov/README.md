@@ -12,17 +12,20 @@ sandbox.
 ## What It Does
 
 - **Cloud Foundry CLI** - uses an existing `cf` binary when the base image already
-  has one. If `cf` is missing, installs Cloud Foundry CLI v8.19.0 into
-  `~/.local/bin` at sandbox startup from pinned upstream release tarballs with
-  committed SHA-256 checks.
+  has one. If `cf` is missing, attempts to install Cloud Foundry CLI
+  v8.19.0 into `~/.local/bin` at sandbox startup from pinned upstream release
+  tarballs with committed SHA-256 checks. The install is best effort: a failed
+  download logs a warning and does not fail sandbox start, so a started sandbox
+  does not guarantee `cf` is present. Run `cf version` before relying on it.
 - **cloud.gov egress** - allow-lists exact cloud.gov control-plane and
   documentation hosts: the Cloud Foundry API, login/UAA, log-stream hosts, and
   user-facing cloud.gov documentation. Public app routes and custom domains stay
   project-specific instead of using wildcard egress.
 - **Cloud Foundry docs egress** - allow-lists upstream Cloud Foundry CLI and docs
   hosts so agents can look up command behavior and platform guidance.
-- **Secret-safe authorization** - documents the `acq secret set` binding for a
-  host-side `cf oauth-token`. The sandbox receives only the backend placeholder
+- **Secret-safe authorization** - documents the per-backend secret binding for a
+  host-side `cf oauth-token` (`acq secret set` on msb, `sbx secret set-custom` on
+  sbx). The sandbox receives only the backend placeholder
   needed for direct Cloud Foundry API calls; the real token stays in the host-side
   secret store / backend proxy.
 
@@ -32,10 +35,12 @@ The kit declares `sbx` and `msb` support. Both backends consume the neutral kit
 fields: `caps.network.allow`, file drops, and startup commands. There
 is no backend shortcut.
 
-The Cloud Foundry token is not a kit field. The user stores it in the acq secret
-store and binds it to `api.fr.cloud.gov`; the active backend maps that to its
-own proxy or secret-substitution mechanism. The kit validates that any injected
-`CF_OAUTH_TOKEN` value is a backend placeholder, not raw token material.
+The Cloud Foundry token is not a kit field. The user binds it to
+`api.fr.cloud.gov` with the backend's own secret mechanism (see
+[Prerequisites](#prerequisites)); the active backend maps that to its proxy or
+secret-substitution mechanism. The kit does a best-effort format
+check on any injected `CF_OAUTH_TOKEN` value (known placeholder prefixes, no
+bearer/JWT shape); that is not proof the backend will substitute it.
 
 The network allow-list avoids wildcard semantics. Both sbx and msb receive the
 same exact host list, which keeps the shared kit least-privilege and makes app
@@ -52,7 +57,8 @@ acq run --kit <path-to-this-kit> opencode /path/to/project
 The kit is a `mixin`, so it composes with the other acq-kits.
 
 **On a TLS-intercepting network (for example Zscaler), the CA-trust kit must
-come before this kit.** Startup commands run in kit order and the CF CLI
+come before this kit.** Startup commands run in kit order (per acq's documented
+behavior; the live sbx check below is what confirms it) and the CF CLI
 download is HTTPS. The global kit bundle applies `zscaler-ca-certificate` before
 `ACQ_EXTRA_KITS`, so the default needs no action. Do **not** add the CA kit to
 `ACQ_EXTRA_KITS` when the global bundle already has it: sbx rejects a
@@ -69,7 +75,7 @@ If the base image already has `cf`, the install step exits successfully without
 network package installation. If `cf` is missing, the kit installs Cloud Foundry
 CLI v8.19.0 from the upstream GitHub release tarball for `linux_x86-64` or
 `linux_arm64`, then verifies the archive SHA-256 before installing it. Unsupported
-architectures fail closed.
+architectures are refused (the install fails; sandbox start still succeeds).
 
 The install is a **startup** step (as the agent user, into `~/.local/bin`), not
 an install-phase step. An install-phase command runs at create time, before a
@@ -82,7 +88,7 @@ To update the CLI, change the version and both SHA-256 constants in
 `files/home/cloud-gov-install-cf-cli.sh` together after reviewing the upstream
 release metadata.
 
-`cf` is installed in `~/.local/bin`. A bare `acq exec` runs a non-login shell
+When installed, `cf` is in `~/.local/bin`. A bare `acq exec` runs a non-login shell
 that may not have that directory on `PATH`; prepend it
 (`PATH="$HOME/.local/bin:$PATH"`) when probing from the host.
 
@@ -94,27 +100,59 @@ From a host shell, log in to cloud.gov with the normal human-controlled flow:
 cf login -a https://api.fr.cloud.gov --sso
 ```
 
-Then store the short-lived Cloud Foundry OAuth token string in acq. `cf
-oauth-token` returns the full authorization value, including the `bearer` prefix;
-this command passes that value over stdin to the host-side secret store. Do not
-paste it into chat or write it to a file:
+Then bind the Cloud Foundry OAuth token to `api.fr.cloud.gov` on the backend you
+use. `cf oauth-token` returns the full authorization value, including the
+`bearer` prefix. Do not paste it into chat or write it to a file. The command
+differs by backend, because sbx feeds its proxy through a different mechanism
+than `acq secret set` can drive for an arbitrary host.
+
+**msb** - pipe the token into the acq secret store (acq's msb backend reads it
+at sandbox creation; `scripts/verify` passed its authenticated probe this way
+on msb during development, but not on the final head):
 
 ```bash
 cf oauth-token | acq secret set -g cloud-gov --host api.fr.cloud.gov --env CF_OAUTH_TOKEN
 ```
 
-For a sandbox-specific token, scope the secret to that sandbox:
+**sbx** - register a custom secret with sbx itself. `acq secret set` alone is not
+enough on sbx: `sbx secret set-custom` cannot read a piped value, so acq stores
+the value in its own store and sbx's proxy never receives it, and the sandbox
+then sees no `CF_OAUTH_TOKEN`. A dynamic `--command` source keeps the token off
+argv and shell history, and sbx resolves it on the host. Whether each request
+gets a freshly minted token or a cached one was not measured here; if a long
+session starts getting 401s, re-run `scripts/verify` step 8 to tell expiry from a
+failed injection:
 
 ```bash
-cf oauth-token | acq secret set <sandbox-name> cloud-gov --host api.fr.cloud.gov --env CF_OAUTH_TOKEN
+sbx secret set-custom --host api.fr.cloud.gov --env CF_OAUTH_TOKEN \
+  --command "$(command -v cf) oauth-token"
 ```
+
+Use the absolute path to `cf`: the command is replayed by the sbx daemon, whose
+`PATH` and environment may differ from your shell.
+
+**Authority.** Without `--sandbox`, this secret is global: while your host `cf`
+session is valid, every sandbox's request to `api.fr.cloud.gov` is authorized as
+you, and each use resolves a current token. That is a wider and longer-lived grant
+than a pasted short-lived token. Prefer `--sandbox <name>` for a specific sandbox,
+and remove the secret (`sbx secret rm`) when you no longer need it. The placeholder (`sbx-cs-...`) is captured when
+a sandbox is created, so create a new sandbox after registering; an existing one
+needs its `CF_OAUTH_TOKEN` updated to the printed placeholder. Observed working
+on sbx 0.50.1 with acq at the time of writing; the same registration failed with a
+`verify command failed` error on sbx 0.48.0 (cause not determined), so upgrade if
+registration fails. The statements that `acq secret set` cannot feed sbx's proxy
+here and that `sbx secret set-custom` takes no stdin were true of those versions;
+re-check them if either tool changes.
 
 The `CF_OAUTH_TOKEN` name is a placeholder binding for backend proxy/secret
 substitution. At startup the kit targets `https://api.fr.cloud.gov` and, when
 that value is present, refuses to continue unless it matches a recognized
 backend-placeholder prefix, including the documented msb guest-secret placeholder
-prefix. The startup guard rejects bearer/JWT-like raw token material before
-anything can be written to the workspace. The stock CF CLI
+prefix. This is a best-effort format check, not proof that the backend will
+substitute the value: it rejects bearer/JWT-shaped values, and the script makes
+no filesystem change until the check passes. A raw token that already reached the
+sandbox environment is not removed by the check; the script only refuses to
+continue. The stock CF CLI
 may parse `AccessToken` locally, so the kit does not write the placeholder into
 CF CLI config or claim authenticated `cf` commands work without live
 verification.
@@ -153,8 +191,10 @@ backend can rewrite the placeholder on the wire:
 curl -H "Authorization: $CF_OAUTH_TOKEN" https://api.fr.cloud.gov/v3/organizations
 ```
 
-If authenticated API calls fail, refresh the host-side secret with `cf oauth-token
-| acq secret set ...` and restart or recreate the sandbox so the placeholder is
+If authenticated API calls fail, run `scripts/verify` with `RUN_ACQ=1` (its step 8
+separates an expired token from a failed injection). On msb, refresh the secret
+with `cf oauth-token | acq secret set ...`; on sbx, check `sbx secret ls` for a
+`CF_OAUTH_TOKEN` custom secret, and recreate the sandbox so the placeholder is
 injected. Do not paste the token into chat or commit it to the workspace.
 
 ## Troubleshooting
@@ -180,8 +220,12 @@ for kit scripts, auth-script guard tests with synthetic placeholders, and exact
 egress allow-list assertions, and that the CF CLI fetch is not an install-phase
 command. Set `RUN_ACQ=1` to create a throwaway sandbox and
 verify that `cf` is installed, cloud.gov/docs endpoints are reachable, and the
-injected placeholder reaches the CF API through a direct HTTPS request.
-`RUN_ACQ=1` requires a global `cloud-gov` acq secret. On an
+injected placeholder reaches the CF API through a direct HTTPS request. If
+that last probe is rejected, `verify` also sends the host's own `cf oauth-token`
+to the same endpoint and reports the sandbox variable's class (never its value),
+so an expired token and a failed placeholder injection are told apart.
+`RUN_ACQ=1` requires the token binding from Prerequisites (a global `cloud-gov`
+acq secret, or on `ACQ_BACKEND=sbx` a `CF_OAUTH_TOKEN` custom secret in sbx). On an
 intercepted network, run it as is: the global bundle supplies the CA kit ahead
 of this one, which is the live regression for the CA-before-fetch ordering. Set
 `CA_KIT=<path>` only if your bundle has no CA-trust kit (a kit with the same

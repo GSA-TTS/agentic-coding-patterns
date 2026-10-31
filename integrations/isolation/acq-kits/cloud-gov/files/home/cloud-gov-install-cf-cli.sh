@@ -3,12 +3,13 @@ set -eu
 
 # Install the Cloud Foundry CLI from a pinned upstream release tarball. The exact
 # version and SHA-256 values are committed in this script so the install is
-# reproducible and fails closed on upstream drift.
+# reproducible and refuses to install on upstream drift (the startup wrapper
+# still lets sandbox start succeed).
 #
 # Runs in the STARTUP phase as the agent user, never `phase: install`. The
 # download is HTTPS; on a network that intercepts TLS the CA-trust kit
-# (zscaler-ca-certificate) installs its CA in its own startup step, which kit
-# order runs before this one. An install-phase fetch runs at create time, before
+# (zscaler-ca-certificate) installs its CA in its own startup step, which the
+# global bundle orders before this one. An install-phase fetch runs at create time, before
 # that CA is trusted, and fails with curl exit 60. The binary goes in the agent's
 # ~/.local/bin, so no root step runs this agent-writable script. The agent can
 # replace that file; the SHA-256 check covers the download, not later tampering.
