@@ -30,6 +30,30 @@ test("rejects invalid CONTAINER_PORT values before probing", () => {
   }
 });
 
+test("rejects malformed timing overrides before contacting sandbox", () => {
+  for (const [key, value] of [["HEALTH_GRACE", "08"], ["ORPHAN_SLACK", ""], ["HEALTH_GRACE", "-1"], ["ORPHAN_SLACK", "86401"], ["HEALTH_GRACE", "1;id"]]) {
+    const result = spawnSync("bash", [script, "example"], {
+      encoding: "utf8", env: { ...process.env, HOST_HP: "127.0.0.1:6767", [key]: value }, timeout: 5000,
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, 2, `${key}=${value}`);
+    assert.match(result.stderr, /HEALTH_GRACE and ORPHAN_SLACK must be decimal/);
+  }
+});
+
+test("diagnostic rendering encodes terminal controls from untrusted responses", async () => {
+  const source = await readFile(script, "utf8");
+  const definition = source.split("\n").find((line) => line.startsWith("safe_text()"));
+  assert.ok(definition);
+  const result = spawnSync("bash", ["-c", `${definition}\nsafe_text "$1"`, "test", "hello\u001b[31m\nworld"], {
+    encoding: "utf8", timeout: 5000,
+  });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0);
+  assert.doesNotMatch(result.stdout, /\u001b|hello|world/);
+  assert.match(result.stdout, /1b/);
+});
+
 test("rejects malformed HOST_HP overrides before probing", async (t) => {
   const mocks = await mkdtemp(path.join(os.tmpdir(), "paseo-identity-host-"));
   t.after(() => rm(mocks, { force: true, recursive: true }));
@@ -72,6 +96,13 @@ test("automatic host mapping selects only the configured guest port", async (t) 
       assert.notEqual(result.status, 2);
     }
   }
+  await mockCommand(mocks, "acq", 'printf "sandbox 6767 -> host 127.0.0.1:22336\\n"; exit 7');
+  const failed = spawnSync("bash", [script, "example"], {
+    env: { ...process.env, HOST_HP: "", PATH: `${mocks}:${process.env.PATH}` }, encoding: "utf8", timeout: 5000,
+  });
+  assert.ifError(failed.error);
+  assert.equal(failed.status, 2);
+  assert.match(failed.stderr, /acq ports failed/);
 });
 
 test("normalizes server-id newlines before KEY=value framing", async () => {

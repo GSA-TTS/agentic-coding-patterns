@@ -47,8 +47,8 @@ if [ "${CONTAINER_PORT+x}" = x ]; then
 else
   CONTAINER_PORT=6767
 fi
-HEALTH_GRACE="${HEALTH_GRACE:-30}"
-ORPHAN_SLACK="${ORPHAN_SLACK:-120}"
+HEALTH_GRACE="${HEALTH_GRACE-30}"
+ORPHAN_SLACK="${ORPHAN_SLACK-120}"
 
 # Keep the override unambiguous: Bash printf treats leading-zero values as octal,
 # while /proc/net/tcp needs a valid decimal TCP port.
@@ -56,6 +56,17 @@ valid_port() {
   case "${1:-}" in ''|0|0*|*[!0-9]*) return 1 ;; esac
   [ "${#1}" -le 5 ] && [ "$1" -le 65535 ]
 }
+
+valid_delay() {
+  case "${1:-}" in ''|*[!0-9]*) return 1 ;; esac
+  case "$1" in 0*?) return 1 ;; esac
+  [ "${#1}" -le 5 ] && [ "$1" -le 86400 ]
+}
+
+if ! valid_delay "$HEALTH_GRACE" || ! valid_delay "$ORPHAN_SLACK"; then
+  echo "FATAL: HEALTH_GRACE and ORPHAN_SLACK must be decimal seconds from 0 through 86400" >&2
+  exit 2
+fi
 
 if ! valid_port "$CONTAINER_PORT"; then
   echo "FATAL: CONTAINER_PORT must be a decimal port from 1 through 65535 (got: ${CONTAINER_PORT:-<empty>})" >&2
@@ -71,6 +82,9 @@ bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail+1)); }
 warn() { printf '  \033[33mWARN\033[0m %s\n' "$1"; warns=$((warns+1)); }
 note() { printf '       %s\n' "$1"; }
 info() { printf '\n\033[1m%s\033[0m\n' "$1"; }
+# Diagnostics may contain bytes controlled by the guest or by a wrong listener.
+# Only the gate's own formatting should be able to write terminal escapes.
+safe_text() { printf '%s' "$1" | LC_ALL=C head -c 256 | LC_ALL=C od -An -tx1 | tr -d '\n'; }
 
 TMP="$(mktemp "${TMPDIR:-/tmp}/paseo-verify-identity.XXXXXX")"
 trap 'rm -f "$TMP"' EXIT
@@ -94,7 +108,11 @@ command -v node >/dev/null 2>&1 || {
 if [ -z "${HOST_HP:-}" ]; then
   # acq prints one row per guest mapping. Never select another kit's first
   # host port when this sandbox publishes multiple services.
-  mappings="$(acq ports "$SBX" 2>/dev/null | awk -v guest="$CONTAINER_PORT" '
+  ports_out="$(acq ports "$SBX" 2>/dev/null)" || {
+    echo "FATAL: acq ports failed while resolving guest port $CONTAINER_PORT" >&2
+    exit 2
+  }
+  mappings="$(printf '%s\n' "$ports_out" | awk -v guest="$CONTAINER_PORT" '
     $1 == "sandbox" && $2 == guest && $3 == "->" && $4 == "host" { print $5 }
   ')"
   if [ "$(printf '%s\n' "$mappings" | grep -c '^127\.0\.0\.1:[0-9][0-9]*$' || true)" != 1 ] ||
@@ -126,7 +144,7 @@ note "so every probe below uses the RESOLVED mapping, never a hardcoded 6767."
 info "1. Host Listener and Provenance"
 printf '+ lsof -nP -iTCP:%s -sTCP:LISTEN\n' "$HOST_PORT"
 LSOF_OUT="$(lsof -nP -iTCP:"$HOST_PORT" -sTCP:LISTEN 2>/dev/null)"
-if [ -n "$LSOF_OUT" ]; then printf '%s\n' "$LSOF_OUT"; else echo "(no listener)"; fi
+if [ -n "$LSOF_OUT" ]; then note "lsof output (hex, capped): $(safe_text "$LSOF_OUT")"; else echo "(no listener)"; fi
 
 LISTEN_PID="$(printf '%s\n' "$LSOF_OUT"  | awk 'NR>1 {print $2; exit}')"
 LISTEN_TYPE="$(printf '%s\n' "$LSOF_OUT" | awk 'NR>1 {print $5; exit}')"
@@ -157,9 +175,9 @@ if is_num "${LISTEN_PID:-}"; then
   printf '\n'
   # -ww: do NOT truncate argv. The binary PATH is the highest-signal field here
   # (which msb build owns the port), and a truncated command hides it.
-  ps -ww -o pid,ppid,lstart,etime -p "$LISTEN_PID" 2>/dev/null || true
+  ps -ww -o pid,ppid,lstart,etime -p "$LISTEN_PID" 2>/dev/null | while IFS= read -r row; do note "ps row (hex, capped): $(safe_text "$row")"; done
   LISTEN_ARGV="$(ps -ww -o command= -p "$LISTEN_PID" 2>/dev/null)"
-  echo "argv: ${LISTEN_ARGV:-<unreadable>}"
+echo "argv (hex, capped): $(safe_text "${LISTEN_ARGV:-<unreadable>}")"
   LISTEN_PPID="$(ps -o ppid= -p "$LISTEN_PID" 2>/dev/null | tr -d ' ')"
   LISTEN_AGE="$(etime_to_secs "$(ps -o etime= -p "$LISTEN_PID" 2>/dev/null)")"
   printf '\n'
@@ -174,8 +192,8 @@ if is_num "${LISTEN_PID:-}"; then
   LISTEN_BIN="$(printf '%s\n' "$LISTEN_ARGV" | awk '{print $1}')"
   ACTIVE_BIN="$(command -v msb 2>/dev/null)"
   [ -n "$ACTIVE_BIN" ] && ACTIVE_BIN="$( (readlink -f "$ACTIVE_BIN" 2>/dev/null) || echo "$ACTIVE_BIN")"
-  echo "listener binary: ${LISTEN_BIN:-<unknown>}"
-  echo "msb on PATH:     ${ACTIVE_BIN:-<none>}"
+  echo "listener binary (hex): $(safe_text "${LISTEN_BIN:-<unknown>}")"
+  echo "msb on PATH (hex):     $(safe_text "${ACTIVE_BIN:-<none>}")"
   if [ -n "${LISTEN_BIN:-}" ] && [ -n "${ACTIVE_BIN:-}" ]; then
     # Compare the installation prefix (…/Cellar/<formula>/<version>/…), not the
     # basename — both are named "msb".
@@ -183,10 +201,10 @@ if is_num "${LISTEN_PID:-}"; then
     a_pfx="$(printf '%s\n' "$ACTIVE_BIN" | sed -n 's;\(.*/Cellar/[^/]*/[^/]*\)/.*;\1;p')"
     if [ -n "$l_pfx" ] && [ -n "$a_pfx" ] && [ "$l_pfx" != "$a_pfx" ]; then
       warn "the port is held by a DIFFERENT msb installation than the one on PATH."
-      note "holding: $l_pfx"
-      note "on PATH: $a_pfx"
-      note "acq cannot manage a forwarder from another build, so 'acq stop'/'acq rm'"
-      note "will not release this port. See the remediation below."
+      note "holding (hex): $(safe_text "$l_pfx")"
+      note "on PATH (hex): $(safe_text "$a_pfx")"
+      note "A different build may not be managed by this acq. Verify ownership"
+      note "before using its supported lifecycle; do not infer an orphan by version."
     else
       ok "listener binary and the msb on PATH are the same installation"
     fi
@@ -208,8 +226,8 @@ info "2. Loopback Name Resolution"
 # pairing, escalate on listener COUNT.
 LOCALHOST_ADDRS="$(node -e 'require("dns").lookup("localhost",{all:true,verbatim:true},(e,a)=>{if(e){console.log("ERR "+e.message);return}console.log(a.map(x=>x.address).join(" "))})' 2>/dev/null)"
 LOCALHOST_FIRST="${LOCALHOST_ADDRS%% *}"
-echo "localhost resolves to: ${LOCALHOST_ADDRS:-<unresolved>}  (first: ${LOCALHOST_FIRST:-?})"
-echo "listeners on $HOST_PORT:   ${LISTEN_COUNT:-0}  (families: ${LISTEN_FAMILIES:-<none>})"
+echo "localhost resolves (hex): $(safe_text "${LOCALHOST_ADDRS:-<unresolved>}")"
+echo "listeners on $HOST_PORT: ${LISTEN_COUNT:-0} (families hex: $(safe_text "${LISTEN_FAMILIES:-<none>}"))"
 if [ "${LISTEN_COUNT:-0}" -gt 1 ]; then
   warn "MORE THAN ONE process is listening on $HOST_PORT, across families."
   note "A 'localhost' URL selects whichever family the resolver returns first, so it"
@@ -251,11 +269,11 @@ SBX_EXTERNAL="$(sbx_val EXTERNAL)"
 SBX_LOOPBACK="$(sbx_val LOOPBACK)"
 SBX_BIND="$(sbx_val BIND)"
 
-echo "server-id:      ${SBX_SERVER_ID:-<unreadable>}"
-echo "daemon pid:     ${SBX_DAEMON_PID:-?}"
-echo "vm uptime (s):  ${SBX_VM_UPTIME:-?}"
-echo "guest health:   ${SBX_HEALTH:-<no answer>}"
-echo "guest listen:   ${SBX_BIND:-?}"
+echo "server-id (hex):    $(safe_text "${SBX_SERVER_ID:-<unreadable>}")"
+echo "daemon pid (hex):   $(safe_text "${SBX_DAEMON_PID:-?}")"
+echo "vm uptime (hex):   $(safe_text "${SBX_VM_UPTIME:-?}")"
+echo "guest health (hex): $(safe_text "${SBX_HEALTH:-<no answer>}")"
+echo "guest listen (hex): $(safe_text "${SBX_BIND:-?}")"
 note "hex: :1A6F = port 6767; 00000000 = 0.0.0.0 (reachable via create-time -p),"
 note "0100007F = 127.0.0.1 (loopback-only; create-time publish cannot reach it)"
 
@@ -264,11 +282,11 @@ if [ -z "$SBX_SERVER_ID" ]; then
 elif ! printf '%s\n' "$SBX_SERVER_ID" | grep -Eq '^srv_[A-Za-z0-9_-]+$'; then
   warn "guest server-id file is malformed (diagnostic only)"
 else
-  note "guest file reports server-id $SBX_SERVER_ID (not runtime evidence)"
+  note "guest file reports server-id $(safe_text "$SBX_SERVER_ID") (hex; not runtime evidence)"
 fi
 case "$SBX_HEALTH" in
   *'"status":"ok"'*) ok "guest daemon health is ok" ;;
-  *)                 bad "guest daemon is not healthy: ${SBX_HEALTH:-<no answer>}" ;;
+  *)                 bad "guest daemon is not healthy (hex: $(safe_text "${SBX_HEALTH:-<no answer>}"))" ;;
 esac
 # Guard the loopback-only bind for the ACTUAL guest port, not a fixed 1A6F.
 case "$SBX_BIND" in
@@ -278,7 +296,7 @@ case "$SBX_BIND" in
   *"00000000:$GUEST_HEX"*)
     ok "guest daemon is bound to 0.0.0.0:$CONTAINER_PORT" ;;
   *)
-    bad "guest bind for :$GUEST_HEX not found in /proc/net/tcp (got: ${SBX_BIND:-<none>})" ;;
+    bad "guest bind for :$GUEST_HEX not found in /proc/net/tcp (hex: $(safe_text "${SBX_BIND:-<none>}"))" ;;
 esac
 
 # Record the age discrepancy, but decide it only after comparing WebSocket IDs.
@@ -299,14 +317,14 @@ while :; do
   OUT="$(curl -g -sS --max-time 5 "http://127.0.0.1:${HOST_PORT}/api/health" 2>&1)"
   case "$OUT" in *'"status":"ok"'*) break ;; esac
   [ "$(date +%s)" -ge "$deadline" ] && break
-  note "not ready yet ($OUT) — retrying within ${HEALTH_GRACE}s grace"
+  note "not ready yet (hex: $(safe_text "$OUT")) — retrying within ${HEALTH_GRACE}s grace"
   sleep 3
 done
 for host in "127.0.0.1" "localhost" "[::ffff:127.0.0.1]"; do
   OUT="$(curl -g -sS --max-time 5 "http://${host}:${HOST_PORT}/api/health" 2>&1)"
   case "$OUT" in
-    *'"status":"ok"'*) note "http://${host}:${HOST_PORT}/api/health -> $OUT (advisory response)" ;;
-    *)                 warn "http://${host}:${HOST_PORT}/api/health -> $OUT" ;;
+    *'"status":"ok"'*) note "http://${host}:${HOST_PORT}/api/health -> $(safe_text "$OUT") (advisory hex response)" ;;
+    *)                 warn "http://${host}:${HOST_PORT}/api/health -> $(safe_text "$OUT") (hex response)" ;;
   esac
 done
 note "The daemon does not log /api/health, so its absence from daemon.log proves nothing."
@@ -462,9 +480,9 @@ fi
 # ------------------------------------------------------------------ 7. verdict
 
 info "7. Verdict"
-echo "host WS server ids:  ${HOST_IDS:-<none>}"
-echo "sandbox runtime id:  ${GUEST_RUNTIME_ID:-<unverified>}"
-echo "sandbox file id:     ${SBX_SERVER_ID:-<unknown>} (diagnostic only)"
+echo "host WS server ids (hex): $(safe_text "${HOST_IDS:-<none>}")"
+echo "sandbox runtime id: ${GUEST_RUNTIME_ID:-<unverified>}"
+echo "sandbox file id (hex): $(safe_text "${SBX_SERVER_ID:-<unknown>}") (diagnostic only)"
 
 if [ -z "$GUEST_RUNTIME_ID" ]; then
   bad "guest daemon did not provide a live server_info ID"
