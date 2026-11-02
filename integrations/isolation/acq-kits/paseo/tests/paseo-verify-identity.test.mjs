@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,6 +26,22 @@ test("rejects invalid CONTAINER_PORT values before probing", () => {
     assert.equal(result.status, 2, `CONTAINER_PORT=${JSON.stringify(port)}`);
     assert.match(result.stderr, /CONTAINER_PORT must be a decimal port/);
     assert.doesNotMatch(result.stderr, /acq not on PATH/);
+  }
+});
+
+test("rejects malformed HOST_HP overrides before probing", async (t) => {
+  const mocks = await mkdtemp(path.join(os.tmpdir(), "paseo-identity-host-"));
+  t.after(() => rm(mocks, { force: true, recursive: true }));
+  await mockCommand(mocks, "acq", "exit 9");
+  await mockCommand(mocks, "node", "exit 9");
+  await mockCommand(mocks, "curl", "exit 9");
+  for (const host of ["localhost:6767", "127.0.0.1:0", "127.0.0.1:08", "127.0.0.1:6767/path", "127.0.0.1:6767@other", "127.0.0.1:65536"]) {
+    const result = spawnSync("bash", [script, "example"], {
+      encoding: "utf8", env: { ...process.env, PATH: `${mocks}:${process.env.PATH}`, HOST_HP: host }, timeout: 5000,
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, 2, host);
+    assert.match(result.stderr, /HOST_HP must be 127\.0\.0\.1/);
   }
 });
 
@@ -90,9 +107,9 @@ test("age discrepancy is advisory only after host and guest IDs agree", async ()
     `ok() { printf 'PASS:%s\\n' "$1"; }; bad() { printf 'FAIL:%s\\n' "$1"; }; ` +
     `warn() { printf 'WARN:%s\\n' "$1"; }; note() { :; };\n` +
     `LISTEN_AGE="$1"; SBX_VM_UPTIME="$2"; HOST_IDS="$3"; SBX_SERVER_ID="$4"; ` +
-    `HOST_ID_COUNT="$5"; ORPHAN_SLACK=120;\n${checks}`;
+    `HOST_ID_COUNT="$5"; IPV4_ID="$6"; ORPHAN_SLACK=120;\n${checks}`;
   function run(listenerAge, guestUptime, hostId, guestId, count = "1") {
-    const result = spawnSync("bash", ["-c", harness, "test", listenerAge, guestUptime, hostId, guestId, count], {
+    const result = spawnSync("bash", ["-c", harness, "test", listenerAge, guestUptime, hostId, guestId, count, hostId], {
       encoding: "utf8", timeout: 5000,
     });
     assert.ifError(result.error);
@@ -104,7 +121,7 @@ test("age discrepancy is advisory only after host and guest IDs agree", async ()
   assert.match(run("130000", "1000", "srv_wrong", "srv_guest"), /FAIL:MISMATCH/);
   assert.match(run("130000", "1000", "srv_wrong", "srv_guest"), /FAIL:listener elapsed time/);
   assert.match(run("130000", "1000", "", "srv_guest", "0"), /FAIL:no host probe/);
-  assert.match(run("1000", "1000", "srv_same", "srv_same"), /PASS:listener is no older/);
+  assert.match(run("1000", "1000", "srv_same", "srv_same"), /PASS:listener elapsed time is within/);
   assert.match(run("", "1000", "srv_same", "srv_same"), /WARN:listener age or guest uptime unavailable/);
 });
 
@@ -115,4 +132,83 @@ test("failed identity guidance never recommends killing this sandbox VM", async 
   assert.equal(start, -1, "stale-forwarder instructions must not include a generic kill sequence");
   assert.match(source, /Never kill an 'msb machine --name \$SBX' process/);
   assert.doesNotMatch(source.slice(source.indexOf("Diagnosis for a failed identity check"), next), /kill -9|kill <listener-pid>/);
+});
+
+test("whole identity gate requires the published IPv4 server ID before downgrading post-sleep age", async (t) => {
+  const mocks = await mkdtemp(path.join(os.tmpdir(), "paseo-identity-full-"));
+  t.after(() => rm(mocks, { force: true, recursive: true }));
+  await mockCommand(mocks, "acq", `
+if [ "$1" = exec ]; then
+  printf 'SERVER_ID=%s\nDAEMON_PID=12\nVM_UPTIME=1000\nBIND=00000000:1A6F\nHEALTH={"status":"ok"}\nEXTERNAL=0\nLOOPBACK=0\n' "$MOCK_GUEST_ID"
+elif [ "$1" = ports ]; then printf '127.0.0.1:6767\n'; else exit 3; fi`);
+  await mockCommand(mocks, "lsof", "printf 'COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\nmsb 432 agent 7u IPv4 0 0t0 TCP *:6767 (LISTEN)\n'");
+  await mockCommand(mocks, "ps", `
+case "$*" in
+  *'command='*) printf 'msb machine --name example\n' ;;
+  *'ppid='*) printf '1\n' ;;
+  *'etime='*) printf '1-12:00:00\n' ;;
+  *) printf 'PID PPID STARTED ELAPSED\n432 1 now 1-12:00:00\n' ;;
+esac`);
+  await mockCommand(mocks, "curl", "printf '{\"status\":\"ok\"}'");
+  await mockCommand(mocks, "node", 'if [ "$1" = -e ]; then printf "127.0.0.1\\n"; else printf "%s\\n" "$MOCK_WS_ROWS"; fi');
+  const cases = [
+    { name: "same daemon after host sleep", guest: "srv_one", rows: "localhost: srv_one\n127.0.0.1: srv_one\nipv4-mapped: srv_one", exit: 0, expected: /RESULT: PASS WITH WARNINGS/ },
+    { name: "wrong daemon", guest: "srv_one", rows: "localhost: srv_other\n127.0.0.1: srv_other\nipv4-mapped: srv_other", exit: 1, expected: /MISMATCH/ },
+    { name: "only localhost has an ID", guest: "srv_one", rows: "localhost: srv_one\n127.0.0.1: timeout\nipv4-mapped: timeout", exit: 1, expected: /published 127\.0\.0\.1 endpoint did not provide/ },
+    { name: "IPv4 serves another daemon", guest: "srv_one", rows: "localhost: srv_one\n127.0.0.1: srv_other\nipv4-mapped: srv_one", exit: 1, expected: /host probes disagree/ },
+    { name: "arbitrary frame text is not an ID", guest: "srv_one", rows: "localhost: invalid server_info srv_one\n127.0.0.1: invalid server_info srv_one\nipv4-mapped: invalid server_info srv_one", exit: 1, expected: /no host probe reached/ },
+    { name: "missing guest ID", guest: "", rows: "localhost: srv_one\n127.0.0.1: srv_one\nipv4-mapped: srv_one", exit: 1, expected: /could not read.*server-id/ },
+  ];
+  for (const scenario of cases) {
+    const result = spawnSync("bash", [script, "example"], {
+      env: { ...process.env, PATH: `${mocks}:${process.env.PATH}`, HOST_HP: "127.0.0.1:6767", HEALTH_GRACE: "0", MOCK_GUEST_ID: scenario.guest, MOCK_WS_ROWS: scenario.rows },
+      encoding: "utf8", timeout: 5000,
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, scenario.exit, `${scenario.name}: ${result.stdout}\n${result.stderr}`);
+    assert.match(result.stdout, scenario.expected, scenario.name);
+    if (scenario.exit === 0) {
+      assert.match(result.stdout, /listener elapsed time exceeds guest uptime/);
+      assert.doesNotMatch(result.stdout, /RESULT: FAIL/);
+    }
+  }
+});
+
+test("WebSocket probe requires a structured server_info response", async (t) => {
+  const source = await readFile(script, "utf8");
+  const begin = source.indexOf("const net = require('net');");
+  const end = source.indexOf("\nNODE\n", begin);
+  assert.ok(begin > 0 && end > begin);
+  const probe = source.slice(begin, end).replace("const port = Number(process.argv[2] || 6767);", "const port = Number(process.argv[1]);");
+  let response = '{"type":"server_info","serverId":"srv_real"}';
+  const server = net.createServer((socket) => {
+    let sent = false;
+    socket.on("data", () => {
+      if (sent) return;
+      sent = true;
+      const payload = Buffer.from(response);
+      socket.end(Buffer.concat([
+        Buffer.from("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"),
+        Buffer.from([0x81, payload.length]), payload,
+      ]));
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  async function probeOnce() {
+    const child = spawn("node", ["-e", probe, String(server.address().port)], { stdio: ["ignore", "pipe", "pipe"] });
+    let output = "";
+    child.stdout.on("data", (bytes) => { output += bytes; });
+    const exit = await new Promise((resolve, reject) => {
+      child.on("error", reject);
+      child.on("close", resolve);
+    });
+    assert.equal(exit, 0);
+    return output;
+  }
+  assert.match(await probeOnce(), /^127\.0\.0\.1: srv_real$/m);
+  response = '{"type":"other","detail":"srv_fake"}';
+  assert.match(await probeOnce(), /^127\.0\.0\.1: invalid server_info$/m);
+  response = 'text containing srv_fake';
+  assert.match(await probeOnce(), /^127\.0\.0\.1: invalid server_info$/m);
 });

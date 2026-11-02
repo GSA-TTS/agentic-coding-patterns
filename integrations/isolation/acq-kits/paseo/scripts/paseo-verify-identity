@@ -96,6 +96,10 @@ if [ -z "$HOST_HP" ]; then
   exit 2
 fi
 HOST_PORT="${HOST_HP##*:}"
+if [ "${HOST_HP%:*}" != "127.0.0.1" ] || ! valid_port "$HOST_PORT"; then
+  echo "FATAL: HOST_HP must be 127.0.0.1:<decimal port 1..65535>" >&2
+  exit 2
+fi
 
 echo "sandbox:        $SBX"
 echo "guest port:     $CONTAINER_PORT"
@@ -151,8 +155,8 @@ if is_num "${LISTEN_PID:-}"; then
   note "listener PID $LISTEN_PID PPID ${LISTEN_PPID:-?} (PPID 1 is normal here — launchd adopts msb forwarders)"
 
   # Which msb build owns the port vs which one acq drives. A listener from a
-  # DIFFERENT, co-installed msb build is invisible to the active one, so neither
-  # `acq stop` nor `acq rm` can reach it — it must be killed by PID.
+  # DIFFERENT, co-installed msb build may be invisible to the active one. Its
+  # build alone does not establish ownership or authorize process-level action.
   LISTEN_BIN="$(printf '%s\n' "$LISTEN_ARGV" | awk '{print $1}')"
   ACTIVE_BIN="$(command -v msb 2>/dev/null)"
   [ -n "$ACTIVE_BIN" ] && ACTIVE_BIN="$( (readlink -f "$ACTIVE_BIN" 2>/dev/null) || echo "$ACTIVE_BIN")"
@@ -376,8 +380,12 @@ function probe(p) {
       }
       const text = decodeFirstTextFrame(data);
       if (text) {
-        const m = text.match(/srv_[A-Za-z0-9_-]+/);
-        done(`${p.label}: ${m ? m[0] : text.slice(0, 200)}`);
+        let id = '';
+        try {
+          const reply = JSON.parse(text);
+          if (reply?.type === 'server_info' && /^srv_[A-Za-z0-9_-]+$/.test(reply.serverId)) id = reply.serverId;
+        } catch { /* An unparseable first frame cannot establish identity. */ }
+        done(`${p.label}: ${id || 'invalid server_info'}`);
       }
     });
     socket.on('timeout', () => done(`${p.label}: timeout`));
@@ -389,8 +397,9 @@ function probe(p) {
 (async () => { for (const p of probes) console.log(await probe(p)); })();
 NODE
 
-HOST_IDS="$(sed -n 's/.*\(srv_[A-Za-z0-9_-]*\).*/\1/p' "$TMP" | sort -u)"
+HOST_IDS="$(sed -n 's/^[^:]*: \(srv_[A-Za-z0-9_-]*\)$/\1/p' "$TMP" | sort -u)"
 HOST_ID_COUNT="$(printf '%s\n' "$HOST_IDS" | grep -c 'srv_' || true)"
+IPV4_ID="$(sed -n 's/^127\.0\.0\.1: \(srv_[A-Za-z0-9_-]*\)$/\1/p' "$TMP" | head -1)"
 PROBE_TIMEOUTS="$(grep -c 'timeout' "$TMP" || true)"
 
 # ------------------------------------ 6. did host traffic reach THIS daemon?
@@ -411,11 +420,14 @@ info "7. Verdict"
 echo "host WS server ids:  ${HOST_IDS:-<none>}"
 echo "sandbox server id:   ${SBX_SERVER_ID:-<unknown>}"
 
+if [ -z "$IPV4_ID" ]; then
+  bad "published 127.0.0.1 endpoint did not provide a valid server_info ID"
+fi
 if [ "$HOST_ID_COUNT" = "0" ]; then
   bad "no host probe reached a Paseo daemon at all"
 elif [ "$HOST_ID_COUNT" != "1" ]; then
   bad "host probes disagree with EACH OTHER ($(printf '%s' "$HOST_IDS" | tr '\n' ' ')) — multiple backends behind one port"
-elif [ -n "$SBX_SERVER_ID" ] && [ "$HOST_IDS" != "$SBX_SERVER_ID" ]; then
+elif [ -n "$SBX_SERVER_ID" ] && { [ "$HOST_IDS" != "$SBX_SERVER_ID" ] || [ "$IPV4_ID" != "$SBX_SERVER_ID" ]; }; then
   bad "MISMATCH — the host port serves $HOST_IDS but acq exec sees $SBX_SERVER_ID"
   note "Browser-originated provider calls will fail with a rejected credential"
   note "(HTTP 401 \"Authentication failed\"): the request never traverses the"
@@ -425,13 +437,13 @@ elif [ -n "$SBX_SERVER_ID" ]; then
 fi
 
 if [ -n "$AGE_DISCREPANCY" ]; then
-  if [ "$HOST_ID_COUNT" = "1" ] && [ -n "$SBX_SERVER_ID" ] && [ "$HOST_IDS" = "$SBX_SERVER_ID" ]; then
+  if [ "$HOST_ID_COUNT" = "1" ] && [ -n "$IPV4_ID" ] && [ -n "$SBX_SERVER_ID" ] && [ "$HOST_IDS" = "$SBX_SERVER_ID" ] && [ "$IPV4_ID" = "$SBX_SERVER_ID" ]; then
     warn "listener elapsed time exceeds guest uptime by ${AGE_DISCREPANCY}s; host sleep can explain this (WebSocket server IDs agree)"
   else
     bad "listener elapsed time exceeds guest uptime by ${AGE_DISCREPANCY}s and same-daemon identity is not established"
   fi
 elif is_num "${LISTEN_AGE:-}" && is_num "${SBX_VM_UPTIME:-}"; then
-  ok "listener is no older than the sandbox it serves"
+  ok "listener elapsed time is within the guest uptime threshold (identity checked separately)"
 else
   warn "listener age or guest uptime unavailable; age comparison unverified"
 fi
