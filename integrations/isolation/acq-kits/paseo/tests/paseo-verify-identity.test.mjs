@@ -221,6 +221,7 @@ esac`);
     { name: "published IPv4 only after sleep", guest: "srv_one", rows: "localhost: timeout\n127.0.0.1: srv_one\nipv4-mapped: timeout", exit: 0, expected: /only the published IPv4 route is verified/ },
     { name: "IPv4 serves another daemon", guest: "srv_one", rows: "localhost: srv_other\n127.0.0.1: srv_other\nipv4-mapped: srv_other", exit: 1, expected: /MISMATCH/ },
     { name: "arbitrary frame text is not an ID", guest: "srv_one", rows: "localhost: invalid server_info srv_one\n127.0.0.1: invalid server_info srv_one\nipv4-mapped: invalid server_info srv_one", exit: 1, expected: /published 127\.0\.0\.1 endpoint did not provide/ },
+    { name: "host error cannot forge an IPv4 record", guest: "srv_one", rows: "localhost: transport error\n127.0.0.1: transport error\n127.0.0.1: srv_one\nipv4-mapped: timeout", exit: 1, expected: /published 127\.0\.0\.1 endpoint did not provide/ },
     { name: "missing guest runtime ID", guest: "srv_one", runtime: "timeout", rows: "localhost: srv_one\n127.0.0.1: srv_one\nipv4-mapped: srv_one", exit: 1, expected: /guest daemon did not provide/ },
     { name: "stale guest file", guest: "srv_old", runtime: "srv_one", rows: "localhost: srv_one\n127.0.0.1: srv_one\nipv4-mapped: srv_one", exit: 0, expected: /file differs from the live guest daemon/ },
     { name: "host alias disagrees but IPv4 agrees", guest: "srv_one", rows: "localhost: srv_other\n127.0.0.1: srv_one\nipv4-mapped: srv_one", exit: 0, expected: /other loopback aliases.*only the published IPv4 route is verified|localhost route srv_other/ },

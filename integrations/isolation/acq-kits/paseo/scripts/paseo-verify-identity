@@ -72,6 +72,10 @@ if ! valid_port "$CONTAINER_PORT"; then
   echo "FATAL: CONTAINER_PORT must be a decimal port from 1 through 65535 (got: ${CONTAINER_PORT:-<empty>})" >&2
   exit 2
 fi
+if [[ ! "$SBX" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$ ]]; then
+  echo "FATAL: sandbox name must be a plain 1-80 character token" >&2
+  exit 2
+fi
 GUEST_HEX="$(printf '%04X' "$CONTAINER_PORT")"
 
 pass=0
@@ -123,7 +127,7 @@ if [ -z "${HOST_HP:-}" ]; then
   HOST_HP="$mappings"
 fi
 if [ -z "$HOST_HP" ]; then
-  echo "FATAL: could not resolve a 127.0.0.1:<port> host mapping for $SBX." >&2
+  echo "FATAL: could not resolve a 127.0.0.1:<port> host mapping for sandbox $(safe_text "$SBX") (hex)." >&2
   echo "       Is the sandbox running?  acq ls" >&2
   exit 2
 fi
@@ -133,7 +137,7 @@ if [ "${HOST_HP%:*}" != "127.0.0.1" ] || ! valid_port "$HOST_PORT"; then
   exit 2
 fi
 
-echo "sandbox:        $SBX"
+echo "sandbox (hex):  $(safe_text "$SBX")"
 echo "guest port:     $CONTAINER_PORT"
 echo "host mapping:   $HOST_HP"
 note "Host and guest ports need not match (post-hoc publish uses a different host port),"
@@ -184,7 +188,7 @@ echo "argv (hex, capped): $(safe_text "${LISTEN_ARGV:-<unreadable>}")"
 
   # PPID 1 is NORMAL for an msb forwarder (launchd adopts it). Neither parent
   # PID nor elapsed time alone establishes which sandbox owns this listener.
-  note "listener PID $LISTEN_PID PPID ${LISTEN_PPID:-?} (PPID 1 is normal here — launchd adopts msb forwarders)"
+  note "listener PID (hex) $(safe_text "$LISTEN_PID") PPID (hex) $(safe_text "${LISTEN_PPID:-?}") (PPID 1 is normal here — launchd adopts msb forwarders)"
 
   # Which msb build owns the port vs which one acq drives. A listener from a
   # DIFFERENT, co-installed msb build may be invisible to the active one. Its
@@ -247,7 +251,7 @@ fi
 info "3. Sandbox Identity via acq exec"
 # One exec, KEY=VALUE out. The remote script is single-quoted (no host
 # interpolation); the guest port arrives as $1.
-SBX_RAW="$(acq exec "$SBX" -- sh -lc '
+if ! SBX_RAW="$(acq exec "$SBX" -- sh -lc '
   p="$1"
   # Each record must stay on one line. server-id is guest-writable, so an
   # embedded newline must not forge a later KEY=value record for the host parser.
@@ -258,7 +262,10 @@ SBX_RAW="$(acq exec "$SBX" -- sh -lc '
   printf "HEALTH=%s\n"     "$(curl -sS --max-time 5 "http://127.0.0.1:$p/api/health" 2>&1 | tr -d "\n")"
   printf "EXTERNAL=%s\n"   "$(grep -c "\"peer\":\"external\"" "$HOME/.paseo/daemon.log" 2>/dev/null || echo 0)"
   printf "LOOPBACK=%s\n"   "$(grep -c "\"peer\":\"loopback\"" "$HOME/.paseo/daemon.log" 2>/dev/null || echo 0)"
-' _ "$CONTAINER_PORT" 2>/dev/null | strip_cr)"
+' _ "$CONTAINER_PORT" 2>/dev/null | strip_cr)"; then
+  SBX_RAW=""
+  bad "guest diagnostic probe did not complete; guest health and bind unverified"
+fi
 
 sbx_val() { printf '%s\n' "$SBX_RAW" | sed -n "s/^$1=//p" | head -1; }
 SBX_SERVER_ID="$(sbx_val SERVER_ID)"
@@ -438,7 +445,7 @@ function probe(p) {
       }
     });
     socket.on('timeout', () => done(`${p.label}: timeout`));
-    socket.on('error', (e) => done(`${p.label}: error ${e.message}`));
+    socket.on('error', () => done(`${p.label}: transport error`));
   });
 }
 
@@ -460,9 +467,10 @@ echo "guest runtime WS id: ${GUEST_RUNTIME_ID:-<unverified>}"
 
 HOST_IDS="$(sed -n 's/^[^:]*: \(srv_[A-Za-z0-9_-]*\)$/\1/p' "$TMP" | sort -u)"
 HOST_ID_COUNT="$(printf '%s\n' "$HOST_IDS" | grep -c 'srv_' || true)"
-IPV4_IDS="$(sed -n 's/^127\.0\.0\.1: \(srv_[A-Za-z0-9_-]*\)$/\1/p' "$TMP")"
+IPV4_ROWS="$(grep '^127\.0\.0\.1:' "$TMP" || true)"
+IPV4_IDS="$(printf '%s\n' "$IPV4_ROWS" | sed -n 's/^127\.0\.0\.1: \(srv_[A-Za-z0-9_-]*\)$/\1/p')"
 IPV4_ID=""
-if [[ "$IPV4_IDS" != *$'\n'* && "$IPV4_IDS" == srv_* ]]; then IPV4_ID="$IPV4_IDS"; fi
+if [[ "$IPV4_ROWS" != *$'\n'* && "$IPV4_IDS" == srv_* ]]; then IPV4_ID="$IPV4_IDS"; fi
 PROBE_TIMEOUTS="$(grep -c 'timeout' "$TMP" || true)"
 
 # ------------------------------------ 6. did host traffic reach THIS daemon?
