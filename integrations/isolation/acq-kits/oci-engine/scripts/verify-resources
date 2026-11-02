@@ -1,0 +1,10 @@
+#!/bin/sh
+# Guest-only resource qualification; see ../docs/decisions/resource-qualification.md.
+set -eu
+PATH=/usr/bin:/bin
+export PATH
+if ! command -v python3 >/dev/null 2>&1; then
+    printf '%s\n' 'UNVERIFIED: Python 3 is unavailable' >&2
+    exit 3
+fi
+exec python3 -I -B "$(dirname "$0")/verify_resources.py" "$@"
