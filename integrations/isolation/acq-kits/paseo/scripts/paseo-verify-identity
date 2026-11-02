@@ -28,8 +28,8 @@
 #                         rc=52 "Empty reply from server" for a few seconds; without
 #                         this the probe reports a false transport fault (the same
 #                         boot race scripts/verify guards with POST_INSTALL_GRACE).
-#   ORPHAN_SLACK=120      seconds the listener may predate the sandbox before we
-#                         call it an orphan (clock/startup-ordering slack)
+#   ORPHAN_SLACK=120      age discrepancy threshold for an advisory when host
+#                         and guest identities agree (host sleep skews uptime)
 #
 # Exit codes:
 #   0  host and sandbox agree — safe to open the UI
@@ -146,10 +146,8 @@ if is_num "${LISTEN_PID:-}"; then
   LISTEN_AGE="$(etime_to_secs "$(ps -o etime= -p "$LISTEN_PID" 2>/dev/null)")"
   printf '\n'
 
-  # PPID 1 is NORMAL for an msb forwarder (launchd adopts it); it is deliberately
-  # informational, not a warning. A check that fires on every healthy system is
-  # noise. The real orphan signals are the age compare (section 3) and the build
-  # compare immediately below.
+  # PPID 1 is NORMAL for an msb forwarder (launchd adopts it). Neither parent
+  # PID nor elapsed time alone establishes which sandbox owns this listener.
   note "listener PID $LISTEN_PID PPID ${LISTEN_PPID:-?} (PPID 1 is normal here — launchd adopts msb forwarders)"
 
   # Which msb build owns the port vs which one acq drives. A listener from a
@@ -265,13 +263,13 @@ case "$SBX_BIND" in
     bad "guest bind for :$GUEST_HEX not found in /proc/net/tcp (got: ${SBX_BIND:-<none>})" ;;
 esac
 
-# Orphan cross-check: a forwarder OLDER than the sandbox it serves is a leak.
+# Record the age discrepancy, but decide it only after comparing WebSocket IDs.
+# Host sleep can advance process elapsed time while guest /proc/uptime pauses.
+AGE_DISCREPANCY=""
 if is_num "${LISTEN_AGE:-}" && is_num "${SBX_VM_UPTIME:-}"; then
   note "listener age ${LISTEN_AGE}s vs sandbox uptime ${SBX_VM_UPTIME}s"
   if [ "$LISTEN_AGE" -gt "$((SBX_VM_UPTIME + ORPHAN_SLACK))" ]; then
-    bad "the host listener PREDATES the running sandbox by $((LISTEN_AGE - SBX_VM_UPTIME))s — orphaned forwarder"
-  else
-    ok "listener is no older than the sandbox it serves"
+    AGE_DISCREPANCY=$((LISTEN_AGE - SBX_VM_UPTIME))
   fi
 fi
 
@@ -426,6 +424,18 @@ elif [ -n "$SBX_SERVER_ID" ]; then
   ok "host port and acq exec agree on $SBX_SERVER_ID"
 fi
 
+if [ -n "$AGE_DISCREPANCY" ]; then
+  if [ "$HOST_ID_COUNT" = "1" ] && [ -n "$SBX_SERVER_ID" ] && [ "$HOST_IDS" = "$SBX_SERVER_ID" ]; then
+    warn "listener elapsed time exceeds guest uptime by ${AGE_DISCREPANCY}s; host sleep can explain this (WebSocket server IDs agree)"
+  else
+    bad "listener elapsed time exceeds guest uptime by ${AGE_DISCREPANCY}s and same-daemon identity is not established"
+  fi
+elif is_num "${LISTEN_AGE:-}" && is_num "${SBX_VM_UPTIME:-}"; then
+  ok "listener is no older than the sandbox it serves"
+else
+  warn "listener age or guest uptime unavailable; age comparison unverified"
+fi
+
 if is_num "${PROBE_TIMEOUTS:-}" && [ "${PROBE_TIMEOUTS:-0}" -gt 0 ]; then
   warn "$PROBE_TIMEOUTS host WS probe(s) timed out — see section 2 for the name-resolution check"
 fi
@@ -437,31 +447,23 @@ if [ "$fail" -gt 0 ]; then
 
 RESULT: FAIL
 
-Remediation for a stale host forwarder — the case 'acq stop' + 'acq rm' do NOT fix:
+Diagnosis for a failed identity check:
 
   1. Identify what holds the port, with FULL argv (note the -ww):
        lsof -nP -iTCP:${HOST_PORT} -sTCP:LISTEN
        ps -ww -o pid,ppid,lstart,etime,command -p <listener-pid>
      Compare its binary path to 'command -v msb'. A listener from a DIFFERENT
-     msb installation is invisible to the acq you are running, which is why the
-     lifecycle commands cannot release it.
+      msb installation may be invisible to the acq you are running. Confirm the
+      host and guest server IDs and the listener's sandbox name before acting.
 
-  2. Kill it by PID, then confirm the port is genuinely free:
-       kill <listener-pid>
-       lsof -nP -iTCP:${HOST_PORT} -sTCP:LISTEN   # must print NOTHING before continuing
-       # only if it survived SIGTERM:
-       kill -9 <listener-pid>
+  2. Never kill an 'msb machine --name $SBX' process: it IS this sandbox's VM.
+     An age difference alone, especially after host sleep, is not proof of an
+     orphan. If identity differs, investigate ownership before any remediation.
 
-     If its PPID is NOT 1, do not SIGKILL blindly — it may have siblings under a
-     supervisor. Investigate the parent first.
-
-  3. Restart the sandbox so its own forwarder can finally bind:
-       acq stop $SBX && acq start $SBX
-
-  4. Re-run this check. Success is the two ids AGREEING WITH EACH OTHER — never
+  3. Re-run this check. Success is the two ids AGREEING WITH EACH OTHER — never
      matching a remembered value, since the id changes when the VM is recreated.
 
-  5. Clear stale browser state, which does not self-heal once the pinned
+  4. Clear stale browser state, which does not self-heal once the pinned
      serverId no longer exists anywhere:
        DevTools > Application > Storage > Clear site data
      ("Empty Cache and Hard Reload" does NOT clear Local Storage, where the

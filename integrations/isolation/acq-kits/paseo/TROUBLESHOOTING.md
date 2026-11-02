@@ -111,21 +111,23 @@ because upstream's `microsandbox` and the pinned `microsandbox-acq` both own
 upgraded, downgraded, or pinned `msb` while a sandbox had a published port, this
 is the failure to check for first.
 
-**Fix.** Kill the stale forwarder by PID, confirm the port is genuinely free,
-then restart so the sandbox can bind its own:
+**Fix.** First confirm the listener does **not** belong to the sandbox being
+checked. Elapsed host process time can exceed guest uptime after a host sleep;
+matching WebSocket server IDs mean an age discrepancy is not an orphan verdict.
+Never kill an `msb machine --name <sandbox>` process for that sandbox: it is the
+VM itself. If identities differ and ownership confirms a stale forwarder from
+another sandbox/build, use that owner's supported lifecycle command first.
+Verify the port is free before restarting the affected sandbox:
 
 ```bash
-kill <listener-pid>
 lsof -nP -iTCP:<host-port> -sTCP:LISTEN     # must print NOTHING before continuing
-# only if it survived SIGTERM:
-kill -9 <listener-pid>
-
 acq stop <sandbox> && acq start <sandbox>
 scripts/paseo-verify-identity <sandbox>
 ```
 
-If the listener's `PPID` is **not** 1, do not `kill -9` blindly — it may have
-siblings under a supervisor. Investigate the parent first.
+If the listener survives the confirmed owner's normal shutdown, investigate
+the process tree before taking any process-level action; PPID 1 alone does not
+prove orphan status.
 
 > **`paseo daemon restart` will not fix this.** Elsewhere in this guide that is
 > the right way to bounce the daemon, but here the stale component is the

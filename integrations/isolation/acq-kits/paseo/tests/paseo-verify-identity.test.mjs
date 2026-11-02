@@ -77,3 +77,42 @@ fi`);
     await rm(mocks, { force: true, recursive: true });
   }
 });
+
+test("age discrepancy is advisory only after host and guest IDs agree", async () => {
+  const source = await readFile(script, "utf8");
+  const ageStart = source.indexOf('AGE_DISCREPANCY=""');
+  const ageEnd = source.indexOf("\n# ------------------------------------------- 4.", ageStart);
+  const verdictStart = source.indexOf('if [ "$HOST_ID_COUNT" = "0" ]');
+  const verdictEnd = source.indexOf('\nif is_num "${PROBE_TIMEOUTS:-}"', verdictStart);
+  assert.ok(ageStart > 0 && ageEnd > ageStart && verdictStart > ageEnd && verdictEnd > verdictStart);
+  const checks = `${source.slice(ageStart, ageEnd)}\n${source.slice(verdictStart, verdictEnd)}`;
+  const harness = `is_num() { case "$1" in ''|*[!0-9]*) return 1;; *) return 0;; esac; }\n` +
+    `ok() { printf 'PASS:%s\\n' "$1"; }; bad() { printf 'FAIL:%s\\n' "$1"; }; ` +
+    `warn() { printf 'WARN:%s\\n' "$1"; }; note() { :; };\n` +
+    `LISTEN_AGE="$1"; SBX_VM_UPTIME="$2"; HOST_IDS="$3"; SBX_SERVER_ID="$4"; ` +
+    `HOST_ID_COUNT="$5"; ORPHAN_SLACK=120;\n${checks}`;
+  function run(listenerAge, guestUptime, hostId, guestId, count = "1") {
+    const result = spawnSync("bash", ["-c", harness, "test", listenerAge, guestUptime, hostId, guestId, count], {
+      encoding: "utf8", timeout: 5000,
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout;
+  }
+  assert.match(run("130000", "1000", "srv_same", "srv_same"), /WARN:listener elapsed time/);
+  assert.doesNotMatch(run("130000", "1000", "srv_same", "srv_same"), /FAIL:/);
+  assert.match(run("130000", "1000", "srv_wrong", "srv_guest"), /FAIL:MISMATCH/);
+  assert.match(run("130000", "1000", "srv_wrong", "srv_guest"), /FAIL:listener elapsed time/);
+  assert.match(run("130000", "1000", "", "srv_guest", "0"), /FAIL:no host probe/);
+  assert.match(run("1000", "1000", "srv_same", "srv_same"), /PASS:listener is no older/);
+  assert.match(run("", "1000", "srv_same", "srv_same"), /WARN:listener age or guest uptime unavailable/);
+});
+
+test("failed identity guidance never recommends killing this sandbox VM", async () => {
+  const source = await readFile(script, "utf8");
+  const start = source.indexOf("Remediation for a stale host forwarder");
+  const next = source.indexOf("RESULT: PASS WITH WARNINGS", start);
+  assert.equal(start, -1, "stale-forwarder instructions must not include a generic kill sequence");
+  assert.match(source, /Never kill an 'msb machine --name \$SBX' process/);
+  assert.doesNotMatch(source.slice(source.indexOf("Diagnosis for a failed identity check"), next), /kill -9|kill <listener-pid>/);
+});
