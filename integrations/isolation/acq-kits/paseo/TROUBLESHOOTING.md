@@ -52,23 +52,18 @@ still carries the placeholder, so the provider receives a well-formed but invali
 credential. The auth error is therefore a *symptom of misrouting*, not a bad key —
 chasing the key wastes the most time on this failure.
 
-**Diagnosis — compare the two identities.** A Paseo daemon has a stable id in
-`~/.paseo/server-id`. Ask the host-published port what it is, then ask the guest
-directly. They must match:
+**Diagnosis — compare two live daemon identities.** Probe `server_info` over
+`/ws` on the published IPv4 port and from inside the guest. Their runtime IDs
+must match:
 
 ```bash
 scripts/paseo-verify-identity <sandbox>
 ```
 
-That check fails loudly on a mismatch and prints the remediation. To do it by
-hand, the guest side is:
-
-```bash
-acq exec <sandbox> -- sh -lc 'cat ~/.paseo/server-id; cat ~/.paseo/paseo.pid'
-```
-
-and the host side is a `hello` frame over the published port's `/ws`, reading
-`serverId` from the `server_info` reply.
+The script performs both probes and reports a mismatch. The guest-writable
+`~/.paseo/server-id` file is only diagnostic; reading it does not prove which
+daemon is serving the guest port. The `localhost` and IPv4-mapped aliases are
+advisory observations, not the published IPv4 identity verdict.
 
 **Cause — a host forwarder that outlived the sandbox it was created for.** The
 create-time `-p HOST:GUEST` publish runs a host-side `msb` process. That process

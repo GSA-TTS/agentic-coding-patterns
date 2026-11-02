@@ -387,10 +387,14 @@ function probe(p) {
         if (headerEnd < 0) return;
         const headers = data.subarray(0, headerEnd).toString('utf8').split('\r\n');
         const status = headers.shift() || '';
-        const values = new Map(headers.map(line => {
+        const values = new Map();
+        for (const line of headers) {
           const colon = line.indexOf(':');
-          return colon < 1 ? ['', ''] : [line.slice(0, colon).trim().toLowerCase(), line.slice(colon + 1).trim()];
-        }));
+          if (colon < 1) return done(`${p.label}: invalid WebSocket upgrade`);
+          const name = line.slice(0, colon).trim().toLowerCase();
+          if (values.has(name)) return done(`${p.label}: invalid WebSocket upgrade`);
+          values.set(name, line.slice(colon + 1).trim());
+        }
         const accept = crypto.createHash('sha1').update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
         if (!/^HTTP\/1\.[01] 101(?: |$)/.test(status) ||
             !/\bwebsocket\b/i.test(values.get('upgrade') || '') ||
@@ -409,7 +413,8 @@ function probe(p) {
         let id = '';
         try {
           const reply = JSON.parse(text);
-          if (reply?.type === 'server_info' && /^srv_[A-Za-z0-9_-]+$/.test(reply.serverId)) id = reply.serverId;
+          if (reply?.type === 'server_info' && typeof reply.serverId === 'string' &&
+              /^srv_[A-Za-z0-9_-]+$/.test(reply.serverId)) id = reply.serverId;
         } catch { /* An unparseable first frame cannot establish identity. */ }
         done(`${p.label}: ${id || 'invalid server_info'}`);
       }
@@ -422,8 +427,12 @@ function probe(p) {
 (async () => { for (const p of probes) console.log(await probe(p)); })();
 NODE
  )"
-node -e "$WS_PROBE" "$HOST_PORT" host 2>/dev/null | tee "$TMP"
-GUEST_WS_RAW="$(acq exec "$SBX" -- node -e "$WS_PROBE" "$CONTAINER_PORT" guest 2>/dev/null | strip_cr)"
+if ! node -e "$WS_PROBE" "$HOST_PORT" host 2>/dev/null | tee "$TMP"; then
+  : > "$TMP" # A partial response from a failed probe cannot establish identity.
+fi
+if ! GUEST_WS_RAW="$(acq exec "$SBX" -- node -e "$WS_PROBE" "$CONTAINER_PORT" guest 2>/dev/null | strip_cr)"; then
+  GUEST_WS_RAW=""
+fi
 GUEST_RUNTIME_ID=""
 if [[ "$GUEST_WS_RAW" != *$'\n'* && "$GUEST_WS_RAW" == '127.0.0.1: srv_'* ]]; then
   candidate="${GUEST_WS_RAW#127.0.0.1: }"
@@ -433,7 +442,9 @@ echo "guest runtime WS id: ${GUEST_RUNTIME_ID:-<unverified>}"
 
 HOST_IDS="$(sed -n 's/^[^:]*: \(srv_[A-Za-z0-9_-]*\)$/\1/p' "$TMP" | sort -u)"
 HOST_ID_COUNT="$(printf '%s\n' "$HOST_IDS" | grep -c 'srv_' || true)"
-IPV4_ID="$(sed -n 's/^127\.0\.0\.1: \(srv_[A-Za-z0-9_-]*\)$/\1/p' "$TMP" | head -1)"
+IPV4_IDS="$(sed -n 's/^127\.0\.0\.1: \(srv_[A-Za-z0-9_-]*\)$/\1/p' "$TMP")"
+IPV4_ID=""
+if [[ "$IPV4_IDS" != *$'\n'* && "$IPV4_IDS" == srv_* ]]; then IPV4_ID="$IPV4_IDS"; fi
 PROBE_TIMEOUTS="$(grep -c 'timeout' "$TMP" || true)"
 
 # ------------------------------------ 6. did host traffic reach THIS daemon?

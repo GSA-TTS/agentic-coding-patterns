@@ -219,6 +219,7 @@ test("WebSocket probe requires a structured server_info response", async (t) => 
   let response = '{"type":"server_info","serverId":"srv_real"}';
   let invalidUpgrade = false;
   let invalidFrame = false;
+  let duplicateAccept = false;
   const server = net.createServer((socket) => {
     let sent = false;
     let awaitingHello = false;
@@ -234,7 +235,7 @@ test("WebSocket probe requires a structured server_info response", async (t) => 
         const accept = createHash("sha1").update(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest("base64");
         received = received.subarray(end + 4);
         awaitingHello = !invalidUpgrade;
-        socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${invalidUpgrade ? "invalid" : accept}\r\n\r\n`);
+        socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n${duplicateAccept ? "Sec-WebSocket-Accept: invalid\r\n" : ""}Sec-WebSocket-Accept: ${invalidUpgrade ? "invalid" : accept}\r\n\r\n`);
         if (invalidUpgrade) return;
       }
       if (received.length < 6) return;
@@ -284,4 +285,10 @@ test("WebSocket probe requires a structured server_info response", async (t) => 
   invalidUpgrade = false;
   invalidFrame = true;
   assert.match(await probeOnce(), /^127\.0\.0\.1: invalid server_info$/m);
+  invalidFrame = false;
+  response = '{"type":"server_info","serverId":["srv_real"]}';
+  assert.match(await probeOnce(), /^127\.0\.0\.1: invalid server_info$/m);
+  response = '{"type":"server_info","serverId":"srv_real"}';
+  duplicateAccept = true;
+  assert.match(await probeOnce(), /^127\.0\.0\.1: invalid WebSocket upgrade$/m);
 });
