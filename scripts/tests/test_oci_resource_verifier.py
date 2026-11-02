@@ -7,15 +7,14 @@ import copy
 import importlib.util
 import json
 import os
-from pathlib import Path
 import signal
 import subprocess
 import sys
 import tempfile
-from types import SimpleNamespace
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
-
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "integrations/isolation/acq-kits/oci-engine/scripts/verify_resources.py"
@@ -24,11 +23,16 @@ v = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(v)
 ID = "a" * 64
 IMAGE = "example.com/library/probe@sha256:" + "b" * 64
-INFO = {"host": {"security": {"rootless": True}, "cgroupVersion": "v2",
-                 "cgroupControllers": ["memory", "cpu", "pids"]}}
-INSPECT = [{"Id": ID, "State": {"Running": True, "Pid": 42},
-            "Config": {"User": "65534:65534"}, "Mounts": [],
-            "HostConfig": {"NetworkMode": "none"}}]
+INFO = {"host": {"security": {"rootless": True}, "cgroupVersion": "v2", "cgroupControllers": ["memory", "cpu", "pids"]}}
+INSPECT = [
+    {
+        "Id": ID,
+        "State": {"Running": True, "Pid": 42},
+        "Config": {"User": "65534:65534"},
+        "Mounts": [],
+        "HostConfig": {"NetworkMode": "none"},
+    }
+]
 
 
 class Fake:
@@ -61,16 +65,24 @@ class QualificationTests(unittest.TestCase):
         fake = Fake()
         self.assertEqual(v.verdict(self.qualify(fake)), 0)
         command = next(args for args in fake.calls if args[0] == "create")
-        for flag in ("--pull=never", "--network=none", "--user=65534:65534",
-                     "--cap-drop=ALL", "--security-opt=no-new-privileges",
-                     "--memory=128m", "--cpus=1", "--pids-limit=32",
-                     "--image-volume=ignore", "--no-healthcheck", "--log-driver=none",
-                     "--entrypoint=/bin/sh"):
+        for flag in (
+            "--pull=never",
+            "--network=none",
+            "--user=65534:65534",
+            "--cap-drop=ALL",
+            "--security-opt=no-new-privileges",
+            "--memory=128m",
+            "--cpus=1",
+            "--pids-limit=32",
+            "--image-volume=ignore",
+            "--no-healthcheck",
+            "--log-driver=none",
+            "--entrypoint=/bin/sh",
+        ):
             self.assertIn(flag, command)
         self.assertEqual(command[-3:], (IMAGE, "-c", "exec sleep 120"))
         self.assertFalse(any(x.startswith(("--mount", "--volume")) for x in command))
-        self.assertEqual(fake.calls[-2:], [("rm", "--force", "--time=0", ID),
-                                          ("container", "exists", ID)])
+        self.assertEqual(fake.calls[-2:], [("rm", "--force", "--time=0", ID), ("container", "exists", ID)])
 
     def test_info_missing_and_negative_schemas_gate_creation(self):
         cases = [({}, 3), ({"host": None}, 3)]
@@ -78,10 +90,13 @@ class QualificationTests(unittest.TestCase):
             info = copy.deepcopy(INFO)
             info["host"]["security"]["rootless"] = rootless
             cases.append((info, code))
-        for field, value in (("cgroupVersion", "v1"), ("cgroupControllers", []),
-                             ("cgroupControllers", "memory cpu pids"),
-                             ("cgroupControllers", ["cpu", "memory"]),
-                             ("cgroupControllers", [None])):
+        for field, value in (
+            ("cgroupVersion", "v1"),
+            ("cgroupControllers", []),
+            ("cgroupControllers", "memory cpu pids"),
+            ("cgroupControllers", ["cpu", "memory"]),
+            ("cgroupControllers", [None]),
+        ):
             info = copy.deepcopy(INFO)
             info["host"][field] = value
             cases.append((info, 3))
@@ -92,17 +107,18 @@ class QualificationTests(unittest.TestCase):
                 self.assertEqual(len(fake.calls), 1)
 
     def test_missing_image_and_malformed_info(self):
-        for responses in ({("image", "exists", IMAGE): (1, "")},
-                          {("info", "--format=json"): (0, "true")},
-                          {("info", "--format=json"): (0, "not json")},
-                          {("info", "--format=json"): (125, "{}")}):
+        for responses in (
+            {("image", "exists", IMAGE): (1, "")},
+            {("info", "--format=json"): (0, "true")},
+            {("info", "--format=json"): (0, "not json")},
+            {("info", "--format=json"): (125, "{}")},
+        ):
             fake = Fake(responses)
             self.assertEqual(v.verdict(self.qualify(fake)), 3)
             self.assertFalse(any(x[0] == "create" for x in fake.calls))
 
     def test_create_failure_never_claims_cleanup(self):
-        for result in ((0, ""), (0, "short"), (0, ID + "\n" + ID),
-                       (125, ""), v.Unverified("timeout")):
+        for result in ((0, ""), (0, "short"), (0, ID + "\n" + ID), (125, ""), v.Unverified("timeout")):
             fake = Fake({("create",): result})
             records = self.qualify(fake)
             self.assertEqual(v.verdict(records), 3)
@@ -116,8 +132,12 @@ class QualificationTests(unittest.TestCase):
         self.assertNotIn(("start", ID), fake.calls)
 
     def test_start_inspect_and_cleanup_failures(self):
-        for command in (("start", ID), ("container", "inspect", ID),
-                        ("rm", "--force", "--time=0", ID), ("container", "exists", ID)):
+        for command in (
+            ("start", ID),
+            ("container", "inspect", ID),
+            ("rm", "--force", "--time=0", ID),
+            ("container", "exists", ID),
+        ):
             for result in ((125, ""), v.Unverified("signal or timeout"), OSError("missing")):
                 with self.subTest(command=command, result=result):
                     fake = Fake({command: result})
@@ -129,14 +149,23 @@ class QualificationTests(unittest.TestCase):
 
     def test_inspect_schemas_and_wrong_policy(self):
         cases = [([], 3), ({}, 3), ([{}], 3), (INSPECT * 2, 3)]
-        for field, value, code in (("Pid", 0, 3), ("Pid", True, 3), ("Pid", "42", 3),
-                                   ("Running", False, 3), ("Running", "true", 3)):
+        for field, value, code in (
+            ("Pid", 0, 3),
+            ("Pid", True, 3),
+            ("Pid", "42", 3),
+            ("Running", False, 3),
+            ("Running", "true", 3),
+        ):
             rows = copy.deepcopy(INSPECT)
             rows[0]["State"][field] = value
             cases.append((rows, code))
-        for key, value, code in (("Id", "b" * 64, 3), ("Mounts", [{}], 1),
-                                 ("Mounts", None, 3), ("Config", {"User": "0"}, 1),
-                                 ("HostConfig", {"NetworkMode": "host"}, 1)):
+        for key, value, code in (
+            ("Id", "b" * 64, 3),
+            ("Mounts", [{}], 1),
+            ("Mounts", None, 3),
+            ("Config", {"User": "0"}, 1),
+            ("HostConfig", {"NetworkMode": "host"}, 1),
+        ):
             rows = copy.deepcopy(INSPECT)
             rows[0][key] = value
             cases.append((rows, code))
@@ -147,10 +176,11 @@ class QualificationTests(unittest.TestCase):
                 self.assertIn(("container", "exists", ID), fake.calls)
 
     def test_measurement_failure_always_cleans_and_retains_failure(self):
-        for error, expected in ((v.Failed("wrong limits"), 1),
-                                (v.Unverified("missing cgroup"), 3)):
-            def measure(_):
+        for error, expected in ((v.Failed("wrong limits"), 1), (v.Unverified("missing cgroup"), 3)):
+
+            def measure(_, error=error):
                 raise error
+
             fake = Fake()
             self.assertEqual(v.verdict(self.qualify(fake, measure)), expected)
             self.assertEqual(fake.calls[-1], ("container", "exists", ID))
@@ -160,11 +190,13 @@ class QualificationTests(unittest.TestCase):
 
     def test_pid_changes_between_inspections(self):
         fake = Fake()
+
         def measure(_):
             rows = copy.deepcopy(INSPECT)
             rows[0]["State"]["Pid"] = 43
             fake.responses[("container", "inspect", ID)] = (0, json.dumps(rows))
             return {}
+
         self.assertEqual(v.verdict(self.qualify(fake, measure)), 3)
         self.assertEqual(fake.calls[-1], ("container", "exists", ID))
 
@@ -191,37 +223,56 @@ class KernelTests(unittest.TestCase):
         return self.data[str(path)]
 
     def test_live_kernel_values_and_mount_root_translation(self):
-        self.assertEqual(v.kernel_limits(42, self.read), {
-            "memory.max": "134217728", "pids.max": "32", "cpu.max": "100000 100000"})
+        self.assertEqual(
+            v.kernel_limits(42, self.read), {"memory.max": "134217728", "pids.max": "32", "cpu.max": "100000 100000"}
+        )
 
     def test_wrong_limits_and_malformed_values(self):
         for name, value, error in (
-            ("memory.max", "max", v.Failed), ("memory.max", "268435456", v.Failed),
-            ("pids.max", "max", v.Failed), ("pids.max", "64", v.Failed),
-            ("cpu.max", "max 100000", v.Failed), ("cpu.max", "200000 100000", v.Failed),
-            ("cpu.max", "100000 0", v.Unverified), ("cpu.max", "junk", v.Unverified),
-            ("memory.max", "junk", v.Unverified), ("pids.max", "", v.Unverified),
+            ("memory.max", "max", v.Failed),
+            ("memory.max", "268435456", v.Failed),
+            ("pids.max", "max", v.Failed),
+            ("pids.max", "64", v.Failed),
+            ("cpu.max", "max 100000", v.Failed),
+            ("cpu.max", "200000 100000", v.Failed),
+            ("cpu.max", "100000 0", v.Unverified),
+            ("cpu.max", "junk", v.Unverified),
+            ("memory.max", "junk", v.Unverified),
+            ("pids.max", "", v.Unverified),
         ):
-            with self.subTest(name=name, value=value):
-                with patch.dict(self.data, {str(self.group / name): value}):
-                    with self.assertRaises(error):
-                        v.kernel_limits(42, self.read)
+            with (
+                self.subTest(name=name, value=value),
+                patch.dict(self.data, {str(self.group / name): value}),
+                self.assertRaises(error),
+            ):
+                v.kernel_limits(42, self.read)
 
     def test_unsafe_or_unmapped_membership_never_reads_limit_files(self):
-        for text in ("0::/delegated/../probe", "0::/delegated/./probe", "0::relative",
-                     "0::/other/probe", "1:memory:/probe", "0::/probe\n0::/probe"):
-            with self.subTest(text=text):
-                with patch.dict(self.data, {"/proc/42/cgroup": text}):
-                    with self.assertRaises(v.Unverified):
-                        v.kernel_limits(42, self.read)
+        for text in (
+            "0::/delegated/../probe",
+            "0::/delegated/./probe",
+            "0::relative",
+            "0::/other/probe",
+            "1:memory:/probe",
+            "0::/probe\n0::/probe",
+        ):
+            with (
+                self.subTest(text=text),
+                patch.dict(self.data, {"/proc/42/cgroup": text}),
+                self.assertRaises(v.Unverified),
+            ):
+                v.kernel_limits(42, self.read)
 
     def test_mount_schemas_and_symlink(self):
-        for table in ("", "garbage", "1 - cgroup2",
-                      f"1 2 0:3 /delegated/.. {self.mount} rw - cgroup2 x rw",
-                      f"1 2 0:3 /delegated {self.mount} rw - tmpfs x rw"):
-            with self.subTest(table=table):
-                with self.assertRaises(v.Unverified):
-                    v.mount_path(v.membership("0::/delegated/probe"), table)
+        for table in (
+            "",
+            "garbage",
+            "1 - cgroup2",
+            f"1 2 0:3 /delegated/.. {self.mount} rw - cgroup2 x rw",
+            f"1 2 0:3 /delegated {self.mount} rw - tmpfs x rw",
+        ):
+            with self.subTest(table=table), self.assertRaises(v.Unverified):
+                v.mount_path(v.membership("0::/delegated/probe"), table)
         alias = self.mount / "alias"
         alias.symlink_to(self.group)
         with self.assertRaises(v.Unverified):
@@ -239,16 +290,19 @@ class KernelTests(unittest.TestCase):
             v.mount_path(member, table + "\n" + self.data["/proc/self/mountinfo"])
 
     def test_process_death_uid_privilege_and_missing_evidence(self):
-        for status, error in (("Uid: 0 0 0 0\nCapEff: 0\nNoNewPrivs: 1", v.Failed),
-                              ("Uid: 1000\n", v.Unverified),
-                              ("Uid: 1 1 1 1\nCapEff: 1\nNoNewPrivs: 1", v.Failed),
-                              ("Uid: 1 1 1 1\nCapEff: 0\nNoNewPrivs: 0", v.Failed)):
-            with patch.dict(self.data, {"/proc/42/status": status}):
-                with self.assertRaises(error):
-                    v.kernel_limits(42, self.read)
-        with patch.dict(self.data, {"/proc/42/stat": self.stat.replace(") S", ") Z")}):
-            with self.assertRaises(v.Unverified):
+        for status, error in (
+            ("Uid: 0 0 0 0\nCapEff: 0\nNoNewPrivs: 1", v.Failed),
+            ("Uid: 1000\n", v.Unverified),
+            ("Uid: 1 1 1 1\nCapEff: 1\nNoNewPrivs: 1", v.Failed),
+            ("Uid: 1 1 1 1\nCapEff: 0\nNoNewPrivs: 0", v.Failed),
+        ):
+            with patch.dict(self.data, {"/proc/42/status": status}), self.assertRaises(error):
                 v.kernel_limits(42, self.read)
+        with (
+            patch.dict(self.data, {"/proc/42/stat": self.stat.replace(") S", ") Z")}),
+            self.assertRaises(v.Unverified),
+        ):
+            v.kernel_limits(42, self.read)
         del self.data[str(self.group / "pids.max")]
         with self.assertRaises(KeyError):
             v.kernel_limits(42, self.read)
@@ -256,12 +310,14 @@ class KernelTests(unittest.TestCase):
     def test_pid_reuse_and_migration(self):
         for target in ("/proc/42/stat", "/proc/42/cgroup"):
             calls = []
-            def read(path):
+
+            def read(path, target=target, calls=calls):
                 if path == target:
                     calls.append(path)
                     if len(calls) == 2:
                         return self.stat[:-3] + "124" if target.endswith("stat") else "0::/delegated/other"
                 return self.read(path)
+
             with self.assertRaises(v.Unverified):
                 v.kernel_limits(42, read)
 
@@ -270,17 +326,26 @@ class TransportTests(unittest.TestCase):
     def setUp(self):
         # Outer sandbox uses the host numeric UID, which need not have a passwd
         # entry. A real qualification requires the guest agent's local account.
-        account = patch.object(v.pwd, "getpwuid", return_value=SimpleNamespace(pw_dir="/tmp"))
+        home = tempfile.TemporaryDirectory()
+        self.addCleanup(home.cleanup)
+        account = patch.object(v.pwd, "getpwuid", return_value=SimpleNamespace(pw_dir=home.name))
         account.start()
         self.addCleanup(account.stop)
 
     def test_environment_is_allowlisted(self):
-        with patch.dict(os.environ, {"DOCKER_HOST": "bad", "CONTAINER_HOST": "bad",
-                                    "CONTAINER_CONNECTION": "bad", "LD_PRELOAD": "bad",
-                                    "HTTP_PROXY": "bad", "PYTHONPATH": "bad"}):
+        with patch.dict(
+            os.environ,
+            {
+                "DOCKER_HOST": "bad",
+                "CONTAINER_HOST": "bad",
+                "CONTAINER_CONNECTION": "bad",
+                "LD_PRELOAD": "bad",
+                "HTTP_PROXY": "bad",
+                "PYTHONPATH": "bad",
+            },
+        ):
             env = v.local_environment()
-        self.assertEqual(set(env), {"HOME", "PATH", "LANG", "LC_ALL", "XDG_RUNTIME_DIR",
-                                    "DBUS_SESSION_BUS_ADDRESS"})
+        self.assertEqual(set(env), {"HOME", "PATH", "LANG", "LC_ALL", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"})
 
     def test_fake_executable_output_timeout_signal_and_local_argv(self):
         # This executable is a Python fixture, never Podman. All subprocess work
@@ -288,11 +353,13 @@ class TransportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             fake = Path(directory) / "fake-engine"
             popen = subprocess.Popen
+
             def fixture_process(argv, **kwargs):
                 # /tmp is deliberately noexec in the review sandbox. Interpret
                 # only this fixture using the already-installed Python binary.
                 self.assertEqual(argv[0], str(fake))
                 return popen([sys.executable, "-I", "-B", *argv], **kwargs)
+
             for body, expected in (
                 ("import sys; print(sys.argv[1:])", "argv"),
                 ("print('x' * 70000)", "error"),
@@ -301,8 +368,7 @@ class TransportTests(unittest.TestCase):
             ):
                 fake.write_text(f"#!{sys.executable}\n{body}\n")
                 fake.chmod(0o700)
-                with patch.object(v, "TIMEOUT", 0.3), \
-                     patch.object(v.subprocess, "Popen", side_effect=fixture_process):
+                with patch.object(v, "TIMEOUT", 0.3), patch.object(v.subprocess, "Popen", side_effect=fixture_process):
                     call = v.Transport(str(fake))
                     if expected == "error":
                         with self.assertRaises(v.Unverified):
@@ -317,8 +383,12 @@ class TransportTests(unittest.TestCase):
             self.assertEqual(v.main(["--guest", "--podman", "/usr/bin/podman", "--image", IMAGE]), 3)
             transport.assert_not_called()
         self.assertEqual(v.main([]), 3)
-        for image in ("alpine", "docker.io/library/alpine:latest", "library/alpine@sha256:" + "a" * 64,
-                      "https://example.com/probe@sha256:" + "a" * 64):
+        for image in (
+            "alpine",
+            "docker.io/library/alpine:latest",
+            "library/alpine@sha256:" + "a" * 64,
+            "https://example.com/probe@sha256:" + "a" * 64,
+        ):
             self.assertIsNone(v.IMAGE.fullmatch(image))
 
     def test_root_and_missing_executable_fail_before_transport(self):
@@ -326,8 +396,7 @@ class TransportTests(unittest.TestCase):
         with patch.object(v.sys, "platform", "linux"), patch.object(v, "Transport") as transport:
             with patch.object(v.os, "getuid", return_value=0):
                 self.assertEqual(v.main(args), 1)
-            with patch.object(v.os, "getuid", return_value=1000), \
-                 patch.object(v.os, "geteuid", return_value=1000):
+            with patch.object(v.os, "getuid", return_value=1000), patch.object(v.os, "geteuid", return_value=1000):
                 self.assertEqual(v.main(args), 3)
                 args[2] = "/does-not-exist/podman"
                 self.assertEqual(v.main(args), 3)
@@ -335,15 +404,22 @@ class TransportTests(unittest.TestCase):
 
     def test_signal_never_passes_even_if_cleanup_finishes(self):
         fake = Fake()
+
         def factory(_):
             def call(*args):
                 result = fake(*args)
                 if args[0] == "start":
                     signal.raise_signal(signal.SIGTERM)
                 return result
+
             return call
-        with patch.object(v.sys, "platform", "linux"), patch.object(v.os, "getuid", return_value=1000), \
-             patch.object(v.os, "geteuid", return_value=1000), patch.object(v, "Transport", side_effect=factory):
+
+        with (
+            patch.object(v.sys, "platform", "linux"),
+            patch.object(v.os, "getuid", return_value=1000),
+            patch.object(v.os, "geteuid", return_value=1000),
+            patch.object(v, "Transport", side_effect=factory),
+        ):
             self.assertEqual(v.main(["--guest", "--podman", sys.executable, "--image", IMAGE]), 3)
         self.assertEqual(fake.calls[-1], ("container", "exists", ID))
 
