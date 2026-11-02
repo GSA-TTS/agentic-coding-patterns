@@ -465,6 +465,13 @@ if [[ "$GUEST_WS_RAW" != *$'\n'* && "$GUEST_WS_RAW" == '127.0.0.1: srv_'* ]]; th
 fi
 echo "guest runtime WS id: ${GUEST_RUNTIME_ID:-<unverified>}"
 
+HOST_ROWS="$(cat "$TMP")"
+if [ "$(printf '%s\n' "$HOST_ROWS" | awk 'NF{n++} END{print n+0}')" != 3 ] ||
+   [ "$(printf '%s\n' "$HOST_ROWS" | grep -c '^localhost: ' || true)" != 1 ] ||
+   [ "$(printf '%s\n' "$HOST_ROWS" | grep -c '^127\.0\.0\.1: ' || true)" != 1 ] ||
+   [ "$(printf '%s\n' "$HOST_ROWS" | grep -c '^ipv4-mapped: ' || true)" != 1 ]; then
+  : > "$TMP" # Unexpected/incomplete records cannot be used as identity evidence.
+fi
 HOST_IDS="$(sed -n 's/^[^:]*: \(srv_[A-Za-z0-9_-]*\)$/\1/p' "$TMP" | sort -u)"
 HOST_ID_COUNT="$(printf '%s\n' "$HOST_IDS" | grep -c 'srv_' || true)"
 IPV4_ROWS="$(grep '^127\.0\.0\.1:' "$TMP" || true)"
@@ -476,7 +483,7 @@ PROBE_TIMEOUTS="$(grep -c 'timeout' "$TMP" || true)"
 # ------------------------------------ 6. did host traffic reach THIS daemon?
 
 info "6. Did Host Traffic Reach This Daemon?"
-echo "daemon.log WebSocket clients by peer:  external=${SBX_EXTERNAL:-?}  loopback=${SBX_LOOPBACK:-?}"
+echo "daemon.log WebSocket clients by peer (hex): external=$(safe_text "${SBX_EXTERNAL:-?}") loopback=$(safe_text "${SBX_LOOPBACK:-?}")"
 if is_num "${SBX_EXTERNAL:-}" && [ "${SBX_EXTERNAL:-0}" -gt 0 ]; then
   ok "host-originated (peer=external) clients have attached to this daemon"
 else
@@ -511,7 +518,7 @@ if [ -n "$IPV4_ID" ]; then
 fi
 if [ -n "$IPV4_ID" ] && [ -n "$GUEST_RUNTIME_ID" ] && [ "$IPV4_ID" != "$GUEST_RUNTIME_ID" ]; then
   bad "MISMATCH — the published IPv4 port serves ${IPV4_ID:-<none>} but guest runtime serves $GUEST_RUNTIME_ID"
-  note "Browser-originated provider calls will fail with a rejected credential"
+  note "Browser-originated provider calls may fail with a rejected credential"
   note "(HTTP 401 \"Authentication failed\"): the request never traverses the"
   note "TLS-intercept path that substitutes injected key placeholders."
 elif [ -n "$IPV4_ID" ] && [ -n "$GUEST_RUNTIME_ID" ]; then
