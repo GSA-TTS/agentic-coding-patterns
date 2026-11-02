@@ -2,8 +2,9 @@
 #
 # paseo-verify-identity — READ-ONLY host-side readiness gate for the paseo acq kit.
 #
-# Answers ONE question with an exit code: does the host-published port reach the
-# SAME Paseo daemon that `acq exec` reaches?
+# Answers ONE question with an exit code: does the published IPv4 host port
+# reach the SAME Paseo daemon that `acq exec` reaches? Other loopback aliases
+# are advisory probes, not independently proven browser routes.
 #
 # Why this is not covered by the bundle readiness gate: that gate proves the UI
 # assets are fully serveable (see docs/decisions/ui-readiness-gate-immutable-cache.md).
@@ -32,7 +33,8 @@
 #                         and guest identities agree (host sleep skews uptime)
 #
 # Exit codes:
-#   0  host and sandbox agree — safe to open the UI
+#   0  published IPv4 host endpoint and sandbox daemon IDs agree;
+#      HTTP health and other host routes are advisory, not UI readiness proof
 #   1  actionable fault (identity mismatch, orphaned forwarder, no listener)
 #   2  precondition failure (missing acq/node, sandbox not running)
 set -uo pipefail
@@ -89,7 +91,19 @@ command -v node >/dev/null 2>&1 || {
   exit 2
 }
 
-HOST_HP="${HOST_HP:-$(acq ports "$SBX" 2>/dev/null | grep -Eo '127\.0\.0\.1:[0-9]+' | head -1)}"
+if [ -z "${HOST_HP:-}" ]; then
+  # acq prints one row per guest mapping. Never select another kit's first
+  # host port when this sandbox publishes multiple services.
+  mappings="$(acq ports "$SBX" 2>/dev/null | awk -v guest="$CONTAINER_PORT" '
+    $1 == "sandbox" && $2 == guest && $3 == "->" && $4 == "host" &&
+    $5 ~ /^127[.]0[.]0[.]1:[0-9]+$/ { print $5 }
+  ' | sort -u)"
+  if [ "$(printf '%s\n' "$mappings" | grep -c '^127\.0\.0\.1:' || true)" != 1 ]; then
+    echo "FATAL: expected exactly one host mapping for guest port $CONTAINER_PORT" >&2
+    exit 2
+  fi
+  HOST_HP="$mappings"
+fi
 if [ -z "$HOST_HP" ]; then
   echo "FATAL: could not resolve a 127.0.0.1:<port> host mapping for $SBX." >&2
   echo "       Is the sandbox running?  acq ls" >&2
@@ -279,7 +293,7 @@ fi
 
 # ------------------------------------------- 4. host health, with a boot grace
 
-info "4. Host HTTP Health (through the published port)"
+info "4. Host HTTP Health (advisory; not an identity proof)"
 deadline=$(( $(date +%s) + HEALTH_GRACE ))
 while :; do
   OUT="$(curl -g -sS --max-time 5 "http://127.0.0.1:${HOST_PORT}/api/health" 2>&1)"
@@ -291,7 +305,7 @@ done
 for host in "127.0.0.1" "localhost" "[::ffff:127.0.0.1]"; do
   OUT="$(curl -g -sS --max-time 5 "http://${host}:${HOST_PORT}/api/health" 2>&1)"
   case "$OUT" in
-    *'"status":"ok"'*) ok   "http://${host}:${HOST_PORT}/api/health -> $OUT" ;;
+    *'"status":"ok"'*) note "http://${host}:${HOST_PORT}/api/health -> $OUT (advisory response)" ;;
     *)                 warn "http://${host}:${HOST_PORT}/api/health -> $OUT" ;;
   esac
 done
@@ -368,8 +382,17 @@ function probe(p) {
       if (!upgraded) {
         const headerEnd = data.indexOf(Buffer.from('\r\n\r\n'));
         if (headerEnd < 0) return;
-        const status = data.subarray(0, headerEnd).toString('utf8').split('\r\n')[0] || '';
-        if (!status.includes('101')) return done(`${p.label}: ${status}`);
+        const headers = data.subarray(0, headerEnd).toString('utf8').split('\r\n');
+        const status = headers.shift() || '';
+        const values = new Map(headers.map(line => {
+          const colon = line.indexOf(':');
+          return colon < 1 ? ['', ''] : [line.slice(0, colon).trim().toLowerCase(), line.slice(colon + 1).trim()];
+        }));
+        const accept = crypto.createHash('sha1').update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
+        if (!/^HTTP\/1\.[01] 101(?: |$)/.test(status) ||
+            !/\bwebsocket\b/i.test(values.get('upgrade') || '') ||
+            !/\bupgrade\b/i.test(values.get('connection') || '') ||
+            values.get('sec-websocket-accept') !== accept) return done(`${p.label}: invalid WebSocket upgrade`);
         upgraded = true;
         data = data.subarray(headerEnd + 4);
         socket.write(encodeFrame(JSON.stringify({
@@ -422,6 +445,14 @@ echo "sandbox server id:   ${SBX_SERVER_ID:-<unknown>}"
 
 if [ -z "$IPV4_ID" ]; then
   bad "published 127.0.0.1 endpoint did not provide a valid server_info ID"
+fi
+if [ "$HOST_ID_COUNT" = "1" ] && [ -n "$IPV4_ID" ]; then
+  for route in localhost ipv4-mapped; do
+    route_id="$(awk -v label="$route:" '$1 == label && $2 ~ /^srv_[A-Za-z0-9_-]+$/ && NF == 2 {print $2; exit}' "$TMP")"
+    if [ -z "$route_id" ]; then
+      warn "$route route did not provide an identity; only the published IPv4 route is verified"
+    fi
+  done
 fi
 if [ "$HOST_ID_COUNT" = "0" ]; then
   bad "no host probe reached a Paseo daemon at all"
@@ -487,6 +518,6 @@ fi
 if [ "$warns" -gt 0 ]; then
   printf 'RESULT: PASS WITH WARNINGS — identities agree; review the warnings above.\n'
 else
-  printf 'RESULT: PASS — safe to open http://127.0.0.1:%s\n' "$HOST_PORT"
+  printf 'RESULT: PASS — published IPv4 identity agrees; UI readiness is a separate check (http://127.0.0.1:%s)\n' "$HOST_PORT"
 fi
 exit 0

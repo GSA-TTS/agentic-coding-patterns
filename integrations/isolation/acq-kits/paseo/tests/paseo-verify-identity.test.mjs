@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { spawn, spawnSync } from "node:child_process";
 import net from "node:net";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -45,6 +46,33 @@ test("rejects malformed HOST_HP overrides before probing", async (t) => {
   }
 });
 
+test("automatic host mapping selects only the configured guest port", async (t) => {
+  const mocks = await mkdtemp(path.join(os.tmpdir(), "paseo-identity-ports-"));
+  t.after(() => rm(mocks, { recursive: true, force: true }));
+  await mockCommand(mocks, "acq", 'printf "%s\\n" "$MOCK_PORTS"');
+  await mockCommand(mocks, "node", "exit 9");
+  await mockCommand(mocks, "curl", "exit 9");
+  for (const [rows, port, status] of [
+    ["sandbox 8080 -> host 127.0.0.1:12345 (create-time -p)\nsandbox 6767 -> host 127.0.0.1:22336 (create-time -p)", "22336", 0],
+    ["sandbox 6767 -> host 127.0.0.1:22336 (create-time -p)\nsandbox 8080 -> host 127.0.0.1:12345 (create-time -p)", "22336", 0],
+    ["sandbox 8080 -> host 127.0.0.1:12345 (create-time -p)", "", 2],
+    ["sandbox 6767 -> host 127.0.0.1:22336\nsandbox 6767 -> host 127.0.0.1:22337", "", 2],
+  ]) {
+    const result = spawnSync("bash", [script, "example"], {
+      env: { ...process.env, HOST_HP: "", MOCK_PORTS: rows, HEALTH_GRACE: "0", PATH: `${mocks}:${process.env.PATH}` },
+      encoding: "utf8", timeout: 5000,
+    });
+    assert.ifError(result.error);
+    if (status === 2) {
+      assert.equal(result.status, 2);
+      assert.match(result.stderr, /expected exactly one host mapping/);
+    } else {
+      assert.match(result.stdout, new RegExp(`host mapping:\\s+127\\.0\\.0\\.1:${port}`));
+      assert.notEqual(result.status, 2);
+    }
+  }
+});
+
 test("normalizes server-id newlines before KEY=value framing", async () => {
   const source = await readFile(script, "utf8");
   const home = await mkdtemp(path.join(os.tmpdir(), "paseo-identity-home-"));
@@ -70,7 +98,7 @@ test("fails when the configured guest port is absent from /proc/net/tcp", async 
   try {
     await mockCommand(mocks, "acq", `
 if [ "$1" = ports ]; then
-  printf '127.0.0.1:6767\\n'
+  printf 'sandbox 6767 -> host 127.0.0.1:6767 (create-time -p)\\n'
 else
   printf 'SERVER_ID=srv_safe\\nDAEMON_PID=1\\nVM_UPTIME=1\\nBIND=00000000:1A6E\\nHEALTH={"status":"ok"}\\nEXTERNAL=0\\nLOOPBACK=0\\n'
 fi`);
@@ -155,6 +183,7 @@ esac`);
     { name: "same daemon after host sleep", guest: "srv_one", rows: "localhost: srv_one\n127.0.0.1: srv_one\nipv4-mapped: srv_one", exit: 0, expected: /RESULT: PASS WITH WARNINGS/ },
     { name: "wrong daemon", guest: "srv_one", rows: "localhost: srv_other\n127.0.0.1: srv_other\nipv4-mapped: srv_other", exit: 1, expected: /MISMATCH/ },
     { name: "only localhost has an ID", guest: "srv_one", rows: "localhost: srv_one\n127.0.0.1: timeout\nipv4-mapped: timeout", exit: 1, expected: /published 127\.0\.0\.1 endpoint did not provide/ },
+    { name: "published IPv4 only after sleep", guest: "srv_one", rows: "localhost: timeout\n127.0.0.1: srv_one\nipv4-mapped: timeout", exit: 0, expected: /only the published IPv4 route is verified/ },
     { name: "IPv4 serves another daemon", guest: "srv_one", rows: "localhost: srv_one\n127.0.0.1: srv_other\nipv4-mapped: srv_one", exit: 1, expected: /host probes disagree/ },
     { name: "arbitrary frame text is not an ID", guest: "srv_one", rows: "localhost: invalid server_info srv_one\n127.0.0.1: invalid server_info srv_one\nipv4-mapped: invalid server_info srv_one", exit: 1, expected: /no host probe reached/ },
     { name: "missing guest ID", guest: "", rows: "localhost: srv_one\n127.0.0.1: srv_one\nipv4-mapped: srv_one", exit: 1, expected: /could not read.*server-id/ },
@@ -181,14 +210,20 @@ test("WebSocket probe requires a structured server_info response", async (t) => 
   assert.ok(begin > 0 && end > begin);
   const probe = source.slice(begin, end).replace("const port = Number(process.argv[2] || 6767);", "const port = Number(process.argv[1]);");
   let response = '{"type":"server_info","serverId":"srv_real"}';
+  let invalidUpgrade = false;
   const server = net.createServer((socket) => {
     let sent = false;
-    socket.on("data", () => {
-      if (sent) return;
+    let received = "";
+    socket.on("data", (chunk) => {
+      received += chunk.toString("binary");
+      if (sent || !received.includes("\r\n\r\n")) return;
       sent = true;
+      const key = received.match(/Sec-WebSocket-Key: ([^\r\n]+)/)?.[1];
+      assert.ok(key, "client must send WebSocket upgrade key");
+      const accept = createHash("sha1").update(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest("base64");
       const payload = Buffer.from(response);
       socket.end(Buffer.concat([
-        Buffer.from("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"),
+        Buffer.from(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${invalidUpgrade ? "invalid" : accept}\r\n\r\n`),
         Buffer.from([0x81, payload.length]), payload,
       ]));
     });
@@ -211,4 +246,7 @@ test("WebSocket probe requires a structured server_info response", async (t) => 
   assert.match(await probeOnce(), /^127\.0\.0\.1: invalid server_info$/m);
   response = 'text containing srv_fake';
   assert.match(await probeOnce(), /^127\.0\.0\.1: invalid server_info$/m);
+  invalidUpgrade = true;
+  response = '{"type":"server_info","serverId":"srv_real"}';
+  assert.match(await probeOnce(), /^127\.0\.0\.1: invalid WebSocket upgrade$/m);
 });
