@@ -154,6 +154,31 @@ patterns:
       - compliance claim review
       - fedramp claim check
       - overclaim check
+  - path: skills/create-a-pr/SKILL.md
+    id: create-a-pr
+    title: Create a PR
+    type: skill
+    status: experimental
+    categories:
+    - development
+    - review
+    - documentation
+    collection: engineering
+    routing:
+      task_types:
+      - author
+      - review
+      - transform
+      input_artifacts:
+      - documentation
+      - pull-request-diff
+      - source-code
+      output_artifacts:
+      - pull-request-diff
+      aliases:
+      - PR digest
+      - create-a-pr
+      - reviewer handoff
   - path: skills/dependency-analysis/SKILL.md
     id: dependency-analysis
     title: Dependency Security Analysis
@@ -898,6 +923,7 @@ categories:
   - security-scan-review
   - untrusted-input-boundary-review
   development:
+  - create-a-pr
   - general-agent
   - implementation-plan
   - issue-to-merge-request
@@ -907,6 +933,7 @@ categories:
   - accessibility-review
   - agentic-actions-auditor
   - backdoor-review
+  - create-a-pr
   - documentation-review
   - incident-evidence-review
   - issue-to-merge-request
@@ -927,6 +954,7 @@ categories:
   - test-generation
   documentation:
   - compliance-claim-checker
+  - create-a-pr
   - documentation-agent
   - documentation-review
   - example-agentic-session
@@ -979,6 +1007,7 @@ collections:
   - uswds-landing-page
   - uswds-prototype
   engineering:
+  - create-a-pr
   - general-agent
   - implementation-plan
   - issue-to-merge-request
@@ -1023,6 +1052,7 @@ task_types:
   - untrusted-input-boundary-review
   author:
   - agentic-value-analyst
+  - create-a-pr
   - design-artifact
   - documentation-agent
   - explainer-gif
@@ -1068,6 +1098,7 @@ task_types:
   - artifact-qa
   - backdoor-review
   - compliance-claim-checker
+  - create-a-pr
   - dependency-analysis
   - design-artifact
   - documentation-agent
@@ -1090,6 +1121,7 @@ task_types:
   - qa-workflow
   - test-generation
   transform:
+  - create-a-pr
   - software-delivery-explainer
   - technical-concept-translator
   visualize:
@@ -1121,6 +1153,7 @@ output_artifacts:
   - design-artifact
   - one-pager
   pull-request-diff:
+  - create-a-pr
   - issue-to-merge-request
   qa-report:
   - accessibility-review
@@ -1168,8 +1201,8 @@ output_artifacts:
   web-prototype:
   - uswds-prototype
 stats:
-  total_patterns: 41
-  skills: 30
+  total_patterns: 42
+  skills: 31
   prompts: 3
   agents: 3
   workflows: 4

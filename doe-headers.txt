@@ -1,0 +1,60 @@
+HTTP/2 302 
+content-type: text/html; charset=utf-8
+content-length: 35544
+location: https://www.energy.gov/documents/doe-categorical-exclusions-json
+date: Tue, 27 Oct 2026 16:37:29 GMT
+referrer-policy: same-origin
+server: Apache
+cache-control: max-age=2764800, public
+x-drupal-route-normalizer: 1
+x-drupal-dynamic-cache: UNCACHEABLE (302)
+content-language: en
+x-content-type-options: nosniff
+x-frame-options: SAMEORIGIN
+expires: Sun, 19 Nov 1978 05:00:00 GMT
+x-drupal-cache: MISS
+set-cookie: SSESS7784625bfc51c2543cb02b26a4c2eebf=j14ivh6rgv3pkgoqbksc2jfdev; expires=Thu, 19 Nov 2026 20:10:49 GMT; Max-Age=2000000; path=/; domain=.www.energy.gov; secure; HttpOnly; SameSite=Lax
+set-cookie: dtCookiedgtcdnr2=v_4_srv_2_sn_43750C2978B33B51EC0209A5AFE3D244_perc_100000_ol_0_mul_1_app-3Acff6532c80af1c10_1; Path=/; Domain=.energy.gov
+nrgenv: nrg-prod
+last-modified: Tue, 27 Oct 2026 16:37:28 GMT
+x-oneagent-js-injection: true
+x-ruxit-js-agent: true
+etag: "1793119049:dtagent10345260810170330GX4H"
+x-varnish: 4130801
+cache-tags: MISS
+strict-transport-security: max-age=63072000; includeSubdomains; preload
+content-security-policy: 
+x-xss-protection: 1; mode=block
+vary: Cookie
+x-cache: Hit from cloudfront
+via: 1.1 3eafe3d97ea450434f79b0d32e70a916.cloudfront.net (CloudFront)
+x-amz-cf-pop: IAD61-P4
+x-amz-cf-id: zRbUigGq9nsknzTCI5Hxm7hk2gEqvESHPapRBn72nVOkgn6ihyxF6w==
+age: 10201
+
+HTTP/2 200 
+content-type: application/json
+content-length: 1493568
+date: Tue, 27 Oct 2026 19:23:58 GMT
+server: Apache
+cache-control: public
+x-drupal-dynamic-cache: MISS
+content-language: en
+x-content-type-options: nosniff
+x-frame-options: SAMEORIGIN
+nrgenv: nrg-prod
+last-modified: Tue, 27 Oct 2026 17:07:51 GMT
+etag: "1793120872:dtagent10345260810170330GX4H"
+x-varnish: 38998000
+accept-ranges: bytes
+cache-tags: MISS
+strict-transport-security: max-age=63072000; includeSubdomains; preload
+content-security-policy: 
+x-xss-protection: 1; mode=block
+referrer-policy: same-origin
+x-cache: Hit from cloudfront
+via: 1.1 3eafe3d97ea450434f79b0d32e70a916.cloudfront.net (CloudFront)
+x-amz-cf-pop: IAD61-P4
+x-amz-cf-id: nwok2qKWmWDMgb5qisERK-QzwQ7YKALhCJhOVElgkf6iFnYI6VXZkw==
+age: 212
+

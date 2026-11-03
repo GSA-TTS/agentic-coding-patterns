@@ -2,7 +2,7 @@
 
 > **Generated file — do not edit by hand.** Run `make generate` (regenerates INDEX.yaml + CATALOG.md). Source of truth is each pattern's `SKILL.md`/`AGENTS.md` frontmatter.
 
-41 patterns — 30 skills, 3 prompts, 3 agents, 4 workflows, 1 lessons.
+42 patterns — 31 skills, 3 prompts, 3 agents, 4 workflows, 1 lessons.
 
 For machine routing use the [`pattern-router`](.agents/skills/meta/pattern-router/SKILL.md) skill + `scripts/route_patterns.py`; this catalog is the human view.
 
@@ -17,6 +17,7 @@ For machine routing use the [`pattern-router`](.agents/skills/meta/pattern-route
 
 | Pattern | Type | Status | Tasks | Consumes | Produces |
 |---------|------|--------|-------|----------|----------|
+| [`create-a-pr`](skills/create-a-pr/SKILL.md) | skill | experimental | author, review, transform | documentation, pull-request-diff, source-code | pull-request-diff |
 | [`general-agent`](agents/general/AGENTS.md) | agent | experimental | author, plan | source-code | source-code |
 | [`implementation-plan`](prompts/planning/implementation-plan/SKILL.md) | prompt | experimental | plan | artifact-brief | documentation |
 | [`issue-to-merge-request`](workflows/issue-to-merge-request/SKILL.md) | workflow | experimental | author, orchestrate, test | artifact-brief | pull-request-diff, source-code |

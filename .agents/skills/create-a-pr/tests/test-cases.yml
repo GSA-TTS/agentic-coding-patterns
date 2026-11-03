@@ -1,0 +1,125 @@
+suite:
+  pattern_id: create-a-pr
+  pattern_version: "1.0.0"
+  description: "Checks the create-a-pr output for clear human context, evidence links, and honest testing language."
+
+test_cases:
+  - id: digest-links-to-evidence
+    name: "Human digest links material claims to evidence"
+    description: "Ensures a PR digest connects its behavioral claim to the detailed evidence section."
+    input:
+      type: literal
+      content: |
+        ## Problem
+
+        Blank names could be submitted without immediate feedback.
+
+        ## Human Digest
+
+        The form now rejects blank names before submission [D1].
+
+        ## Evidence and Details
+
+        ### D1: Blank-name validation
+
+        - **Claim:** Blank names are rejected before submission.
+        - **Evidence:** The validation function checks the trimmed value.
+        - **Observed result:** The focused unit test passed.
+    assertions:
+      - type: has_sections
+        sections:
+          - "Problem"
+          - "Human Digest"
+          - "Evidence and Details"
+      - type: contains
+        pattern: "[D1]"
+        min_count: 1
+      - type: contains
+        pattern: "### D1:"
+        min_count: 1
+
+  - id: unrun-work-is-not-presented-as-tested
+    name: "Unrun checks are stated plainly"
+    description: "Ensures the PR distinguishes a passed unit test from an unrun manual check."
+    input:
+      type: literal
+      content: |
+        ## Testing
+
+        | Check | Observed result | What it covers |
+        | --- | --- | --- |
+        | `npm test -- display-name` | Passed | Validation behavior [D1] |
+        | Keyboard-only browser check | Not run | Accessibility behavior [D2] |
+
+        **Testing honesty statement:** The focused unit test passed. The
+        keyboard-only browser check was not run, so accessibility behavior is not verified.
+    assertions:
+      - type: contains
+        pattern: "Not run"
+        min_count: 1
+      - type: contains
+        pattern: "not verified"
+        case_sensitive: false
+      - type: no_prohibited
+        patterns:
+          - "all tests pass"
+          - "fully tested"
+
+  - id: tradeoffs-limitations-and-questions-are-visible
+    name: "PR makes tradeoffs, limits, and questions visible"
+    description: "Checks that the reviewer-facing digest includes required decision and uncertainty sections."
+    input:
+      type: literal
+      content: |
+        ## Human Digest
+
+        The validation uses the existing form path [D1].
+
+        ### Approach and Tradeoffs
+
+        - **Chosen approach:** Reuse the existing validation path [D2].
+        - **Other approaches considered:** A new validation library would add a dependency and maintenance cost [D3].
+
+        ### Known Limitations
+
+        - Client-side validation does not replace server-side validation [D4]. This does not block review.
+
+        ### Open Questions
+
+        - Does the error announcement work with a screen reader? This does not block code review but needs manual verification [D5].
+    assertions:
+      - type: has_sections
+        sections:
+          - "Human Digest"
+          - "Approach and Tradeoffs"
+          - "Known Limitations"
+          - "Open Questions"
+      - type: contains
+        pattern: "maintenance cost"
+        case_sensitive: false
+      - type: contains
+        pattern: "does not block"
+        case_sensitive: false
+
+  - id: evidence-records-unknowns-without-guessing
+    name: "Evidence records unknown results directly"
+    description: "Ensures missing evidence is marked unknown rather than described as a successful result."
+    input:
+      type: literal
+      content: |
+        ## Evidence and Details
+
+        ### D1: Accessibility behavior
+
+        - **Claim:** The error announcement works with a screen reader.
+        - **Evidence:** No screen-reader test was performed.
+        - **Observed result:** Unknown.
+    assertions:
+      - type: contains
+        pattern: "Unknown"
+        min_count: 1
+      - type: no_prohibited
+        patterns:
+          - "should be fine"
+          - "probably works"
+          - "likely works"
