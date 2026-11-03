@@ -174,14 +174,13 @@ etime_to_secs() {
 }
 
 LISTEN_AGE=""
-LISTEN_ARGV=""
+LISTEN_BIN=""
 if is_num "${LISTEN_PID:-}"; then
   printf '\n'
-  # -ww: do NOT truncate argv. The binary PATH is the highest-signal field here
-  # (which msb build owns the port), and a truncated command hides it.
+  # Query the executable name only: argv may contain credentials, and encoding
+  # it for terminal safety would still disclose them in captured diagnostics.
   ps -ww -o pid,ppid,lstart,etime -p "$LISTEN_PID" 2>/dev/null | while IFS= read -r row; do note "ps row (hex, capped): $(safe_text "$row")"; done
-  LISTEN_ARGV="$(ps -ww -o command= -p "$LISTEN_PID" 2>/dev/null)"
-echo "argv (hex, capped): $(safe_text "${LISTEN_ARGV:-<unreadable>}")"
+  LISTEN_BIN="$(ps -ww -o comm= -p "$LISTEN_PID" 2>/dev/null)"
   LISTEN_PPID="$(ps -o ppid= -p "$LISTEN_PID" 2>/dev/null | tr -d ' ')"
   LISTEN_AGE="$(etime_to_secs "$(ps -o etime= -p "$LISTEN_PID" 2>/dev/null)")"
   printf '\n'
@@ -193,7 +192,6 @@ echo "argv (hex, capped): $(safe_text "${LISTEN_ARGV:-<unreadable>}")"
   # Which msb build owns the port vs which one acq drives. A listener from a
   # DIFFERENT, co-installed msb build may be invisible to the active one. Its
   # build alone does not establish ownership or authorize process-level action.
-  LISTEN_BIN="$(printf '%s\n' "$LISTEN_ARGV" | awk '{print $1}')"
   ACTIVE_BIN="$(command -v msb 2>/dev/null)"
   [ -n "$ACTIVE_BIN" ] && ACTIVE_BIN="$( (readlink -f "$ACTIVE_BIN" 2>/dev/null) || echo "$ACTIVE_BIN")"
   echo "listener binary (hex): $(safe_text "${LISTEN_BIN:-<unknown>}")"
@@ -209,8 +207,10 @@ echo "argv (hex, capped): $(safe_text "${LISTEN_ARGV:-<unreadable>}")"
       note "on PATH (hex): $(safe_text "$a_pfx")"
       note "A different build may not be managed by this acq. Verify ownership"
       note "before using its supported lifecycle; do not infer an orphan by version."
-    else
+    elif [ -n "$l_pfx" ] && [ -n "$a_pfx" ]; then
       ok "listener binary and the msb on PATH are the same installation"
+    else
+      note "listener installation comparison unavailable (runtime identity checked separately)"
     fi
   fi
 else
@@ -438,8 +438,11 @@ function probe(p) {
         let id = '';
         try {
           const reply = JSON.parse(text);
-          if (reply?.type === 'server_info' && typeof reply.serverId === 'string' &&
-              /^srv_[A-Za-z0-9_-]+$/.test(reply.serverId)) id = reply.serverId;
+          // Paseo 0.13 wraps server_info in a session/status envelope.
+          const payload = reply?.type === 'session' && reply.message?.type === 'status'
+            ? reply.message.payload : null;
+          if (payload?.status === 'server_info' && typeof payload.serverId === 'string' &&
+              /^srv_[A-Za-z0-9_-]+$/.test(payload.serverId)) id = payload.serverId;
         } catch { /* An unparseable first frame cannot establish identity. */ }
         done(`${p.label}: ${id || 'invalid server_info'}`);
       }
@@ -550,9 +553,9 @@ RESULT: FAIL
 
 Diagnosis for a failed identity check:
 
-  1. Identify what holds the port, with FULL argv (note the -ww):
+  1. Identify the listener executable without collecting potentially secret argv:
        lsof -nP -iTCP:${HOST_PORT} -sTCP:LISTEN
-       ps -ww -o pid,ppid,lstart,etime,command -p <listener-pid>
+       ps -ww -o pid,ppid,lstart,etime,comm -p <listener-pid>
      Compare its binary path to 'command -v msb'. A listener from a DIFFERENT
       msb installation may be invisible to the acq you are running. Confirm the
       host and guest server IDs and the listener's sandbox name before acting.

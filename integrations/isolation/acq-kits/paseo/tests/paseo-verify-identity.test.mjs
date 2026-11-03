@@ -248,8 +248,10 @@ test("WebSocket probe requires a structured server_info response", async (t) => 
   const begin = source.indexOf("const net = require('net');");
   const end = source.indexOf("\nNODE\n", begin);
   assert.ok(begin > 0 && end > begin);
-  const probe = source.slice(begin, end).replace("const port = Number(process.argv[2] || 6767);", "const port = Number(process.argv[1]);");
-  let response = '{"type":"server_info","serverId":"srv_real"}';
+  const probe = source.slice(begin, end);
+  const serverInfo = (id) => JSON.stringify({ type: "session", message: { type: "status", payload: { status: "server_info", serverId: id } } });
+  let response = serverInfo("srv_real");
+  let splitFrame = false;
   let invalidUpgrade = false;
   let invalidFrame = false;
   let duplicateAccept = false;
@@ -289,15 +291,22 @@ test("WebSocket probe requires a structured server_info response", async (t) => 
       assert.equal(JSON.parse(hello.toString()).type, "hello");
       sent = true;
       const payload = Buffer.from(response);
-      socket.end(Buffer.concat([
+      const frame = Buffer.concat([
         Buffer.from([invalidFrame ? 0x01 : 0x81, payload.length]), payload,
-      ]));
+      ]);
+      if (splitFrame) {
+        socket.write(frame.subarray(0, 1));
+        setImmediate(() => {
+          socket.write(frame.subarray(1, 7));
+          setImmediate(() => socket.end(frame.subarray(7)));
+        });
+      } else socket.end(frame);
     });
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise((resolve) => server.close(resolve)));
   async function probeOnce() {
-    const child = spawn("node", ["-e", probe, String(server.address().port)], { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn("node", ["-e", probe, String(server.address().port), "host"], { stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
     child.stdout.on("data", (bytes) => { output += bytes; });
     const exit = await new Promise((resolve, reject) => {
@@ -308,20 +317,25 @@ test("WebSocket probe requires a structured server_info response", async (t) => 
     return output;
   }
   assert.match(await probeOnce(), /^127\.0\.0\.1: srv_real$/m);
+  splitFrame = true;
+  assert.match(await probeOnce(), /^127\.0\.0\.1: srv_real$/m);
+  splitFrame = false;
   response = '{"type":"other","detail":"srv_fake"}';
   assert.match(await probeOnce(), /^127\.0\.0\.1: invalid server_info$/m);
   response = 'text containing srv_fake';
   assert.match(await probeOnce(), /^127\.0\.0\.1: invalid server_info$/m);
   invalidUpgrade = true;
-  response = '{"type":"server_info","serverId":"srv_real"}';
+  response = serverInfo("srv_real");
   assert.match(await probeOnce(), /^127\.0\.0\.1: invalid WebSocket upgrade$/m);
   invalidUpgrade = false;
   invalidFrame = true;
   assert.match(await probeOnce(), /^127\.0\.0\.1: invalid server_info$/m);
   invalidFrame = false;
-  response = '{"type":"server_info","serverId":["srv_real"]}';
+  response = serverInfo(["srv_real"]);
   assert.match(await probeOnce(), /^127\.0\.0\.1: invalid server_info$/m);
   response = '{"type":"server_info","serverId":"srv_real"}';
+  assert.match(await probeOnce(), /^127\.0\.0\.1: invalid server_info$/m);
+  response = serverInfo("srv_real");
   duplicateAccept = true;
   assert.match(await probeOnce(), /^127\.0\.0\.1: invalid WebSocket upgrade$/m);
 });

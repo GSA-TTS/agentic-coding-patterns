@@ -20,8 +20,9 @@ acq ports <sandbox>                       # is container 6767 mapped to a host p
 acq exec <sandbox> -- sh -c 'curl -fsS http://127.0.0.1:6767/api/health && echo OK'
 ```
 
-- `/api/health` returns 200 and the port is mapped → open
-  `http://127.0.0.1:<host-port-for-6767>`.
+- `/api/health` returns 200 and the port is mapped → run
+  `scripts/paseo-verify-identity <sandbox>` to check that the published IPv4
+  endpoint reaches the guest daemon before opening that IPv4 URL.
 - `/api/health` fails → the daemon isn't up yet. On **first boot** it installs the
   Paseo CLI first (a few seconds). Watch the logs:
 
@@ -70,13 +71,13 @@ create-time `-p HOST:GUEST` publish runs a host-side `msb` process. That process
 can **survive `acq stop` *and* `acq rm`** and keep holding the host port. The
 replacement sandbox's forwarder then cannot bind, while `acq ports` still reports
 the mapping as configured — so every restart appears to succeed and changes
-nothing. Two independent tells:
+nothing. Two diagnostic clues, neither of which proves an orphan on its own:
 
-- **Age.** The listener is *older than the sandbox it serves*. Compare its
-  `ELAPSED` against guest uptime:
+- **Age.** Compare listener `ELAPSED` against guest uptime. Host sleep can make
+  these clocks diverge for a healthy sandbox; check live IDs before acting:
 
   ```bash
-  ps -ww -o pid,ppid,lstart,etime,command -p <listener-pid>
+   ps -ww -o pid,ppid,lstart,etime,comm -p <listener-pid>
   acq exec <sandbox> -- sh -c 'cut -d. -f1 /proc/uptime'
   ```
 
@@ -89,7 +90,7 @@ nothing. Two independent tells:
 
   ```bash
   lsof -nP -iTCP:<host-port> -sTCP:LISTEN     # note the PID
-  ps -ww -o command= -p <listener-pid>        # -ww: do not truncate the path
+   ps -ww -o comm= -p <listener-pid>           # executable only, not secret-bearing argv
   command -v msb                              # compare installation prefixes
   ```
 
@@ -97,7 +98,8 @@ nothing. Two independent tells:
   what gets cut off.
 
 > A `PPID` of `1` is **normal** here: launchd adopts the forwarder. It is not by
-> itself evidence of a leak. Age and build are the discriminating signals.
+> itself evidence of a leak. Age and build inform diagnosis; live runtime IDs
+> determine whether the published IPv4 endpoint reaches the guest daemon.
 
 **How you get one.** Switching the host's `msb` version is the known trigger:
 replacing the active binary does not stop forwarders from the outgoing build, and
