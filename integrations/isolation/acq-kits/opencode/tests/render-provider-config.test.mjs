@@ -117,7 +117,7 @@ test("provider projection applies protocol adapter options, OpenCode cost keys, 
     },
   })
   assert.deepEqual(output.provider.usai.models.claude_4_5_sonnet.cost, { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 })
-  assert.equal(Object.keys(output.provider.usai.models).length, 24)
+  assert.equal(Object.keys(output.provider.usai.models).length, JSON.parse(snapshotText).models.length)
   assert.equal(output.provider.usai.models["gpt-6.1-sol-latest-guardrails-defaultv2"].name, "GPT 6.1 Sol Latest Guardrails Defaultv2")
   assert.deepEqual(output.provider.usai.models["gpt-6.1-sol-latest-guardrails-defaultv2"].cost.context_over_200k, { input: 4, output: 15, cache_read: 0.2, cache_write: 5 })
   assert.equal(output.model, "usai/claude-sonnet-5")

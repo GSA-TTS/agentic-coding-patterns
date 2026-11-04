@@ -1,0 +1,4 @@
+{
+  "modelsList": "integrations/providers/usai/tests/fixtures/refresh/usai-models.json",
+  "enrichment": "integrations/providers/usai/tests/fixtures/refresh/models-dev.json"
+}

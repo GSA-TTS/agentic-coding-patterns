@@ -6,6 +6,20 @@ OpenCode v2 platform package tarball**. Replaces acq's older unpinned MSB
 fallback (`npm install -g opencode-ai`, resolves to the legacy 1.x line) with a
 deterministic, version-pinned install.
 
+## Agent scratch directory
+
+The install-time `opencode --version` checks run as root and can create
+`/tmp/opencode` with root ownership. On every sandbox startup, a root command
+creates or repairs that directory with ownership of the sandbox's `agent` user
+and group, resolved by name at startup (the numeric uid can differ from `1000`
+on some MSB images), and private permissions (`0700`). It fails closed if the
+`agent` user does not exist. This also handles a cleared `/tmp` after a restart.
+
+The command changes only the directory itself, not existing contents, and
+refuses a pre-existing symlink or non-directory. It uses the same neutral
+startup command for both SBX and MSB. Existing sandboxes need the updated kit
+applied; this does not repair a sandbox merely by restarting OpenCode.
+
 ## Provider Renderer Ownership
 
 The kit stages its base policy at `/home/agent/opencode-config/base-config.jsonc`.
@@ -65,7 +79,8 @@ procedure covers image input only and cannot substantiate `reasoning`, `audio`,
 (variants are independent of it); see
 [reasoning validation](docs/reasoning-validation.md). See
 [ADR 0006](../../docs/decisions/0006-neutral-model-capability-metadata.md) and
-the [synthetic-image validation procedure](docs/synthetic-image-validation.md).
+the [synthetic-image validation procedure](docs/synthetic-image-validation.md)
+(its host-run harness, `scripts/verify_image_capability.py`, is committed but has not been run live).
 
 The provider renderer preserves unrelated user configuration and removes only
 the provider IDs and default model roles recorded in its previous ownership

@@ -1,0 +1,207 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "llama_4_maverick",
+      "object": "model",
+      "owned_by": "Meta",
+      "name": "Llama 4 Maverick",
+      "context_window": 1000000,
+      "max_output_tokens": 8192
+    },
+    {
+      "id": "gemini-2.5-flash-lite",
+      "object": "model",
+      "owned_by": "Google",
+      "name": "Gemini 2.5 Flash Lite",
+      "context_window": 1048576,
+      "max_output_tokens": 65536
+    },
+    {
+      "id": "gemini-2.5-flash",
+      "object": "model",
+      "owned_by": "Google",
+      "name": "Gemini 2.5 Flash",
+      "context_window": 1048576,
+      "max_output_tokens": 65536
+    },
+    {
+      "id": "gemini-3.5-flash",
+      "object": "model",
+      "owned_by": "Google",
+      "name": "Gemini 3.5 Flash",
+      "context_window": 1048576,
+      "max_output_tokens": 65536
+    },
+    {
+      "id": "gemini-3-7-flash",
+      "object": "model",
+      "owned_by": "Google",
+      "name": "Gemini 3.7 Flash",
+      "context_window": 1048576,
+      "max_output_tokens": 65536
+    },
+    {
+      "id": "gemini-3.8-flash",
+      "object": "model",
+      "owned_by": "Google",
+      "name": "Gemini 3.8 Flash",
+      "context_window": 1048576,
+      "max_output_tokens": 65536
+    },
+    {
+      "id": "gpt_5_2_default_v2",
+      "object": "model",
+      "owned_by": "OpenAI",
+      "name": "GPT 5.2 Default V2",
+      "context_window": 400000,
+      "max_output_tokens": 128000
+    },
+    {
+      "id": "gpt_5_4_default_v2",
+      "object": "model",
+      "owned_by": "OpenAI",
+      "name": "GPT 5.4 Default V2",
+      "context_window": 1050000,
+      "max_output_tokens": 128000
+    },
+    {
+      "id": "gpt_5_5_default_v2",
+      "object": "model",
+      "owned_by": "OpenAI",
+      "name": "GPT 5.5 Default V2",
+      "context_window": 1050000,
+      "max_output_tokens": 128000
+    },
+    {
+      "id": "gpt-5.6-terra",
+      "object": "model",
+      "owned_by": "OpenAI",
+      "name": "GPT 5.6 Terra",
+      "context_window": 1050000,
+      "max_output_tokens": 128000
+    },
+    {
+      "id": "gpt-5.6-sol-latest-guardrails-defaultv2",
+      "object": "model",
+      "owned_by": "OpenAI",
+      "name": "GPT 5.6 Sol Latest Guardrails Defaultv2",
+      "context_window": 1050000,
+      "max_output_tokens": 128000
+    },
+    {
+      "id": "gpt-5.6-luna",
+      "object": "model",
+      "owned_by": "OpenAI",
+      "name": "GPT 5.6 Luna",
+      "context_window": 1050000,
+      "max_output_tokens": 128000
+    },
+    {
+      "id": "gpt-6-sol-latest-guardrails-defaultv2",
+      "object": "model",
+      "owned_by": "OpenAI",
+      "name": "GPT 6 Sol Latest Guardrails Defaultv2",
+      "context_window": 1050000,
+      "max_output_tokens": 128000
+    },
+    {
+      "id": "gpt-6-luna",
+      "object": "model",
+      "owned_by": "OpenAI",
+      "name": "GPT 6 Luna",
+      "context_window": 1050000,
+      "max_output_tokens": 128000
+    },
+    {
+      "id": "gpt-6-astra",
+      "object": "model",
+      "owned_by": "OpenAI",
+      "name": "GPT 6 Astra",
+      "context_window": 1050000,
+      "max_output_tokens": 128000
+    },
+    {
+      "id": "gpt-6.1-sol-latest-guardrails-defaultv2",
+      "object": "model",
+      "owned_by": "OpenAI",
+      "name": "GPT 6.1 Sol Latest Guardrails Defaultv2",
+      "context_window": 1050000,
+      "max_output_tokens": 128000
+    },
+    {
+      "id": "claude_4_5_sonnet",
+      "object": "model",
+      "owned_by": "Anthropic",
+      "name": "Claude 4.5 Sonnet",
+      "context_window": 200000,
+      "max_output_tokens": 64000
+    },
+    {
+      "id": "claude_4_5_haiku",
+      "object": "model",
+      "owned_by": "Anthropic",
+      "name": "Claude 4.5 Haiku",
+      "context_window": 200000,
+      "max_output_tokens": 64000
+    },
+    {
+      "id": "claude_4_6_sonnet",
+      "object": "model",
+      "owned_by": "Anthropic",
+      "name": "Claude 4.6 Sonnet",
+      "context_window": 1000000,
+      "max_output_tokens": 128000
+    },
+    {
+      "id": "claude_4_7_opus",
+      "object": "model",
+      "owned_by": "Anthropic",
+      "name": "Claude 4.7 Opus",
+      "context_window": 1000000,
+      "max_output_tokens": 128000
+    },
+    {
+      "id": "claude_4_8_opus",
+      "object": "model",
+      "owned_by": "Anthropic",
+      "name": "Claude 4.8 Opus",
+      "context_window": 1000000,
+      "max_output_tokens": 128000
+    },
+    {
+      "id": "claude-sonnet-5",
+      "object": "model",
+      "owned_by": "Anthropic",
+      "name": "Claude Sonnet 5",
+      "context_window": 1000000,
+      "max_output_tokens": 128000
+    },
+    {
+      "id": "claude-opus-5",
+      "object": "model",
+      "owned_by": "Anthropic",
+      "name": "Claude Opus 5",
+      "context_window": 1000000,
+      "max_output_tokens": 128000
+    },
+    {
+      "id": "claude-sonnet-5.5",
+      "object": "model",
+      "owned_by": "Anthropic",
+      "name": "Claude Sonnet 5.5",
+      "context_window": 1000000,
+      "max_output_tokens": 128000
+    },
+    {
+      "id": "cohere_english_v3",
+      "object": "model",
+      "owned_by": "Cohere"
+    },
+    {
+      "id": "text-embedding-005",
+      "object": "model",
+      "owned_by": "Google"
+    }
+  ]
+}

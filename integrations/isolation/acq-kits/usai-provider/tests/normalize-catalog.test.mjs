@@ -186,7 +186,7 @@ test("shipped snapshot exactly matches normalizeCatalog(upstream catalog)", asyn
     "normalizer produced no models[] from the upstream catalog -- gate cannot pass",
   )
 
-  assert.equal(snapshot.models.length, 24)
+  assert.equal(snapshot.models.length, upstream.models.length)
   assert.deepEqual(snapshot, regenerated)
 })
 
