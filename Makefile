@@ -1,4 +1,4 @@
-.PHONY: setup validate validate-kits validate-provider-input-contract test-kits generate generate-check test coverage security ci clean search install-hooks help
+.PHONY: setup validate validate-kits validate-provider-input-contract refresh-usai-catalog refresh-usai-catalog-check test-kits generate generate-check test coverage security ci clean search install-hooks help
 
 PYTHON ?= python3
 
@@ -40,6 +40,12 @@ validate-kits:  ## Validate neutral acq-kits specs against the hybrid/v1 schema 
 
 validate-provider-input-contract:  ## Validate provider facts, catalogs, and package-to-projection manifests
 	$(PYTHON) scripts/validate_provider_input_contract.py
+
+refresh-usai-catalog:  ## Refresh the USAi catalog and its neutral artifacts from one source pull (needs USAI_API_KEY; writes files, never commits)
+	node integrations/providers/usai/scripts/refresh.mjs
+
+refresh-usai-catalog-check:  ## Report drift between the USAi catalog artifacts and one fresh source pull (needs USAI_API_KEY; changes no tracked file)
+	node integrations/providers/usai/scripts/refresh.mjs --check
 
 test-kits:  ## Run the acq-kits node test suites + providers/usai emitters
 	@if command -v node >/dev/null 2>&1; then \

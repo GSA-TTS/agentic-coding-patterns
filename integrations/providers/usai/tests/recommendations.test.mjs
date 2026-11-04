@@ -223,13 +223,15 @@ test("CLI: an unreadable existing catalog fails instead of dropping the roles", 
   })
 })
 
-test("CLI: the default offline bootstrap no longer deletes the committed role defaults", () => {
+test("CLI: a run with no model source refuses and leaves the committed catalog untouched", () => {
   withTempDir((dir) => {
     const out = path.join(dir, "catalog.json")
-    writeFileSync(out, readFileSync(CATALOG, "utf8"))
+    const before = readFileSync(CATALOG, "utf8")
+    writeFileSync(out, before)
     const result = spawnSync(process.execPath, [BUILD, "--out", out], { encoding: "utf8" })
-    assert.equal(result.status, 0, result.stderr)
-    assert.deepEqual(JSON.parse(readFileSync(out, "utf8")).recommendations, loadCatalog().recommendations)
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /make refresh-usai-catalog/)
+    assert.equal(readFileSync(out, "utf8"), before)
   })
 })
 

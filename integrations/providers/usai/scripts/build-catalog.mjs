@@ -4,68 +4,60 @@
 // build-catalog.mjs — the FETCH + SHAPE half of the USAi catalog pipeline.
 //
 // Data flow:
-//   live feeds -> build-catalog.mjs -> catalog.json -> per-harness emitters
+//   live feeds -> build-catalog.mjs -> catalog.json -> neutral artifacts
 //
 // This script derives `integrations/providers/usai/catalog.json` (schema
-// `usai-model-catalog/v1`). It DOES NOT render any harness config — the RENDER
-// half (the opencode.jsonc emitter) lives in a later issue and consumes this
-// catalog. The byte-exact round-trip test against the renderer contract fixture is
-// the safety gate; therefore the FIRST committed catalog.json is BOOTSTRAPPED
-// from that shipped file's `// BEGIN GENERATED USAI MODELS` block so it exactly
-// represents today's models. Live-feed mode (fetch USAi + models.dev) is
-// provided for future regeneration.
+// `usai-model-catalog/v1`). It renders no harness-native configuration.
 //
-// Modes:
-//   (default, no flags)     bootstrap catalog.json from the prior shipped production config
-//                           GENERATED block (offline, deterministic).
-//   --models-url <path|url> read the USAi model list from a local path or URL.
-//   --no-enrichment         do not fetch/read models.dev; use only the models
-//                           list (limits/costs come from the fixture/list only).
-//   --models-dev <path|url> read models.dev enrichment from a local path or URL.
-//   --bootstrap             force bootstrap-from-opencode.jsonc mode (default
-//                           when neither --models-url nor live fetch is used).
-//   --opencode-jsonc <path> override the bootstrap source path.
-//   --out <path>            override the output catalog.json path.
-//   --check                 do not write; fail if catalog.json has drifted.
+// Most people should not run it directly. The documented entrypoint is
+// `make refresh-usai-catalog` (scripts/refresh.mjs), which pulls the feeds once,
+// calls this builder, and then regenerates every registered provider-neutral
+// artifact from the result. See ../README.md and
+// docs/decisions/0003-repo-time-provider-catalog-refresh.md.
+//
+// Inputs (both required; there is no default source):
+//   --models-url <path|url> the USAi model list, from a local file or an https URL.
+//   --models-dev <path|url> models.dev enrichment, from a local file or an https URL
+//                           (default: https://models.dev/api.json).
+//   --no-enrichment         do not read models.dev; limits and costs then come
+//                           from the model list only.
+//   --out <path>            the catalog to write (and to carry `recommendations`
+//                           forward from). Default: ./catalog.json.
+//   --check                 do not write; fail if the catalog at --out has drifted.
 //   --include-capabilities  OPT-IN: copy reasoning/input-modality values from the
-//                           matched models.dev entry into live-feed output. Off by
-//                           default because models.dev describes the upstream
-//                           provider, not what the USAi gateway forwards; output
-//                           produced with this flag must not be committed until each
-//                           value has per-model, per-field evidence (the synthetic-
-//                           image procedure covers image input only; see ADR 0006
-//                           and the opencode kit's synthetic-image-validation.md).
+//                           matched models.dev entry. Off by default because
+//                           models.dev describes the upstream provider, not what
+//                           the USAi gateway forwards; output produced with this
+//                           flag must not be committed until each value has
+//                           per-model, per-field evidence (see ADR 0006 and the
+//                           opencode kit's synthetic-image-validation.md).
 //                           sources.capabilitiesVerified is a catalog-wide release
-//                           reminder, not that evidence. With the
-//                           flag, --check against a capability-free catalog.json
-//                           reports drift by design.
+//                           reminder, not that evidence. With the flag, --check
+//                           against a capability-free catalog reports drift by
+//                           design.
+//
+// There is no bootstrap mode. The catalog used to be seeded from a frozen
+// copy of an old OpenCode config; that made a harness-native file a source of
+// truth and let a no-argument run silently replace the catalog. A run with no
+// --models-url now refuses and points at the refresh command.
 //
 // What --check compares: the SUBSTANTIVE catalog — schemaVersion, gateway,
-// vendors, and models. It deliberately IGNORES the `sources` block, which
-// records provenance (which feed or file this run read) and legitimately
-// differs between a live-feed regeneration and an offline bootstrap of the
-// same models. Comparing it would make --check fail on every offline run
-// regardless of real drift, and a drift detector that always fires is one
-// everybody learns to ignore — at which point genuine model drift is
-// indistinguishable from the noise. On a real difference, --check reports
-// WHICH ids were added, removed, or changed, because a diff is actionable
-// where a boolean is not.
+// vendors, models, and recommendations. It deliberately IGNORES the `sources`
+// block, which records provenance (which feed this run read) and legitimately
+// differs between runs of identical models. Comparing it would make --check fail
+// on every run regardless of real drift, and a drift detector that always fires
+// is one everybody learns to ignore. On a real difference, --check reports WHICH
+// ids were added, removed, or changed, because a diff is actionable where a
+// boolean is not.
 //
-// CI / round-trip callers use the offline paths (--bootstrap, or --models-url
-// against committed fixtures with --no-enrichment) so no network is required.
-//
-// Live invocation (regenerating from the real USAi gateway) requires a USAi API
-// key, because the gateway rejects unauthenticated /models requests:
-//
-//   USAI_API_KEY=… node scripts/build-catalog.mjs \
-//     --models-url https://api.gsa.usai.gov/api/v1/models
-//
-// The key is read from the ENVIRONMENT ONLY. There is deliberately NO CLI flag
-// for it (flags land in shell history and process listings), it is never logged,
-// and it is never written into catalog.json — `sources.modelsList` records the
-// URL, not the credential. If the key is missing, or the gateway answers 401/403,
-// the build FAILS LOUDLY rather than falling back to bootstrap or emitting a
-// partial catalog: a silently-degraded catalog is worse than no catalog.
+// Live invocation requires a USAi API key, because the gateway rejects
+// unauthenticated /models requests. The key is read from the ENVIRONMENT ONLY
+// (USAI_API_KEY). There is deliberately NO CLI flag for it (flags land in shell
+// history and process listings), it is never logged, and it is never written
+// into catalog.json — `sources.modelsList` records the URL, not the credential.
+// If the key is missing, or the gateway answers 401/403, the build FAILS LOUDLY
+// rather than emitting a partial catalog: a silently-degraded catalog is worse
+// than no catalog.
 // =============================================================================
 
 import { readFile, writeFile } from "node:fs/promises"
@@ -75,26 +67,15 @@ import { fileURLToPath } from "node:url"
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const USAI_DIR = path.resolve(HERE, "..")
-const REPO_ROOT = path.resolve(USAI_DIR, "../../..")
 
 const DEFAULT_OUT = path.join(USAI_DIR, "catalog.json")
 const DEFAULT_SCHEMA = path.join(USAI_DIR, "catalog.schema.json")
-const DEFAULT_OPENCODE_JSONC = path.join(
-  REPO_ROOT,
-  "integrations/providers/usai/tests/fixtures/opencode-production.jsonc",
-)
-// Path recorded in catalog.sources.bootstrappedFrom — repo-relative, stable.
-const OPENCODE_JSONC_REL =
-  "integrations/providers/usai/tests/fixtures/opencode-production.jsonc"
-
-const GENERATED_START = "// BEGIN GENERATED USAI MODELS"
-const GENERATED_END = "// END GENERATED USAI MODELS"
 
 const SCHEMA_VERSION = "usai-model-catalog/v1"
 const GENERATED_MARKER = "build-catalog.mjs (generated — do not hand-edit)"
 
-const USAI_MODELS_URL = "https://api.gsa.usai.gov/api/v1/models"
-const MODELS_DEV_URL = "https://models.dev/api.json"
+export const USAI_MODELS_URL = "https://api.gsa.usai.gov/api/v1/models"
+export const MODELS_DEV_URL = "https://models.dev/api.json"
 
 // Network hardening (mirrors the monolith sync-usai-models.mjs): bound time and
 // size, and shape-validate before trusting third-party content.
@@ -486,7 +467,7 @@ function normalizeInputModalities(value, where) {
 // Upstream data is untrusted and not ours to fail on: a malformed models.dev
 // capability field is treated as UNKNOWN (omitted) with a stderr warning, so one
 // bad upstream entry cannot abort the whole catalog build. Our own committed
-// data (bootstrap block, catalog.json) stays fail-closed.
+// data (catalog.json) stays fail-closed.
 function capabilitiesFromModelsDev(data, id) {
   const out = {}
   let malformed = false
@@ -541,6 +522,11 @@ async function readBodyCapped(response, ref) {
 }
 
 async function fetchJsonBounded(url, options = {}) {
+  // HTTPS only: refuse before any request is made, so neither the gateway key
+  // nor the model data ever travels over plain http.
+  if (!/^https:\/\//i.test(url)) {
+    throw new Error(`refusing to fetch ${url}: only https:// sources are allowed`)
+  }
   // `requiresAuth` is our own marker for error reporting, not a fetch option.
   const { requiresAuth = false, timeoutMs, ...fetchOptions } = options
   const controller = new AbortController()
@@ -555,7 +541,7 @@ async function fetchJsonBounded(url, options = {}) {
     clearTimeout(timer)
   }
   // Authentication failures are called out explicitly and always throw: never
-  // degrade to bootstrap or to a partial catalog on a rejected credential.
+  // degrade to a partial catalog on a rejected credential.
   if (response.status === 401 || response.status === 403) {
     const detail = requiresAuth
       ? `the ${USAI_API_KEY_ENV} value was rejected (expired, revoked, or wrong environment)`
@@ -673,119 +659,8 @@ function extractUsaiList(payload) {
   return list
 }
 
-// -----------------------------------------------------------------------------
-// Bootstrap: parse the renderer contract's GENERATED block into catalog
-// models, translating opencode cost keys -> catalog cost keys. This preserves
-// model ORDER and vendor grouping exactly as the block declares them.
-// -----------------------------------------------------------------------------
-function extractGeneratedBlock(jsoncText) {
-  const start = jsoncText.indexOf(GENERATED_START)
-  const end = jsoncText.indexOf(GENERATED_END)
-  if (start === -1 || end === -1 || end <= start) {
-    throw new Error("GENERATED USAI MODELS markers not found in opencode.jsonc")
-  }
-  return jsoncText.slice(start + GENERATED_START.length, end)
-}
-
-// Parse the block body — a sequence of `// Vendor Comment` lines and
-// `"id": { ...json... }` objects — into ordered { id, vendor, name, json }.
-// We rely on brace-balancing to slice each model object, then JSON.parse it
-// (the model objects are strict JSON; comments only appear between objects).
-function parseBootstrapModels(blockBody) {
-  const entries = []
-  let i = 0
-  const n = blockBody.length
-  while (i < n) {
-    // Skip to the next quoted key that begins a model object: `"<id>": {`
-    const keyMatch = /"([^"]+)"\s*:\s*\{/g
-    keyMatch.lastIndex = i
-    const m = keyMatch.exec(blockBody)
-    if (!m) break
-    const id = m[1]
-    // Find the balanced closing brace of the object starting at m.index + key.
-    const objStart = blockBody.indexOf("{", m.index)
-    let depth = 0
-    let j = objStart
-    let inStr = false
-    for (; j < n; j++) {
-      const ch = blockBody[j]
-      if (inStr) {
-        if (ch === "\\") j++
-        else if (ch === '"') inStr = false
-        continue
-      }
-      if (ch === '"') inStr = true
-      else if (ch === "{") depth++
-      else if (ch === "}") {
-        depth--
-        if (depth === 0) {
-          j++
-          break
-        }
-      }
-    }
-    const objText = blockBody.slice(objStart, j)
-    let obj
-    try {
-      obj = JSON.parse(objText)
-    } catch (err) {
-      throw new Error(`bootstrap: could not parse model "${id}": ${err.message}`)
-    }
-    entries.push({ id, obj })
-    i = j
-  }
-  if (entries.length === 0) throw new Error("bootstrap: no models parsed from GENERATED block")
-  return entries
-}
-
-function bootstrapModelsFromBlock(entries) {
-  const models = []
-  const vendorsSeen = new Set()
-  const excluded = []
-  for (const { id, obj } of entries) {
-    const reason = nonChatReason(id, obj?.name ?? "")
-    if (reason) {
-      excluded.push({ id, reason })
-      continue
-    }
-    const vendor = classifyVendor(id, "")
-    vendorsSeen.add(vendor)
-    const model = { id, vendor, name: obj.name ?? generateDisplayName(id) }
-    const limit = obj.limit || {}
-    if (Number.isInteger(limit.context)) model.contextWindow = limit.context
-    if (Number.isInteger(limit.output)) model.maxOutputTokens = limit.output
-    const cost = obj.cost || {}
-    const baseCost = {}
-    for (const [camel, snake] of COST_MAP) {
-      if (typeof cost[snake] === "number") baseCost[camel] = cost[snake]
-    }
-    if (Object.keys(baseCost).length > 0) model.cost = baseCost
-    const over = cost.context_over_200k
-    if (over && typeof over === "object") {
-      const above = {}
-      for (const [camel, snake] of COST_MAP) {
-        if (typeof over[snake] === "number") above[camel] = over[snake]
-      }
-      if (Object.keys(above).length > 0) model.costAbove200kContext = above
-    }
-    if (obj.reasoning !== undefined) {
-      if (typeof obj.reasoning !== "boolean") throw new Error(`bootstrap: ${id}.reasoning must be a boolean`)
-      model.reasoning = obj.reasoning
-    }
-    if (obj.modalities !== undefined && (obj.modalities === null || typeof obj.modalities !== "object" || Array.isArray(obj.modalities))) {
-      throw new Error(`bootstrap: ${id}.modalities must be an object`)
-    }
-    if (obj.modalities?.input !== undefined) {
-      model.inputModalities = normalizeInputModalities(obj.modalities.input, `bootstrap: ${id}.modalities.input`)
-    }
-    models.push(model)
-  }
-  reportExclusions(excluded)
-  return { models, vendorsSeen }
-}
-
-// Build the ordered vendors[] array. Bootstrap preserves the order the vendors
-// first appear in the block; live-feed mode uses VENDOR_CONFIG.order.
+// Build the ordered vendors[] array from the vendors shapeFromFeeds saw, in
+// VENDOR_CONFIG.order.
 function buildVendors(vendorKeysInOrder) {
   return vendorKeysInOrder.map((key, idx) => {
     const cfg = VENDOR_CONFIG[key] || VENDOR_CONFIG.other
@@ -853,7 +728,7 @@ export function reportUnenriched(unenriched, enrichmentAttempted) {
   }
 }
 
-function shapeFromFeeds(usaiList, modelsDevCatalog, { includeCapabilities = false } = {}) {
+function shapeFromFeeds(usaiList, modelsDevCatalog, { includeCapabilities = false, preferredOrder = [] } = {}) {
   usaiList = extractUsaiList(usaiList)
   // Chat models only, preserve incoming list order but group by vendor display
   // order for a stable catalog.
@@ -874,10 +749,18 @@ function shapeFromFeeds(usaiList, modelsDevCatalog, { includeCapabilities = fals
 
   reportExclusions(excluded)
 
+  // Order: vendor group first. Within a vendor, models already in the existing
+  // catalog keep their relative position (that order is curated and consumers
+  // render it), and new models follow, sorted by id. With no existing catalog
+  // the order is vendor group, then id.
+  const rank = new Map(preferredOrder.map((id, index) => [id, index]))
   parsed.sort((a, b) => {
     const oa = VENDOR_CONFIG[a.vendor]?.order ?? 99
     const ob = VENDOR_CONFIG[b.vendor]?.order ?? 99
     if (oa !== ob) return oa - ob
+    const pa = rank.get(a.id) ?? Number.POSITIVE_INFINITY
+    const pb = rank.get(b.id) ?? Number.POSITIVE_INFINITY
+    if (pa !== pb) return pa < pb ? -1 : 1
     return a.id.localeCompare(b.id)
   })
 
@@ -1138,13 +1021,19 @@ function buildGateway() {
 // -----------------------------------------------------------------------------
 // Arg parsing
 // -----------------------------------------------------------------------------
+const REFRESH_HINT =
+  "Refresh the catalog with `make refresh-usai-catalog` (see integrations/providers/usai/README.md)."
+
 function parseArgs(argv) {
   const args = { flags: new Set(), opts: {} }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
-    if (a === "--no-enrichment" || a === "--bootstrap" || a === "--check" || a === "--include-capabilities") {
+    if (a === "--bootstrap" || a === "--opencode-jsonc") {
+      throw new Error(`${a} was removed: the catalog is no longer seeded from a harness config. ${REFRESH_HINT}`)
+    }
+    if (a === "--no-enrichment" || a === "--check" || a === "--include-capabilities") {
       args.flags.add(a)
-    } else if (a === "--models-url" || a === "--models-dev" || a === "--opencode-jsonc" || a === "--out" || a === "--schema") {
+    } else if (a === "--models-url" || a === "--models-dev" || a === "--out" || a === "--schema" || a === "--carry-from") {
       args.opts[a] = argv[++i]
     } else if (a.startsWith("--") && a.includes("=")) {
       const [k, v] = a.split(/=(.*)/s)
@@ -1157,18 +1046,17 @@ function parseArgs(argv) {
 }
 
 /**
- * Role defaults are curated by a human, not derived from the feeds, so a
- * regeneration must carry them forward. Returns the existing catalog's
- * `recommendations` object, or undefined when there is nothing to carry:
- *   - the file does not exist (first generation), or
- *   - the file is a catalog (right schemaVersion, models[] array) that has no
- *     `recommendations` yet; there are no roles to lose.
- * Anything else that exists at the output path is an error. In particular a
- * file that parses as JSON but is not a catalog (`[]`, `null`, `123`, `{}`, a
- * catalog with no models[]) must never be silently overwritten with a catalog
- * that has no roles, because that is the failure this guards against.
+ * Read the catalog already at `catalogPath`; undefined when the file does not
+ * exist (first generation). Role defaults and model order are curated, not
+ * derived from the feeds, so a regeneration carries both forward from here.
+ *
+ * Anything at the path that is not a catalog is an error. In particular a file
+ * that parses as JSON but is not a catalog (`[]`, `null`, `123`, `{}`, a catalog
+ * with no models[]) must never be silently overwritten with a catalog that has
+ * no roles, because that is the failure this guards against. A real catalog that
+ * has no `recommendations` yet is accepted: there are no roles to lose.
  */
-async function readExistingRecommendations(catalogPath) {
+async function readExistingCatalog(catalogPath) {
   let raw
   try {
     raw = await readFile(catalogPath, "utf8")
@@ -1196,7 +1084,7 @@ async function readExistingRecommendations(catalogPath) {
   if (!Array.isArray(existing.models)) {
     throw refuse("is a catalog without a models[] array")
   }
-  return existing.recommendations
+  return existing
 }
 
 /**
@@ -1222,71 +1110,65 @@ function carryForwardRecommendations(recommendations, models, where = "catalog.j
   return { ...recommendations }
 }
 
+const NO_SOURCE_MESSAGE =
+  "no model source given: pass --models-url <path|https url>.\n" +
+  "  This builder has no default source and no bootstrap mode, so it cannot silently\n" +
+  "  replace the catalog. To refresh the catalog and its neutral artifacts, run:\n" +
+  "    make refresh-usai-catalog\n" +
+  "  (see integrations/providers/usai/README.md)."
+
+/**
+ * Build a catalog from a USAi model list and optional models.dev enrichment.
+ *
+ * `args.sourceLabels` (programmatic only) overrides what `sources` records for
+ * the two inputs, so a build from a pulled directory can record the URLs that
+ * were pulled instead of a temporary path.
+ */
 async function buildCatalog(args) {
   const schemaPath = args.opts["--schema"] || DEFAULT_SCHEMA
   const schema = JSON.parse(await readFile(schemaPath, "utf8"))
 
   const modelsUrl = args.opts["--models-url"]
+  if (args.flags.has("--include-capabilities") && !modelsUrl) {
+    throw new Error("--include-capabilities requires --models-url")
+  }
+  if (!modelsUrl) throw new Error(NO_SOURCE_MESSAGE)
   const noEnrichment = args.flags.has("--no-enrichment")
-  const forceBootstrap = args.flags.has("--bootstrap")
-  if (args.flags.has("--include-capabilities") && (!modelsUrl || forceBootstrap)) {
-    throw new Error("--include-capabilities requires --models-url and cannot be combined with --bootstrap")
+  const modelsDevRef = args.opts["--models-dev"] || MODELS_DEV_URL
+  const labels = args.sourceLabels ?? {}
+
+  // The catalog already on disk supplies the curated parts: role defaults and
+  // model order. Read it first so an unreadable file fails before any work.
+  const carryPath = args.opts["--carry-from"] || args.opts["--out"] || DEFAULT_OUT
+  const existing = await readExistingCatalog(carryPath)
+
+  const usaiList = extractUsaiList(await loadJsonSource(modelsUrl))
+  let modelsDevCatalog = null
+  if (!noEnrichment) {
+    const raw = await loadJsonSource(modelsDevRef)
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) modelsDevCatalog = raw
+    else throw new Error("models.dev source has unexpected shape (expected provider-keyed object)")
+  }
+  const includeCapabilities = args.flags.has("--include-capabilities")
+  if (includeCapabilities && !modelsDevCatalog) throw new Error("--include-capabilities requires models.dev enrichment (omit --no-enrichment)")
+  const { models, vendorOrder } = shapeFromFeeds(usaiList, modelsDevCatalog, {
+    includeCapabilities,
+    preferredOrder: (existing?.models ?? []).map((m) => m?.id),
+  })
+  const catalog = {
+    schemaVersion: SCHEMA_VERSION,
+    generatedBy: GENERATED_MARKER,
+    sources: {
+      modelsList: labels.modelsList ?? modelsUrl,
+      enrichment: noEnrichment ? "(none)" : (labels.enrichment ?? modelsDevRef),
+      ...(includeCapabilities ? { capabilities: "models.dev upstream provider data; not verified against the USAi gateway" } : {}),
+    },
+    gateway: buildGateway(),
+    vendors: buildVendors(vendorOrder),
+    models,
   }
 
-  let catalog
-  if (modelsUrl && !forceBootstrap) {
-    // Live-feed / fixture mode.
-    const usaiPayload = await loadJsonSource(modelsUrl)
-    const usaiList = extractUsaiList(usaiPayload)
-    let modelsDevCatalog = null
-    if (!noEnrichment) {
-      const modelsDevRef = args.opts["--models-dev"] || MODELS_DEV_URL
-      const raw = await loadJsonSource(modelsDevRef)
-      if (raw && typeof raw === "object" && !Array.isArray(raw)) modelsDevCatalog = raw
-      else throw new Error("models.dev source has unexpected shape (expected provider-keyed object)")
-    }
-    const includeCapabilities = args.flags.has("--include-capabilities")
-    if (includeCapabilities && !modelsDevCatalog) throw new Error("--include-capabilities requires models.dev enrichment (omit --no-enrichment)")
-    const { models, vendorOrder } = shapeFromFeeds(usaiList, modelsDevCatalog, { includeCapabilities })
-    catalog = {
-      schemaVersion: SCHEMA_VERSION,
-      generatedBy: GENERATED_MARKER,
-      sources: {
-        modelsList: modelsUrl,
-        enrichment: noEnrichment ? "(none)" : (args.opts["--models-dev"] || MODELS_DEV_URL),
-        ...(includeCapabilities ? { capabilities: "models.dev upstream provider data; not verified against the USAi gateway" } : {}),
-      },
-      gateway: buildGateway(),
-      vendors: buildVendors(vendorOrder),
-      models,
-    }
-  } else {
-    // Bootstrap from the renderer contract's GENERATED block (default).
-    const opencodePath = args.opts["--opencode-jsonc"] || DEFAULT_OPENCODE_JSONC
-    const jsoncText = await readFile(opencodePath, "utf8")
-    const block = extractGeneratedBlock(jsoncText)
-    const entries = parseBootstrapModels(block)
-    const { models } = bootstrapModelsFromBlock(entries)
-    // Preserve vendor first-appearance order from the block.
-    const vendorOrder = []
-    for (const m of models) if (!vendorOrder.includes(m.vendor)) vendorOrder.push(m.vendor)
-    catalog = {
-      schemaVersion: SCHEMA_VERSION,
-      generatedBy: GENERATED_MARKER,
-      sources: {
-        bootstrappedFrom: OPENCODE_JSONC_REL,
-      },
-      gateway: buildGateway(),
-      vendors: buildVendors(vendorOrder),
-      models,
-    }
-  }
-
-  const carried = carryForwardRecommendations(
-    await readExistingRecommendations(args.opts["--out"] || DEFAULT_OUT),
-    catalog.models,
-    args.opts["--out"] || DEFAULT_OUT,
-  )
+  const carried = carryForwardRecommendations(existing?.recommendations, catalog.models, carryPath)
   if (carried !== undefined) catalog.recommendations = carried
 
   const errors = validateCatalog(catalog, schema)
@@ -1299,8 +1181,7 @@ async function buildCatalog(args) {
 /**
  * The substantive catalog: everything a consumer renders, with provenance
  * stripped. `sources` names the feed or file this particular run read, so it
- * differs between a live regeneration and an offline bootstrap of identical
- * models — it is metadata about the build, not about the catalog's content.
+ * differs between runs that read identical models from different places — it is metadata about the build, not about the catalog's content.
  */
 function substantive(catalog) {
   const { sources: _provenance, ...rest } = catalog
@@ -1337,6 +1218,10 @@ function describeDrift(existing, fresh) {
   const byId = (list) => new Map((list || []).map((m) => [m.id, m]))
   const before = byId(existing?.models)
   const after = byId(fresh?.models)
+  const orderOf = (list) => (list || []).map((m) => m.id).filter((id) => before.has(id) && after.has(id))
+  const kept = orderOf(existing?.models)
+  const keptAfter = orderOf(fresh?.models)
+  if (JSON.stringify(kept) !== JSON.stringify(keptAfter)) lines.push("model order changed")
   const added = [...after.keys()].filter((id) => !before.has(id)).sort()
   const removed = [...before.keys()].filter((id) => !after.has(id)).sort()
   if (added.length) lines.push(`models added: ${added.join(", ")}`)
@@ -1392,8 +1277,10 @@ export {
   substantive,
   describeDrift,
   carryForwardRecommendations,
-  parseBootstrapModels,
-  bootstrapModelsFromBlock,
+  readExistingCatalog,
+  loadJsonSource,
+  fetchJsonBounded,
+  MAX_RESPONSE_BYTES,
   shapeFromFeeds,
   findModelsDevMatch,
   classifyVendor,
