@@ -15,13 +15,14 @@
 // =============================================================================
 
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { test } from "node:test"
 import { spawnSync } from "node:child_process"
 
-import { describeDrift, substantive } from "../scripts/build-catalog.mjs"
+import { describeDrift, serialize, substantive } from "../scripts/build-catalog.mjs"
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const USAI_DIR = path.resolve(HERE, "..")
@@ -47,8 +48,25 @@ test("identical catalogs report no drift", () => {
 })
 
 test("default --check uses the committed 24-model production catalog", () => {
-  const result = spawnSync(process.execPath, ["scripts/build-catalog.mjs", "--check"], { cwd: USAI_DIR, encoding: "utf8" })
-  assert.equal(result.status, 0, result.stderr)
+  // The default source is the legacy bootstrap fixture, which carries no
+  // capability data (verified capabilities are committed in catalog.json only,
+  // with evidence). Check the rest of the catalog against it by stripping the
+  // two capability fields from a temp copy; the capability data itself is
+  // guarded in capabilities.test.mjs.
+  const stripped = loadCatalog()
+  for (const model of stripped.models) {
+    delete model.reasoning
+    delete model.inputModalities
+  }
+  const dir = mkdtempSync(path.join(tmpdir(), "catalog-check-"))
+  try {
+    const out = path.join(dir, "catalog.json")
+    writeFileSync(out, serialize(stripped))
+    const result = spawnSync(process.execPath, ["scripts/build-catalog.mjs", "--check", "--out", out], { cwd: USAI_DIR, encoding: "utf8" })
+    assert.equal(result.status, 0, result.stderr)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
   assert.equal(loadCatalog().models.length, 24)
 })
 

@@ -2,7 +2,8 @@
   "schemaVersion": "usai-model-catalog/v1",
   "generatedBy": "build-catalog.mjs (generated — do not hand-edit)",
   "sources": {
-    "bootstrappedFrom": "integrations/providers/usai/tests/fixtures/opencode-renderer-contract.jsonc"
+    "bootstrappedFrom": "integrations/providers/usai/tests/fixtures/opencode-renderer-contract.jsonc",
+    "capabilitiesVerified": "2026-11-04; opencode 2.0.30"
   },
   "recommendations": {
     "primary": "claude-sonnet-5",
@@ -55,7 +56,11 @@
         "output": 10,
         "cacheRead": 0.1,
         "cacheWrite": 2.5
-      }
+      },
+      "inputModalities": [
+        "text",
+        "image"
+      ]
     },
     {
       "id": "claude-opus-5",
@@ -81,7 +86,11 @@
         "output": 10,
         "cacheRead": 0.2,
         "cacheWrite": 2.5
-      }
+      },
+      "inputModalities": [
+        "text",
+        "image"
+      ]
     },
     {
       "id": "claude_4_8_opus",
@@ -94,7 +103,11 @@
         "output": 25,
         "cacheRead": 0.5,
         "cacheWrite": 6.25
-      }
+      },
+      "inputModalities": [
+        "text",
+        "image"
+      ]
     },
     {
       "id": "claude_4_7_opus",
@@ -107,7 +120,11 @@
         "output": 25,
         "cacheRead": 0.5,
         "cacheWrite": 6.25
-      }
+      },
+      "inputModalities": [
+        "text",
+        "image"
+      ]
     },
     {
       "id": "claude_4_6_sonnet",
@@ -120,7 +137,11 @@
         "output": 16.5,
         "cacheRead": 0.33,
         "cacheWrite": 4.125
-      }
+      },
+      "inputModalities": [
+        "text",
+        "image"
+      ]
     },
     {
       "id": "claude_4_5_haiku",
@@ -165,7 +186,11 @@
         "output": 15,
         "cacheRead": 0.2,
         "cacheWrite": 5
-      }
+      },
+      "inputModalities": [
+        "text",
+        "image"
+      ]
     },
     {
       "id": "gpt-6-astra",
@@ -184,7 +209,11 @@
         "output": 75,
         "cacheRead": 2,
         "cacheWrite": 25
-      }
+      },
+      "inputModalities": [
+        "text",
+        "image"
+      ]
     },
     {
       "id": "gpt-6-luna",
@@ -313,7 +342,11 @@
         "input": 5,
         "output": 22.5,
         "cacheRead": 0.5
-      }
+      },
+      "inputModalities": [
+        "text",
+        "image"
+      ]
     },
     {
       "id": "gpt_5_2_default_v2",
@@ -325,7 +358,11 @@
         "input": 1.75,
         "output": 14,
         "cacheRead": 0.175
-      }
+      },
+      "inputModalities": [
+        "text",
+        "image"
+      ]
     },
     {
       "id": "gemini-3.8-flash",
@@ -337,7 +374,11 @@
         "input": 0.75,
         "output": 3.75,
         "cacheRead": 0.075
-      }
+      },
+      "inputModalities": [
+        "text",
+        "image"
+      ]
     },
     {
       "id": "gemini-3-7-flash",
@@ -349,7 +390,11 @@
         "input": 0.75,
         "output": 3.75,
         "cacheRead": 0.075
-      }
+      },
+      "inputModalities": [
+        "text",
+        "image"
+      ]
     },
     {
       "id": "gemini-3.5-flash",
@@ -361,7 +406,11 @@
         "input": 1.5,
         "output": 9,
         "cacheRead": 0.15
-      }
+      },
+      "inputModalities": [
+        "text",
+        "image"
+      ]
     },
     {
       "id": "gemini-2.5-flash",

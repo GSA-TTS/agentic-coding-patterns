@@ -82,7 +82,11 @@ value is confirmed against the gateway with per-model, per-field evidence (a
 data PR description plus a committed evidence file; see the ADR). The
 `sources.capabilitiesVerified` string (`<date>; opencode <version>`) is only a
 catalog-wide release reminder, not evidence. Malformed upstream values are
-treated as unknown with a warning. Nothing is inferred from model ids or names. See
+treated as unknown with a warning. Nothing is inferred from model ids or names.
+The committed `inputModalities` values are listed, with their evidence, in
+[the capability evidence file](../../isolation/acq-kits/opencode/docs/capability-evidence/2026-11-04-opencode-2.0.30.md).
+Rebuilding the catalog from the feeds does not carry them forward, so a refresh
+that rewrites `catalog.json` must keep them or re-verify them. See
 [ADR 0006](../../isolation/docs/decisions/0006-neutral-model-capability-metadata.md).
 
 ## Safety guarantee
