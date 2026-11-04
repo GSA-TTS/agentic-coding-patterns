@@ -53,7 +53,23 @@ function withTempDir(fn) {
 
 // A minimal existing catalog: right identity, no models. Enough for the
 // carry-forward shape check; the build replaces everything but the roles.
-const stubCatalog = (extra = {}) => JSON.stringify({ schemaVersion: "usai-model-catalog/v1", models: [], ...extra })
+// A valid existing catalog (the committed fixture copy), optionally modified. The
+// build now validates the catalog it carries from, so a bare stub is rejected.
+const FIXTURE_CATALOG = path.join(HERE, "fixtures/refresh/artifacts/catalog.json")
+function existingCatalog(mutate = () => {}) {
+  const catalog = JSON.parse(readFileSync(FIXTURE_CATALOG, "utf8"))
+  mutate(catalog)
+  return JSON.stringify(catalog)
+}
+
+// An existing catalog that is valid on its own but recommends a model the feed
+// no longer lists.
+function leftTheFeed() {
+  return existingCatalog((c) => {
+    c.models.push({ ...c.models[0], id: "model-that-left-the-feed", name: "Left the feed" })
+    c.recommendations = { ...c.recommendations, primary: "model-that-left-the-feed" }
+  })
+}
 
 // Role ids that exist in the offline fixture feed, so a fixture refresh can
 // keep them.
@@ -162,7 +178,7 @@ test("describeDrift is silent when roles match, and substantive() keeps them", (
 test("CLI: a fixture refresh carries the existing role defaults forward", () => {
   withTempDir((dir) => {
     const out = path.join(dir, "catalog.json")
-    writeFileSync(out, stubCatalog({ recommendations: FIXTURE_ROLES }))
+    writeFileSync(out, existingCatalog((c) => (c.recommendations = FIXTURE_ROLES)))
     const result = refresh(out)
     assert.equal(result.status, 0, result.stderr)
     assert.deepEqual(JSON.parse(readFileSync(out, "utf8")).recommendations, FIXTURE_ROLES)
@@ -172,7 +188,7 @@ test("CLI: a fixture refresh carries the existing role defaults forward", () => 
 test("CLI: a refresh is deterministic and --check against its own output is clean", () => {
   withTempDir((dir) => {
     const out = path.join(dir, "catalog.json")
-    writeFileSync(out, stubCatalog({ recommendations: FIXTURE_ROLES }))
+    writeFileSync(out, existingCatalog((c) => (c.recommendations = FIXTURE_ROLES)))
     assert.equal(refresh(out).status, 0)
     const first = readFileSync(out, "utf8")
     assert.equal(refresh(out).status, 0)
@@ -192,7 +208,7 @@ test("CLI: a refresh with no existing catalog writes no recommendations", () => 
 test("CLI: a recommended model that left the feed fails the refresh and leaves the file untouched", () => {
   withTempDir((dir) => {
     const out = path.join(dir, "catalog.json")
-    const before = stubCatalog({ recommendations: { ...FIXTURE_ROLES, primary: "model-that-left-the-feed" } })
+    const before = leftTheFeed()
     writeFileSync(out, before)
     const result = refresh(out)
     assert.notEqual(result.status, 0)
@@ -205,7 +221,7 @@ test("CLI: a recommended model that left the feed fails the refresh and leaves t
 test("CLI: --check also fails closed when a recommended model left the feed", () => {
   withTempDir((dir) => {
     const out = path.join(dir, "catalog.json")
-    writeFileSync(out, stubCatalog({ recommendations: { primary: "model-that-left-the-feed" } }))
+    writeFileSync(out, leftTheFeed())
     const result = refresh(out, "--check")
     assert.notEqual(result.status, 0)
     assert.match(result.stderr, /model-that-left-the-feed/)
@@ -223,13 +239,15 @@ test("CLI: an unreadable existing catalog fails instead of dropping the roles", 
   })
 })
 
-test("CLI: the default offline bootstrap no longer deletes the committed role defaults", () => {
+test("CLI: a run with no model source refuses and leaves the committed catalog untouched", () => {
   withTempDir((dir) => {
     const out = path.join(dir, "catalog.json")
-    writeFileSync(out, readFileSync(CATALOG, "utf8"))
+    const before = readFileSync(CATALOG, "utf8")
+    writeFileSync(out, before)
     const result = spawnSync(process.execPath, [BUILD, "--out", out], { encoding: "utf8" })
-    assert.equal(result.status, 0, result.stderr)
-    assert.deepEqual(JSON.parse(readFileSync(out, "utf8")).recommendations, loadCatalog().recommendations)
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /make refresh-usai-catalog/)
+    assert.equal(readFileSync(out, "utf8"), before)
   })
 })
 
@@ -260,7 +278,7 @@ for (const [label, contents] of [
 test("CLI: an existing valid catalog with no recommendations yet is replaced, with no roles written", () => {
   withTempDir((dir) => {
     const out = path.join(dir, "catalog.json")
-    writeFileSync(out, stubCatalog())
+    writeFileSync(out, existingCatalog((c) => delete c.recommendations))
     const result = refresh(out)
     assert.equal(result.status, 0, result.stderr)
     const written = JSON.parse(readFileSync(out, "utf8"))

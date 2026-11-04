@@ -5,6 +5,12 @@ request was made while writing this. Until the steps below are run and their
 observed output is recorded, nothing in this repository claims that image
 recognition works or is fixed.
 
+The harness for these steps is committed
+(`../scripts/verify_image_capability.py`; see "How to run it" below), but it
+**has not been run live**: it was tested only offline, against a stand-in
+`opencode` and a local fake gateway. Treat its output as candidate evidence for
+human review, not as a result.
+
 ## Purpose
 
 Establish, per USAi model, whether the gateway actually accepts and uses an
@@ -142,3 +148,86 @@ evidence file.
 Stop and report if: any step would require exposing the credential; an
 unexpected host is contacted; responses contain data other than the synthetic
 token; or the sandbox cannot be created from the release candidate bundle.
+
+## How to run it
+
+`../scripts/verify_image_capability.py` automates steps 1 to 6 for every model
+in the rendered provider block. It needs Python 3.11 or later (standard library only) and
+must run **inside** a sandbox created from the release candidate bundle, where
+the USAi key exists only as the injected environment variable. It reads the
+rendered config read-only and never prints it, drives `opencode run --standalone`
+with a throwaway per-configuration config tree, and deletes that tree on exit
+(including Ctrl-C). Output goes under the current worktree, never `/tmp`.
+
+Exact one-line shape (replace the two placeholders; the absolute `cd` is the
+worktree mounted in the sandbox):
+
+```bash
+cd /ABSOLUTE/PATH/TO/WORKTREE && python3 integrations/isolation/acq-kits/opencode/scripts/verify_image_capability.py --output-dir "$PWD/tmp/image-verification-$(date -u +%Y%m%dT%H%M%SZ)"
+```
+
+Add `--dry-run` first to print the plan (models and request count; about ten
+gateway requests per model; in the offline probe OpenCode also sent one extra
+title request per run, so expect roughly double) without sending anything. Other options: `--models a,b` (subset),
+`--samples N` (default and minimum 3), `--timeout SECONDS` (per step, default
+300), `--seed` (reproducible tokens), `--config`, `--provider`,
+`--expected-host`, `--opencode`.
+
+It writes `results.json`, `results.tsv` and `evidence.md` (the rendered table:
+model id, OpenCode version, step-1 config facts, verbatim replies per sample,
+classification, text-only control result, date) to the output directory, and
+prints one line to paste back:
+
+```text
+RESULT unset=correct:N/wrong:N/rejected:N/error:N text-image=... text-only=... models=N candidates=N token_leaks=N skipped=N(<models>) stopped=no opencode=<version> date=<YYYY-MM-DD> dir=<path>
+```
+
+Paste back the `RESULT` line and the contents of `evidence.md` (it holds
+results and verbatim replies only). Do not paste the environment, the config
+file, or any transcript. Exit status is 0 for a complete run, 2 when a stop
+condition fired (partial results are still written and labeled), 130 on
+interrupt.
+
+The script enforces these stop conditions and halts rather than continuing: a
+literal credential in the rendered provider block, or the key variable unset;
+a provider `baseURL` that is not `https://api.gsa.usai.gov`; a reply that is
+longer than 500 characters (unset and explicit `["text","image"]` runs, where
+only a six-character token is expected) or carries credential-shaped data; an
+explicit `["text"]` run that
+returns the token; three consecutive models failing the text control for auth, routing, timeout or
+connection reasons (or no model passing it at all); and an
+OpenCode that cannot be run. A model whose own text control fails is recorded
+and skipped (not an image result). When the gateway message names that one model (`model_blocked_globally`,
+an unknown or nonexistent model, or "doesn't support tool use") it is reported
+as `SKIPPED (unavailable)`, does not count toward the three-in-a-row stop, and
+does not change the exit status; a complete run with such models exits 0 and
+lists them as `skipped=N(model,...)` in the `RESULT` line. A plain 401 or 403, a
+bare 4xx with no model-specific text, a timeout, or a connection error stays a
+run-level failure, and if no model at all passes its text control the run stops
+(a run cannot succeed with every model "unavailable"). In the explicit
+`["text"]` negative control a long, harmless refusal is the expected outcome, so
+that run's length cap is 8000 characters instead (credential-shaped content
+still stops the run); stored replies are truncated to 500 characters after
+classification.
+
+The script never edits `catalog.json`, a schema, or any committed capability
+value, and its `candidate` column applies the decision rule above mechanically (and, stricter than the prose, also requires the text-only control samples to be plain non-token replies, so an outage cannot pass as a negative control).
+Committing values, writing the dated evidence file under `capability-evidence/`,
+and setting `sources.capabilitiesVerified` remain human, reviewed steps.
+
+OpenCode-specific mechanics the script relies on (OpenCode 2.0.30; if a later
+release changes them, edit the constants at the top of the script): the model
+and attachment flags are `--model <provider>/<id>` and `--file <path>`;
+`--standalone` is required so the run does not use the shared background
+service. Isolation was checked offline against a local stand-in gateway: only
+the `XDG_CONFIG_HOME` family of variables redirected the global config
+location (`OPENCODE_CONFIG`, `OPENCODE_CONFIG_DIR` and `OPENCODE_CONFIG_CONTENT`
+add layers on top of it, so the script strips them from the child environment);
+a project-level `opencode.json` and `AGENTS.md` in the worktree otherwise leaked
+into the request and overrode the modalities under test, so the script also sets
+`OPENCODE_DISABLE_PROJECT_CONFIG`, `OPENCODE_DISABLE_CLAUDE_CODE` and a private
+`OPENCODE_TEST_HOME`. With those, the request carried the image part for unset
+and `["text","image"]` and dropped it for `["text"]`. The error shape that separates *Rejected* from an availability
+error was observed only against a local stand-in gateway; the live gateway's
+real rejection messages are unverified until the first live run, so review the
+`detail` column of any *Rejected* or *Error* row by hand.

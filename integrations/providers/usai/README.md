@@ -7,32 +7,98 @@ single agent harness.
 ## Data flow
 
 ```
-live feeds -> build-catalog.mjs -> catalog.json -> per-harness emitters
+live feeds (USAi model list + models.dev)
+  -> one source pull
+  -> catalog.json                      (this directory)
+  -> registered provider-neutral artifacts
+       neutral model snapshot          (acq-kits/usai-provider, via its normalizer)
+  -> drift check / review / commit by a person
 ```
 
-- **live feeds** — the USAi models list plus enrichment metadata.
-- **build-catalog.mjs** — derives `catalog.json`.
-- **catalog.json** — the generated catalog. **GENERATED — do not hand-edit.**
-- **per-harness emitters** — render `catalog.json` into each harness config
-  (e.g. the OpenCode renderer contract fixture's model block).
+- **catalog.json** — the generated catalog. **GENERATED — do not hand-edit**
+  (except the `recommendations` role defaults, which a person curates).
+- **neutral snapshot** — the metadata-only `acq-neutral-model-catalog/v1`
+  document the USAi provider kit vendors. It is derived from `catalog.json`.
+- **harness-native configuration** is not produced here. Each harness kit renders
+  its own configuration from the neutral inputs. The refresh never writes or
+  reads one.
 
-## Checking for drift
+The decision behind this lifecycle is
+[ADR 0003](../../../docs/decisions/0003-repo-time-provider-catalog-refresh.md).
+
+## Refreshing the catalog (the one command)
 
 ```bash
-node scripts/build-catalog.mjs --check
+make refresh-usai-catalog          # pull once, rewrite catalog.json and the snapshot
+make refresh-usai-catalog-check    # same pull, report drift, write nothing
 ```
 
-Exits non-zero and names what moved when the committed `catalog.json` no longer
-matches what the current sources produce — which models were added, removed, or
-changed, so the output is actionable rather than a bare pass/fail.
+Run these on a maintainer host. A live pull needs `USAI_API_KEY` in the process
+environment (the gateway rejects unauthenticated requests). The key is read from
+the environment only, never from a flag, and is never printed or written to a
+file. The command refuses to run a live pull when it detects CI.
+
+What happens:
+
+1. Both feeds are fetched **once** (https only, bounded time and size) into
+   `tmp/usai-source/`, which is git-ignored.
+2. `catalog.json` is built from that pull. Role defaults and model order are
+   carried forward from the existing catalog.
+3. Every artifact in [`refresh-registry.json`](refresh-registry.json) is
+   regenerated from the new catalog by its file-to-file generator.
+4. Only if every step succeeded are the files written. Nothing is committed.
+   Review `git diff`, then commit as a normal change.
+
+Check mode compares in a temporary directory and exits `1` on drift, naming the
+artifact and the models that were added, removed or changed. `sources` is not
+compared, because it records where a run read from, not what the catalog says.
+
+### Offline and deterministic
+
+```bash
+node integrations/providers/usai/scripts/refresh.mjs --from <dir> [--check]
+```
+
+`<dir>` holds `usai-models.json` and `models-dev.json` (the two feeds saved
+earlier, for example by a previous live pull under `tmp/usai-source/`).
+No network and no credential are needed. The fixtures under
+`tests/fixtures/refresh/` are such a directory, and `tests/fixtures/refresh/artifacts/`
+holds the catalog and snapshot they regenerate byte for byte. The tests use those
+copies, so they do not change when the real catalog is refreshed.
+
+### When a refresh fails
+
+- **A recommended model left the feed.** The build names each role and id and
+  writes nothing. Choose a replacement, edit `recommendations` in `catalog.json`,
+  and re-run.
+- **The catalog at the output path is not a catalog.** The build refuses to
+  overwrite it. Repair or remove the file.
+- **No key / CI detected / feed unreachable.** The command exits `2` with the
+  reason. Use `--from` to work from a saved pull.
+
+### Adding a provider-neutral artifact
+
+Add an entry to `refresh-registry.json` with a repository-relative `path` and a
+`generator` (a Node script that reads the catalog and writes the artifact, using
+the `{catalog}` and `{out}` placeholders). The generator must be a pure
+file-to-file transform: no network, no credential, no harness-native output.
+Add a fixture test next to `tests/refresh.test.mjs`.
+
+## Checking for drift in the catalog alone
+
+```bash
+node scripts/build-catalog.mjs --check --models-url <usai-models.json> --models-dev <models-dev.json>
+```
+
+`build-catalog.mjs` has no default source and no bootstrap mode; run without
+`--models-url` it refuses and points at the refresh command.
 
 The check compares the **substantive** catalog: `schemaVersion`, `generatedBy`,
-`gateway`, `vendors`, and `models`. It deliberately ignores `sources`, which
-records *which feed or file a given run read*. A live-feed regeneration and an
-offline bootstrap of byte-identical models disagree there by design, so
-comparing it would fail every offline run regardless of real drift — and a
-detector that always fires is one everybody learns to ignore, leaving genuine
-drift indistinguishable from the noise.
+`gateway`, `vendors`, `models` and `recommendations`. It deliberately ignores
+`sources`, which records *which feed or file a given run read*. Two runs over
+byte-identical models disagree there by design, so comparing it would fail every
+run regardless of real drift — and a detector that always fires is one everybody
+learns to ignore.
 
 ## Role defaults (`recommendations`)
 

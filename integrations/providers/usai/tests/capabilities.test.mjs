@@ -18,7 +18,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { test } from "node:test"
 
-import { INPUT_MODALITIES, bootstrapModelsFromBlock, describeDrift, parseBootstrapModels, shapeFromFeeds, validateCatalog } from "../scripts/build-catalog.mjs"
+import { INPUT_MODALITIES, describeDrift, shapeFromFeeds, validateCatalog } from "../scripts/build-catalog.mjs"
 import { INPUT_MODALITIES as NORMALIZER_MODALITIES, normalizeCatalog } from "../../../isolation/acq-kits/usai-provider/scripts/normalize-catalog.mjs"
 import { INPUT_MODALITIES as RENDERER_MODALITIES, renderProviderConfig } from "../../../isolation/acq-kits/opencode/files/home/opencode-config/render-provider-config.mjs"
 
@@ -193,13 +193,10 @@ test("a summary line counts matched models with malformed capability data; none 
   assert.doesNotMatch(captureStderr(() => shapeFromFeeds(feed("claude-sonnet-5"), modelsDevWith("claude-sonnet-5", { reasoning: "yes" }))).stderr, /malformed capability data/)
 })
 
-test("CLI: --include-capabilities without a models URL, or with --bootstrap, exits non-zero with a clear error", () => {
-  const run = (...args) => spawnSync(process.execPath, [BUILD_SCRIPT, "--check", ...args], { encoding: "utf8" })
-  for (const args of [["--include-capabilities"], ["--include-capabilities", "--bootstrap"], ["--include-capabilities", "--bootstrap", "--models-url", path.join(HERE, "fixtures/models-list.json")]]) {
-    const result = run(...args)
-    assert.notEqual(result.status, 0, args.join(" "))
-    assert.match(result.stderr, /--include-capabilities requires --models-url/)
-  }
+test("CLI: --include-capabilities without a models URL exits non-zero with a clear error", () => {
+  const result = spawnSync(process.execPath, [BUILD_SCRIPT, "--check", "--include-capabilities"], { encoding: "utf8" })
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /--include-capabilities requires --models-url/)
 })
 
 test("catalog validation rejects malformed capability fields", () => {
@@ -215,25 +212,11 @@ test("catalog validation rejects malformed capability fields", () => {
   assert.match(validateCatalog(withModel({ inputModalities: [] }), schema).join("\n"), /inputModalities/)
 })
 
-test("bootstrap carries reasoning and modalities from an OpenCode-shaped block", () => {
-  const block = `"gpt-x": {"name": "GPT X", "reasoning": true, "modalities": {"input": ["image", "text"]}, "limit": {"context": 10, "output": 5}},
-    "plain": {"name": "Plain", "limit": {"context": 10, "output": 5}}`
-  const { models } = bootstrapModelsFromBlock(parseBootstrapModels(block))
-  const byId = Object.fromEntries(models.map((m) => [m.id, m]))
-  assert.equal(byId["gpt-x"].reasoning, true)
-  assert.deepEqual(byId["gpt-x"].inputModalities, ["text", "image"], "canonical order")
-  assert.equal("reasoning" in byId.plain, false)
-  assert.equal("inputModalities" in byId.plain, false)
-})
-
-test("bootstrap rejects malformed capability data in our own committed block", () => {
-  const parse = (extra) => bootstrapModelsFromBlock(parseBootstrapModels(`"m": {"name": "M", "limit": {"context": 10, "output": 5}, ${extra}}`))
-  assert.throws(() => parse('"modalities": "image"'), /modalities must be an object/)
-  assert.throws(() => parse('"modalities": ["text"]'), /modalities must be an object/)
-  assert.throws(() => parse('"modalities": null'), /modalities must be an object/)
-  assert.throws(() => parse('"modalities": {"input": "image"}'), /non-empty array/)
-  assert.throws(() => parse('"modalities": {"input": ["hologram"]}'), /unsupported modality/)
-  assert.throws(() => parse('"reasoning": "true"'), /reasoning must be a boolean/)
+test("a model fed through models.dev carries reasoning and modalities in canonical order when opted in", () => {
+  const dev = modelsDevWith("claude-sonnet-5", { reasoning: true, modalities: { input: ["pdf", "image", "text"] } })
+  const [model] = shapeFromFeeds(feed("claude-sonnet-5"), dev, { includeCapabilities: true }).models
+  assert.equal(model.reasoning, true)
+  assert.deepEqual(model.inputModalities, ["text", "image", "pdf"], "canonical order")
 })
 
 test("capability changes are reported as drift", () => {

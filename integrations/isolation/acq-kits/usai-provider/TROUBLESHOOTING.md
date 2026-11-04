@@ -65,13 +65,11 @@ and shipped with a kit release; a sandbox never regenerates it.
 
 **Fix:** update to a kit release that carries a refreshed snapshot, then
 re-apply or recreate the sandbox. A maintainer can compare the committed
-catalog with the live gateway by running, from `integrations/providers/usai/`,
-`node scripts/build-catalog.mjs --check --models-url
-https://api.gsa.usai.gov/api/v1/models`. The check writes nothing. It reads the
-gateway credential from the environment variable named in the catalog's
-`gateway.apiKeyEnv`, so run it on a maintainer host, not inside a sandbox.
-Without `--models-url` the command compares against a frozen offline fixture and
-says nothing about the live gateway.
+catalog with the live gateway by running `make refresh-usai-catalog-check` from
+the repository root (see `integrations/providers/usai/README.md`). The check
+changes no tracked file. It reads the gateway credential from the environment
+variable named in the catalog's `gateway.apiKeyEnv`, so run it on a maintainer
+host, not inside a sandbox.
 
 ## A global-key override warning appeared at startup
 

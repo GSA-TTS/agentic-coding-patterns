@@ -61,7 +61,8 @@ this before any `reasoning: true` value is committed; the synthetic-image
 procedure covers image input only and cannot substantiate `reasoning`, `audio`,
 `video`, or `pdf`. See
 [ADR 0006](../../docs/decisions/0006-neutral-model-capability-metadata.md) and
-the [synthetic-image validation procedure](docs/synthetic-image-validation.md).
+the [synthetic-image validation procedure](docs/synthetic-image-validation.md)
+(its host-run harness, `scripts/verify_image_capability.py`, is committed but has not been run live).
 
 The provider renderer preserves unrelated user configuration and removes only
 the provider IDs and default model roles recorded in its previous ownership

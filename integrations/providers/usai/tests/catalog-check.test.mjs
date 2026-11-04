@@ -4,7 +4,7 @@
 //
 // Why this test exists: --check once compared the whole serialized catalog,
 // including the `sources` block. `sources` records WHICH feed or file a given
-// run read, so a live-feed regeneration and an offline bootstrap of byte-identical
+// run read, so a live-feed regeneration and an offline regeneration of byte-identical
 // models disagree there by design. The result was a detector that failed on every
 // offline run no matter what — and a drift check that always fires is one everyone
 // learns to ignore, which is strictly worse than having none, because genuine
@@ -15,14 +15,13 @@
 // =============================================================================
 
 import assert from "node:assert/strict"
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { readFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { test } from "node:test"
 import { spawnSync } from "node:child_process"
 
-import { describeDrift, serialize, substantive } from "../scripts/build-catalog.mjs"
+import { describeDrift, substantive } from "../scripts/build-catalog.mjs"
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const USAI_DIR = path.resolve(HERE, "..")
@@ -47,38 +46,27 @@ test("identical catalogs report no drift", () => {
   assert.deepEqual(drift, [])
 })
 
-test("default --check uses the committed 24-model production catalog", () => {
-  // The default source is the legacy bootstrap fixture, which carries no
-  // capability data (verified capabilities are committed in catalog.json only,
-  // with evidence). Check the rest of the catalog against it by stripping the
-  // two capability fields from a temp copy. The capability values themselves
-  // are not pinned by a test (only the release-reminder shape is, in
-  // capabilities.test.mjs); the evidence file and its review are the control.
-  const stripped = loadCatalog()
-  for (const model of stripped.models) {
-    delete model.reasoning
-    delete model.inputModalities
-  }
-  const dir = mkdtempSync(path.join(tmpdir(), "catalog-check-"))
-  try {
-    const out = path.join(dir, "catalog.json")
-    writeFileSync(out, serialize(stripped))
-    const result = spawnSync(process.execPath, ["scripts/build-catalog.mjs", "--check", "--out", out], { cwd: USAI_DIR, encoding: "utf8" })
-    assert.equal(result.status, 0, result.stderr)
-  } finally {
-    rmSync(dir, { recursive: true, force: true })
-  }
-  assert.equal(loadCatalog().models.length, 24)
+test("the committed catalog is a valid catalog with at least one model", () => {
+  const catalog = loadCatalog()
+  assert.equal(catalog.schemaVersion, "usai-model-catalog/v1")
+  assert.ok(catalog.models.length > 0)
+  assert.equal(catalog.models.length, 24)
+})
+
+test("--check with no source refuses instead of comparing against anything", () => {
+  const result = spawnSync(process.execPath, ["scripts/build-catalog.mjs", "--check"], { cwd: USAI_DIR, encoding: "utf8" })
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /make refresh-usai-catalog/)
 })
 
 test("a sources-only difference is NOT drift", () => {
   // The exact false positive this test guards: same models, different provenance.
   const live = loadCatalog()
   live.sources = { modelsList: "https://api.gsa.usai.gov/api/v1/models", enrichment: "(none)" }
-  const bootstrapped = loadCatalog()
-  bootstrapped.sources = { bootstrappedFrom: "integrations/.../opencode.jsonc" }
+  const offline = loadCatalog()
+  offline.sources = { modelsList: "offline:usai-models.json", enrichment: "offline:models-dev.json" }
 
-  const drift = describeDrift(substantive(live), substantive(bootstrapped))
+  const drift = describeDrift(substantive(live), substantive(offline))
   assert.deepEqual(drift, [], "provenance metadata must not count as drift")
 })
 
