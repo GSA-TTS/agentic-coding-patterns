@@ -1,0 +1,193 @@
+model	config	sample	token	classification	reply	detail	opencode_version	date
+claude-sonnet-5.5	unset	1	RNPNVP	Accepted-correct	RNPNVP		2.0.30	2026-11-04
+claude-sonnet-5.5	unset	2	U9X3MG	Accepted-correct	U9X3MG		2.0.30	2026-11-04
+claude-sonnet-5.5	unset	3	RFCVTR	Accepted-correct	RFCVTR		2.0.30	2026-11-04
+claude-sonnet-5.5	text-image	1	RNPNVP	Accepted-correct	RNPNVP		2.0.30	2026-11-04
+claude-sonnet-5.5	text-image	2	U9X3MG	Accepted-correct	U9X3MG		2.0.30	2026-11-04
+claude-sonnet-5.5	text-image	3	RFCVTR	Accepted-correct	RFCVTR		2.0.30	2026-11-04
+claude-sonnet-5.5	text-only	1	RNPNVP	Accepted-wrong	I can't read "claude-sonnet-5.5-1.png" because the model I'm running on (Claude Sonnet 5.5) doesn't support image input. That means I can't tell you which characters are in the image. You could do one of these instead: - Type the characters here, and I'll work with them. - Switch to a model that supports image input, then send the image again.		2.0.30	2026-11-04
+claude-sonnet-5.5	text-only	2	U9X3MG	Accepted-wrong	I can't read "claude-sonnet-5.5-2.png" because the model I'm running on doesn't support image input. I can't see the characters in it. You could type out the characters or text from the image. You could also run it through an OCR tool and paste the result here. If you have a model that accepts images, switching to it would work too.		2.0.30	2026-11-04
+claude-sonnet-5.5	text-only	3	RFCVTR	Accepted-wrong	I can't read "claude-sonnet-5.5-3.png" because the model I'm running on (Claude Sonnet 5.5) doesn't support image input. So I can't tell you which characters are in the image. You could type out the image's contents as text and send that. You could also switch to a model that accepts images and ask again.		2.0.30	2026-11-04
+claude-opus-5	unset	1	V9XPVJ	Accepted-wrong	v9xpvj		2.0.30	2026-11-04
+claude-opus-5	unset	2	6CCHRH	Accepted-correct	6CCHRH		2.0.30	2026-11-04
+claude-opus-5	unset	3	J66FDW	Accepted-correct	J66FDW		2.0.30	2026-11-04
+claude-opus-5	text-image	1	V9XPVJ	Accepted-wrong	v9xpvj		2.0.30	2026-11-04
+claude-opus-5	text-image	2	6CCHRH	Accepted-correct	6CCHRH		2.0.30	2026-11-04
+claude-opus-5	text-image	3	J66FDW	Accepted-correct	J66FDW		2.0.30	2026-11-04
+claude-opus-5	text-only	1	V9XPVJ	Accepted-wrong	I can't read that image — this model doesn't support image input, so `claude-opus-5-1.png` couldn't be loaded. To get the characters from the image, you could switch to a model with vision support. Want me to look up which available models accept image input?		2.0.30	2026-11-04
+claude-opus-5	text-only	2	6CCHRH	Accepted-wrong	I can't complete that request — the image never made it into my context. The harness reported: `ERROR: Cannot read "claude-opus-5-2.png" (this model does not support image input).` Since no image data reached me, I have nothing to transcribe, and I won't guess at characters. A couple of options: 1. **Paste the characters as text** and I can work with them directly. 2. **Switch to a vision-capable model** in this session, then re-attach the image. If you'd like, I can look up which available 		2.0.30	2026-11-04
+claude-opus-5	text-only	3	J66FDW	Accepted-wrong	I wasn't able to view that image — no image data reached me, and the harness reported: > Cannot read "claude-opus-5-3.png" (this model does not support image input). So I can't tell you what characters it shows, and I won't guess. A couple of options: - Re-attach the image in a session/model configuration that supports image input. - Or just type the characters out and I'll work with them directly.		2.0.30	2026-11-04
+claude-sonnet-5	unset	1	M3CHF7	Accepted-correct	M3CHF7		2.0.30	2026-11-04
+claude-sonnet-5	unset	2	K7N7PH	Accepted-correct	K7N7PH		2.0.30	2026-11-04
+claude-sonnet-5	unset	3	UWY67P	Accepted-correct	UWY67P		2.0.30	2026-11-04
+claude-sonnet-5	text-image	1	M3CHF7	Accepted-correct	M3CHF7		2.0.30	2026-11-04
+claude-sonnet-5	text-image	2	K7N7PH	Accepted-correct	K7N7PH		2.0.30	2026-11-04
+claude-sonnet-5	text-image	3	UWY67P	Accepted-correct	UWY67P		2.0.30	2026-11-04
+claude-sonnet-5	text-only	1	M3CHF7	Accepted-wrong	I'm unable to read images with this model — "claude-sonnet-5-1.png" could not be processed because image input isn't supported here. Could you paste the text from the image instead?		2.0.30	2026-11-04
+claude-sonnet-5	text-only	2	K7N7PH	Accepted-wrong	I'm unable to view or read images with this model (Claude Sonnet 5 doesn't support image input), so I can't read the characters shown in "claude-sonnet-5-2.png." If you tell me the characters directly, or switch to a vision-capable model, I'd be happy to help from there.		2.0.30	2026-11-04
+claude-sonnet-5	text-only	3	UWY67P	Accepted-wrong	I'm unable to read the image because this model doesn't support image input, so I can't see the characters shown in it. Could you type out the text from the image instead, or try with a model that supports image input?		2.0.30	2026-11-04
+claude_4_8_opus	unset	1	CJ7PUW	Accepted-correct	CJ7PUW		2.0.30	2026-11-04
+claude_4_8_opus	unset	2	VFK6UV	Accepted-correct	VFK6UV		2.0.30	2026-11-04
+claude_4_8_opus	unset	3	XJYP6J	Accepted-correct	XJYP6J		2.0.30	2026-11-04
+claude_4_8_opus	text-image	1	CJ7PUW	Accepted-correct	CJ7PUW		2.0.30	2026-11-04
+claude_4_8_opus	text-image	2	VFK6UV	Accepted-correct	VFK6UV		2.0.30	2026-11-04
+claude_4_8_opus	text-image	3	XJYP6J	Accepted-correct	XJYP6J		2.0.30	2026-11-04
+claude_4_8_opus	text-only	1	CJ7PUW	Accepted-wrong	I can't read the image — this model doesn't support image input, so I'm unable to see the characters shown in the file "claude_4_8_opus-1.png". If you can paste the characters as text, I'll be glad to help with whatever you need.		2.0.30	2026-11-04
+claude_4_8_opus	text-only	2	VFK6UV	Accepted-wrong	I can't read the image. This model doesn't support image input, so the file `claude_4_8_opus-2.png` couldn't be processed. If you can share the characters as text, I'd be happy to help.		2.0.30	2026-11-04
+claude_4_8_opus	text-only	3	XJYP6J	Accepted-wrong	I can't read the image — this model doesn't support image input, so there's no way for me to see the characters it contains. If you can type out or paste the characters as text, I'd be happy to help with whatever you need.		2.0.30	2026-11-04
+claude_4_7_opus	unset	1	CNMGWK	Accepted-correct	CNMGWK		2.0.30	2026-11-04
+claude_4_7_opus	unset	2	DWHVR9	Accepted-correct	DWHVR9		2.0.30	2026-11-04
+claude_4_7_opus	unset	3	DTKDW9	Accepted-wrong	I can't read images. Could you type out the characters you'd like me to work with?		2.0.30	2026-11-04
+claude_4_7_opus	text-image	1	CNMGWK	Accepted-correct	CNMGWK		2.0.30	2026-11-04
+claude_4_7_opus	text-image	2	DWHVR9	Accepted-correct	DWHVR9		2.0.30	2026-11-04
+claude_4_7_opus	text-image	3	DTKDW9	Accepted-correct	DTKDW9		2.0.30	2026-11-04
+claude_4_7_opus	text-only	1	CNMGWK	Accepted-wrong	I'm not able to view images — this model doesn't support image input, so I can't read the characters in `claude_4_7_opus-1.png`. If you can type out the characters, I'd be happy to help with whatever you're working on.		2.0.30	2026-11-04
+claude_4_7_opus	text-only	2	DWHVR9	Accepted-wrong	I can't read the image — this model (Claude 4.7 Opus) doesn't support image input. If you can type out the characters, I can help with whatever you need next, or you can switch to a model that supports vision.		2.0.30	2026-11-04
+claude_4_7_opus	text-only	3	DTKDW9	Accepted-wrong	I can't read the image file `claude_4_7_opus-3.png` — this model doesn't support image input, so I'm unable to see the characters shown in it. If you can type out the characters, I'd be happy to help with whatever you're working on. Alternatively, you could switch to a model that supports image input.		2.0.30	2026-11-04
+claude_4_6_sonnet	unset	1	4FFMHG	Accepted-correct	4FFMHG		2.0.30	2026-11-04
+claude_4_6_sonnet	unset	2	PXRJPR	Accepted-correct	PXRJPR		2.0.30	2026-11-04
+claude_4_6_sonnet	unset	3	XHE7CM	Accepted-correct	XHE7CM		2.0.30	2026-11-04
+claude_4_6_sonnet	text-image	1	4FFMHG	Accepted-correct	4FFMHG		2.0.30	2026-11-04
+claude_4_6_sonnet	text-image	2	PXRJPR	Accepted-correct	PXRJPR		2.0.30	2026-11-04
+claude_4_6_sonnet	text-image	3	XHE7CM	Accepted-correct	XHE7CM		2.0.30	2026-11-04
+claude_4_6_sonnet	text-only	1	4FFMHG	Accepted-wrong	I'm sorry, but the model currently being used (**Claude 4.6 Sonnet**) does not support image input. It cannot read or process image files like `claude_4_6_sonnet-1.png`. To work with images, you would need to switch to a model that supports vision/image input. Here are your options: 1. **Switch to a vision-capable model** — Models like `claude-3-5-sonnet`, `gpt-4o`, or `gemini-1.5-pro` support image input. 2. **Describe the image contents manually** — You can tell me what characters are shown 		2.0.30	2026-11-04
+claude_4_6_sonnet	text-only	2	PXRJPR	Accepted-wrong	This model (**Claude 4.6 Sonnet**) does not support image input. I cannot read or process the file `claude_4_6_sonnet-2.png`. To proceed, you could: - **Switch to a vision-capable model** (such as Claude 3.5 Sonnet or GPT-4o) that supports image input. - **Describe the image contents** to me in text, and I'll respond accordingly.		2.0.30	2026-11-04
+claude_4_6_sonnet	text-only	3	XHE7CM	Accepted-wrong	This model (**Claude 4.6 Sonnet**) does not support image input. I'm unable to read or process the file `claude_4_6_sonnet-3.png` or any other image files. If you need image analysis, you could: 1. **Switch to a vision-capable model** — such as Claude 3.5 Sonnet, GPT-4o, or Gemini, which support image input. 2. **Describe the image contents** — type out what's shown in the image and I can help from there.		2.0.30	2026-11-04
+claude_4_5_haiku	unset	1	JY3XVY	Accepted-wrong	JY3RNVV		2.0.30	2026-11-04
+claude_4_5_haiku	unset	2	DW3DMV	Accepted-wrong	OMBOMY		2.0.30	2026-11-04
+claude_4_5_haiku	unset	3	F9NCC7	Accepted-wrong	F29NCC7		2.0.30	2026-11-04
+claude_4_5_haiku	text-image	1	JY3XVY	Accepted-wrong	JY3XIUY		2.0.30	2026-11-04
+claude_4_5_haiku	text-image	2	DW3DMV	Accepted-wrong	BWBOMU		2.0.30	2026-11-04
+claude_4_5_haiku	text-image	3	F9NCC7	Accepted-wrong	F29NCC7		2.0.30	2026-11-04
+claude_4_5_haiku	text-only	1	JY3XVY	Accepted-wrong	I appreciate you letting me know about this limitation. Here's the message for the user: --- **I apologize, but I'm unable to view or process images.** The model I'm currently using (Claude 4.5 Haiku) does not support image input capabilities. If you need me to: - **Read text from an image**: Please copy and paste the text directly - **Analyze image content**: Describe what's in the image, and I can help based on your description - **Work with image files**: Let me know the file path, and I c		2.0.30	2026-11-04
+claude_4_5_haiku	text-only	2	DW3DMV	Accepted-wrong	I appreciate you letting me know about this limitation. Unfortunately, I'm unable to read or process the image you've shared because **Claude 4.5 Haiku does not support image input**. To help you with the task of reading characters from an image, you would need to either: 1. **Switch to a different model** that supports image analysis (such as Claude 3.5 Sonnet or Claude 3.5 Opus) 2. **Describe the image content** in text, and I can help you work with that information 3. **Extract the text man		2.0.30	2026-11-04
+claude_4_5_haiku	text-only	3	F9NCC7	Accepted-wrong	I'm unable to process images. The Claude 4.5 Haiku model I'm running doesn't support image input. If you need to extract text from an image, you could: - Describe the image to me in text - Use a model that supports vision capabilities - Share the text content directly How can I help you with your task?		2.0.30	2026-11-04
+claude_4_5_sonnet	unset	1	WHKC4F	Accepted-correct	WHKC4F		2.0.30	2026-11-04
+claude_4_5_sonnet	unset	2	ANR9JU	Accepted-correct	ANR9JU		2.0.30	2026-11-04
+claude_4_5_sonnet	unset	3	C6CC4N	Accepted-correct	C6CC4N		2.0.30	2026-11-04
+claude_4_5_sonnet	text-image	1	WHKC4F	Accepted-correct	WHKC4F		2.0.30	2026-11-04
+claude_4_5_sonnet	text-image	2	ANR9JU	Accepted-correct	ANR9JU		2.0.30	2026-11-04
+claude_4_5_sonnet	text-image	3	C6CC4N	Accepted-wrong	C6Cc4N		2.0.30	2026-11-04
+claude_4_5_sonnet	text-only	1	WHKC4F	Accepted-wrong	I apologize, but I cannot read the image file "claude_4_5_sonnet-1.png" because the model I'm running (Claude 4.5 Sonnet) does not support image input in this context. To help you with the characters shown in the image, you could: 1. Use a different model that supports vision capabilities 2. Describe the characters you see in the image 3. Extract the text using an OCR tool first If you'd like to try with a vision-capable model, I can help you find one. Would you like me to search for available		2.0.30	2026-11-04
+claude_4_5_sonnet	text-only	2	ANR9JU	Accepted-wrong	I'm unable to read the image file "claude_4_5_sonnet-2.png" because Claude 4.5 Sonnet does not support image input. If you need to read text from an image, you could either: 1. Use a different model that supports vision capabilities (like Claude 3.5 Sonnet or other vision-enabled models) 2. Use an OCR tool to extract the text from the image first 3. Manually type out the characters you'd like me to work with Would you like me to help you with any of these alternatives?		2.0.30	2026-11-04
+claude_4_5_sonnet	text-only	3	C6CC4N	Accepted-wrong	I apologize, but I cannot read the image file "claude_4_5_sonnet-3.png" because the Claude 4.5 Sonnet model does not support image input. To help you with this task, you could either: 1. Use a different model that supports vision/image capabilities (such as Claude 3.5 Sonnet or other vision-enabled models) 2. Provide the text content directly instead of in an image format Would you like me to help you switch to a vision-capable model?		2.0.30	2026-11-04
+gpt-6.1-sol-latest-guardrails-defaultv2	unset	1	CPT4MU	Accepted-correct	CPT4MU		2.0.30	2026-11-04
+gpt-6.1-sol-latest-guardrails-defaultv2	unset	2	7NVHAG	Accepted-correct	7NVHAG		2.0.30	2026-11-04
+gpt-6.1-sol-latest-guardrails-defaultv2	unset	3	DNCGDP	Accepted-correct	DNCGDP		2.0.30	2026-11-04
+gpt-6.1-sol-latest-guardrails-defaultv2	text-image	1	CPT4MU	Accepted-correct	CPT4MU		2.0.30	2026-11-04
+gpt-6.1-sol-latest-guardrails-defaultv2	text-image	2	7NVHAG	Accepted-correct	7NVHAG		2.0.30	2026-11-04
+gpt-6.1-sol-latest-guardrails-defaultv2	text-image	3	DNCGDP	Accepted-correct	DNCGDP		2.0.30	2026-11-04
+gpt-6.1-sol-latest-guardrails-defaultv2	text-only	1	CPT4MU	Accepted-wrong	I can’t read the image because this model doesn’t support image input.		2.0.30	2026-11-04
+gpt-6.1-sol-latest-guardrails-defaultv2	text-only	2	7NVHAG	Accepted-wrong	I can’t read the image because this model doesn’t support image input.		2.0.30	2026-11-04
+gpt-6.1-sol-latest-guardrails-defaultv2	text-only	3	DNCGDP	Accepted-wrong	I can’t read the image because this model doesn’t support image input.		2.0.30	2026-11-04
+gpt-6-astra	unset	1	7HHMRT	Accepted-correct	7HHMRT		2.0.30	2026-11-04
+gpt-6-astra	unset	2	7HGV6C	Accepted-correct	7HGV6C		2.0.30	2026-11-04
+gpt-6-astra	unset	3	R9R3GG	Accepted-correct	R9R3GG		2.0.30	2026-11-04
+gpt-6-astra	text-image	1	7HHMRT	Accepted-correct	7HHMRT		2.0.30	2026-11-04
+gpt-6-astra	text-image	2	7HGV6C	Accepted-correct	7HGV6C		2.0.30	2026-11-04
+gpt-6-astra	text-image	3	R9R3GG	Accepted-correct	R9R3GG		2.0.30	2026-11-04
+gpt-6-astra	text-only	1	7HHMRT	Accepted-wrong	I can’t read the image because this model doesn’t support image input.		2.0.30	2026-11-04
+gpt-6-astra	text-only	2	7HGV6C	Accepted-wrong	I can’t read the image because this model doesn’t support image input.		2.0.30	2026-11-04
+gpt-6-astra	text-only	3	R9R3GG	Accepted-wrong	I can’t read the image because this model doesn’t support image input.		2.0.30	2026-11-04
+gpt-6-luna	unset	1	VR39A6	Accepted-wrong	UF52A6		2.0.30	2026-11-04
+gpt-6-luna	unset	2	AUUCMJ	Accepted-wrong	AUUIHT		2.0.30	2026-11-04
+gpt-6-luna	unset	3	HTC7HG	Accepted-wrong	Sorry, I can’t solve CAPTCHAs. I can help with an accessible alternative.		2.0.30	2026-11-04
+gpt-6-luna	text-image	1	VR39A6	Accepted-wrong	UF25A6		2.0.30	2026-11-04
+gpt-6-luna	text-image	2	AUUCMJ	Accepted-wrong	AUUICHLT		2.0.30	2026-11-04
+gpt-6-luna	text-image	3	HTC7HG	Accepted-wrong	HTC7H5		2.0.30	2026-11-04
+gpt-6-luna	text-only	1	VR39A6	Accepted-wrong	I can’t read `gpt-6-luna-1.png` because this model doesn’t support image input.		2.0.30	2026-11-04
+gpt-6-luna	text-only	2	AUUCMJ	Accepted-wrong	I can’t read `gpt-6-luna-2.png` because this model doesn’t support image input. Please provide the image in a supported format or type out what it shows.		2.0.30	2026-11-04
+gpt-6-luna	text-only	3	HTC7HG	Accepted-wrong	I can’t read `gpt-6-luna-3.png` because this model doesn’t support image input.		2.0.30	2026-11-04
+gpt-6-sol-latest-guardrails-defaultv2	unset	1	MK46P4	Accepted-correct	MK46P4		2.0.30	2026-11-04
+gpt-6-sol-latest-guardrails-defaultv2	unset	2	7N7NWU	Accepted-correct	7N7NWU		2.0.30	2026-11-04
+gpt-6-sol-latest-guardrails-defaultv2	unset	3	447PEM	Accepted-correct	447PEM		2.0.30	2026-11-04
+gpt-6-sol-latest-guardrails-defaultv2	text-image	1	MK46P4	Accepted-wrong	HK46P4		2.0.30	2026-11-04
+gpt-6-sol-latest-guardrails-defaultv2	text-image	2	7N7NWU	Accepted-correct	7N7NWU		2.0.30	2026-11-04
+gpt-6-sol-latest-guardrails-defaultv2	text-image	3	447PEM	Accepted-wrong	447FEM		2.0.30	2026-11-04
+gpt-6-sol-latest-guardrails-defaultv2	text-only	1	MK46P4	Accepted-wrong	I can’t read the image with this model. Please type the characters shown in it.		2.0.30	2026-11-04
+gpt-6-sol-latest-guardrails-defaultv2	text-only	2	7N7NWU	Accepted-wrong	I can’t read the image because this model doesn’t support image input.		2.0.30	2026-11-04
+gpt-6-sol-latest-guardrails-defaultv2	text-only	3	447PEM	Accepted-wrong	I can’t read the image because this model doesn’t support image input.		2.0.30	2026-11-04
+gpt-5.6-luna	unset	1	H3P6FH	Accepted-wrong	H326FH		2.0.30	2026-11-04
+gpt-5.6-luna	unset	2	YG9FHX	Accepted-wrong	YG5FHX		2.0.30	2026-11-04
+gpt-5.6-luna	unset	3	CUJV97	Accepted-correct	CUJV97		2.0.30	2026-11-04
+gpt-5.6-luna	text-image	1	H3P6FH	Accepted-correct	H3P6FH		2.0.30	2026-11-04
+gpt-5.6-luna	text-image	2	YG9FHX	Accepted-wrong	YG5FHX		2.0.30	2026-11-04
+gpt-5.6-luna	text-image	3	CUJV97	Accepted-wrong	CUTV97		2.0.30	2026-11-04
+gpt-5.6-luna	text-only	1	H3P6FH	Accepted-wrong	I can’t read the image because this model does not support image input.		2.0.30	2026-11-04
+gpt-5.6-luna	text-only	2	YG9FHX	Accepted-wrong	I can’t read the image because this model does not support image input.		2.0.30	2026-11-04
+gpt-5.6-luna	text-only	3	CUJV97	Accepted-wrong	I can’t read the image because this model does not support image input.		2.0.30	2026-11-04
+gpt-5.6-sol-latest-guardrails-defaultv2	unset	1	JKHFTU	Accepted-wrong	JTKHFTU		2.0.30	2026-11-04
+gpt-5.6-sol-latest-guardrails-defaultv2	unset	2	HRNMAE	Accepted-wrong	HR:4MAE		2.0.30	2026-11-04
+gpt-5.6-sol-latest-guardrails-defaultv2	unset	3	3MFK9H	Accepted-correct	3MFK9H		2.0.30	2026-11-04
+gpt-5.6-sol-latest-guardrails-defaultv2	text-image	1	JKHFTU	Accepted-correct	JKHFTU		2.0.30	2026-11-04
+gpt-5.6-sol-latest-guardrails-defaultv2	text-image	2	HRNMAE	Accepted-wrong	HR4MAE		2.0.30	2026-11-04
+gpt-5.6-sol-latest-guardrails-defaultv2	text-image	3	3MFK9H	Accepted-correct	3MFK9H		2.0.30	2026-11-04
+gpt-5.6-sol-latest-guardrails-defaultv2	text-only	1	JKHFTU	Accepted-wrong	I can’t read the image because this model doesn’t support image input.		2.0.30	2026-11-04
+gpt-5.6-sol-latest-guardrails-defaultv2	text-only	2	HRNMAE	Accepted-wrong	I can’t read the image because this model does not support image input.		2.0.30	2026-11-04
+gpt-5.6-sol-latest-guardrails-defaultv2	text-only	3	3MFK9H	Accepted-wrong	I can’t read the image because this model doesn’t support image input.		2.0.30	2026-11-04
+gpt-5.6-terra	unset	1	AWAMYW	Accepted-correct	AWAMYW		2.0.30	2026-11-04
+gpt-5.6-terra	unset	2	FDVMYJ	Accepted-wrong	FOYMYJ		2.0.30	2026-11-04
+gpt-5.6-terra	unset	3	RWFDYM	Accepted-wrong	RWF D'YM		2.0.30	2026-11-04
+gpt-5.6-terra	text-image	1	AWAMYW	Accepted-correct	AWAMYW		2.0.30	2026-11-04
+gpt-5.6-terra	text-image	2	FDVMYJ	Accepted-wrong	F0VMYJ		2.0.30	2026-11-04
+gpt-5.6-terra	text-image	3	RWFDYM	Accepted-wrong	RWF DYM		2.0.30	2026-11-04
+gpt-5.6-terra	text-only	1	AWAMYW	Accepted-wrong	I can’t read `gpt-5.6-terra-1.png` because this model does not support image input.		2.0.30	2026-11-04
+gpt-5.6-terra	text-only	2	FDVMYJ	Accepted-wrong	I can’t read the image because image input isn’t supported.		2.0.30	2026-11-04
+gpt-5.6-terra	text-only	3	RWFDYM	Accepted-wrong	I can’t read the image because this model does not support image input.		2.0.30	2026-11-04
+gpt_5_5_default_v2	unset	1	AJRDU4	Accepted-correct	AJRDU4		2.0.30	2026-11-04
+gpt_5_5_default_v2	unset	2	EMWRCH	Accepted-correct	EMWRCH		2.0.30	2026-11-04
+gpt_5_5_default_v2	unset	3	HJ74VU	Accepted-wrong	HJ?4VU		2.0.30	2026-11-04
+gpt_5_5_default_v2	text-image	1	AJRDU4	Accepted-correct	AJRDU4		2.0.30	2026-11-04
+gpt_5_5_default_v2	text-image	2	EMWRCH	Accepted-correct	EMWRCH		2.0.30	2026-11-04
+gpt_5_5_default_v2	text-image	3	HJ74VU	Accepted-wrong	HJ?4VU		2.0.30	2026-11-04
+gpt_5_5_default_v2	text-only	1	AJRDU4	Accepted-wrong	I can’t read the image because this model does not support image input.		2.0.30	2026-11-04
+gpt_5_5_default_v2	text-only	2	EMWRCH	Accepted-wrong	I can’t read the image because this model does not support image input.		2.0.30	2026-11-04
+gpt_5_5_default_v2	text-only	3	HJ74VU	Accepted-wrong	I can’t read the image because this model does not support image input.		2.0.30	2026-11-04
+gpt_5_4_default_v2	unset	1	KMP6U6	Accepted-correct	KMP6U6		2.0.30	2026-11-04
+gpt_5_4_default_v2	unset	2	JGNRC4	Accepted-correct	JGNRC4		2.0.30	2026-11-04
+gpt_5_4_default_v2	unset	3	7PFMN7	Accepted-correct	7PFMN7		2.0.30	2026-11-04
+gpt_5_4_default_v2	text-image	1	KMP6U6	Accepted-correct	KMP6U6		2.0.30	2026-11-04
+gpt_5_4_default_v2	text-image	2	JGNRC4	Accepted-correct	JGNRC4		2.0.30	2026-11-04
+gpt_5_4_default_v2	text-image	3	7PFMN7	Accepted-correct	7PFMN7		2.0.30	2026-11-04
+gpt_5_4_default_v2	text-only	1	KMP6U6	Accepted-wrong	I can’t read `gpt_5_4_default_v2-1.png` in this chat because this model doesn’t support image input. Please use an image-capable model or provide the image text another way.		2.0.30	2026-11-04
+gpt_5_4_default_v2	text-only	2	JGNRC4	Accepted-wrong	I can’t read `gpt_5_4_default_v2-2.png` in this chat because this model doesn’t support image input.		2.0.30	2026-11-04
+gpt_5_4_default_v2	text-only	3	7PFMN7	Accepted-wrong	I can’t read `gpt_5_4_default_v2-3.png` in this chat because this model doesn’t support image input. Please use an image-capable model or provide the image text another way.		2.0.30	2026-11-04
+gpt_5_2_default_v2	unset	1	M3PXRT	Accepted-correct	M3PXRT		2.0.30	2026-11-04
+gpt_5_2_default_v2	unset	2	V4EJA6	Accepted-correct	V4EJA6		2.0.30	2026-11-04
+gpt_5_2_default_v2	unset	3	VFFMAY	Accepted-correct	VFFMAY		2.0.30	2026-11-04
+gpt_5_2_default_v2	text-image	1	M3PXRT	Accepted-correct	M3PXRT		2.0.30	2026-11-04
+gpt_5_2_default_v2	text-image	2	V4EJA6	Accepted-correct	V4EJA6		2.0.30	2026-11-04
+gpt_5_2_default_v2	text-image	3	VFFMAY	Accepted-correct	VFFMAY		2.0.30	2026-11-04
+gpt_5_2_default_v2	text-only	1	M3PXRT	Accepted-wrong	I can’t view that image in your current setup: it reports `ERROR: Cannot read "gpt_5_2_default_v2-1.png" (this model does not support image input)`. Please resend the characters as text, or switch to a model/configuration that supports image input.		2.0.30	2026-11-04
+gpt_5_2_default_v2	text-only	2	V4EJA6	Accepted-wrong	I can’t comply with “Reply with only the characters shown in the image” because the image `gpt_5_2_default_v2-2.png` isn’t readable in this environment: **this model/run reports it does not support image input**, so I can’t see the characters to transcribe them. If you paste the characters as text (or provide a text description), I can return *only those characters* exactly.		2.0.30	2026-11-04
+gpt_5_2_default_v2	text-only	3	VFFMAY	Accepted-wrong	I can’t comply with “Reply with only the characters shown in the image” because the image file `gpt_5_2_default_v2-3.png` wasn’t readable in this environment (reported as “this model does not support image input”).   If you paste the characters as text or provide the image in a supported way, I can reply with exactly those characters.		2.0.30	2026-11-04
+gemini-3.8-flash	unset	1	PDCRJK	Accepted-correct	PDCRJK		2.0.30	2026-11-04
+gemini-3.8-flash	unset	2	YHPKXP	Accepted-correct	YHPKXP		2.0.30	2026-11-04
+gemini-3.8-flash	unset	3	VXTPVT	Accepted-correct	VXTPVT		2.0.30	2026-11-04
+gemini-3.8-flash	text-image	1	PDCRJK	Accepted-correct	PDCRJK		2.0.30	2026-11-04
+gemini-3.8-flash	text-image	2	YHPKXP	Accepted-correct	YHPKXP		2.0.30	2026-11-04
+gemini-3.8-flash	text-image	3	VXTPVT	Accepted-correct	VXTPVT		2.0.30	2026-11-04
+gemini-3.8-flash	text-only	1	PDCRJK	Accepted-wrong	I cannot view or read the image `gemini-3.8-flash-1.png` because this model does not support image input. Please provide the text or content directly if you would like me to assist with it.		2.0.30	2026-11-04
+gemini-3.8-flash	text-only	2	YHPKXP	Accepted-wrong	I am unable to view or process the image `gemini-3.8-flash-2.png` because this model does not support image inputs. Please provide the text or details directly if you would like assistance with them.		2.0.30	2026-11-04
+gemini-3.8-flash	text-only	3	VXTPVT	Accepted-wrong	I cannot read or view "gemini-3.8-flash-3.png" because this model does not support image input.		2.0.30	2026-11-04
+gemini-3-7-flash	unset	1	9PAH99	Accepted-correct	9PAH99		2.0.30	2026-11-04
+gemini-3-7-flash	unset	2	MVJGW4	Accepted-correct	MVJGW4		2.0.30	2026-11-04
+gemini-3-7-flash	unset	3	N4MRE3	Accepted-correct	N4MRE3		2.0.30	2026-11-04
+gemini-3-7-flash	text-image	1	9PAH99	Accepted-correct	9PAH99		2.0.30	2026-11-04
+gemini-3-7-flash	text-image	2	MVJGW4	Accepted-correct	MVJGW4		2.0.30	2026-11-04
+gemini-3-7-flash	text-image	3	N4MRE3	Accepted-correct	N4MRE3		2.0.30	2026-11-04
+gemini-3-7-flash	text-only	1	9PAH99	Accepted-wrong	I cannot read or view the image `gemini-3-7-flash-1.png` because this model configuration does not support image inputs. Please provide the text or content directly if you would like me to assist you with it.		2.0.30	2026-11-04
+gemini-3-7-flash	text-only	2	MVJGW4	Accepted-wrong	I am unable to view or process the image (`gemini-3-7-flash-2.png`) because image input is not supported by this model.		2.0.30	2026-11-04
+gemini-3-7-flash	text-only	3	N4MRE3	Accepted-wrong	I cannot read or view the image "gemini-3-7-flash-3.png" because this model does not support image/multimodal input. Please provide the text or details directly if you'd like assistance with them.		2.0.30	2026-11-04
+gemini-3.5-flash	unset	1	KHTWY9	Accepted-correct	KHTWY9		2.0.30	2026-11-04
+gemini-3.5-flash	unset	2	HUDRND	Accepted-correct	HUDRND		2.0.30	2026-11-04
+gemini-3.5-flash	unset	3	43FG6V	Accepted-correct	43FG6V		2.0.30	2026-11-04
+gemini-3.5-flash	text-image	1	KHTWY9	Accepted-correct	KHTWY9		2.0.30	2026-11-04
+gemini-3.5-flash	text-image	2	HUDRND	Accepted-correct	HUDRND		2.0.30	2026-11-04
+gemini-3.5-flash	text-image	3	43FG6V	Accepted-correct	43FG6V		2.0.30	2026-11-04
+gemini-3.5-flash	text-only	1	KHTWY9	Accepted-wrong	The model **Gemini 3.5 Flash** (`usai/gemini-3.5-flash`) does not support image input in this environment.  When attempting to execute the probe with the prompt: > *"Reply with only the characters shown in the image."* The system encountered the following error: > **ERROR:** `Cannot read "gemini-3.5-flash-1.png" (this model does not support image input).` ### Context & Classification Under the **Synthetic-image validation procedure**: - **Outcome Classification:** **Rejected** (the model or g		2.0.30	2026-11-04
+gemini-3.5-flash	text-only	2	HUDRND	Accepted-wrong	I cannot read the image "gemini-3.5-flash-2.png" because the model I am running on (Gemini 3.5 Flash) does not support image input in this configuration. Consequently, I am unable to tell you which characters are shown in the image. To proceed, you can: - Type or paste the characters from the image as text, and I will gladly work with them. - Switch to a vision-enabled model that supports image input and try your request again.		2.0.30	2026-11-04
+gemini-3.5-flash	text-only	3	43FG6V	Accepted-wrong	I am unable to read the image `gemini-3.5-flash-3.png` because this model (`gemini-3.5-flash`) does not support image/multimodal inputs in this environment.  Consequently, I cannot see or extract the characters shown in the image. If you can provide a text description or switch to a model with image-support capabilities, I would be happy to help!		2.0.30	2026-11-04
+gemini-2.5-flash	text-control	0		Error		text control failed: HTTP 403 provider.auth: Not authorized. model_blocked_globally	2.0.30	2026-11-04
+gemini-2.5-flash-lite	text-control	0		Error		text control failed: HTTP 403 provider.auth: Not authorized. model_blocked_globally	2.0.30	2026-11-04
+llama_4_maverick	text-control	0		Error		text control failed: HTTP 400 provider.invalid-request: This model doesn't support tool use in streaming mode.	2.0.30	2026-11-04

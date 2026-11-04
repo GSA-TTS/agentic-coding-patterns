@@ -1,0 +1,2121 @@
+{
+  "script_version": "1.0.0",
+  "date": "2026-11-04",
+  "provider": "usai",
+  "samples": 3,
+  "seed": "70f8e8da5746",
+  "opencode_version": "2.0.30",
+  "host": "api.gsa.usai.gov",
+  "stopped": "CONTROL_FAILING: 3 consecutive models failed the text control (auth or routing?)",
+  "summary": {
+    "models": 24,
+    "qualifying": [
+      "claude-sonnet-5.5",
+      "claude-sonnet-5",
+      "claude_4_8_opus",
+      "claude_4_7_opus",
+      "claude_4_6_sonnet",
+      "gpt-6.1-sol-latest-guardrails-defaultv2",
+      "gpt-6-astra",
+      "gpt_5_4_default_v2",
+      "gpt_5_2_default_v2",
+      "gemini-3.8-flash",
+      "gemini-3-7-flash",
+      "gemini-3.5-flash"
+    ],
+    "counts": {
+      "unset": {
+        "Accepted-correct": 48,
+        "Accepted-wrong": 15,
+        "Rejected": 0,
+        "Error": 0
+      },
+      "text-image": {
+        "Accepted-correct": 47,
+        "Accepted-wrong": 16,
+        "Rejected": 0,
+        "Error": 0
+      },
+      "text-only": {
+        "Accepted-correct": 0,
+        "Accepted-wrong": 63,
+        "Rejected": 0,
+        "Error": 0
+      }
+    },
+    "text_only_token_leaks": 0
+  },
+  "models": [
+    {
+      "model": "claude-sonnet-5.5",
+      "config_facts": {
+        "modalities.input": null,
+        "reasoning": null
+      },
+      "text_control_ok": true,
+      "text_control_detail": "OK",
+      "skipped": "",
+      "candidate_image": true,
+      "reasons_not_candidate": [],
+      "samples": [
+        {
+          "config": "unset",
+          "index": 1,
+          "token": "RNPNVP",
+          "reply": "RNPNVP",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "unset",
+          "index": 2,
+          "token": "U9X3MG",
+          "reply": "U9X3MG",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "unset",
+          "index": 3,
+          "token": "RFCVTR",
+          "reply": "RFCVTR",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 1,
+          "token": "RNPNVP",
+          "reply": "RNPNVP",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 2,
+          "token": "U9X3MG",
+          "reply": "U9X3MG",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 3,
+          "token": "RFCVTR",
+          "reply": "RFCVTR",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-only",
+          "index": 1,
+          "token": "RNPNVP",
+          "reply": "I can't read \"claude-sonnet-5.5-1.png\" because the model I'm running on (Claude Sonnet 5.5) doesn't support image input. That means I can't tell you which characters are in the image.\n\nYou could do one of these instead:\n- Type the characters here, and I'll work with them.\n- Switch to a model that supports image input, then send the image again.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 2,
+          "token": "U9X3MG",
+          "reply": "I can't read \"claude-sonnet-5.5-2.png\" because the model I'm running on doesn't support image input. I can't see the characters in it.\n\nYou could type out the characters or text from the image. You could also run it through an OCR tool and paste the result here. If you have a model that accepts images, switching to it would work too.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 3,
+          "token": "RFCVTR",
+          "reply": "I can't read \"claude-sonnet-5.5-3.png\" because the model I'm running on (Claude Sonnet 5.5) doesn't support image input. So I can't tell you which characters are in the image.\n\nYou could type out the image's contents as text and send that. You could also switch to a model that accepts images and ask again.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        }
+      ]
+    },
+    {
+      "model": "claude-opus-5",
+      "config_facts": {
+        "modalities.input": null,
+        "reasoning": null
+      },
+      "text_control_ok": true,
+      "text_control_detail": "OK",
+      "skipped": "",
+      "candidate_image": false,
+      "reasons_not_candidate": [
+        "text-image sample 1 was Accepted-wrong"
+      ],
+      "samples": [
+        {
+          "config": "unset",
+          "index": 1,
+          "token": "V9XPVJ",
+          "reply": "v9xpvj",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "unset",
+          "index": 2,
+          "token": "6CCHRH",
+          "reply": "6CCHRH",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "unset",
+          "index": 3,
+          "token": "J66FDW",
+          "reply": "J66FDW",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 1,
+          "token": "V9XPVJ",
+          "reply": "v9xpvj",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 2,
+          "token": "6CCHRH",
+          "reply": "6CCHRH",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 3,
+          "token": "J66FDW",
+          "reply": "J66FDW",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-only",
+          "index": 1,
+          "token": "V9XPVJ",
+          "reply": "I can't read that image \u2014 this model doesn't support image input, so `claude-opus-5-1.png` couldn't be loaded.\n\nTo get the characters from the image, you could switch to a model with vision support. Want me to look up which available models accept image input?",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 2,
+          "token": "6CCHRH",
+          "reply": "I can't complete that request \u2014 the image never made it into my context.\n\nThe harness reported: `ERROR: Cannot read \"claude-opus-5-2.png\" (this model does not support image input).`\n\nSince no image data reached me, I have nothing to transcribe, and I won't guess at characters.\n\nA couple of options:\n\n1. **Paste the characters as text** and I can work with them directly.\n2. **Switch to a vision-capable model** in this session, then re-attach the image. If you'd like, I can look up which available ",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 3,
+          "token": "J66FDW",
+          "reply": "I wasn't able to view that image \u2014 no image data reached me, and the harness reported:\n\n> Cannot read \"claude-opus-5-3.png\" (this model does not support image input).\n\nSo I can't tell you what characters it shows, and I won't guess.\n\nA couple of options:\n- Re-attach the image in a session/model configuration that supports image input.\n- Or just type the characters out and I'll work with them directly.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        }
+      ]
+    },
+    {
+      "model": "claude-sonnet-5",
+      "config_facts": {
+        "modalities.input": null,
+        "reasoning": null
+      },
+      "text_control_ok": true,
+      "text_control_detail": "OK",
+      "skipped": "",
+      "candidate_image": true,
+      "reasons_not_candidate": [],
+      "samples": [
+        {
+          "config": "unset",
+          "index": 1,
+          "token": "M3CHF7",
+          "reply": "M3CHF7",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "unset",
+          "index": 2,
+          "token": "K7N7PH",
+          "reply": "K7N7PH",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "unset",
+          "index": 3,
+          "token": "UWY67P",
+          "reply": "UWY67P",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 1,
+          "token": "M3CHF7",
+          "reply": "M3CHF7",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 2,
+          "token": "K7N7PH",
+          "reply": "K7N7PH",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 3,
+          "token": "UWY67P",
+          "reply": "UWY67P",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-only",
+          "index": 1,
+          "token": "M3CHF7",
+          "reply": "I'm unable to read images with this model \u2014 \"claude-sonnet-5-1.png\" could not be processed because image input isn't supported here. Could you paste the text from the image instead?",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 2,
+          "token": "K7N7PH",
+          "reply": "I'm unable to view or read images with this model (Claude Sonnet 5 doesn't support image input), so I can't read the characters shown in \"claude-sonnet-5-2.png.\"\n\nIf you tell me the characters directly, or switch to a vision-capable model, I'd be happy to help from there.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 3,
+          "token": "UWY67P",
+          "reply": "I'm unable to read the image because this model doesn't support image input, so I can't see the characters shown in it. Could you type out the text from the image instead, or try with a model that supports image input?",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        }
+      ]
+    },
+    {
+      "model": "claude_4_8_opus",
+      "config_facts": {
+        "modalities.input": null,
+        "reasoning": null
+      },
+      "text_control_ok": true,
+      "text_control_detail": "OK",
+      "skipped": "",
+      "candidate_image": true,
+      "reasons_not_candidate": [],
+      "samples": [
+        {
+          "config": "unset",
+          "index": 1,
+          "token": "CJ7PUW",
+          "reply": "CJ7PUW",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "unset",
+          "index": 2,
+          "token": "VFK6UV",
+          "reply": "VFK6UV",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "unset",
+          "index": 3,
+          "token": "XJYP6J",
+          "reply": "XJYP6J",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 1,
+          "token": "CJ7PUW",
+          "reply": "CJ7PUW",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 2,
+          "token": "VFK6UV",
+          "reply": "VFK6UV",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 3,
+          "token": "XJYP6J",
+          "reply": "XJYP6J",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-only",
+          "index": 1,
+          "token": "CJ7PUW",
+          "reply": "I can't read the image \u2014 this model doesn't support image input, so I'm unable to see the characters shown in the file \"claude_4_8_opus-1.png\".\n\nIf you can paste the characters as text, I'll be glad to help with whatever you need.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 2,
+          "token": "VFK6UV",
+          "reply": "I can't read the image. This model doesn't support image input, so the file `claude_4_8_opus-2.png` couldn't be processed.\n\nIf you can share the characters as text, I'd be happy to help.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 3,
+          "token": "XJYP6J",
+          "reply": "I can't read the image \u2014 this model doesn't support image input, so there's no way for me to see the characters it contains.\n\nIf you can type out or paste the characters as text, I'd be happy to help with whatever you need.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        }
+      ]
+    },
+    {
+      "model": "claude_4_7_opus",
+      "config_facts": {
+        "modalities.input": null,
+        "reasoning": null
+      },
+      "text_control_ok": true,
+      "text_control_detail": "OK",
+      "skipped": "",
+      "candidate_image": true,
+      "reasons_not_candidate": [],
+      "samples": [
+        {
+          "config": "unset",
+          "index": 1,
+          "token": "CNMGWK",
+          "reply": "CNMGWK",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "unset",
+          "index": 2,
+          "token": "DWHVR9",
+          "reply": "DWHVR9",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "unset",
+          "index": 3,
+          "token": "DTKDW9",
+          "reply": "I can't read images. Could you type out the characters you'd like me to work with?",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-image",
+          "index": 1,
+          "token": "CNMGWK",
+          "reply": "CNMGWK",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 2,
+          "token": "DWHVR9",
+          "reply": "DWHVR9",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 3,
+          "token": "DTKDW9",
+          "reply": "DTKDW9",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-only",
+          "index": 1,
+          "token": "CNMGWK",
+          "reply": "I'm not able to view images \u2014 this model doesn't support image input, so I can't read the characters in `claude_4_7_opus-1.png`. If you can type out the characters, I'd be happy to help with whatever you're working on.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 2,
+          "token": "DWHVR9",
+          "reply": "I can't read the image \u2014 this model (Claude 4.7 Opus) doesn't support image input. If you can type out the characters, I can help with whatever you need next, or you can switch to a model that supports vision.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 3,
+          "token": "DTKDW9",
+          "reply": "I can't read the image file `claude_4_7_opus-3.png` \u2014 this model doesn't support image input, so I'm unable to see the characters shown in it.\n\nIf you can type out the characters, I'd be happy to help with whatever you're working on. Alternatively, you could switch to a model that supports image input.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        }
+      ]
+    },
+    {
+      "model": "claude_4_6_sonnet",
+      "config_facts": {
+        "modalities.input": null,
+        "reasoning": null
+      },
+      "text_control_ok": true,
+      "text_control_detail": "OK",
+      "skipped": "",
+      "candidate_image": true,
+      "reasons_not_candidate": [],
+      "samples": [
+        {
+          "config": "unset",
+          "index": 1,
+          "token": "4FFMHG",
+          "reply": "4FFMHG",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "unset",
+          "index": 2,
+          "token": "PXRJPR",
+          "reply": "PXRJPR",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "unset",
+          "index": 3,
+          "token": "XHE7CM",
+          "reply": "XHE7CM",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 1,
+          "token": "4FFMHG",
+          "reply": "4FFMHG",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 2,
+          "token": "PXRJPR",
+          "reply": "PXRJPR",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 3,
+          "token": "XHE7CM",
+          "reply": "XHE7CM",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-only",
+          "index": 1,
+          "token": "4FFMHG",
+          "reply": "I'm sorry, but the model currently being used (**Claude 4.6 Sonnet**) does not support image input. It cannot read or process image files like `claude_4_6_sonnet-1.png`.\n\nTo work with images, you would need to switch to a model that supports vision/image input. Here are your options:\n\n1. **Switch to a vision-capable model** \u2014 Models like `claude-3-5-sonnet`, `gpt-4o`, or `gemini-1.5-pro` support image input.\n2. **Describe the image contents manually** \u2014 You can tell me what characters are shown ",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 2,
+          "token": "PXRJPR",
+          "reply": "This model (**Claude 4.6 Sonnet**) does not support image input. I cannot read or process the file `claude_4_6_sonnet-2.png`.\n\nTo proceed, you could:\n- **Switch to a vision-capable model** (such as Claude 3.5 Sonnet or GPT-4o) that supports image input.\n- **Describe the image contents** to me in text, and I'll respond accordingly.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 3,
+          "token": "XHE7CM",
+          "reply": "This model (**Claude 4.6 Sonnet**) does not support image input. I'm unable to read or process the file `claude_4_6_sonnet-3.png` or any other image files.\n\nIf you need image analysis, you could:\n1. **Switch to a vision-capable model** \u2014 such as Claude 3.5 Sonnet, GPT-4o, or Gemini, which support image input.\n2. **Describe the image contents** \u2014 type out what's shown in the image and I can help from there.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        }
+      ]
+    },
+    {
+      "model": "claude_4_5_haiku",
+      "config_facts": {
+        "modalities.input": null,
+        "reasoning": null
+      },
+      "text_control_ok": true,
+      "text_control_detail": "OK",
+      "skipped": "",
+      "candidate_image": false,
+      "reasons_not_candidate": [
+        "text-image sample 1 was Accepted-wrong",
+        "text-image sample 2 was Accepted-wrong",
+        "text-image sample 3 was Accepted-wrong"
+      ],
+      "samples": [
+        {
+          "config": "unset",
+          "index": 1,
+          "token": "JY3XVY",
+          "reply": "JY3RNVV",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "unset",
+          "index": 2,
+          "token": "DW3DMV",
+          "reply": "OMBOMY",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "unset",
+          "index": 3,
+          "token": "F9NCC7",
+          "reply": "F29NCC7",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-image",
+          "index": 1,
+          "token": "JY3XVY",
+          "reply": "JY3XIUY",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-image",
+          "index": 2,
+          "token": "DW3DMV",
+          "reply": "BWBOMU",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-image",
+          "index": 3,
+          "token": "F9NCC7",
+          "reply": "F29NCC7",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 1,
+          "token": "JY3XVY",
+          "reply": "I appreciate you letting me know about this limitation. Here's the message for the user:\n\n---\n\n**I apologize, but I'm unable to view or process images.** The model I'm currently using (Claude 4.5 Haiku) does not support image input capabilities.\n\nIf you need me to:\n- **Read text from an image**: Please copy and paste the text directly\n- **Analyze image content**: Describe what's in the image, and I can help based on your description\n- **Work with image files**: Let me know the file path, and I c",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 2,
+          "token": "DW3DMV",
+          "reply": "I appreciate you letting me know about this limitation. Unfortunately, I'm unable to read or process the image you've shared because **Claude 4.5 Haiku does not support image input**.\n\nTo help you with the task of reading characters from an image, you would need to either:\n\n1. **Switch to a different model** that supports image analysis (such as Claude 3.5 Sonnet or Claude 3.5 Opus)\n2. **Describe the image content** in text, and I can help you work with that information\n3. **Extract the text man",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 3,
+          "token": "F9NCC7",
+          "reply": "I'm unable to process images. The Claude 4.5 Haiku model I'm running doesn't support image input.\n\nIf you need to extract text from an image, you could:\n- Describe the image to me in text\n- Use a model that supports vision capabilities\n- Share the text content directly\n\nHow can I help you with your task?",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        }
+      ]
+    },
+    {
+      "model": "claude_4_5_sonnet",
+      "config_facts": {
+        "modalities.input": null,
+        "reasoning": null
+      },
+      "text_control_ok": true,
+      "text_control_detail": "OK",
+      "skipped": "",
+      "candidate_image": false,
+      "reasons_not_candidate": [
+        "text-image sample 3 was Accepted-wrong"
+      ],
+      "samples": [
+        {
+          "config": "unset",
+          "index": 1,
+          "token": "WHKC4F",
+          "reply": "WHKC4F",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "unset",
+          "index": 2,
+          "token": "ANR9JU",
+          "reply": "ANR9JU",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "unset",
+          "index": 3,
+          "token": "C6CC4N",
+          "reply": "C6CC4N",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 1,
+          "token": "WHKC4F",
+          "reply": "WHKC4F",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 2,
+          "token": "ANR9JU",
+          "reply": "ANR9JU",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 3,
+          "token": "C6CC4N",
+          "reply": "C6Cc4N",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-only",
+          "index": 1,
+          "token": "WHKC4F",
+          "reply": "I apologize, but I cannot read the image file \"claude_4_5_sonnet-1.png\" because the model I'm running (Claude 4.5 Sonnet) does not support image input in this context.\n\nTo help you with the characters shown in the image, you could:\n1. Use a different model that supports vision capabilities\n2. Describe the characters you see in the image\n3. Extract the text using an OCR tool first\n\nIf you'd like to try with a vision-capable model, I can help you find one. Would you like me to search for available",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 2,
+          "token": "ANR9JU",
+          "reply": "I'm unable to read the image file \"claude_4_5_sonnet-2.png\" because Claude 4.5 Sonnet does not support image input.\n\nIf you need to read text from an image, you could either:\n1. Use a different model that supports vision capabilities (like Claude 3.5 Sonnet or other vision-enabled models)\n2. Use an OCR tool to extract the text from the image first\n3. Manually type out the characters you'd like me to work with\n\nWould you like me to help you with any of these alternatives?",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 3,
+          "token": "C6CC4N",
+          "reply": "I apologize, but I cannot read the image file \"claude_4_5_sonnet-3.png\" because the Claude 4.5 Sonnet model does not support image input.\n\nTo help you with this task, you could either:\n1. Use a different model that supports vision/image capabilities (such as Claude 3.5 Sonnet or other vision-enabled models)\n2. Provide the text content directly instead of in an image format\n\nWould you like me to help you switch to a vision-capable model?",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        }
+      ]
+    },
+    {
+      "model": "gpt-6.1-sol-latest-guardrails-defaultv2",
+      "config_facts": {
+        "modalities.input": null,
+        "reasoning": null
+      },
+      "text_control_ok": true,
+      "text_control_detail": "OK",
+      "skipped": "",
+      "candidate_image": true,
+      "reasons_not_candidate": [],
+      "samples": [
+        {
+          "config": "unset",
+          "index": 1,
+          "token": "CPT4MU",
+          "reply": "CPT4MU",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "unset",
+          "index": 2,
+          "token": "7NVHAG",
+          "reply": "7NVHAG",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "unset",
+          "index": 3,
+          "token": "DNCGDP",
+          "reply": "DNCGDP",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 1,
+          "token": "CPT4MU",
+          "reply": "CPT4MU",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 2,
+          "token": "7NVHAG",
+          "reply": "7NVHAG",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 3,
+          "token": "DNCGDP",
+          "reply": "DNCGDP",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-only",
+          "index": 1,
+          "token": "CPT4MU",
+          "reply": "I can\u2019t read the image because this model doesn\u2019t support image input.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 2,
+          "token": "7NVHAG",
+          "reply": "I can\u2019t read the image because this model doesn\u2019t support image input.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 3,
+          "token": "DNCGDP",
+          "reply": "I can\u2019t read the image because this model doesn\u2019t support image input.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        }
+      ]
+    },
+    {
+      "model": "gpt-6-astra",
+      "config_facts": {
+        "modalities.input": null,
+        "reasoning": null
+      },
+      "text_control_ok": true,
+      "text_control_detail": "OK",
+      "skipped": "",
+      "candidate_image": true,
+      "reasons_not_candidate": [],
+      "samples": [
+        {
+          "config": "unset",
+          "index": 1,
+          "token": "7HHMRT",
+          "reply": "7HHMRT",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "unset",
+          "index": 2,
+          "token": "7HGV6C",
+          "reply": "7HGV6C",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "unset",
+          "index": 3,
+          "token": "R9R3GG",
+          "reply": "R9R3GG",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 1,
+          "token": "7HHMRT",
+          "reply": "7HHMRT",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 2,
+          "token": "7HGV6C",
+          "reply": "7HGV6C",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 3,
+          "token": "R9R3GG",
+          "reply": "R9R3GG",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-only",
+          "index": 1,
+          "token": "7HHMRT",
+          "reply": "I can\u2019t read the image because this model doesn\u2019t support image input.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 2,
+          "token": "7HGV6C",
+          "reply": "I can\u2019t read the image because this model doesn\u2019t support image input.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 3,
+          "token": "R9R3GG",
+          "reply": "I can\u2019t read the image because this model doesn\u2019t support image input.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        }
+      ]
+    },
+    {
+      "model": "gpt-6-luna",
+      "config_facts": {
+        "modalities.input": null,
+        "reasoning": null
+      },
+      "text_control_ok": true,
+      "text_control_detail": "OK",
+      "skipped": "",
+      "candidate_image": false,
+      "reasons_not_candidate": [
+        "text-image sample 1 was Accepted-wrong",
+        "text-image sample 2 was Accepted-wrong",
+        "text-image sample 3 was Accepted-wrong"
+      ],
+      "samples": [
+        {
+          "config": "unset",
+          "index": 1,
+          "token": "VR39A6",
+          "reply": "UF52A6",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "unset",
+          "index": 2,
+          "token": "AUUCMJ",
+          "reply": "AUUIHT",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "unset",
+          "index": 3,
+          "token": "HTC7HG",
+          "reply": "Sorry, I can\u2019t solve CAPTCHAs. I can help with an accessible alternative.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-image",
+          "index": 1,
+          "token": "VR39A6",
+          "reply": "UF25A6",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-image",
+          "index": 2,
+          "token": "AUUCMJ",
+          "reply": "AUUICHLT",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-image",
+          "index": 3,
+          "token": "HTC7HG",
+          "reply": "HTC7H5",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 1,
+          "token": "VR39A6",
+          "reply": "I can\u2019t read `gpt-6-luna-1.png` because this model doesn\u2019t support image input.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 2,
+          "token": "AUUCMJ",
+          "reply": "I can\u2019t read `gpt-6-luna-2.png` because this model doesn\u2019t support image input. Please provide the image in a supported format or type out what it shows.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 3,
+          "token": "HTC7HG",
+          "reply": "I can\u2019t read `gpt-6-luna-3.png` because this model doesn\u2019t support image input.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        }
+      ]
+    },
+    {
+      "model": "gpt-6-sol-latest-guardrails-defaultv2",
+      "config_facts": {
+        "modalities.input": null,
+        "reasoning": null
+      },
+      "text_control_ok": true,
+      "text_control_detail": "OK",
+      "skipped": "",
+      "candidate_image": false,
+      "reasons_not_candidate": [
+        "text-image sample 1 was Accepted-wrong",
+        "text-image sample 3 was Accepted-wrong"
+      ],
+      "samples": [
+        {
+          "config": "unset",
+          "index": 1,
+          "token": "MK46P4",
+          "reply": "MK46P4",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "unset",
+          "index": 2,
+          "token": "7N7NWU",
+          "reply": "7N7NWU",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "unset",
+          "index": 3,
+          "token": "447PEM",
+          "reply": "447PEM",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 1,
+          "token": "MK46P4",
+          "reply": "HK46P4",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-image",
+          "index": 2,
+          "token": "7N7NWU",
+          "reply": "7N7NWU",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 3,
+          "token": "447PEM",
+          "reply": "447FEM",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 1,
+          "token": "MK46P4",
+          "reply": "I can\u2019t read the image with this model. Please type the characters shown in it.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 2,
+          "token": "7N7NWU",
+          "reply": "I can\u2019t read the image because this model doesn\u2019t support image input.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 3,
+          "token": "447PEM",
+          "reply": "I can\u2019t read the image because this model doesn\u2019t support image input.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        }
+      ]
+    },
+    {
+      "model": "gpt-5.6-luna",
+      "config_facts": {
+        "modalities.input": null,
+        "reasoning": null
+      },
+      "text_control_ok": true,
+      "text_control_detail": "OK",
+      "skipped": "",
+      "candidate_image": false,
+      "reasons_not_candidate": [
+        "text-image sample 2 was Accepted-wrong",
+        "text-image sample 3 was Accepted-wrong"
+      ],
+      "samples": [
+        {
+          "config": "unset",
+          "index": 1,
+          "token": "H3P6FH",
+          "reply": "H326FH",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "unset",
+          "index": 2,
+          "token": "YG9FHX",
+          "reply": "YG5FHX",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "unset",
+          "index": 3,
+          "token": "CUJV97",
+          "reply": "CUJV97",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 1,
+          "token": "H3P6FH",
+          "reply": "H3P6FH",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 2,
+          "token": "YG9FHX",
+          "reply": "YG5FHX",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-image",
+          "index": 3,
+          "token": "CUJV97",
+          "reply": "CUTV97",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 1,
+          "token": "H3P6FH",
+          "reply": "I can\u2019t read the image because this model does not support image input.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 2,
+          "token": "YG9FHX",
+          "reply": "I can\u2019t read the image because this model does not support image input.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 3,
+          "token": "CUJV97",
+          "reply": "I can\u2019t read the image because this model does not support image input.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        }
+      ]
+    },
+    {
+      "model": "gpt-5.6-sol-latest-guardrails-defaultv2",
+      "config_facts": {
+        "modalities.input": null,
+        "reasoning": null
+      },
+      "text_control_ok": true,
+      "text_control_detail": "OK",
+      "skipped": "",
+      "candidate_image": false,
+      "reasons_not_candidate": [
+        "text-image sample 2 was Accepted-wrong"
+      ],
+      "samples": [
+        {
+          "config": "unset",
+          "index": 1,
+          "token": "JKHFTU",
+          "reply": "JTKHFTU",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "unset",
+          "index": 2,
+          "token": "HRNMAE",
+          "reply": "HR:4MAE",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "unset",
+          "index": 3,
+          "token": "3MFK9H",
+          "reply": "3MFK9H",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 1,
+          "token": "JKHFTU",
+          "reply": "JKHFTU",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 2,
+          "token": "HRNMAE",
+          "reply": "HR4MAE",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-image",
+          "index": 3,
+          "token": "3MFK9H",
+          "reply": "3MFK9H",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-only",
+          "index": 1,
+          "token": "JKHFTU",
+          "reply": "I can\u2019t read the image because this model doesn\u2019t support image input.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 2,
+          "token": "HRNMAE",
+          "reply": "I can\u2019t read the image because this model does not support image input.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 3,
+          "token": "3MFK9H",
+          "reply": "I can\u2019t read the image because this model doesn\u2019t support image input.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        }
+      ]
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "config_facts": {
+        "modalities.input": null,
+        "reasoning": null
+      },
+      "text_control_ok": true,
+      "text_control_detail": "OK",
+      "skipped": "",
+      "candidate_image": false,
+      "reasons_not_candidate": [
+        "text-image sample 2 was Accepted-wrong",
+        "text-image sample 3 was Accepted-wrong"
+      ],
+      "samples": [
+        {
+          "config": "unset",
+          "index": 1,
+          "token": "AWAMYW",
+          "reply": "AWAMYW",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "unset",
+          "index": 2,
+          "token": "FDVMYJ",
+          "reply": "FOYMYJ",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "unset",
+          "index": 3,
+          "token": "RWFDYM",
+          "reply": "RWF D'YM",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-image",
+          "index": 1,
+          "token": "AWAMYW",
+          "reply": "AWAMYW",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 2,
+          "token": "FDVMYJ",
+          "reply": "F0VMYJ",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-image",
+          "index": 3,
+          "token": "RWFDYM",
+          "reply": "RWF DYM",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 1,
+          "token": "AWAMYW",
+          "reply": "I can\u2019t read `gpt-5.6-terra-1.png` because this model does not support image input.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 2,
+          "token": "FDVMYJ",
+          "reply": "I can\u2019t read the image because image input isn\u2019t supported.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 3,
+          "token": "RWFDYM",
+          "reply": "I can\u2019t read the image because this model does not support image input.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        }
+      ]
+    },
+    {
+      "model": "gpt_5_5_default_v2",
+      "config_facts": {
+        "modalities.input": null,
+        "reasoning": null
+      },
+      "text_control_ok": true,
+      "text_control_detail": "OK",
+      "skipped": "",
+      "candidate_image": false,
+      "reasons_not_candidate": [
+        "text-image sample 3 was Accepted-wrong"
+      ],
+      "samples": [
+        {
+          "config": "unset",
+          "index": 1,
+          "token": "AJRDU4",
+          "reply": "AJRDU4",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "unset",
+          "index": 2,
+          "token": "EMWRCH",
+          "reply": "EMWRCH",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "unset",
+          "index": 3,
+          "token": "HJ74VU",
+          "reply": "HJ?4VU",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-image",
+          "index": 1,
+          "token": "AJRDU4",
+          "reply": "AJRDU4",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 2,
+          "token": "EMWRCH",
+          "reply": "EMWRCH",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 3,
+          "token": "HJ74VU",
+          "reply": "HJ?4VU",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 1,
+          "token": "AJRDU4",
+          "reply": "I can\u2019t read the image because this model does not support image input.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 2,
+          "token": "EMWRCH",
+          "reply": "I can\u2019t read the image because this model does not support image input.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 3,
+          "token": "HJ74VU",
+          "reply": "I can\u2019t read the image because this model does not support image input.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        }
+      ]
+    },
+    {
+      "model": "gpt_5_4_default_v2",
+      "config_facts": {
+        "modalities.input": null,
+        "reasoning": null
+      },
+      "text_control_ok": true,
+      "text_control_detail": "OK",
+      "skipped": "",
+      "candidate_image": true,
+      "reasons_not_candidate": [],
+      "samples": [
+        {
+          "config": "unset",
+          "index": 1,
+          "token": "KMP6U6",
+          "reply": "KMP6U6",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "unset",
+          "index": 2,
+          "token": "JGNRC4",
+          "reply": "JGNRC4",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "unset",
+          "index": 3,
+          "token": "7PFMN7",
+          "reply": "7PFMN7",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 1,
+          "token": "KMP6U6",
+          "reply": "KMP6U6",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 2,
+          "token": "JGNRC4",
+          "reply": "JGNRC4",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 3,
+          "token": "7PFMN7",
+          "reply": "7PFMN7",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-only",
+          "index": 1,
+          "token": "KMP6U6",
+          "reply": "I can\u2019t read `gpt_5_4_default_v2-1.png` in this chat because this model doesn\u2019t support image input. Please use an image-capable model or provide the image text another way.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 2,
+          "token": "JGNRC4",
+          "reply": "I can\u2019t read `gpt_5_4_default_v2-2.png` in this chat because this model doesn\u2019t support image input.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 3,
+          "token": "7PFMN7",
+          "reply": "I can\u2019t read `gpt_5_4_default_v2-3.png` in this chat because this model doesn\u2019t support image input. Please use an image-capable model or provide the image text another way.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        }
+      ]
+    },
+    {
+      "model": "gpt_5_2_default_v2",
+      "config_facts": {
+        "modalities.input": null,
+        "reasoning": null
+      },
+      "text_control_ok": true,
+      "text_control_detail": "OK",
+      "skipped": "",
+      "candidate_image": true,
+      "reasons_not_candidate": [],
+      "samples": [
+        {
+          "config": "unset",
+          "index": 1,
+          "token": "M3PXRT",
+          "reply": "M3PXRT",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "unset",
+          "index": 2,
+          "token": "V4EJA6",
+          "reply": "V4EJA6",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "unset",
+          "index": 3,
+          "token": "VFFMAY",
+          "reply": "VFFMAY",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 1,
+          "token": "M3PXRT",
+          "reply": "M3PXRT",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 2,
+          "token": "V4EJA6",
+          "reply": "V4EJA6",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 3,
+          "token": "VFFMAY",
+          "reply": "VFFMAY",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-only",
+          "index": 1,
+          "token": "M3PXRT",
+          "reply": "I can\u2019t view that image in your current setup: it reports `ERROR: Cannot read \"gpt_5_2_default_v2-1.png\" (this model does not support image input)`. Please resend the characters as text, or switch to a model/configuration that supports image input.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 2,
+          "token": "V4EJA6",
+          "reply": "I can\u2019t comply with \u201cReply with only the characters shown in the image\u201d because the image `gpt_5_2_default_v2-2.png` isn\u2019t readable in this environment: **this model/run reports it does not support image input**, so I can\u2019t see the characters to transcribe them.\n\nIf you paste the characters as text (or provide a text description), I can return *only those characters* exactly.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 3,
+          "token": "VFFMAY",
+          "reply": "I can\u2019t comply with \u201cReply with only the characters shown in the image\u201d because the image file `gpt_5_2_default_v2-3.png` wasn\u2019t readable in this environment (reported as \u201cthis model does not support image input\u201d).  \n\nIf you paste the characters as text or provide the image in a supported way, I can reply with exactly those characters.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        }
+      ]
+    },
+    {
+      "model": "gemini-3.8-flash",
+      "config_facts": {
+        "modalities.input": null,
+        "reasoning": null
+      },
+      "text_control_ok": true,
+      "text_control_detail": "OK.",
+      "skipped": "",
+      "candidate_image": true,
+      "reasons_not_candidate": [],
+      "samples": [
+        {
+          "config": "unset",
+          "index": 1,
+          "token": "PDCRJK",
+          "reply": "PDCRJK",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "unset",
+          "index": 2,
+          "token": "YHPKXP",
+          "reply": "YHPKXP",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "unset",
+          "index": 3,
+          "token": "VXTPVT",
+          "reply": "VXTPVT",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 1,
+          "token": "PDCRJK",
+          "reply": "PDCRJK",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 2,
+          "token": "YHPKXP",
+          "reply": "YHPKXP",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 3,
+          "token": "VXTPVT",
+          "reply": "VXTPVT",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-only",
+          "index": 1,
+          "token": "PDCRJK",
+          "reply": "I cannot view or read the image `gemini-3.8-flash-1.png` because this model does not support image input. Please provide the text or content directly if you would like me to assist with it.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 2,
+          "token": "YHPKXP",
+          "reply": "I am unable to view or process the image `gemini-3.8-flash-2.png` because this model does not support image inputs. Please provide the text or details directly if you would like assistance with them.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 3,
+          "token": "VXTPVT",
+          "reply": "I cannot read or view \"gemini-3.8-flash-3.png\" because this model does not support image input.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        }
+      ]
+    },
+    {
+      "model": "gemini-3-7-flash",
+      "config_facts": {
+        "modalities.input": null,
+        "reasoning": null
+      },
+      "text_control_ok": true,
+      "text_control_detail": "OK",
+      "skipped": "",
+      "candidate_image": true,
+      "reasons_not_candidate": [],
+      "samples": [
+        {
+          "config": "unset",
+          "index": 1,
+          "token": "9PAH99",
+          "reply": "9PAH99",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "unset",
+          "index": 2,
+          "token": "MVJGW4",
+          "reply": "MVJGW4",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "unset",
+          "index": 3,
+          "token": "N4MRE3",
+          "reply": "N4MRE3",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 1,
+          "token": "9PAH99",
+          "reply": "9PAH99",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 2,
+          "token": "MVJGW4",
+          "reply": "MVJGW4",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 3,
+          "token": "N4MRE3",
+          "reply": "N4MRE3",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-only",
+          "index": 1,
+          "token": "9PAH99",
+          "reply": "I cannot read or view the image `gemini-3-7-flash-1.png` because this model configuration does not support image inputs. Please provide the text or content directly if you would like me to assist you with it.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 2,
+          "token": "MVJGW4",
+          "reply": "I am unable to view or process the image (`gemini-3-7-flash-2.png`) because image input is not supported by this model.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 3,
+          "token": "N4MRE3",
+          "reply": "I cannot read or view the image \"gemini-3-7-flash-3.png\" because this model does not support image/multimodal input. Please provide the text or details directly if you'd like assistance with them.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        }
+      ]
+    },
+    {
+      "model": "gemini-3.5-flash",
+      "config_facts": {
+        "modalities.input": null,
+        "reasoning": null
+      },
+      "text_control_ok": true,
+      "text_control_detail": "OK",
+      "skipped": "",
+      "candidate_image": true,
+      "reasons_not_candidate": [],
+      "samples": [
+        {
+          "config": "unset",
+          "index": 1,
+          "token": "KHTWY9",
+          "reply": "KHTWY9",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "unset",
+          "index": 2,
+          "token": "HUDRND",
+          "reply": "HUDRND",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "unset",
+          "index": 3,
+          "token": "43FG6V",
+          "reply": "43FG6V",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 1,
+          "token": "KHTWY9",
+          "reply": "KHTWY9",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 2,
+          "token": "HUDRND",
+          "reply": "HUDRND",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-image",
+          "index": 3,
+          "token": "43FG6V",
+          "reply": "43FG6V",
+          "classification": "Accepted-correct",
+          "detail": "",
+          "token_in_reply": true
+        },
+        {
+          "config": "text-only",
+          "index": 1,
+          "token": "KHTWY9",
+          "reply": "The model **Gemini 3.5 Flash** (`usai/gemini-3.5-flash`) does not support image input in this environment. \n\nWhen attempting to execute the probe with the prompt:\n> *\"Reply with only the characters shown in the image.\"*\n\nThe system encountered the following error:\n> **ERROR:** `Cannot read \"gemini-3.5-flash-1.png\" (this model does not support image input).`\n\n### Context & Classification\nUnder the **Synthetic-image validation procedure**:\n- **Outcome Classification:** **Rejected** (the model or g",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 2,
+          "token": "HUDRND",
+          "reply": "I cannot read the image \"gemini-3.5-flash-2.png\" because the model I am running on (Gemini 3.5 Flash) does not support image input in this configuration. Consequently, I am unable to tell you which characters are shown in the image.\n\nTo proceed, you can:\n- Type or paste the characters from the image as text, and I will gladly work with them.\n- Switch to a vision-enabled model that supports image input and try your request again.",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        },
+        {
+          "config": "text-only",
+          "index": 3,
+          "token": "43FG6V",
+          "reply": "I am unable to read the image `gemini-3.5-flash-3.png` because this model (`gemini-3.5-flash`) does not support image/multimodal inputs in this environment. \n\nConsequently, I cannot see or extract the characters shown in the image. If you can provide a text description or switch to a model with image-support capabilities, I would be happy to help!",
+          "classification": "Accepted-wrong",
+          "detail": "",
+          "token_in_reply": false
+        }
+      ]
+    },
+    {
+      "model": "gemini-2.5-flash",
+      "config_facts": {
+        "modalities.input": null,
+        "reasoning": null
+      },
+      "text_control_ok": false,
+      "text_control_detail": "HTTP 403 provider.auth: Not authorized. model_blocked_globally",
+      "skipped": "text control failed: HTTP 403 provider.auth: Not authorized. model_blocked_globally",
+      "candidate_image": false,
+      "reasons_not_candidate": [
+        "text control failed: HTTP 403 provider.auth: Not authorized. model_blocked_globally",
+        "fewer than 3 text-image samples",
+        "fewer than 3 text-only control samples"
+      ],
+      "samples": []
+    },
+    {
+      "model": "gemini-2.5-flash-lite",
+      "config_facts": {
+        "modalities.input": null,
+        "reasoning": null
+      },
+      "text_control_ok": false,
+      "text_control_detail": "HTTP 403 provider.auth: Not authorized. model_blocked_globally",
+      "skipped": "text control failed: HTTP 403 provider.auth: Not authorized. model_blocked_globally",
+      "candidate_image": false,
+      "reasons_not_candidate": [
+        "text control failed: HTTP 403 provider.auth: Not authorized. model_blocked_globally",
+        "fewer than 3 text-image samples",
+        "fewer than 3 text-only control samples"
+      ],
+      "samples": []
+    },
+    {
+      "model": "llama_4_maverick",
+      "config_facts": {
+        "modalities.input": null,
+        "reasoning": null
+      },
+      "text_control_ok": false,
+      "text_control_detail": "HTTP 400 provider.invalid-request: This model doesn't support tool use in streaming mode.",
+      "skipped": "text control failed: HTTP 400 provider.invalid-request: This model doesn't support tool use in streaming mode.",
+      "candidate_image": false,
+      "reasons_not_candidate": [
+        "text control failed: HTTP 400 provider.invalid-request: This model doesn't support tool use in streaming mode.",
+        "fewer than 3 text-image samples",
+        "fewer than 3 text-only control samples"
+      ],
+      "samples": []
+    }
+  ]
+}
