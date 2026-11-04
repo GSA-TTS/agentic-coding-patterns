@@ -35,6 +35,10 @@
 //                           reminder, not that evidence. With the flag, --check
 //                           against a capability-free catalog reports drift by
 //                           design.
+//                           Verified capability values already in the catalog at
+//                           --out are carried forward, and the flag is refused
+//                           (nothing written) if its upstream values would
+//                           conflict with them or sit beside them unverified.
 //
 // There is no bootstrap mode. The catalog used to be seeded from a frozen
 // copy of an old OpenCode config; that made a harness-native file a source of
