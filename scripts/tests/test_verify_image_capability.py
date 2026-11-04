@@ -332,7 +332,7 @@ def test_end_to_end_classifies_models_and_never_writes_secrets(sandbox, capsys):
     assert doc["summary"]["qualifying"] == ["good"]
     for name in ("results.json", "results.tsv", "evidence.md"):
         assert FAKE_SECRET not in (out / name).read_text()
-    assert not (out / ".work").exists()
+    assert not list(out.glob(".work*"))
     seen = [json.loads(line) for line in (sandbox[0] / "seen.jsonl").read_text().splitlines()]
     assert seen and not any(s["has_oc_config"] for s in seen)
     assert all(str(out) in s["xdg"] for s in seen)
@@ -472,3 +472,184 @@ def test_timeout_is_reported_as_error(sandbox, tmp_path):
     slow.chmod(0o755)
     result = v.run_step(str(slow), "usai/m", "p", None, dict(os.environ), tmp_path, 1)
     assert result.kind == "error" and result.detail == "timeout"
+
+
+# --- work-dir ownership ---------------------------------------------------------------------------
+
+
+def preexisting_work(out):
+    marker = out / ".work" / "keep.txt"
+    marker.parent.mkdir(parents=True)
+    marker.write_text("user data")
+    return marker
+
+
+def test_existing_work_dir_survives_dry_run(sandbox):
+    out = sandbox[0] / "out"
+    marker = preexisting_work(out)
+    code, _ = run_main(sandbox, "--dry-run")
+    assert code == 0 and marker.read_text() == "user data"
+
+
+def test_existing_work_dir_survives_preflight_failure(sandbox, monkeypatch):
+    out = sandbox[0] / "out"
+    marker = preexisting_work(out)
+    monkeypatch.delenv("USAI_API_KEY")
+    code, _ = run_main(sandbox)
+    assert code == 2 and marker.read_text() == "user data"
+
+
+def test_existing_work_dir_survives_a_full_run(sandbox):
+    out = sandbox[0] / "out"
+    marker = preexisting_work(out)
+    code, _ = run_main(sandbox, "--models", "good")
+    assert code == 0 and marker.read_text() == "user data"
+    assert not [p for p in out.glob(".work-*")]
+
+
+def test_owned_work_dir_removed_on_stop_and_interrupt(sandbox, monkeypatch):
+    seen = []
+    real = v.run_all
+
+    def stopping(cfg, *args, **kwargs):
+        seen.append(cfg.work)
+        assert cfg.work.is_dir() and cfg.work.parent == sandbox[0] / "out"
+        raise v.StopRun("TEST_STOP", "boom")
+
+    monkeypatch.setattr(v, "run_all", stopping)
+    code, out = run_main(sandbox)
+    assert code == 2 and not seen[0].exists() and not list(out.glob(".work*"))
+
+    def interrupting(cfg, *args, **kwargs):
+        seen.append(cfg.work)
+        raise v.Interrupted("SIGINT")
+
+    monkeypatch.setattr(v, "run_all", interrupting)
+    code, out = run_main(sandbox)
+    assert code == 130 and not seen[1].exists() and not list(out.glob(".work*"))
+    monkeypatch.setattr(v, "run_all", real)
+
+
+# --- requested sample count -----------------------------------------------------------------------
+
+
+def sized_result(samples, text_only):
+    result = v.ModelResult("m", {}, control_ok=True)
+    for name, _ in v.CONFIGS:
+        count = text_only if name == "text-only" else samples
+        for i in range(count):
+            cls = v.WRONG if name == "text-only" else v.CORRECT
+            result.samples.append(sample(name, i, cls))
+    return result
+
+
+def test_candidate_requires_all_requested_samples_in_every_configuration():
+    meta = {"script_version": "1", "date": "d", "provider": "p", "samples": 5, "seed": "s"}
+    meta.update(opencode_version="1", host="h", stopped="INTERRUPTED: SIGINT")
+    partial = v.build_document(meta, [sized_result(5, 3)])
+    record = partial["models"][0]
+    assert record["candidate_image"] is False
+    assert any("fewer than 5 text-only" in r for r in record["reasons_not_candidate"])
+    assert partial["summary"]["qualifying"] == []
+    full = v.build_document({**meta, "stopped": ""}, [sized_result(5, 5)])
+    assert full["models"][0]["candidate_image"] is True and full["summary"]["qualifying"] == ["m"]
+    short_unset = sized_result(5, 5)
+    short_unset.samples = [s for s in short_unset.samples if not (s.config == "unset" and s.index > 2)]
+    assert v.decide(short_unset, 5)[0] is False
+
+
+# --- per-model unavailability vs run-level control failure ----------------------------------------
+
+
+def test_control_unavailable_classification():
+    blocked = "HTTP 403 provider.auth: Not authorized. model_blocked_globally"
+    nostream = "HTTP 400 provider.invalid-request: This model doesn't support tool use in streaming mode."
+    assert v.control_unavailable(outcome("error", detail=blocked))
+    assert v.control_unavailable(outcome("rejected", detail=nostream))
+    assert v.control_unavailable(outcome("rejected", detail="HTTP 404 The model `x` does not exist"))
+    for detail in (
+        "HTTP 403 provider.auth: Not authorized.",
+        "HTTP 401 unauthorized",
+        "HTTP 401 provider.auth: API key does not exist",
+        "HTTP 401 model_blocked_globally",
+        "timeout",
+        "cannot start opencode: OSError",
+    ):
+        assert not v.control_unavailable(outcome("error", detail=detail)), detail
+    for detail in (
+        "HTTP 403 provider.auth: authentication scheme not supported",
+        "HTTP 404 Not Found",
+        "HTTP 400 provider.invalid-request: bad request",
+        "HTTP 422 unprocessable",
+        "HTTP 400 API version not supported",
+    ):
+        assert not v.control_unavailable(outcome("rejected", detail=detail)), detail
+
+
+def test_unavailable_models_do_not_trip_the_stop_and_run_exits_zero(sandbox, capsys):
+    set_models(sandbox[2], ["good", "blocked1", "nostream1", "blocked2", "blocked3", "nostream2"])
+    code, out = run_main(sandbox)
+    assert code == 0
+    doc = json.loads((out / "results.json").read_text())
+    assert doc["stopped"] == "" and len(doc["models"]) == 6
+    skipped = [m["model"] for m in doc["models"] if m["skipped_unavailable"]]
+    assert skipped == ["blocked1", "nostream1", "blocked2", "blocked3", "nostream2"]
+    assert doc["summary"]["skipped_unavailable"] == skipped
+    assert all(m["candidate_image"] is False for m in doc["models"] if m["model"] != "good")
+    last = capsys.readouterr().out.strip().splitlines()[-1]
+    assert "skipped=5(blocked1,nostream1,blocked2,blocked3,nostream2)" in last and "stopped=no" in last
+    assert "SKIPPED (unavailable)" in (out / "evidence.md").read_text()
+
+
+def test_plain_auth_failures_across_models_still_stop(sandbox):
+    set_models(sandbox[2], ["auth403a", "auth403b", "auth403c", "good"])
+    code, out = run_main(sandbox)
+    assert code == 2
+    doc = json.loads((out / "results.json").read_text())
+    assert "CONTROL_FAILING" in doc["stopped"] and len(doc["models"]) == 3
+    assert doc["summary"]["skipped_unavailable"] == []
+
+
+def test_unavailable_between_real_failures_does_not_reset_or_count(sandbox):
+    set_models(sandbox[2], ["auth403a", "blocked1", "auth403b", "blocked2", "auth403c", "good"])
+    code, out = run_main(sandbox)
+    assert code == 2
+    doc = json.loads((out / "results.json").read_text())
+    assert "CONTROL_FAILING" in doc["stopped"] and len(doc["models"]) == 5
+
+
+def test_few_models_all_failing_auth_stops(sandbox):
+    set_models(sandbox[2], ["auth403a"])
+    code, out = run_main(sandbox)
+    assert code == 2
+    assert "CONTROL_FAILING" in json.loads((out / "results.json").read_text())["stopped"]
+
+
+def test_timeouts_count_as_run_level_failures(sandbox):
+    set_models(sandbox[2], ["timeout1", "timeout2", "timeout3", "good"])
+    code, out = run_main(sandbox, "--timeout", "1")
+    assert code == 2
+    doc = json.loads((out / "results.json").read_text())
+    assert "CONTROL_FAILING" in doc["stopped"] and doc["summary"]["skipped_unavailable"] == []
+
+
+def test_every_model_unavailable_is_a_run_level_stop_not_a_silent_success(sandbox):
+    set_models(sandbox[2], ["blocked1", "nostream1", "blocked2", "blocked3"])
+    code, out = run_main(sandbox)
+    assert code == 2
+    doc = json.loads((out / "results.json").read_text())
+    assert "CONTROL_FAILING" in doc["stopped"] and "no model passed" in doc["stopped"]
+    assert len(doc["models"]) == 4 and doc["summary"]["qualifying"] == []
+
+
+def test_bare_gateway_rejections_on_every_model_are_run_level(sandbox):
+    set_models(sandbox[2], ["bare404a", "bare404b", "bare404c", "good"])
+    code, out = run_main(sandbox)
+    assert code == 2
+    doc = json.loads((out / "results.json").read_text())
+    assert "CONTROL_FAILING" in doc["stopped"] and doc["summary"]["skipped_unavailable"] == []
+
+
+def test_unavailable_skip_reports_only_the_skip_reason():
+    result = v.ModelResult("m", {}, skipped="SKIPPED (unavailable): HTTP 403 model_blocked_globally")
+    assert v.decide(result) == (False, ["SKIPPED (unavailable): HTTP 403 model_blocked_globally"])

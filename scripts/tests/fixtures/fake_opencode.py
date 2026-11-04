@@ -6,6 +6,7 @@ import json
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 args = sys.argv[1:]
@@ -55,6 +56,16 @@ def emit_error(status, message):
 
 
 if image is None:
+    if model_id.startswith("bare404"):
+        emit_error(404, "Not Found")
+    if model_id.startswith("blocked"):
+        emit_error(403, "Not authorized. model_blocked_globally")
+    if model_id.startswith("nostream"):
+        emit_error(400, "This model doesn't support tool use in streaming mode.")
+    if model_id.startswith("auth403"):
+        emit_error(403, "Not authorized.")
+    if model_id.startswith("timeout"):
+        time.sleep(5)
     if model_id.startswith("nocontrol"):
         emit_error(401, "unauthorized")
     emit_text("OK")

@@ -33,6 +33,7 @@ import signal
 import struct
 import subprocess
 import sys
+import tempfile
 import zlib
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -313,6 +314,7 @@ class ModelResult:
     control_detail: str = ""
     samples: list[Sample] = field(default_factory=list)
     skipped: str = ""
+    unavailable: bool = False
 
 
 def normalize_reply(text: str) -> str:
@@ -320,6 +322,26 @@ def normalize_reply(text: str) -> str:
     if len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'`":
         text = text[1:-1].strip()
     return text
+
+
+# A text-control failure is a per-model fact only when the gateway names the model itself (blocked, unknown,
+# or lacking a feature OpenCode needs). Deliberately narrow: generic phrases such as "not supported" or
+# "does not exist" also appear in credential and routing errors, which must stay run-level failures.
+UNAVAILABLE_RE = re.compile(
+    r"model[_ -]?blocked|blocked[_ -]?globally|model[_ -]?not[_ -]?found|unknown model"
+    r"|model\b[^.]{0,60}\bdoes not exist|(?:does not|doesn['\u2019]?t) support tool use",
+    re.IGNORECASE,
+)
+
+
+def control_unavailable(outcome: StepOutcome) -> bool:
+    """True when a failed text control means this one model is unusable, so it is skipped, not a run-level fault.
+
+    Never true for a 401, a timeout, a connection error, or a bare 4xx with no model-specific text.
+    """
+    if outcome.kind not in ("rejected", "error") or outcome.detail.startswith("HTTP 401"):
+        return False
+    return bool(UNAVAILABLE_RE.search(outcome.detail))
 
 
 def classify(outcome: StepOutcome, token: str) -> str:
@@ -335,9 +357,11 @@ def decide(result: ModelResult, required: int = MIN_SAMPLES) -> tuple[bool, list
     text-only control never returned the token. Returns (qualifies, reasons it does not)."""
     reasons: list[str] = []
     if not result.control_ok:
-        reasons.append("text control failed" if not result.skipped else result.skipped)
+        return (False, [result.skipped or "text control failed"])
     by_config = {name: [s for s in result.samples if s.config == name] for name, _ in CONFIGS}
-    explicit, control = by_config["text-image"], by_config["text-only"]
+    unset, explicit, control = by_config["unset"], by_config["text-image"], by_config["text-only"]
+    if len(unset) < required:
+        reasons.append(f"fewer than {required} unset samples")
     if len(explicit) < required:
         reasons.append(f"fewer than {required} text-image samples")
     reasons += [
@@ -352,14 +376,21 @@ def decide(result: ModelResult, required: int = MIN_SAMPLES) -> tuple[bool, list
     return (not reasons, reasons)
 
 
-def summarize(results: list[ModelResult]) -> dict:
+def summarize(results: list[ModelResult], required: int = MIN_SAMPLES) -> dict:
     counts = {name: dict.fromkeys(CLASSES, 0) for name, _ in CONFIGS}
     for result in results:
         for sample in result.samples:
             counts[sample.config][sample.classification] += 1
-    qualifying = [r.model for r in results if decide(r)[0]]
+    qualifying = [r.model for r in results if decide(r, required)[0]]
     leaks = sum(1 for r in results for s in r.samples if s.config == "text-only" and s.leaked)
-    return {"models": len(results), "qualifying": qualifying, "counts": counts, "text_only_token_leaks": leaks}
+    skipped = [r.model for r in results if r.unavailable]
+    return {
+        "models": len(results),
+        "qualifying": qualifying,
+        "counts": counts,
+        "text_only_token_leaks": leaks,
+        "skipped_unavailable": skipped,
+    }
 
 
 # --- running OpenCode ------------------------------------------------------------------------------
@@ -610,7 +641,9 @@ def verify_model(cfg: Settings, model_id: str, cwd: Path, images: Path, results:
         result.control_ok = control.kind == "reply" and bool(control.text)
         result.control_detail = control.text[:80] if result.control_ok else (control.detail or control.kind)
         if not result.control_ok:
-            result.skipped = f"text control failed: {result.control_detail}"
+            result.unavailable = control_unavailable(control)
+            label = "SKIPPED (unavailable)" if result.unavailable else "text control failed"
+            result.skipped = f"{label}: {result.control_detail}"
             return result
         tokens = make_tokens(cfg.seed, model_id, cfg.samples)
         paths = []
@@ -640,12 +673,16 @@ def run_all(cfg: Settings, models: list[str], cwd: Path, images: Path, results: 
     for number, model_id in enumerate(models, start=1):
         cfg.status(f"[{number}/{len(models)}] {model_id}")
         result = verify_model(cfg, model_id, cwd, images, results)
+        if result.unavailable:
+            continue
         consecutive_control_failures = 0 if result.control_ok else consecutive_control_failures + 1
         if consecutive_control_failures >= MAX_CONSECUTIVE_CONTROL_FAILURES:
             raise StopRun(
                 "CONTROL_FAILING",
                 f"{consecutive_control_failures} consecutive models failed the text control (auth or routing?)",
             )
+    if results and not any(r.control_ok for r in results):
+        raise StopRun("CONTROL_FAILING", "no model passed the text control (auth, routing, or provider-wide fault?)")
 
 
 # --- outputs ----------------------------------------------------------------------------------------
@@ -659,14 +696,15 @@ def tsv_field(text: object) -> str:
     return re.sub(r"[\t\r\n]+", " ", str(text))
 
 
-def model_record(result: ModelResult) -> dict:
-    qualifies, reasons = decide(result)
+def model_record(result: ModelResult, required: int = MIN_SAMPLES) -> dict:
+    qualifies, reasons = decide(result, required)
     return {
         "model": result.model,
         "config_facts": result.facts,
         "text_control_ok": result.control_ok,
         "text_control_detail": result.control_detail,
         "skipped": result.skipped,
+        "skipped_unavailable": result.unavailable,
         "candidate_image": qualifies,
         "reasons_not_candidate": reasons,
         "samples": [
@@ -688,8 +726,9 @@ INVALIDATING_STOPS = ("NEGATIVE_CONTROL_LEAK", "UNEXPECTED_CONTENT")
 
 
 def build_document(meta: dict, results: list[ModelResult]) -> dict:
-    records = [model_record(r) for r in results]
-    summary = summarize(results)
+    required = max(int(meta.get("samples", MIN_SAMPLES)), MIN_SAMPLES)
+    records = [model_record(r, required) for r in results]
+    summary = summarize(results, required)
     if any(code in str(meta.get("stopped", "")) for code in INVALIDATING_STOPS):
         # The harness itself is in doubt, so nothing from this run may be treated as a candidate.
         for record in records:
@@ -777,8 +816,9 @@ def evidence_markdown(document: dict) -> str:
     for model in document["models"]:
         facts = model["config_facts"]
         step1 = f"{fact_cell(facts.get('modalities.input'))} / {fact_cell(facts.get('reasoning'))}"
+        failure = cell(model["skipped"] or model["text_control_detail"])
         control = (
-            "ok" if model["text_control_ok"] else f"FAILED: {cell(model['skipped'] or model['text_control_detail'])}"
+            "ok" if model["text_control_ok"] else (failure if model["skipped_unavailable"] else f"FAILED: {failure}")
         )
         decision = "yes" if model["candidate_image"] else "no: " + cell("; ".join(model["reasons_not_candidate"]))
         lines.append(
@@ -812,6 +852,7 @@ def evidence_markdown(document: dict) -> str:
 
 def result_line(document: dict, outdir: Path) -> str:
     counts = document["summary"]["counts"]
+    skipped = document["summary"].get("skipped_unavailable", [])
     parts = ["RESULT"]
     for name, _ in CONFIGS:
         c = counts[name]
@@ -820,6 +861,7 @@ def result_line(document: dict, outdir: Path) -> str:
         f"models={document['summary']['models']}",
         f"candidates={len(document['summary']['qualifying'])}",
         f"token_leaks={document['summary']['text_only_token_leaks']}",
+        f"skipped={len(skipped)}" + (f"({','.join(skipped)})" if skipped else ""),
         f"stopped={document.get('stopped') or 'no'}",
         f"opencode={document['opencode_version']}",
         f"date={document['date']}",
@@ -895,7 +937,7 @@ def main(argv: list[str] | None = None) -> int:
         "host": args.expected_host,
         "stopped": "",
     }
-    work = outdir / ".work"
+    work: Path | None = None
     old_handlers = {s: signal.signal(s, _raise_interrupted) for s in (signal.SIGINT, signal.SIGTERM)}
     code = 0
     try:
@@ -923,6 +965,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         outdir.mkdir(parents=True, exist_ok=True)
         outdir.chmod(0o700)
+        # Owned scratch dir: unique per run, created only after preflight, and the only thing cleanup removes.
+        work = Path(tempfile.mkdtemp(prefix=".work-", dir=outdir))
         cwd, images = work / "cwd", work / "images"
         for directory in (cwd, images):
             directory.mkdir(parents=True, exist_ok=True)
@@ -951,7 +995,8 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         for sig_number, handler in old_handlers.items():
             signal.signal(sig_number, handler)
-        shutil.rmtree(work, ignore_errors=True)
+        if work is not None:
+            shutil.rmtree(work, ignore_errors=True)
     outdir.mkdir(parents=True, exist_ok=True)
     outdir.chmod(0o700)
     document = build_document(meta, results)

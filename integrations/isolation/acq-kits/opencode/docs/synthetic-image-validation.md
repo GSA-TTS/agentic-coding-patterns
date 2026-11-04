@@ -179,7 +179,7 @@ classification, text-only control result, date) to the output directory, and
 prints one line to paste back:
 
 ```text
-RESULT unset=correct:N/wrong:N/rejected:N/error:N text-image=... text-only=... models=N candidates=N token_leaks=N stopped=no opencode=<version> date=<YYYY-MM-DD> dir=<path>
+RESULT unset=correct:N/wrong:N/rejected:N/error:N text-image=... text-only=... models=N candidates=N token_leaks=N skipped=N(<models>) stopped=no opencode=<version> date=<YYYY-MM-DD> dir=<path>
 ```
 
 Paste back the `RESULT` line and the contents of `evidence.md` (it holds
@@ -194,9 +194,17 @@ a provider `baseURL` that is not `https://api.gsa.usai.gov`; a reply that is
 longer than 500 characters (unset and explicit `["text","image"]` runs, where
 only a six-character token is expected) or carries credential-shaped data; an
 explicit `["text"]` run that
-returns the token; three consecutive models failing the text control; and an
+returns the token; three consecutive models failing the text control for auth, routing, timeout or
+connection reasons (or no model passing it at all); and an
 OpenCode that cannot be run. A model whose own text control fails is recorded
-and skipped (auth or routing, not an image result). In the explicit
+and skipped (not an image result). When the gateway message names that one model (`model_blocked_globally`,
+an unknown or nonexistent model, or "doesn't support tool use") it is reported
+as `SKIPPED (unavailable)`, does not count toward the three-in-a-row stop, and
+does not change the exit status; a complete run with such models exits 0 and
+lists them as `skipped=N(model,...)` in the `RESULT` line. A plain 401 or 403, a
+bare 4xx with no model-specific text, a timeout, or a connection error stays a
+run-level failure, and if no model at all passes its text control the run stops
+(a run cannot succeed with every model "unavailable"). In the explicit
 `["text"]` negative control a long, harmless refusal is the expected outcome, so
 that run's length cap is 8000 characters instead (credential-shaped content
 still stops the run); stored replies are truncated to 500 characters after
