@@ -4,7 +4,7 @@
 //
 // Why this test exists: --check once compared the whole serialized catalog,
 // including the `sources` block. `sources` records WHICH feed or file a given
-// run read, so a live-feed regeneration and an offline bootstrap of byte-identical
+// run read, so a live-feed regeneration and an offline regeneration of byte-identical
 // models disagree there by design. The result was a detector that failed on every
 // offline run no matter what — and a drift check that always fires is one everyone
 // learns to ignore, which is strictly worse than having none, because genuine
@@ -46,20 +46,26 @@ test("identical catalogs report no drift", () => {
   assert.deepEqual(drift, [])
 })
 
-test("default --check uses the committed 24-model production catalog", () => {
+test("the committed catalog is a valid catalog with at least one model", () => {
+  const catalog = loadCatalog()
+  assert.equal(catalog.schemaVersion, "usai-model-catalog/v1")
+  assert.ok(catalog.models.length > 0)
+})
+
+test("--check with no source refuses instead of comparing against anything", () => {
   const result = spawnSync(process.execPath, ["scripts/build-catalog.mjs", "--check"], { cwd: USAI_DIR, encoding: "utf8" })
-  assert.equal(result.status, 0, result.stderr)
-  assert.equal(loadCatalog().models.length, 24)
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /make refresh-usai-catalog/)
 })
 
 test("a sources-only difference is NOT drift", () => {
   // The exact false positive this test guards: same models, different provenance.
   const live = loadCatalog()
   live.sources = { modelsList: "https://api.gsa.usai.gov/api/v1/models", enrichment: "(none)" }
-  const bootstrapped = loadCatalog()
-  bootstrapped.sources = { bootstrappedFrom: "integrations/.../opencode.jsonc" }
+  const offline = loadCatalog()
+  offline.sources = { modelsList: "offline:usai-models.json", enrichment: "offline:models-dev.json" }
 
-  const drift = describeDrift(substantive(live), substantive(bootstrapped))
+  const drift = describeDrift(substantive(live), substantive(offline))
   assert.deepEqual(drift, [], "provenance metadata must not count as drift")
 })
 
