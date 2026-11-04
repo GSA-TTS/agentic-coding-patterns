@@ -73,10 +73,12 @@ probe session against the gateway. Samples were small (see the limits section).
    `none`, and `thinking: {type: "disabled"}`, were accepted without error, with no observable change in tokens or
    correctness. `low` and `high` were tried on all four models, `none` and
    `thinking: disabled` on `claude-sonnet-5.5` and `gemini-3.5-flash` only,
-   two runs per setting. A negative control needs a way to switch thinking off or
-   a model known not to think. Only `gpt_5_2_default_v2` behaves as a
-   non-thinker, and that comes from observation, not from any switch. An
-   explicit `false` has nothing to compare against.
+   two runs per setting. A control needs a way to switch thinking on or off
+   on the target itself. Only `gpt_5_2_default_v2` behaves as a
+   non-thinker, and that comes from observation, not from any switch, and it
+   says nothing about the other models. Without a working switch, every model
+   stays *Indeterminate*, including `gpt_5_2_default_v2`: its short wrong
+   answers could equally be a reasoning model with thinking off by default.
 
 ## What a published value would mean
 
@@ -90,15 +92,17 @@ probe session against the gateway. Samples were small (see the limits section).
 On the pinned version a value is inert and was seen to log a warning per model
 (`--print-logs`, debug level, local stand-in gateway). `false` has no use that `absent` does not already serve: no consumer
 examined here reads "known not to reason", and the evidence for it would be the weakest
-(absence of a signal the gateway never sends). Publishing `true` would be a
+(absence of a signal the gateway never sends, which cannot tell "does not
+reason" from "reasons but is not reported"). Publishing `true` would be a
 claim about a vendor behavior that no check in this path can see, and on 1.x
 may (unverified) add variants and change requests, which someone must accept
 (the OpenCode kit owner, and the owner of the data change).
 
 ## Procedure (for a future run)
 
-Run only if the gateway starts exposing a reasoning signal, or a consumer is
-found that reads the field. Otherwise stop at the decision rule.
+Run only if the gateway starts exposing a reasoning signal, a consumer is
+found that reads the field, or the gateway or vendor states explicitly that a
+model does not support reasoning. Otherwise stop at the decision rule.
 
 ### Preconditions
 
@@ -131,24 +135,42 @@ found that reads the field. Otherwise stop at the decision rule.
    `reasoning_tokens` in usage, completion tokens, `total_tokens` minus
    `prompt_tokens`, and whether the answer is correct.
 4. **Repeat** at least five times per prompt with fresh random tasks.
-5. **Classify** each model:
-   - *Reasons, observed*: a reasoning field or `reasoning_tokens` is present on
-     every run, **and** the non-thinker control (below) shows no such signal on
-     the same task. A documented off switch that removes the signal and lowers
-     correctness on every run strengthens this but does not replace it.
-   - *Does not reason, observed*: the signal is absent on every run, the task
-     fails on every run, **and** a documented on switch demonstrably changes the
-     signal on a model that does think (so the probe is shown able to see it).
-   - *Indeterminate*: anything else, including token accounting alone.
+5. **Classify** each model. Every class needs evidence about **that model**.
+   A result on another model (a positive control, a non-thinker, a switch that
+   works elsewhere) shows only that the probe can see a signal; it never
+   establishes a value for the target.
+   - *Reasons, observed* (supports `true`): on the target, a reasoning field or
+     `reasoning_tokens` is present on every run, **and** the target's own
+     documented off switch removes or sharply reduces that signal on the same
+     task (or a non-thinker control run on the target itself shows none). Correctness
+     falling when the switch is off strengthens this but does not replace it.
+   - *Does not reason, known-unsupported* (supports `false`): only an explicit,
+     target-specific statement that the model does not support reasoning: the
+     gateway's or vendor's documentation for that model, or an explicit
+     gateway response for that model (for example an error naming the
+     reasoning parameter as unsupported for it). An OFF/ON run with no
+     difference is **not** enough, because a switch the gateway ignores looks
+     identical to a model that does not reason. A missing signal, failed
+     arithmetic or low token counts are never enough.
+   - *Indeterminate*: everything else. In particular: a null or negative
+     observation (no signal, wrong answers, small token counts) on a model whose
+     own positive control is missing, or was run only on a different model;
+     a model that may have thinking disabled by default, suppressed telemetry
+     or weak accuracy; and token accounting alone. Indeterminate means the
+     field stays **absent** (unknown).
 
 ### Controls
 
 - A trivial prompt, to give each model's baseline token count.
-- A model that behaves as a non-thinker on the same task (in the 2026-11-04
-  session, `gpt_5_2_default_v2`), required for either published value, to show that the probe can tell the difference.
-- A switch (on or off) that the gateway documents for a model that thinks and
-  that demonstrably changes the signal. Without one, neither class of
-  "observed" above can be reached for `false`, so `false` cannot be published.
+- A switch on the **target model** (on or off) that the gateway documents for
+  that model and that demonstrably changes the signal. Without one,
+  *Reasons, observed* cannot be reached for that model, so `true` cannot be
+  published for it. `false` does not come from a control at all: it needs the
+  explicit target-specific statement described above.
+- A non-thinker on the same task (in the 2026-11-04 session,
+  `gpt_5_2_default_v2`) shows only that the probe can tell two models apart.
+  It is a calibration, not evidence about any other model, and it cannot move
+  another model out of *Indeterminate*.
 
 ### Decision rule
 
@@ -158,10 +180,11 @@ found that reads the field. Otherwise stop at the decision rule.
   value must change something a consumer reads, and whoever owns that
   consumer must accept the changes in variants, requests, cost and latency.
 - Publish `reasoning: false` only for a model classified *Does not reason,
-  observed* **and** only if a consumer is shown to need the distinction from
-  absent.
-- Everything else stays **absent**. As of the 2026-11-04 session this is every
-  model tested, and every untested model.
+  known-unsupported* from target-specific evidence **and** only if a consumer
+  is shown to need the distinction from absent. A null observation never yields
+  `false`.
+- Everything else, including every *Indeterminate* model, stays **absent**. As
+  of the 2026-11-04 session this is every model tested, and every untested model.
 
 ### Evidence file
 
@@ -185,7 +208,12 @@ version differs from the one under test.
 
 - That a model "really reasons" internally. Token accounting and the presence of
   a stream field are observations about the gateway's reporting, not about
-  the model.
+  the model. Reporting telemetry does not establish internal reasoning, and
+  its absence does not establish that a model does not reason.
+- That a model does not reason. A reasoning-capable model may have thinking off
+  by default, suppressed telemetry, or wrong answers. Only target-specific
+  evidence can move a model to `false`; a positive control on another model
+  cannot.
 - Behavior of any OpenCode version other than the one run, including 1.x.
 - Behavior of consumers not examined here, notably the Quickstart projection.
 - Anything about audio, video, pdf or image input.
