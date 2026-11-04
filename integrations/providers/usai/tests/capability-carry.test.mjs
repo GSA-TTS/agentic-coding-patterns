@@ -231,6 +231,18 @@ test("values without a valid release reminder are not treated as verified: warne
   })
 })
 
+test("a malformed release reminder is not accepted as verified either", async () => {
+  await withRootAndSource(async (root, source) => {
+    commitVerified(root, twelve(committedIds(root)), "true")
+    const { result, stderr } = await quietly(() => runRefresh(options(root, source)))
+    assert.equal(result.status, 0)
+    assert.match(stderr, /not treated as verified/)
+    const catalog = readJson(path.join(root, CATALOG_REL))
+    assert.equal(catalog.models.some((m) => "inputModalities" in m), false)
+    assert.equal("capabilitiesVerified" in catalog.sources, false)
+  })
+})
+
 // ---------------------------------------------------------------------------
 // Drift reporting (added / changed / dropped), per model and field
 // ---------------------------------------------------------------------------

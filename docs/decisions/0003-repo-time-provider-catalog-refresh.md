@@ -70,7 +70,8 @@ documented command, and never produce or read harness-native configuration.
    recommended model has left the feed, the refresh fails and names each role; a
    person chooses the replacement.
    Verified `reasoning` and `inputModalities` values are curated in the same way:
-   they are carried forward by model id, dropped only when their model leaves the
+   they are carried forward by model id (while the catalog has a valid
+   `sources.capabilitiesVerified`), dropped only when their model leaves the
    feed (reported as drift), and never overwritten by the unverified
    `--include-capabilities` copy, which is refused while a verified value is
    carried. `sources.capabilitiesVerified` is carried, never advanced. Details:
