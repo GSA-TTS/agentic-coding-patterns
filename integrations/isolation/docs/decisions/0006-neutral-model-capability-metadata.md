@@ -155,7 +155,7 @@ substantiates image input only.
 | `inputModalities` includes `image` | The synthetic-image procedure for that model: an exact-token read, repeated over several independently generated images, and a text-only control (explicit `["text"]`), repeated on the same images, that never returns the token. A single run is not enough. |
 | `inputModalities` includes `audio`, `video`, or `pdf` | Its own probe, with a known-content input of that type that cannot be answered from text or the model id, repeated samples, and a text-only control. An image probe says nothing about these. No such probe exists yet, so these values are not published. |
 | `inputModalities: ["text"]` (known text-only) | A negative result is also a claim. Record the failed attempts and the exact rejection or error, so a transient outage is not published as "unsupported". |
-| `reasoning: true` or `false` | No procedure can currently substantiate it on OpenCode 2.0.30 or the USAi gateway: OpenCode drops the field, and the gateway exposes no reasoning signal or working control. See [`reasoning-validation.md`](../../acq-kits/opencode/docs/reasoning-validation.md). **Decision rule: no value is published and the field stays absent for every model.** Revisit only if a future OpenCode or gateway exposes an observable control, meaning a consumer that reads the field and changes behavior with it, or a gateway signal (a reasoning stream field or `reasoning_tokens`) plus a documented switch that demonstrably changes it **on the target model** (for `true`), or an explicit gateway or vendor statement for the target model (for `false`). A null observation, or a control that works only on another model, leaves the model indeterminate and the field absent. An image probe says nothing about this. |
+| `reasoning: true` or `false` | No procedure can currently substantiate it on OpenCode 2.0.30 or the USAi gateway: OpenCode drops the field, and the gateway exposes no reasoning signal or working control. See [`reasoning-validation.md`](../../acq-kits/opencode/docs/reasoning-validation.md). **Decision rule: no value is published and the field stays absent for every model.** Revisit only if a future OpenCode or gateway exposes an observable control, meaning a consumer that reads the field and changes behavior with it, or a gateway signal (a reasoning stream field or `reasoning_tokens`) plus a documented switch that demonstrably changes it **on the target model** (for `true`), or an explicit gateway or vendor statement for the target model that its reasoning capability itself is unsupported (for `false`; a rejected parameter, effort value or endpoint is not such a statement). A null observation, a rejected control, or a control that works only on another model, leaves the model indeterminate and the field absent. An image probe says nothing about this. |
 
 ### Evidence record
 
@@ -277,8 +277,9 @@ kept as written.
 The owner of the epic accepted keeping `reasoning` **absent for every model**.
 No `reasoning: true` or `false` value is published, and none will be unless a
 future OpenCode or gateway exposes an observable control, or the gateway or
-vendor states explicitly that a given model does not support reasoning (see the
-evidence table).
+vendor states explicitly that a given model's reasoning capability is
+unsupported (see the evidence table). A rejected parameter, effort value or
+endpoint is not such a statement.
 
 ### Evidence
 
@@ -303,10 +304,15 @@ USAi gateway; full method and limits are in
   (no signal, wrong answers, low token counts) is not evidence that a model
   does not reason, and a control working on another model cannot establish a
   value for the target. `true` needs target-specific positive evidence (a signal plus that
-  model's own switch changing it). `false` (known-unsupported) needs an explicit
-  target-specific statement from the gateway or vendor that the model does
-  not support reasoning; an OFF/ON run with no difference is not enough,
-  because an ignored switch looks the same. The
+  model's own switch changing it; a control that is merely accepted is not
+  evidence). `false` (known-unsupported) needs an explicit target-specific
+  statement from the gateway or vendor that the model's reasoning capability
+  itself is unsupported (it does not reason). Capability statement: "model X
+  is not a reasoning model". Control rejection, which is never enough: an
+  error that `reasoning.effort`, an effort value or an endpoint is
+  unsupported, because a reasoning-capable model can reject a request control
+  while reasoning through its supported API. An OFF/ON run with no
+  difference is not enough either, because an ignored switch looks the same. The
   gateway's reporting telemetry does not establish internal reasoning.
 
 The samples are small (four gateway models in depth, single-digit runs, one
@@ -336,7 +342,8 @@ per the kit README) was **not tested**.
 - Consumers MUST treat absent `reasoning` as unknown, not as "does not reason".
 - Unsuccessful or unobserved reasoning (no signal, failed task, or a positive
   control that exists only on another model) stays *Indeterminate* and the
-  field stays absent. `false` is never concluded from a null observation.
+  field stays absent. `false` is never concluded from a null observation or
+  from a rejected parameter, value or endpoint.
 - Producers should not supply `reasoning` for OpenCode 2.0.30 consumers unless
   the behavior is re-verified. The renderer does not enforce this today; it
   would emit a supplied value.

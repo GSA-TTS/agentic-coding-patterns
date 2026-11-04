@@ -102,7 +102,8 @@ may (unverified) add variants and change requests, which someone must accept
 
 Run only if the gateway starts exposing a reasoning signal, a consumer is
 found that reads the field, or the gateway or vendor states explicitly that a
-model does not support reasoning. Otherwise stop at the decision rule.
+model's reasoning capability is unsupported (not merely that a parameter is
+rejected). Otherwise stop at the decision rule.
 
 ### Preconditions
 
@@ -142,16 +143,25 @@ model does not support reasoning. Otherwise stop at the decision rule.
    - *Reasons, observed* (supports `true`): on the target, a reasoning field or
      `reasoning_tokens` is present on every run, **and** the target's own
      documented off switch removes or sharply reduces that signal on the same
-     task (or a non-thinker control run on the target itself shows none). Correctness
-     falling when the switch is off strengthens this but does not replace it.
+     task (or a non-thinker control run on the target itself shows none).
+     Correctness falling when the switch is off strengthens this but does not
+     replace it. A control the gateway merely accepts (HTTP 200, no error, an
+     echoed parameter) is not evidence of the capability.
    - *Does not reason, known-unsupported* (supports `false`): only an explicit,
-     target-specific statement that the model does not support reasoning: the
-     gateway's or vendor's documentation for that model, or an explicit
-     gateway response for that model (for example an error naming the
-     reasoning parameter as unsupported for it). An OFF/ON run with no
-     difference is **not** enough, because a switch the gateway ignores looks
-     identical to a model that does not reason. A missing signal, failed
-     arithmetic or low token counts are never enough.
+     target-specific statement that the model's reasoning **capability itself**
+     is unsupported (the model does not reason or has no reasoning mode):
+     the gateway's or vendor's documentation for that model, or an explicit
+     response for that model that says so. Capability statement, accepted
+     example: documentation that "model X is not a reasoning model". Control
+     rejection, **never enough**: an error that a parameter, an effort value
+     or an endpoint is unsupported (for example `reasoning.effort` rejected,
+     or only `high` accepted, or the reasoning API surface unavailable). That
+     shows only which request syntax or control the model's API accepts, and a
+     reasoning-capable model can reject any of them while reasoning through
+     its supported API. Such a rejection leaves the model *Indeterminate*. An
+     OFF/ON run with no difference is also not enough, because a switch the
+     gateway ignores looks identical to a model that does not reason. A
+     missing signal, failed arithmetic or low token counts are never enough.
    - *Indeterminate*: everything else. In particular: a null or negative
      observation (no signal, wrong answers, small token counts) on a model whose
      own positive control is missing, or was run only on a different model;
@@ -180,8 +190,9 @@ model does not support reasoning. Otherwise stop at the decision rule.
   value must change something a consumer reads, and whoever owns that
   consumer must accept the changes in variants, requests, cost and latency.
 - Publish `reasoning: false` only for a model classified *Does not reason,
-  known-unsupported* from target-specific evidence **and** only if a consumer
-  is shown to need the distinction from absent. A null observation never yields
+  known-unsupported* from a target-specific capability statement **and** only
+  if a consumer is shown to need the distinction from absent. A null
+  observation, or a rejected parameter, value or endpoint, never yields
   `false`.
 - Everything else, including every *Indeterminate* model, stays **absent**. As
   of the 2026-11-04 session this is every model tested, and every untested model.
@@ -211,9 +222,10 @@ version differs from the one under test.
   the model. Reporting telemetry does not establish internal reasoning, and
   its absence does not establish that a model does not reason.
 - That a model does not reason. A reasoning-capable model may have thinking off
-  by default, suppressed telemetry, or wrong answers. Only target-specific
-  evidence can move a model to `false`; a positive control on another model
-  cannot.
+  by default, suppressed telemetry, wrong answers, or reject a reasoning
+  parameter, value or endpoint. Only a target-specific statement that the
+  model's reasoning capability is unsupported can move a model to `false`; a
+  positive control on another model, or a control rejection, cannot.
 - Behavior of any OpenCode version other than the one run, including 1.x.
 - Behavior of consumers not examined here, notably the Quickstart projection.
 - Anything about audio, video, pdf or image input.
