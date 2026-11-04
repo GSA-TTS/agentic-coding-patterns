@@ -51,8 +51,9 @@ test("default --check uses the committed 24-model production catalog", () => {
   // The default source is the legacy bootstrap fixture, which carries no
   // capability data (verified capabilities are committed in catalog.json only,
   // with evidence). Check the rest of the catalog against it by stripping the
-  // two capability fields from a temp copy; the capability data itself is
-  // guarded in capabilities.test.mjs.
+  // two capability fields from a temp copy. The capability values themselves
+  // are not pinned by a test (only the release-reminder shape is, in
+  // capabilities.test.mjs); the evidence file and its review are the control.
   const stripped = loadCatalog()
   for (const model of stripped.models) {
     delete model.reasoning
