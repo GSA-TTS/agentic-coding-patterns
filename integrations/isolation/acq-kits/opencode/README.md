@@ -10,8 +10,10 @@ deterministic, version-pinned install.
 
 The install-time `opencode --version` checks run as root and can create
 `/tmp/opencode` with root ownership. On every sandbox startup, a root command
-creates or repairs that directory with agent ownership (`1000:1000`) and private
-permissions (`0700`). This also handles a cleared `/tmp` after a restart.
+creates or repairs that directory with ownership of the sandbox's `agent` user
+and group, resolved by name at startup (the numeric uid can differ from `1000`
+on some MSB images), and private permissions (`0700`). It fails closed if the
+`agent` user does not exist. This also handles a cleared `/tmp` after a restart.
 
 The command changes only the directory itself, not existing contents, and
 refuses a pre-existing symlink or non-directory. It uses the same neutral

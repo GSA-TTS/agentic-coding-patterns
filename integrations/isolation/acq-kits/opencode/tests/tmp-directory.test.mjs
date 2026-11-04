@@ -10,23 +10,77 @@ const startup = spec.match(/  - phase: startup\n    user: "0"\n    description: 
 assert.ok(startup, "scratch directory preparation must be wired as a root startup command")
 const body = startup[1].replace(/^        /gm, "")
 
-async function fixture(t) {
+const idShim = `#!/bin/sh
+[ -n "$FAKE_UID" ] || exit 1
+[ "$2" = agent ] || exit 1
+case "$1" in -u) echo "$FAKE_UID" ;; -g) echo "$FAKE_GID" ;; *) exit 1 ;; esac
+`
+
+// Records the requested ownership, then installs with the caller's real ids
+// (the test cannot chown to arbitrary ids without root).
+const installShim = `#!/bin/sh
+echo "$*" >> "$INSTALL_LOG"
+n=$#
+while [ "$n" -gt 0 ]; do
+  a=$1; shift; n=$((n - 1))
+  case "$a" in
+    -o) shift; n=$((n - 1)); set -- "$@" -o "$REAL_UID" ;;
+    -g) shift; n=$((n - 1)); set -- "$@" -g "$REAL_GID" ;;
+    *) set -- "$@" "$a" ;;
+  esac
+done
+exec /usr/bin/install "$@"
+`
+
+async function fixture(t, { agent = { uid: process.getuid(), gid: process.getgid() } } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "opencode-tmp-test-"))
   t.after(() => rm(root, { recursive: true, force: true }))
   const directory = path.join(root, "opencode")
+  const bin = path.join(root, "bin")
+  const installLog = path.join(root, "install.log")
+  await mkdir(bin)
+  await writeFile(path.join(bin, "id"), idShim, { mode: 0o755 })
+  await writeFile(path.join(bin, "install"), installShim, { mode: 0o755 })
   // Exercise real install/chmod without requiring root or touching /tmp/opencode.
   const command = body.replaceAll("/tmp/opencode", directory)
-    .replace("-o 1000 -g 1000", `-o ${process.getuid()} -g ${process.getgid()}`)
   const run = () => spawnSync("/bin/sh", ["-c", command], {
-    env: { PATH: "/usr/bin:/bin" }, encoding: "utf8",
+    env: {
+      PATH: `${bin}:/usr/bin:/bin`,
+      INSTALL_LOG: installLog,
+      REAL_UID: String(process.getuid()),
+      REAL_GID: String(process.getgid()),
+      ...(agent ? { FAKE_UID: String(agent.uid), FAKE_GID: String(agent.gid) } : {}),
+    },
+    encoding: "utf8",
   })
-  return { root, directory, run }
+  const installCalls = async () => readFile(installLog, "utf8").catch(() => "")
+  return { root, directory, run, installCalls }
 }
 
-test("root startup assigns the sandbox agent's numeric UID/GID without recursive changes", () => {
-  assert.match(body, /install -d -o 1000 -g 1000 -m 0700 \/tmp\/opencode/)
+test("root startup resolves the agent's UID/GID by name without recursive changes", () => {
+  assert.match(body, /id -u agent/)
+  assert.match(body, /id -g agent/)
+  assert.match(body, /install -d -o "\$agent_uid" -g "\$agent_gid" -m 0700 \/tmp\/opencode/)
+  assert.doesNotMatch(body, /\b1000\b/)
   assert.doesNotMatch(body, /(?:chown|chmod)\s+-R/)
   assert.ok(spec.indexOf(startup[0]) < spec.indexOf("description: Render current provider inputs"))
+})
+
+test("startup uses a non-1000 agent uid/gid reported by the sandbox", async (t) => {
+  const { directory, run, installCalls } = await fixture(t, { agent: { uid: 2345, gid: 2346 } })
+  const result = run()
+  assert.equal(result.status, 0, result.stderr)
+  assert.match(await installCalls(), /-d -o 2345 -g 2346 -m 0700 \S+\/opencode/)
+  assert.ok((await stat(directory)).isDirectory())
+})
+
+test("startup fails closed when the agent user does not exist", async (t) => {
+  const { directory, run, installCalls } = await fixture(t, { agent: null })
+  const result = run()
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /user 'agent' not found/)
+  assert.equal(await installCalls(), "")
+  await assert.rejects(stat(directory))
 })
 
 test("startup creates a private writable directory and is idempotent", async (t) => {
