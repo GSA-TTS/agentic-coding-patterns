@@ -1,9 +1,12 @@
 # Reasoning capability validation procedure (not feasible; field stays absent)
 
 **Status:** investigated live against OpenCode 2.0.30 and the USAi gateway on
-2026-11-04. **Finding: `reasoning` cannot be honestly verified or usefully
-published for any model through this path.** The field stays **absent**
-(unknown) for every model. No script and no data accompany this document.
+2026-11-04. **Finding: this investigation could not verify `reasoning` for any model,
+and found no consumer for which a published value changes anything on the
+pinned version.** The recommendation is that the field stay **absent**
+(unknown) for every model. The evidence is small (four gateway models in depth, a
+handful of runs each, one date), so this is a recommendation from limited
+evidence, not a proof. No script and no data accompany this document.
 
 ## Purpose
 
@@ -41,8 +44,9 @@ probe session against the gateway. Samples were small (see the limits section).
    `#medium` and `#high` are accepted and send `reasoning_effort` with that
    value. `#none`, `#minimal`, `#xhigh` and `#max` fail locally with
    "Variant unavailable". The result is the same for `reasoning` absent, `true`
-   and `false`. Publishing `true` therefore adds no variants, changes no
-   request, and changes no cost or latency in 2.0.30. The 1.x behavior in the
+   and `false`. In 2.0.30 publishing `true` was therefore observed to add no
+   variants and to change no request body, event or usage figure (cost and
+   latency were not measured separately). The 1.x behavior in the
    ADR (variants derived from the field) was not re-tested.
 3. **Reasoning events appear only when the server streams them.** With
    `opencode run --format json --thinking`, a `reasoning` event appears when
@@ -66,9 +70,10 @@ probe session against the gateway. Samples were small (see the limits section).
    not hidden reasoning. Each family accounts for tokens differently, so a
    single numeric rule cannot classify them.
 6. **There is no working control.** `reasoning_effort` of `low`, `high` and
-   `none`, and `thinking: {type: "disabled"}`, were accepted without error by
-   the models tried, with no observable change in tokens or correctness
-   (two runs each). A negative control needs a way to switch thinking off or
+   `none`, and `thinking: {type: "disabled"}`, were accepted without error, with no observable change in tokens or
+   correctness. `low` and `high` were tried on all four models, `none` and
+   `thinking: disabled` on `claude-sonnet-5.5` and `gemini-3.5-flash` only,
+   two runs per setting. A negative control needs a way to switch thinking off or
    a model known not to think. Only `gpt_5_2_default_v2` behaves as a
    non-thinker, and that comes from observation, not from any switch. An
    explicit `false` has nothing to compare against.
@@ -78,16 +83,16 @@ probe session against the gateway. Samples were small (see the limits section).
 | Consumer | `true` | `false` | absent |
 |---|---|---|---|
 | OpenCode 2.0.30 renderer output | Dropped by OpenCode with a warning in the log | Same | No warning |
-| OpenCode request, variants, cost, latency | No change | No change | No change |
+| OpenCode request, variants, events, usage | No change observed | No change observed | Baseline |
 | OpenCode 1.x | Unverified: may derive low/medium/high variants | Unverified | No variants |
 | Quickstart projection and other consumers | Not examined here | Not examined here | Unknown |
 
-On the pinned version a value is inert and produces a log warning per model at
-startup. `false` has no use that `absent` does not already serve: no consumer
-reads "known not to reason", and the evidence for it would be the weakest
+On the pinned version a value is inert and was seen to log a warning per model
+(`--print-logs`, debug level, local stand-in gateway). `false` has no use that `absent` does not already serve: no consumer
+examined here reads "known not to reason", and the evidence for it would be the weakest
 (absence of a signal the gateway never sends). Publishing `true` would be a
 claim about a vendor behavior that no check in this path can see, and on 1.x
-would silently add variants and change requests, which someone must accept
+may (unverified) add variants and change requests, which someone must accept
 (the OpenCode kit owner, and the owner of the data change).
 
 ## Procedure (for a future run)
@@ -101,11 +106,14 @@ found that reads the field. Otherwise stop at the decision rule.
   injected environment variable. Never print, log or store it.
 - Each probe uses a throwaway configuration tree (`XDG_CONFIG_HOME`,
   `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME`; the `OPENCODE_CONFIG*`
-  variables do not work), `--standalone`, an empty working directory, all
-  permissions denied, and `OPENCODE_DISABLE_PROJECT_CONFIG=1`, as in the image
-  procedure.
-- Approval to spend requests. Budget at most 20 per model and ask before going
-  past about 300 in total.
+  variables did not work in earlier probing and were not re-tested here),
+  `--standalone` (without it `run` uses the shared background service), an
+  empty working directory, all tool permissions denied, and
+  `OPENCODE_DISABLE_PROJECT_CONFIG=1`. This investigation confirmed that the XDG
+  tree, `--standalone` and the project-config switch work on 2.0.30.
+- Approval to spend requests. Plan up to about 45 per model (3 field settings
+  times 3 prompts times 5 runs) and ask before going past about 300 in
+  total.
 
 ### Steps per model
 
@@ -125,25 +133,27 @@ found that reads the field. Otherwise stop at the decision rule.
 4. **Repeat** at least five times per prompt with fresh random tasks.
 5. **Classify** each model:
    - *Reasons, observed*: a reasoning field or `reasoning_tokens` is present on
-     every run, or a documented off switch changes the signal and the
-     correctness in the expected direction on every run.
-   - *Does not reason, observed*: the signal is absent, the task fails on every
-     run, and a documented on switch changes nothing.
+     every run, **and** the non-thinker control (below) shows no such signal on
+     the same task. A documented off switch that removes the signal and lowers
+     correctness on every run strengthens this but does not replace it.
+   - *Does not reason, observed*: the signal is absent on every run, the task
+     fails on every run, **and** a documented on switch demonstrably changes the
+     signal on a model that does think (so the probe is shown able to see it).
    - *Indeterminate*: anything else, including token accounting alone.
 
 ### Controls
 
 - A trivial prompt, to give each model's baseline token count.
 - A model that behaves as a non-thinker on the same task (in the 2026-11-04
-  session, `gpt_5_2_default_v2`), to show that the probe can tell the difference.
-- A reasoning off switch, only where the gateway documents one for that model
-  and it demonstrably changes the signal. If none can be shown to work,
-  `false` cannot be published for that model.
+  session, `gpt_5_2_default_v2`), required for either published value, to show that the probe can tell the difference.
+- A switch (on or off) that the gateway documents for a model that thinks and
+  that demonstrably changes the signal. Without one, neither class of
+  "observed" above can be reached for `false`, so `false` cannot be published.
 
 ### Decision rule
 
-- Publish `reasoning: true` only for a model classified *Reasons, observed*,
-  **and** only after the consumer decision in "What a published value would
+- Publish `reasoning: true` only for a model classified *Reasons, observed*
+  with its evidence file already written (see below), **and** only after the consumer decision in "What a published value would
   mean" has been made in writing: for the pinned OpenCode version a published
   value must change something a consumer reads, and whoever owns that
   consumer must accept the changes in variants, requests, cost and latency.
@@ -151,13 +161,13 @@ found that reads the field. Otherwise stop at the decision rule.
   observed* **and** only if a consumer is shown to need the distinction from
   absent.
 - Everything else stays **absent**. As of the 2026-11-04 session this is every
-  model.
+  model tested, and every untested model.
 
 ### Evidence file
 
 One file per run, at `capability-evidence/<YYYY-MM-DD>-opencode-<version>.md`
-(the ADR convention, shared with the image procedure; no evidence file is
-committed by this document). One table row per model, field and value, with:
+(the convention the ADR defines; no evidence file is committed by this
+document). One table row per model, field and value, with:
 model id, OpenCode version, date, field effect result (step 2), sample count,
 per-run signals (step 3), control results, classification, and the value
 published or "absent". Verbatim results only; no credentials, no raw
