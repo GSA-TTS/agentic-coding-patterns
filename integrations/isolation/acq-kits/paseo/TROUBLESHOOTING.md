@@ -20,8 +20,9 @@ acq ports <sandbox>                       # is container 6767 mapped to a host p
 acq exec <sandbox> -- sh -c 'curl -fsS http://127.0.0.1:6767/api/health && echo OK'
 ```
 
-- `/api/health` returns 200 and the port is mapped → open
-  `http://127.0.0.1:<host-port-for-6767>`.
+- `/api/health` returns 200 and the port is mapped → run
+  `scripts/paseo-verify-identity <sandbox>` to check that the published IPv4
+  endpoint reaches the guest daemon before opening that IPv4 URL.
 - `/api/health` fails → the daemon isn't up yet. On **first boot** it installs the
   Paseo CLI first (a few seconds). Watch the logs:
 
@@ -52,36 +53,31 @@ still carries the placeholder, so the provider receives a well-formed but invali
 credential. The auth error is therefore a *symptom of misrouting*, not a bad key —
 chasing the key wastes the most time on this failure.
 
-**Diagnosis — compare the two identities.** A Paseo daemon has a stable id in
-`~/.paseo/server-id`. Ask the host-published port what it is, then ask the guest
-directly. They must match:
+**Diagnosis — compare two live daemon identities.** Probe `server_info` over
+`/ws` on the published IPv4 port and from inside the guest. Their runtime IDs
+must match:
 
 ```bash
 scripts/paseo-verify-identity <sandbox>
 ```
 
-That check fails loudly on a mismatch and prints the remediation. To do it by
-hand, the guest side is:
-
-```bash
-acq exec <sandbox> -- sh -lc 'cat ~/.paseo/server-id; cat ~/.paseo/paseo.pid'
-```
-
-and the host side is a `hello` frame over the published port's `/ws`, reading
-`serverId` from the `server_info` reply.
+The script performs both probes and reports a mismatch. The guest-writable
+`~/.paseo/server-id` file is only diagnostic; reading it does not prove which
+daemon is serving the guest port. The `localhost` and IPv4-mapped aliases are
+advisory observations, not the published IPv4 identity verdict.
 
 **Cause — a host forwarder that outlived the sandbox it was created for.** The
 create-time `-p HOST:GUEST` publish runs a host-side `msb` process. That process
 can **survive `acq stop` *and* `acq rm`** and keep holding the host port. The
 replacement sandbox's forwarder then cannot bind, while `acq ports` still reports
 the mapping as configured — so every restart appears to succeed and changes
-nothing. Two independent tells:
+nothing. Two diagnostic clues, neither of which proves an orphan on its own:
 
-- **Age.** The listener is *older than the sandbox it serves*. Compare its
-  `ELAPSED` against guest uptime:
+- **Age.** Compare listener `ELAPSED` against guest uptime. Host sleep can make
+  these clocks diverge for a healthy sandbox; check live IDs before acting:
 
   ```bash
-  ps -ww -o pid,ppid,lstart,etime,command -p <listener-pid>
+   ps -ww -o pid,ppid,lstart,etime,comm -p <listener-pid>
   acq exec <sandbox> -- sh -c 'cut -d. -f1 /proc/uptime'
   ```
 
@@ -94,7 +90,7 @@ nothing. Two independent tells:
 
   ```bash
   lsof -nP -iTCP:<host-port> -sTCP:LISTEN     # note the PID
-  ps -ww -o command= -p <listener-pid>        # -ww: do not truncate the path
+   ps -ww -o comm= -p <listener-pid>           # executable only, not secret-bearing argv
   command -v msb                              # compare installation prefixes
   ```
 
@@ -102,7 +98,8 @@ nothing. Two independent tells:
   what gets cut off.
 
 > A `PPID` of `1` is **normal** here: launchd adopts the forwarder. It is not by
-> itself evidence of a leak. Age and build are the discriminating signals.
+> itself evidence of a leak. Age and build inform diagnosis; live runtime IDs
+> determine whether the published IPv4 endpoint reaches the guest daemon.
 
 **How you get one.** Switching the host's `msb` version is the known trigger:
 replacing the active binary does not stop forwarders from the outgoing build, and
@@ -111,28 +108,31 @@ because upstream's `microsandbox` and the pinned `microsandbox-acq` both own
 upgraded, downgraded, or pinned `msb` while a sandbox had a published port, this
 is the failure to check for first.
 
-**Fix.** Kill the stale forwarder by PID, confirm the port is genuinely free,
-then restart so the sandbox can bind its own:
+**Fix.** First confirm the listener does **not** belong to the sandbox being
+checked. Elapsed host process time can exceed guest uptime after a host sleep;
+matching WebSocket server IDs mean an age discrepancy is not an orphan verdict.
+Never kill an `msb machine --name <sandbox>` process for that sandbox: it is the
+VM itself. If identities differ and ownership confirms a stale forwarder from
+another sandbox/build, use that owner's supported lifecycle command first.
+Verify the port is free before restarting the affected sandbox:
 
 ```bash
-kill <listener-pid>
 lsof -nP -iTCP:<host-port> -sTCP:LISTEN     # must print NOTHING before continuing
-# only if it survived SIGTERM:
-kill -9 <listener-pid>
-
 acq stop <sandbox> && acq start <sandbox>
 scripts/paseo-verify-identity <sandbox>
 ```
 
-If the listener's `PPID` is **not** 1, do not `kill -9` blindly — it may have
-siblings under a supervisor. Investigate the parent first.
+If the listener survives the confirmed owner's normal shutdown, investigate
+the process tree before taking any process-level action; PPID 1 alone does not
+prove orphan status.
 
 > **`paseo daemon restart` will not fix this.** Elsewhere in this guide that is
 > the right way to bounce the daemon, but here the stale component is the
 > **host-side forwarder**, not the guest daemon. Restarting the daemon alone was
 > observed to change nothing: the daemon PID changed while the host listener kept
-> the port and kept serving the old backend. The sequence above is required —
-> kill the forwarder, then restart the **sandbox** so it can bind a new one.
+> the port and kept serving the old backend. Release the port through the
+> confirmed owner's supported lifecycle first; any process-level action needs
+> separate ownership verification before restarting the affected sandbox.
 
 Success is the two ids **agreeing with each other**, never matching a remembered
 value: the id changes whenever the VM is recreated.
