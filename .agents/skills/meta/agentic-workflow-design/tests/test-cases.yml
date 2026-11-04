@@ -1,0 +1,90 @@
+suite:
+  pattern_id: agentic-workflow-design
+  pattern_version: "1.0.0"
+  description: Expected design-package behaviors for agentic workflow design.
+
+test_cases:
+  - id: missing-terminal-route
+    name: Flags items without a terminal route
+    description: A workflow design must identify the absent terminal status instead of treating all work as successful.
+    input:
+      type: literal
+      content: |
+        ## Summary
+        NEEDS-REVISION
+
+        ## Readiness Review
+        Finding: the intake route has no terminal status for items deferred when the budget is exhausted.
+        Corrective action: add a `deferred_by_budget` terminal state and reconciliation check.
+    assertions:
+      - type: contains
+        pattern: "NEEDS-REVISION"
+      - type: contains
+        pattern: "deferred_by_budget"
+      - type: contains
+        pattern: "terminal state"
+
+  - id: gate-dependency
+    name: Prevents work from bypassing an operator gate
+    description: A downstream step cannot run until the required decision is present.
+    input:
+      type: literal
+      content: |
+        ## Summary
+        BLOCKED pending scope approval.
+
+        ## Step Graph
+        `dispatch` consumes `scope_approval`, produced by `scope_gate`.
+        `dispatch` must not run before `scope_gate` records the decision.
+
+        ## Readiness Review
+        Add `scope_approval` as a required graph input to `dispatch`.
+    assertions:
+      - type: contains
+        pattern: "BLOCKED"
+      - type: contains
+        pattern: "must not run before"
+      - type: contains
+        pattern: "required graph input"
+
+  - id: measurable-success-contract
+    name: Requires operational success metrics
+    description: The design names a numerator, denominator, evidence source, and deterministic check.
+    input:
+      type: literal
+      content: |
+        ## Workflow Design Brief
+        | Metric | Stage | Numerator | Denominator | Evidence and check |
+        |---|---|---|---|---|
+        | Accepted-item rate | quality gate | accepted items | evaluated items | state ledger; `verify-states` |
+
+        ## Verification Plan
+        Run `verify-states` and fail when an evaluated item lacks a terminal status.
+    assertions:
+      - type: contains
+        pattern: "Numerator"
+      - type: contains
+        pattern: "Denominator"
+      - type: contains
+        pattern: "state ledger"
+      - type: contains
+        pattern: "verify-states"
+
+  - id: no-invented-authority
+    name: Blocks missing execution authority
+    description: The skill must not invent permissions for unattended network or write operations.
+    input:
+      type: literal
+      content: |
+        ## Summary
+        BLOCKED: unattended execution authority is not defined.
+
+        ## Readiness Review
+        Obtain an approved network and write policy before permitting the workflow to run without an operator.
+    assertions:
+      - type: contains
+        pattern: "BLOCKED"
+      - type: contains
+        pattern: "network and write policy"
+      - type: not_contains
+        pattern: "approval assumed"
