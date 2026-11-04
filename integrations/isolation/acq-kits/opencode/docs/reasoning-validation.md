@@ -151,7 +151,8 @@ rejected). Otherwise stop at the decision rule.
      target-specific statement that the model's reasoning **capability itself**
      is unsupported (the model does not reason or has no reasoning mode):
      the gateway's or vendor's documentation for that model, or an explicit
-     response for that model that says so. Capability statement, accepted
+     response for that model that says the model has no reasoning mode
+     independent of the request syntax. Capability statement, accepted
      example: documentation that "model X is not a reasoning model". Control
      rejection, **never enough**: an error that a parameter, an effort value
      or an endpoint is unsupported (for example `reasoning.effort` rejected,

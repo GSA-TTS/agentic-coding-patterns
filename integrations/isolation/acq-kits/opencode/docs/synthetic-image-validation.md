@@ -139,7 +139,8 @@ evidence file.
   derives from the field (1.x derives low/medium/high reasoning-effort variants
   for openai-compatible models), and request-time effects such as effort or
   thinking-budget parameters. Do not publish `reasoning: true` or `false` until
-  that procedure exists and has been run for the model.
+  the decision rule in [`reasoning-validation.md`](reasoning-validation.md) is
+  satisfied for the model.
 - Generate candidate values with the catalog builder's opt-in
   `--include-capabilities` flag, then keep only the values that have evidence.
 
