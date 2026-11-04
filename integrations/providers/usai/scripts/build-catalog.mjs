@@ -35,6 +35,10 @@
 //                           reminder, not that evidence. With the flag, --check
 //                           against a capability-free catalog reports drift by
 //                           design.
+//                           Verified capability values already in the catalog at
+//                           --out are carried forward, and the flag is refused
+//                           (nothing written) if its upstream values would
+//                           conflict with them or sit beside them unverified.
 //
 // There is no bootstrap mode. The catalog used to be seeded from a frozen
 // copy of an old OpenCode config; that made a harness-native file a source of
@@ -1128,6 +1132,100 @@ function carryForwardRecommendations(recommendations, models, where = "catalog.j
   return { ...recommendations }
 }
 
+const UNVERIFIED_LABEL = "models.dev upstream provider data; not verified against the USAi gateway"
+const CAPABILITY_FIELDS = ["reasoning", "inputModalities"]
+
+// Shape of sources.capabilitiesVerified: a release reminder, not evidence (ADR
+// 0006). A carried-forward value is only trusted as verified when it is present.
+const RELEASE_REMINDER = /^\d{4}-\d{2}-\d{2}; opencode v?\d+\.\d+\.\d+\S*$/
+
+const sameValue = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+
+/**
+ * Verified capability values, keyed by model id, read from the already
+ * shape-validated existing catalog. They are curated overlay data exactly like
+ * `recommendations`: the feeds never supply them, a person commits them with
+ * per-model evidence, and a regeneration carries them forward.
+ *
+ * Values with no valid sources.capabilitiesVerified release reminder are not
+ * treated as verified (for example the output of an earlier
+ * --include-capabilities run): they are not carried, and a warning names how
+ * many were left behind. --check then reports them as dropped.
+ */
+function readVerifiedOverlay(existing, where) {
+  const reminder = existing?.sources?.capabilitiesVerified
+  const reminderOk = typeof reminder === "string" && RELEASE_REMINDER.test(reminder)
+  const overlay = new Map()
+  for (const model of existing?.models ?? []) {
+    const values = {}
+    for (const field of CAPABILITY_FIELDS) if (field in model) values[field] = model[field]
+    if (Object.keys(values).length > 0) overlay.set(model.id, values)
+  }
+  if (!reminderOk) {
+    if (overlay.size > 0) {
+      process.stderr.write(
+        `  WARNING ${where}: capability values for ${overlay.size} model(s) have no valid ` +
+          `sources.capabilitiesVerified ("<YYYY-MM-DD>; opencode <version>"); not treated as verified, not carried\n`,
+      )
+    }
+    return { overlay: new Map(), reminder: undefined }
+  }
+  return { overlay, reminder }
+}
+
+const show = (value) => (value === undefined ? "(none)" : JSON.stringify(value))
+
+/**
+ * Carry verified capability values onto the regenerated models. A model that
+ * left the feed takes its values with it (reported on stderr; --check reports it
+ * as drift). Returns the reminder to keep, or undefined when no value remains.
+ *
+ * With --include-capabilities the unverified upstream values are already on
+ * `models`. While any verified value is carried, an upstream value is accepted
+ * only if it equals the verified value for the same model and field. A
+ * different value is a conflict, and a value for a field that has no verified
+ * value would sit unverified under a sources.capabilitiesVerified string that
+ * vouches for verified ones; both are refused before anything is written.
+ */
+function applyVerifiedOverlay(models, { overlay, reminder }, { includeCapabilities, where }) {
+  const byId = new Map(models.map((m) => [m.id, m]))
+  const gone = [...overlay].filter(([id]) => !byId.has(id))
+  if (gone.length > 0) {
+    process.stderr.write(
+      `capability values dropped for model(s) no longer in the feed:\n` +
+        gone.map(([id, values]) => `  - ${id}: ${Object.keys(values).join(", ")}`).join("\n") + "\n",
+    )
+  }
+  const carried = [...overlay].filter(([id]) => byId.has(id))
+  if (includeCapabilities && carried.length > 0) {
+    const lines = []
+    for (const model of models) {
+      for (const field of CAPABILITY_FIELDS) {
+        if (!(field in model)) continue
+        const verified = overlay.get(model.id)?.[field]
+        if (verified === undefined) {
+          lines.push(`  - ${model.id} ${field}: no verified value, upstream ${show(model[field])} (would be unverified)`)
+        } else if (!sameValue(verified, model[field])) {
+          lines.push(`  - ${model.id} ${field}: verified ${show(verified)}, upstream ${show(model[field])} (CONFLICT)`)
+        }
+      }
+    }
+    if (lines.length > 0) {
+      throw new Error(
+        `--include-capabilities refused: ${where} carries verified capability values, and the upstream copy ` +
+          `would conflict with them or sit beside them unverified:\n${lines.join("\n")}\n` +
+          `  To inspect upstream values, run against a scratch --out with no verified values; to change a ` +
+          `verified value, re-verify it and edit the catalog by hand. The catalog was NOT written.`,
+      )
+    }
+  }
+  for (const [id, values] of carried) Object.assign(byId.get(id), values)
+  if (carried.length === 0 && reminder !== undefined) {
+    process.stderr.write("no verified capability values remain; sources.capabilitiesVerified is dropped\n")
+  }
+  return carried.length > 0 ? reminder : undefined
+}
+
 const NO_SOURCE_MESSAGE =
   "no model source given: pass --models-url <path|https url>.\n" +
   "  This builder has no default source and no bootstrap mode, so it cannot silently\n" +
@@ -1179,7 +1277,6 @@ async function buildCatalog(args) {
     sources: {
       modelsList: labels.modelsList ?? modelsUrl,
       enrichment: noEnrichment ? "(none)" : (labels.enrichment ?? modelsDevRef),
-      ...(includeCapabilities ? { capabilities: "models.dev upstream provider data; not verified against the USAi gateway" } : {}),
     },
     gateway: buildGateway(),
     vendors: buildVendors(vendorOrder),
@@ -1188,6 +1285,13 @@ async function buildCatalog(args) {
 
   const carried = carryForwardRecommendations(existing?.recommendations, catalog.models, carryPath)
   if (carried !== undefined) catalog.recommendations = carried
+
+  const reminder = applyVerifiedOverlay(catalog.models, readVerifiedOverlay(existing, carryPath), {
+    includeCapabilities,
+    where: carryPath,
+  })
+  if (reminder !== undefined) catalog.sources.capabilitiesVerified = reminder
+  else if (includeCapabilities) catalog.sources.capabilities = UNVERIFIED_LABEL
 
   const errors = validateCatalog(catalog, schema)
   if (errors.length) {
@@ -1244,10 +1348,23 @@ function describeDrift(existing, fresh) {
   const removed = [...before.keys()].filter((id) => !after.has(id)).sort()
   if (added.length) lines.push(`models added: ${added.join(", ")}`)
   if (removed.length) lines.push(`models removed: ${removed.join(", ")}`)
+  for (const id of removed) {
+    const fields = CAPABILITY_FIELDS.filter((field) => field in before.get(id))
+    if (fields.length) lines.push(`capability values dropped with removed model: ${id} (${fields.join(", ")})`)
+  }
   for (const id of [...after.keys()].filter((i) => before.has(i)).sort()) {
-    if (JSON.stringify(before.get(id)) !== JSON.stringify(after.get(id))) {
-      lines.push(`model changed: ${id}`)
+    const was = before.get(id)
+    const now = after.get(id)
+    const capabilityLines = []
+    for (const field of CAPABILITY_FIELDS) {
+      if (sameValue(was[field], now[field])) continue
+      if (!(field in was)) capabilityLines.push(`capability added: ${id}.${field} = ${show(now[field])}`)
+      else if (!(field in now)) capabilityLines.push(`capability dropped: ${id}.${field} (was ${show(was[field])})`)
+      else capabilityLines.push(`capability changed: ${id}.${field}: ${show(was[field])} -> ${show(now[field])}`)
     }
+    const strip = (model) => Object.fromEntries(Object.entries(model).filter(([key]) => !CAPABILITY_FIELDS.includes(key)))
+    if (JSON.stringify(strip(was)) !== JSON.stringify(strip(now))) lines.push(`model changed: ${id}`)
+    lines.push(...capabilityLines)
   }
   return lines
 }

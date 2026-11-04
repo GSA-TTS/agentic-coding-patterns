@@ -42,15 +42,16 @@ What happens:
 
 1. Both feeds are fetched **once** (https only, bounded time and size) into
    `tmp/usai-source/`, which is git-ignored.
-2. `catalog.json` is built from that pull. Role defaults and model order are
-   carried forward from the existing catalog.
+2. `catalog.json` is built from that pull. Role defaults, model order and
+   verified capability values are carried forward from the existing catalog.
 3. Every artifact in [`refresh-registry.json`](refresh-registry.json) is
    regenerated from the new catalog by its file-to-file generator.
 4. Only if every step succeeded are the files written. Nothing is committed.
    Review `git diff`, then commit as a normal change.
 
 Check mode compares in a temporary directory and exits `1` on drift, naming the
-artifact and the models that were added, removed or changed. `sources` is not
+artifact and the models that were added, removed or changed (and, for capability
+values, the model and field that were added, changed or dropped). `sources` is not
 compared, because it records where a run read from, not what the catalog says.
 
 ### Offline and deterministic
@@ -126,6 +127,37 @@ rather than recomputing them.
 - `--check` applies the same rules: a recommended model that left the feed makes
   it fail with the message above, and `describeDrift` also names any role whose
   value differs between the two catalogs it compares.
+
+## Verified capability values across a refresh
+
+Verified `reasoning` and `inputModalities` values are curated data, like
+`recommendations`: the feeds never supply them, a person commits them with
+per-model evidence, and a regeneration carries them forward from the catalog at
+`--out`, keyed by model id. The neutral snapshot is regenerated from the result,
+so it carries them too.
+
+- A model that is still in the feed keeps its values. A model that leaves the
+  feed takes its values with it: the build names the model and fields on
+  stderr, and `--check` reports them as drift (`capability values dropped with
+  removed model: <id> (<fields>)`).
+- `sources.capabilitiesVerified` is the release reminder, not evidence. A refresh
+  carries it unchanged while any verified value is carried, never writes or
+  advances it, and drops it when no verified value remains.
+- Values are treated as verified only when the existing catalog has a valid
+  `sources.capabilitiesVerified`. Without one they are not carried (a warning
+  names how many) and `--check` reports them as dropped.
+- `--include-capabilities` is refused, before any write, whenever a verified
+  value is carried and the upstream copy would either differ from it or add a
+  value for a field that has no verified value. The message lists each model and
+  field with the verified and upstream values. Mixing unverified values under a
+  string that vouches for verified ones is the hazard; to compare upstream values,
+  build to a scratch `--out` that has no verified values. With no verified value
+  present the flag behaves as before and labels its output unverified.
+- `--check` reports capability values per model and field as `capability added`,
+  `capability changed` or `capability dropped`, for the catalog and the snapshot.
+
+To change a verified value, re-verify it and edit `catalog.json` by hand with its
+evidence file; the refresh never edits one.
 
 ## Files
 

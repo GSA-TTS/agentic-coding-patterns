@@ -222,8 +222,11 @@ test("a model fed through models.dev carries reasoning and modalities in canonic
 test("capability changes are reported as drift", () => {
   const before = { models: [{ id: "m", name: "M" }] }
   const known = { models: [{ id: "m", name: "M", inputModalities: ["text", "image"] }] }
-  assert.deepEqual(describeDrift(before, known), ["model changed: m"])
-  assert.deepEqual(describeDrift(known, { models: [{ id: "m", name: "M", inputModalities: ["text"] }] }), ["model changed: m"])
+  assert.deepEqual(describeDrift(before, known), ['capability added: m.inputModalities = ["text","image"]'])
+  assert.deepEqual(describeDrift(known, { models: [{ id: "m", name: "M", inputModalities: ["text"] }] }), [
+    'capability changed: m.inputModalities: ["text","image"] -> ["text"]',
+  ])
+  assert.deepEqual(describeDrift(known, before), ['capability dropped: m.inputModalities (was ["text","image"])'])
 })
 
 test("the modality allowlist is identical in both schemas and the builder", () => {
