@@ -194,7 +194,7 @@ version differs from the one under test.
 
 ## Recommendation
 
-Keep `reasoning` absent for all models. Do not add a script. Consider
-amending ADR 0006 to record that OpenCode 2.0.30 omits the field (so that the
-mapping table is not read as behavior-bearing) and revisit the field's
-purpose before any value is proposed.
+Keep `reasoning` absent for all models. Do not add a script. The owner
+accepted this on 2026-11-04, and ADR 0006 now carries an Amendment recording
+that OpenCode 2.0.30 omits the field, so its mapping table is not read as
+behavior-bearing. Revisit the field's purpose before any value is proposed.
