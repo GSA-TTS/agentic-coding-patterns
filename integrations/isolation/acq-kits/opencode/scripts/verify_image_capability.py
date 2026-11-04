@@ -48,6 +48,9 @@ DEFAULT_PROVIDER = "usai"
 MIN_SAMPLES = 3
 STEP_TIMEOUT = 300
 MAX_REPLY_CHARS = 500
+# The explicit text-only run is the negative control: a long, harmless refusal is the GOOD outcome there,
+# so it gets a much larger stop cap; stored replies are still truncated to MAX_REPLY_CHARS.
+MAX_CONTROL_REPLY_CHARS = 8000
 MAX_CONSECUTIVE_CONTROL_FAILURES = 3
 TOKEN_LEN = 6
 # Unambiguous glyphs only (no 0/O, 1/I/L, 2/Z, 5/S, 8/B) so a misread is a model fault, not an OCR coin flip.
@@ -273,10 +276,10 @@ def key_env_name(block: dict) -> str:
     return match.group(1)
 
 
-def check_reply_content(reply: str, secret_values: tuple[str, ...]) -> None:
+def check_reply_content(reply: str, secret_values: tuple[str, ...], limit: int = MAX_REPLY_CHARS) -> None:
     """Stop condition: a reply that is oversize or carries secret-shaped data is not a token reply."""
-    if len(reply) > MAX_REPLY_CHARS:
-        raise StopRun("UNEXPECTED_CONTENT", f"reply longer than {MAX_REPLY_CHARS} characters")
+    if len(reply) > limit:
+        raise StopRun("UNEXPECTED_CONTENT", f"reply longer than {limit} characters")
     if redact(reply, secret_values) != reply:
         raise StopRun("UNEXPECTED_CONTENT", "reply contains credential-shaped data (withheld)")
 
@@ -569,7 +572,15 @@ class Settings:
     status: Callable[[str], None] = print
 
 
-def probe_step(cfg: Settings, tree: Path, cwd: Path, model_id: str, prompt: str, image: Path | None) -> StepOutcome:
+def probe_step(
+    cfg: Settings,
+    tree: Path,
+    cwd: Path,
+    model_id: str,
+    prompt: str,
+    image: Path | None,
+    limit: int = MAX_REPLY_CHARS,
+) -> StepOutcome:
     outcome = run_step(
         cfg.opencode,
         f"{cfg.provider}/{model_id}",
@@ -580,7 +591,7 @@ def probe_step(cfg: Settings, tree: Path, cwd: Path, model_id: str, prompt: str,
         cfg.timeout,
     )
     if outcome.kind == "reply":
-        check_reply_content(outcome.text, cfg.secret)
+        check_reply_content(outcome.text, cfg.secret, limit)
         outcome.text = outcome.text.strip()
     outcome.detail = redact(outcome.detail, cfg.secret)[:MAX_REPLY_CHARS]
     return outcome
@@ -609,9 +620,11 @@ def verify_model(cfg: Settings, model_id: str, cwd: Path, images: Path, results:
             paths.append(path)
         for name, _ in CONFIGS:
             for index, (token, path) in enumerate(zip(tokens, paths, strict=True)):
-                outcome = probe_step(cfg, trees[name], cwd, model_id, PROMPT_IMAGE, path)
+                limit = MAX_CONTROL_REPLY_CHARS if name == "text-only" else MAX_REPLY_CHARS
+                outcome = probe_step(cfg, trees[name], cwd, model_id, PROMPT_IMAGE, path, limit)
                 sample = Sample(name, index, token, outcome.text, classify(outcome, token), outcome.detail)
                 sample.leaked = outcome.kind == "reply" and token.lower() in outcome.text.lower()
+                sample.reply = sample.reply[:MAX_REPLY_CHARS]
                 result.samples.append(sample)
                 cfg.status(f"  {name} #{index + 1}: {sample.classification}")
                 if name == "text-only" and sample.leaked:

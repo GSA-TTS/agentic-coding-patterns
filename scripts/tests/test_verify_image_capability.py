@@ -348,6 +348,59 @@ def test_default_output_dir_is_under_cwd_tmp(sandbox, monkeypatch, tmp_path):
     assert len(runs) == 1 and (runs[0] / "evidence.md").exists()
 
 
+def set_models(config, names):
+    data = json.loads(config.read_text().split("\n", 1)[1])
+    data["provider"]["usai"]["models"] = {n: {"name": n} for n in names}
+    config.write_text(json.dumps(data))
+
+
+def test_long_refusal_on_text_only_is_classified_and_run_continues(sandbox):
+    set_models(sandbox[2], ["verbose", "good"])
+    code, out = run_main(sandbox)
+    assert code == 0
+    doc = json.loads((out / "results.json").read_text())
+    assert [m["model"] for m in doc["models"]] == ["verbose", "good"]
+    verbose = doc["models"][0]
+    control = [s for s in verbose["samples"] if s["config"] == "text-only"]
+    assert len(control) == 3 and {s["classification"] for s in control} == {v.WRONG}
+    assert all(len(s["reply"]) == v.MAX_REPLY_CHARS for s in control)
+    assert verbose["candidate_image"] is True and doc["stopped"] == ""
+
+
+def test_long_reply_in_token_configurations_still_stops(sandbox):
+    set_models(sandbox[2], ["longall", "good"])
+    code, out = run_main(sandbox)
+    assert code == 2
+    doc = json.loads((out / "results.json").read_text())
+    assert "UNEXPECTED_CONTENT" in doc["stopped"] and "500" in doc["stopped"]
+    assert [m["model"] for m in doc["models"]] == ["longall"]
+
+
+def test_secret_shaped_long_reply_on_text_only_still_stops(sandbox, capsys):
+    set_models(sandbox[2], ["longsecret"])
+    code, out = run_main(sandbox)
+    assert code == 2
+    doc = json.loads((out / "results.json").read_text())
+    assert "UNEXPECTED_CONTENT" in doc["stopped"] and doc["summary"]["qualifying"] == []
+    assert "abcdefghijklmnop12345" not in (out / "results.json").read_text()
+    assert "abcdefghijklmnop12345" not in capsys.readouterr().out
+
+
+def test_token_after_truncation_point_is_still_detected_as_leak(sandbox):
+    set_models(sandbox[2], ["lateleak"])
+    code, out = run_main(sandbox)
+    assert code == 2
+    doc = json.loads((out / "results.json").read_text())
+    assert "NEGATIVE_CONTROL_LEAK" in doc["stopped"] and doc["summary"]["qualifying"] == []
+    assert doc["summary"]["text_only_token_leaks"] == 1
+
+
+def test_control_reply_over_the_larger_cap_stops():
+    with pytest.raises(v.StopRun):
+        v.check_reply_content("x" * (v.MAX_CONTROL_REPLY_CHARS + 1), (), v.MAX_CONTROL_REPLY_CHARS)
+    v.check_reply_content("x" * v.MAX_CONTROL_REPLY_CHARS, (), v.MAX_CONTROL_REPLY_CHARS)
+
+
 def test_negative_control_leak_stops_the_run(sandbox):
     tmp, fake, config = sandbox
     data = json.loads(config.read_text().split("\n", 1)[1])

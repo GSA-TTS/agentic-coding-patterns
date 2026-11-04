@@ -191,10 +191,16 @@ interrupt.
 The script enforces these stop conditions and halts rather than continuing: a
 literal credential in the rendered provider block, or the key variable unset;
 a provider `baseURL` that is not `https://api.gsa.usai.gov`; a reply that is
-oversize or carries credential-shaped data; an explicit `["text"]` run that
+longer than 500 characters (unset and explicit `["text","image"]` runs, where
+only a six-character token is expected) or carries credential-shaped data; an
+explicit `["text"]` run that
 returns the token; three consecutive models failing the text control; and an
 OpenCode that cannot be run. A model whose own text control fails is recorded
-and skipped (auth or routing, not an image result).
+and skipped (auth or routing, not an image result). In the explicit
+`["text"]` negative control a long, harmless refusal is the expected outcome, so
+that run's length cap is 8000 characters instead (credential-shaped content
+still stops the run); stored replies are truncated to 500 characters after
+classification.
 
 The script never edits `catalog.json`, a schema, or any committed capability
 value, and its `candidate` column applies the decision rule above mechanically (and, stricter than the prose, also requires the text-only control samples to be plain non-token replies, so an outage cannot pass as a negative control).

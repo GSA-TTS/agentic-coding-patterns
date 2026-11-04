@@ -67,6 +67,14 @@ if model_id == "rejecter" and image_allowed:
     emit_error(400, "image input is not supported")
 if model_id == "blind":
     emit_text("ZZZZZZ")
+if model_id == "verbose":
+    emit_text(token if image_allowed else "I am unable to view images in this conversation. " * 60)
+if model_id == "lateleak":
+    emit_text(token if image_allowed else "I cannot see any image. " * 40 + token)
+if model_id == "longall":
+    emit_text("x" * 600)
+if model_id == "longsecret":
+    emit_text("I cannot see an image. " * 60 + "Bearer abcdefghijklmnop12345" if not image_allowed else token)
 if model_id == "good":
     emit_text(token if image_allowed else "I cannot see any image")
 emit_text("I cannot see any image")
