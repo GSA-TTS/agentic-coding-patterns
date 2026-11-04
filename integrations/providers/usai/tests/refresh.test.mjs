@@ -16,7 +16,7 @@ import { test } from "node:test"
 import { fileURLToPath } from "node:url"
 
 import { MAX_RESPONSE_BYTES, fetchJsonBounded, loadJsonSource, serialize } from "../scripts/build-catalog.mjs"
-import { assertLivePullAllowed, loadRegistry, pullSources, runRefresh } from "../scripts/refresh.mjs"
+import { assertLivePullAllowed, describeArtifactDrift, loadRegistry, pullSources, runRefresh } from "../scripts/refresh.mjs"
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const USAI_DIR = path.resolve(HERE, "..")
@@ -289,6 +289,85 @@ test("a write run followed by --check over the same sources is clean", async () 
 })
 
 // ---------------------------------------------------------------------------
+// The committed catalog is validated, and every substantive field is compared
+// ---------------------------------------------------------------------------
+
+function editCommittedCatalog(root, mutate) {
+  const file = path.join(root, CATALOG_REL)
+  const catalog = readJson(file)
+  mutate(catalog)
+  writeFileSync(file, JSON.stringify(catalog, null, 2) + "\n")
+}
+
+test("--check rejects a committed catalog with a schema-disallowed top-level field", async () => {
+  await withRootAndSource(async (root, source) => {
+    editCommittedCatalog(root, (c) => (c.unexpectedField = "x"))
+    await assert.rejects(refresh(root, source, { check: true }), /not a valid catalog[\s\S]*disallowed key "unexpectedField"/)
+  })
+})
+
+test("a write run refuses the same invalid catalog and leaves every artifact untouched", async () => {
+  await withRootAndSource(async (root, source) => {
+    editCommittedCatalog(root, (c) => (c.unexpectedField = "x"))
+    const before = [read(path.join(root, CATALOG_REL)), read(path.join(root, SNAPSHOT_REL))]
+    await assert.rejects(refresh(root, source), /disallowed key "unexpectedField"/)
+    assert.deepEqual([read(path.join(root, CATALOG_REL)), read(path.join(root, SNAPSHOT_REL))], before)
+  })
+})
+
+test("an invalid committed catalog is rejected for other schema violations too", async () => {
+  const cases = [
+    [(c) => (c.gateway.api = "other"), /gateway\.api/],
+    [(c) => (c.models[0].vendor = "nobody"), /not in vendors/],
+    [(c) => (c.recommendations.primary = "no-such-model"), /not in models\[\]/],
+    [(c) => (c.recommendations.bogus = c.models[0].id), /disallowed role "bogus"/],
+    [(c) => (c.models[0].contextWindow = -1), /contextWindow/],
+  ]
+  for (const [mutate, pattern] of cases) {
+    await withRootAndSource(async (root, source) => {
+      editCommittedCatalog(root, mutate)
+      await assert.rejects(refresh(root, source, { check: true }), pattern)
+    })
+  }
+})
+
+test("a committed catalog with a malformed `sources` is rejected, not reported up to date", async () => {
+  for (const sources of [123, [1], { a: 5 }, null]) {
+    await withRootAndSource(async (root, source) => {
+      editCommittedCatalog(root, (c) => (c.sources = sources))
+      await assert.rejects(refresh(root, source, { check: true }), /sources/, JSON.stringify(sources))
+    })
+  }
+})
+
+test("--check reports a changed gateway block and a changed role default as drift", async () => {
+  await withRootAndSource(async (root, source) => {
+    editCommittedCatalog(root, (c) => {
+      c.gateway.host = "elsewhere.example"
+      c.recommendations.small = c.recommendations.primary
+    })
+    const { status, report } = await refresh(root, source, { check: true })
+    assert.equal(status, 1)
+    assert.match(report.join("\n"), /gateway block changed/)
+  })
+})
+
+test("drift compares every field except `sources`: extra, removed and changed fields all count", () => {
+  const artifact = { kind: "catalog" }
+  const fresh = { schemaVersion: "v", generatedBy: "g", sources: { a: "1" }, gateway: {}, vendors: [], models: [] }
+  const same = (c) => describeArtifactDrift(artifact, "{}", "", c, fresh)
+  assert.deepEqual(same({ ...fresh, sources: { a: "different" } }), [], "sources is provenance, not content")
+  assert.deepEqual(same({ ...fresh, unexpectedField: "x" }), ["field changed: unexpectedField"])
+  assert.deepEqual(same({ ...fresh, generatedBy: "other" }), ['generatedBy: "other" -> "g"'])
+  const { generatedBy: _gone, ...withoutGenerator } = fresh
+  assert.ok(same(withoutGenerator).length > 0)
+  const derived = { kind: "derived" }
+  const one = JSON.stringify({ schemaVersion: "v", models: [], extra: 1 })
+  const two = JSON.stringify({ schemaVersion: "v", models: [], extra: 2 })
+  assert.deepEqual(describeArtifactDrift(derived, one, two, null, fresh), ["field changed: extra"])
+})
+
+// ---------------------------------------------------------------------------
 // A failed generation writes nothing
 // ---------------------------------------------------------------------------
 
@@ -333,6 +412,59 @@ test("missing source files are reported before anything is generated", async () 
     rmSync(path.join(source, "models-dev.json"))
     await assert.rejects(refresh(root, source), /models-dev\.json not found/)
   })
+})
+
+// ---------------------------------------------------------------------------
+// A checkout path containing a space
+// ---------------------------------------------------------------------------
+
+test("CLI: refresh --from <fixtures> --check works when the checkout path contains a space", () => {
+  const parent = mkdtempSync(path.join(tmpdir(), "usai-space-"))
+  const root = path.join(parent, "space root")
+  try {
+    // Copy the scripts too, so the entrypoint guards run from the spaced path.
+    for (const rel of [
+      REGISTRY_REL,
+      NORMALIZER_REL,
+      SCHEMA_REL,
+      "integrations/providers/usai/scripts/refresh.mjs",
+      "integrations/providers/usai/scripts/build-catalog.mjs",
+    ]) {
+      mkdirSync(path.dirname(path.join(root, rel)), { recursive: true })
+      cpSync(path.join(REPO_ROOT, rel), path.join(root, rel))
+    }
+    for (const [rel, from] of [[CATALOG_REL, "artifacts/catalog.json"], [SNAPSHOT_REL, "artifacts/snapshot.json"]]) {
+      mkdirSync(path.dirname(path.join(root, rel)), { recursive: true })
+      cpSync(path.join(FIXTURES, from), path.join(root, rel))
+    }
+    const script = path.join(root, "integrations/providers/usai/scripts/refresh.mjs")
+    const env = { PATH: process.env.PATH }
+    const check = spawnSync(process.execPath, [script, "--root", root, "--from", FIXTURES, "--check"], { encoding: "utf8", env })
+    assert.equal(check.status, 0, check.stderr)
+    assert.match(check.stdout, /neutral-snapshot: up to date/)
+
+    // A write run must actually produce the snapshot (the normalizer must run).
+    rmSync(path.join(root, SNAPSHOT_REL))
+    const write = spawnSync(process.execPath, [script, "--root", root, "--from", FIXTURES], { encoding: "utf8", env })
+    assert.equal(write.status, 0, write.stderr)
+    assert.equal(read(path.join(root, SNAPSHOT_REL)), read(path.join(FIXTURES, "artifacts/snapshot.json")))
+
+    // The standalone builder also runs from the spaced path (guards the same pattern).
+    const builder = path.join(root, "integrations/providers/usai/scripts/build-catalog.mjs")
+    const refused = spawnSync(process.execPath, [builder], { encoding: "utf8", env })
+    assert.equal(refused.status, 1)
+    assert.match(refused.stderr, /make refresh-usai-catalog/)
+  } finally {
+    rmSync(parent, { recursive: true, force: true })
+  }
+})
+
+test("guard: no script under integrations/ builds its entrypoint check from a file:// template", () => {
+  const offenders = walk(path.join(REPO_ROOT, "integrations"))
+    .filter((file) => /\.(mjs|js|cjs)$/.test(file) && !file.split(path.sep).includes("node_modules"))
+    .filter((file) => /import\.meta\.url\s*===?\s*`file:\/\//.test(read(file)))
+    .map((file) => path.relative(REPO_ROOT, file))
+  assert.deepEqual(offenders, [])
 })
 
 // ---------------------------------------------------------------------------

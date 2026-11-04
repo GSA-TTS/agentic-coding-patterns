@@ -245,22 +245,42 @@ function parseJson(text) {
   }
 }
 
+/** Substantive top-level fields that describeDrift reports on its own. */
+const REPORTED_BY_DESCRIBE_DRIFT = new Set(["schemaVersion", "generatedBy", "recommendations", "gateway", "vendors", "models"])
+
+/**
+ * Every top-level field that differs, other than the ones describeDrift names and
+ * `sources` (provenance, not content). Catches added, removed and changed fields.
+ */
+function describeOtherFieldDrift(committed, fresh, ignore) {
+  const lines = []
+  for (const key of [...new Set([...Object.keys(committed), ...Object.keys(fresh)])].sort()) {
+    if (ignore.has(key)) continue
+    if (JSON.stringify(committed[key]) !== JSON.stringify(fresh[key])) lines.push(`field changed: ${key}`)
+  }
+  return lines
+}
+
 /** Describe how a committed artifact differs from what the sources produce. */
 export function describeArtifactDrift(artifact, committedText, freshText, committedCatalog, freshCatalog) {
   if (committedText === undefined) return ["file is missing"]
   if (artifact.kind === "catalog") {
     // `sources` is provenance, not content: it is deliberately not compared.
-    return describeDrift(substantive(committedCatalog ?? {}), substantive(freshCatalog))
+    // Everything else is, so a field describeDrift does not know about still counts.
+    const committed = isPlainObject(committedCatalog) ? committedCatalog : {}
+    return [
+      ...describeDrift(substantive(committed), substantive(freshCatalog)),
+      ...describeOtherFieldDrift(committed, freshCatalog, new Set([...REPORTED_BY_DESCRIBE_DRIFT, "sources"])),
+    ]
   }
   if (committedText === freshText) return []
   const committed = parseJson(committedText)
   const fresh = parseJson(freshText)
   if (!isPlainObject(committed) || !isPlainObject(fresh)) return ["content differs"]
-  const lines = describeDrift(committed, fresh)
-  for (const key of new Set([...Object.keys(committed), ...Object.keys(fresh)])) {
-    if (key === "models") continue
-    if (JSON.stringify(committed[key]) !== JSON.stringify(fresh[key])) lines.push(`field changed: ${key}`)
-  }
+  const lines = [
+    ...describeDrift(committed, fresh),
+    ...describeOtherFieldDrift(committed, fresh, REPORTED_BY_DESCRIBE_DRIFT),
+  ]
   return lines.length > 0 ? lines : ["bytes differ (formatting only)"]
 }
 

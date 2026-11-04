@@ -63,7 +63,7 @@
 import { readFile, writeFile } from "node:fs/promises"
 import path from "node:path"
 import process from "node:process"
-import { fileURLToPath } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const USAI_DIR = path.resolve(HERE, "..")
@@ -874,6 +874,18 @@ function validateCatalog(catalog, schema) {
 
   assert(catalog.schemaVersion === SCHEMA_VERSION, `schemaVersion must be "${SCHEMA_VERSION}"`, errors)
 
+  // sources (optional): provenance, an object of string values per the schema.
+  if ("sources" in catalog) {
+    const sources = catalog.sources
+    if (!sources || typeof sources !== "object" || Array.isArray(sources)) {
+      errors.push("sources must be an object")
+    } else {
+      for (const [key, value] of Object.entries(sources)) {
+        if (typeof value !== "string") errors.push(`sources.${key} must be a string`)
+      }
+    }
+  }
+
   // recommendations (optional): role names come from the schema, and every
   // value must name a model that is actually in models[].
   if ("recommendations" in catalog) {
@@ -1056,7 +1068,7 @@ function parseArgs(argv) {
  * no roles, because that is the failure this guards against. A real catalog that
  * has no `recommendations` yet is accepted: there are no roles to lose.
  */
-async function readExistingCatalog(catalogPath) {
+async function readExistingCatalog(catalogPath, schema) {
   let raw
   try {
     raw = await readFile(catalogPath, "utf8")
@@ -1083,6 +1095,12 @@ async function readExistingCatalog(catalogPath) {
   }
   if (!Array.isArray(existing.models)) {
     throw refuse("is a catalog without a models[] array")
+  }
+  // A catalog that is the right shape but breaks the schema (an unknown field, a
+  // dangling role, a bad gateway) is not trusted as the source of roles or order.
+  if (schema) {
+    const errors = validateCatalog(existing, schema)
+    if (errors.length) throw refuse(`is not a valid catalog:\n  - ${errors.join("\n  - ")}`)
   }
   return existing
 }
@@ -1140,7 +1158,7 @@ async function buildCatalog(args) {
   // The catalog already on disk supplies the curated parts: role defaults and
   // model order. Read it first so an unreadable file fails before any work.
   const carryPath = args.opts["--carry-from"] || args.opts["--out"] || DEFAULT_OUT
-  const existing = await readExistingCatalog(carryPath)
+  const existing = await readExistingCatalog(carryPath, schema)
 
   const usaiList = extractUsaiList(await loadJsonSource(modelsUrl))
   let modelsDevCatalog = null
@@ -1289,7 +1307,14 @@ export {
   INPUT_MODALITIES,
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Compare URL against URL so the check is portable: on Windows
+// `process.argv[1]` is a `C:\...` path, which a `file://${...}` template turns
+// into `file://C:\...`, while `import.meta.url` is `file:///C:/...`. Those never
+// match, so this script would exit 0 without doing anything.
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href
+) {
   main().catch((error) => {
     console.error(error.message)
     process.exit(1)
