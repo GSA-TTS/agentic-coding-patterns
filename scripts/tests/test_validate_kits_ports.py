@@ -135,7 +135,10 @@ class TestValidateKitPortsAndBackground:
             "  - guest: 3000\n"
             "commands:\n"
             "  - phase: startup\n"
-            '    command: ["sh", "-c", "loop &"]\n'
+            "    command:\n"
+            "      - sh\n"
+            "      - -c\n"
+            '      - "loop &"\n'
             "    background: true\n",
         )
         errors, _warnings = validate_kit(kit, _load_schema())
@@ -185,7 +188,8 @@ class TestValidateKitPortsAndBackground:
             "description: d\n"
             "commands:\n"
             "  - phase: startup\n"
-            '    command: ["sh"]\n'
+            "    command:\n"
+            "      - sh\n"
             '    background: "yes"\n',
         )
         errors, _warnings = validate_kit(kit, _load_schema())

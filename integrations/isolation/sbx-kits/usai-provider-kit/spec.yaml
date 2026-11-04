@@ -1,9 +1,7 @@
 # spec.yaml — usai-provider (an sbx mixin kit)
 #
-# Configures an agent to use the GSA USAi OpenAI-compatible endpoint as its
-# model provider. Today it targets OpenCode; the kit is named "usai-provider"
-# (not "usai-opencode-provider") to leave room for additional agents later.
-# See README.md "Scope and roadmap".
+# Legacy compatibility copy. The neutral acq kit is authoritative. This copy
+# retains endpoint policy only; OpenCode owns configuration rendering.
 #
 # Applied at sandbox creation with (local path):
 #   sbx run --kit <path-to-this-kit> opencode <project>
@@ -33,11 +31,8 @@ kind: mixin
 name: usai-provider
 displayName: USAi Provider (OpenCode)
 description: >
-  Configures the agent to use the GSA USAi OpenAI-compatible endpoint as its
-  model provider, with egress allow-listed. Targets OpenCode today: ships a
-  USAi opencode.jsonc and merges it into OpenCode's global config path at
-  startup, composing with (rather than clobbering) any global config the
-  opencode template or another kit wrote.
+  Legacy compatibility kit that allow-lists the USAi endpoint. OpenCode owns
+  provider-input rendering and global configuration writes.
 
 caps:
   network:
@@ -45,32 +40,3 @@ caps:
       # Exact host (default port 443). USAi is a custom endpoint, not a
       # built-in sbx service, so the kit must allow-list it explicitly.
       - api.gsa.usai.gov
-
-commands:
-  # Merge the staged USAi config into OpenCode's GLOBAL config path, without
-  # clobbering an existing global config. Runs at every start as the agent user
-  # (uid 1000, which owns /home/agent). The kit's files/ payload is laid down by
-  # the base-image setup that runs BEFORE startup (same lifecycle the
-  # zscaler-ca-certificate kit relies on), so the staged source + script exist
-  # here. The merge script:
-  #   - copies the staged file verbatim (comments preserved) if no global config
-  #     exists yet; or
-  #   - deep-merges the USAi keys INTO an existing global config (USAi wins for
-  #     its own keys; unrelated keys preserved; warns on any leaf it overrides).
-  # It is idempotent: re-merging the same keys converges to the same result.
-  # A non-zero exit only happens on an unexpected error (missing/unparseable
-  # source); leaf-conflict warnings do NOT fail startup.
-  startup:
-    - description: Merge USAi provider config into the global OpenCode config
-      user: "1000"
-      # StartupCommand.command is argv ([]string), not a shell string.
-      command:
-        - node
-        - /home/agent/usai-config/merge-global-config.mjs
-        - --source
-        - /home/agent/usai-config/opencode.jsonc
-        - --global-dir
-        - /home/agent/.config/opencode
-
-# files/home/usai-config/{opencode.jsonc,merge-global-config.mjs} map to
-# /home/agent/usai-config/... automatically — no explicit listing.

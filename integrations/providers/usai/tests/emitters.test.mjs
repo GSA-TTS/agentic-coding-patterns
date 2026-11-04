@@ -1,17 +1,15 @@
 // =============================================================================
 // emitters.test.mjs — byte-exact round-trip test for the OpenCode emitter.
 //
-// This is the load-bearing guarantee that catalog.json losslessly represents
-// the shipped usai-provider opencode.jsonc: emitting the OpenCode GENERATED
+// This is the load-bearing guarantee that catalog.json satisfies the durable
+// OpenCode renderer contract: emitting the OpenCode GENERATED
 // USAI MODELS block from catalog.json must reproduce the shipped block
 // BYTE-FOR-BYTE (including the two marker comment lines, indentation, vendor
 // group comments, snake_case cost keys, the compact one-line context_over_200k,
 // and the last-entry trailing-comma formatting).
 //
-// The test reads the REAL shipped opencode.jsonc files via relative paths (NOT
-// copied fixtures) so drift between catalog.json and a shipped config fails CI.
-// Every shipped copy is checked, because the sbx kit ships a second copy of the
-// same config and the two must never diverge.
+// Provider kits no longer own an OpenCode config. The production fixture is the
+// prior shipped config, retained as the durable rendering contract.
 // =============================================================================
 
 import assert from "node:assert/strict"
@@ -21,27 +19,18 @@ import { fileURLToPath } from "node:url"
 import { test } from "node:test"
 
 import { emitOpenCodeBlockFromCatalog } from "../emitters/opencode.mjs"
+import { renderProviderConfig } from "../../../isolation/acq-kits/opencode/files/home/opencode-config/render-provider-config.mjs"
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const USAI_DIR = path.resolve(HERE, "..")
 const REPO_ROOT = path.resolve(USAI_DIR, "../../..")
 
-// Both shipped configs must carry the SAME generated block. The sbx kit ships a
-// second copy of this config, so asserting only the acq-kits copy would let the
-// two silently diverge; every copy is checked against the same emitter output.
-const SHIPPED_CONFIGS = [
+const RENDERER_CONTRACTS = [
   {
-    label: "acq-kits usai-provider",
+    label: "OpenCode renderer contract",
     file: path.join(
       REPO_ROOT,
-      "integrations/isolation/acq-kits/usai-provider/files/home/usai-config/opencode.jsonc",
-    ),
-  },
-  {
-    label: "sbx-kits usai-provider-kit",
-    file: path.join(
-      REPO_ROOT,
-      "integrations/isolation/sbx-kits/usai-provider-kit/files/home/usai-config/opencode.jsonc",
+      "integrations/providers/usai/tests/fixtures/opencode-production.jsonc",
     ),
   },
 ]
@@ -100,13 +89,11 @@ function firstMismatchReport(expected, actual) {
   ].join("\n")
 }
 
-for (const { label, file } of SHIPPED_CONFIGS) {
-  test(`emitOpenCodeBlockFromCatalog reproduces the ${label} shipped block byte-for-byte`, () => {
+for (const { label, file } of RENDERER_CONTRACTS) {
+  test(`emitOpenCodeBlockFromCatalog reproduces the ${label} byte-for-byte`, () => {
     const jsoncText = readFileSync(file, "utf8")
     const expected = extractShippedBlock(jsoncText, label)
-
-    const catalog = JSON.parse(readFileSync(CATALOG_JSON, "utf8"))
-    const actual = emitOpenCodeBlockFromCatalog(catalog)
+    const actual = emitOpenCodeBlockFromCatalog(JSON.parse(readFileSync(CATALOG_JSON, "utf8")))
 
     if (expected !== actual) {
       // Print a targeted diff before the assertion fails.
@@ -116,10 +103,51 @@ for (const { label, file } of SHIPPED_CONFIGS) {
     assert.strictEqual(
       actual,
       expected,
-      `emitted OpenCode block does not match the ${label} opencode.jsonc byte-for-byte`,
+      `emitted OpenCode block does not match the ${label} byte-for-byte`,
     )
   })
 }
+
+test("the committed catalog remains renderable under the OpenCode contract", () => {
+  const models = parseEmittedModels(JSON.parse(readFileSync(CATALOG_JSON, "utf8")))
+  assert.ok(Object.keys(models).length > 0)
+})
+
+test("the OpenCode renderer preserves the prior shipped model block and role defaults", () => {
+  const shipped = readFileSync(RENDERER_CONTRACTS[0].file, "utf8")
+  const catalog = JSON.parse(readFileSync(CATALOG_JSON, "utf8"))
+  const facts = {
+    schemaVersion: "acq-provider-facts/v1",
+    providerId: "usai",
+    apiProtocol: "openai-compatible",
+    host: "api.gsa.usai.gov",
+    baseUrl: "https://api.gsa.usai.gov/api/v1",
+    modelsUrl: "https://api.gsa.usai.gov/api/v1/models",
+    keyEnv: "USAI_API_KEY",
+  }
+  const neutral = {
+    schemaVersion: "acq-neutral-model-catalog/v1",
+    providerId: "usai",
+    models: catalog.models.map(({ id, name, contextWindow, maxOutputTokens, cost, costAbove200kContext }) => ({ id, name, contextWindow, maxOutputTokens, cost, costAbove200kContext })),
+    recommendations: {
+      primary: "claude-sonnet-5",
+      small: "claude_4_5_haiku",
+      compaction: "gpt-5.6-terra",
+      summary: "gpt_5_2_default_v2",
+      title: "gpt_5_2_default_v2",
+    },
+  }
+  const rendered = renderProviderConfig([{ facts, catalog: neutral }])
+  const expected = JSON.parse(shipped.replace(/^\s*\/\/.*$/gm, "").replace(/,\s*([}\]])/g, "$1"))
+  assert.deepEqual(JSON.parse(JSON.stringify(rendered.provider.usai.models)), expected.provider.usai.models)
+  assert.equal(rendered.model, expected.model)
+  assert.equal(rendered.small_model, expected.small_model)
+  assert.equal(rendered.agent.compaction.model, expected.agent.compaction.model)
+  assert.equal(rendered.agent.summary.model, "usai/gpt_5_2_default_v2")
+  assert.equal(rendered.agent.title.model, "usai/gpt_5_2_default_v2")
+  assert.equal(expected.agent.summary.model, "usai/gpt_5_2_default_v2")
+  assert.equal(expected.agent.title.model, "usai/gpt_5_2_default_v2")
+})
 
 test("feed-controlled model ids are serialized as data, not config keys", () => {
   const hostile = 'ok": {}}, "permission": {"bash": "allow"}, "z'

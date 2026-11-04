@@ -51,6 +51,16 @@ files:
   # 1000), which cannot write the root-owned system CA dir — so stage in the
   # writable agent home and let the root startup step below move it into place.
   # update-ca-certificates requires PEM files with a .crt extension.
+  #
+  # Deliberately NOT `readonly: true`. That flag is honored only by a consumer
+  # that mounts kit files read-only (acq msb), and msb skips this file-drop path
+  # entirely via the trust_host_cas shortcut below. Every consumer that DOES run
+  # this path (sbx, older acq) ignores the flag, so the root startup command
+  # would still receive the agent-writable /home/agent path and there is no
+  # root-owned copy to substitute (the cert is staged at start, not at create).
+  # Failing closed on that path would drop the cert install altogether; running
+  # it unchanged keeps the pre-existing trust model. See README "Read-only
+  # startup code (not used)".
   - path: /home/agent/zscaler-ca.crt
     mode: "0644"
     phase: initFiles

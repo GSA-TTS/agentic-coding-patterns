@@ -66,9 +66,12 @@ non-absolute `--root` to avoid silently mis-placing them.
 
 ## Consequences
 
-- Worktrees land under `<primary-project>/.paseo-worktrees/<projectHash>/<slug>`
-  once the entrypoint has run once on `acq run`. Before that first run, they
-  default to `$PASEO_HOME/worktrees`.
+- Startup seeds an absent config with the primary guest `ACQ_WORKSPACE` when it
+  is a usable absolute directory. That allows a detached create to place
+  worktrees under `<primary-project>/.paseo-worktrees/<projectHash>/<slug>`
+  before a terminal attach. If startup cannot seed and no existing root is set,
+  Paseo defaults to `$PASEO_HOME/worktrees`. The PID-1 entrypoint reconciles a
+  different root on an interactive `acq run`; a shell's bare `opencode` does not.
 - Applying a new root costs one daemon bounce (a few seconds of downtime while
   the supervisor respawns the daemon). Idempotent: unchanged root ⇒ no bounce.
 - A user who sets a custom absolute `worktrees.root` by hand will have it

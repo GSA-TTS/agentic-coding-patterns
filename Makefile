@@ -41,8 +41,10 @@ validate-kits:  ## Validate neutral acq-kits specs against the hybrid/v1 schema 
 validate-provider-input-contract:  ## Validate provider facts, catalogs, and package-to-projection manifests
 	$(PYTHON) scripts/validate_provider_input_contract.py
 
-test-kits:  ## Run the acq-kits node test suites (usai-provider + paseo) + providers/usai emitters
+test-kits:  ## Run the acq-kits node test suites + providers/usai emitters
 	@if command -v node >/dev/null 2>&1; then \
+		echo "==> opencode kit tests" && \
+		(cd integrations/isolation/acq-kits/opencode && npm test) && \
 		echo "==> usai-provider kit tests" && \
 		(cd integrations/isolation/acq-kits/usai-provider && node --test 'tests/**/*.test.mjs') && \
 		echo "==> paseo kit tests" && \

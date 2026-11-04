@@ -35,7 +35,12 @@ owned by `agent`), devenv + direnv pinned to a nixpkgs rev, flakes enabled,
 and the bash wiring that puts the Nix profile and direnv hook in every shell.
 
 The devenv major is part of the image contract: `1.x` tags ship devenv 1.x
-(nixos-25.05), `2.x` tags ship devenv 2.x (nixos-26.05). devenv 2.x bundles
+(nixos-25.05), `2.x` tags ship devenv 2.x (nixos-26.05). From `2.1.0`, devenv
+comes from a separate nixos-unstable pin (`DEVENV_NIXPKGS_REV`, devenv 2.4.0)
+while direnv stays on `NIXPKGS_REV`: devenv 2.0–2.3.0 ignores the signing keys
+of the caches in a repo's `cachix.pull`, so every path from those caches
+(including `devenv.cachix.org`) is rebuilt from source, which sandbox egress
+usually blocks. Avoid `2.0.0` for that reason. devenv 2.x bundles
 its own Nix for evaluation and builds and shares the single-user store with
 the installer's Nix on `PATH`; both read and write the same store database.
 
@@ -90,7 +95,7 @@ docker build --build-arg EXTRA_CA_CERT="$(cat proxy-root-ca.crt)" .
 ## Versioning
 
 [`VERSION`](VERSION) is the published tag, bumped together with any toolchain
-change (`NIXPKGS_REV`, installer version, base image), with a major bump when
-the devenv major changes; tags are never reused —
-the workflow refuses to republish an existing version tag. A moving `latest`
+change (`NIXPKGS_REV`, `DEVENV_NIXPKGS_REV`, installer version, base image),
+with a major bump when the devenv major changes; tags are never reused — the
+workflow refuses to republish an existing version tag. A moving `latest`
 also exists — pin the version tag in anything durable.

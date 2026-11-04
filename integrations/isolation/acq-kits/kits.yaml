@@ -32,10 +32,10 @@ kits:
   usai-provider:
     backends: [sbx, msb]
     parity: |
-      Both backends allow-list api.gsa.usai.gov, drop the USAi opencode.jsonc +
-      merge script, and run the startup merge into OpenCode's global config. No
-      backend shortcut. The USAi API key is injected at runtime by acq via the
-      active backend's credential path (never stored in the kit).
+      Both backends allow-list api.gsa.usai.gov and materialize the same provider
+      input. The OpenCode kit is the only writer of its global config and renders
+      acq's selected current generation at startup. Credentials are injected by
+      acq via the active backend's credential path (never stored in either kit).
 
   agentic-coding-playbook:
     backends: [sbx, msb]

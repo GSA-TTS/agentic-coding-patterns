@@ -101,6 +101,10 @@
             "enum": ["initFiles"],
             "description": "Optional lifecycle phase hint for when the file is written (default: written before commands run)."
           },
+          "readonly": {
+            "type": "boolean",
+            "description": "Optional. When true, the file's bytes are trusted CODE that the consumer should execute from a host-authoritative read-only mount instead of a guest-writable copy (quickstart ADR-0035, msb only). Requires source. A consumer that supports it stages the file on the read-only mount, does not copy it to path, and rewrites a commands[] argv element that is exactly path to the mounted location; a consumer that does not support it ignores the field and copies the file to path as usual, so a command must stay safe to run from path (see acq-kits/README.md). Do not set on files the kit or user modifies at runtime, or on files read only through a path embedded in a script string."
+          },
           "description": {
             "type": "string"
           }

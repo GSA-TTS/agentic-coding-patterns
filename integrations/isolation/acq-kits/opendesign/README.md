@@ -178,6 +178,17 @@ the inspection CA. The install script appends `PROXY_CA_CERT_B64` only when it
 can decode it successfully, then appends the system CA bundle to
 `NODE_EXTRA_CA_CERTS` when available.
 
+## Read-only startup code (not used)
+
+This kit does not mark any file `readonly: true`. Its only root `startup`
+command is the inline `mkdir`/`chown` step and runs no kit file. The scripts it
+ships (`opendesign-start.sh`, `opendesign-install.sh`, `opendesign-relay.mjs`)
+run as the agent user, so they add no privilege the guest does not already have.
+They are also not passed to a command as whole argv elements: the start script
+is launched from inside an `sh -c` string, and it runs the install script and
+relay by `$HOME` path. The read-only mount rewrite only replaces whole argv
+elements, so marking them would leave the files missing from `/home/agent`.
+
 ## Backend support
 
 `acq` selects and abstracts the isolation backend. This kit is written entirely

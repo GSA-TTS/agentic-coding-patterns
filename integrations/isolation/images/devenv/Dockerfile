@@ -5,11 +5,19 @@
 ARG BASE_IMAGE=docker/sandbox-templates:shell-docker
 FROM ${BASE_IMAGE}
 
-# devenv/direnv nixpkgs pin (nixos-26.05 → devenv 2.1.2). Bump this and
-# VERSION together — unpinned `nixpkgs#…` tracks unstable HEAD and drifts per
-# build. The devenv major is part of the image contract: a major change here
-# is a major VERSION bump.
+# nixpkgs pins. Bump these and VERSION together — unpinned `nixpkgs#…` tracks
+# unstable HEAD and drifts per build. The devenv major is part of the image
+# contract: a major change here is a major VERSION bump.
+#
+# NIXPKGS_REV (nixos-26.05) supplies direnv and is the rev kits pin to share
+# the image's closures. DEVENV_NIXPKGS_REV (nixos-unstable → devenv 2.4.0)
+# supplies devenv alone: devenv 2.0–2.3.0 stopped fetching the signing keys of
+# `cachix.pull` caches, so Nix rejects every substitute from them and builds
+# from source (fixed in 2.3.1). Both revs are Hydra-built and signed by the
+# cache.nixos.org key. Drop DEVENV_NIXPKGS_REV once nixos-26.05 (or the
+# stable branch NIXPKGS_REV moves to) packages devenv ≥ 2.3.1.
 ARG NIXPKGS_REV=0d9e9b832d03ac387417e16ce1febf73b2e631e1
+ARG DEVENV_NIXPKGS_REV=31ecbaca1bdefa45dffc409f0250bd8039ea0010
 
 # Checksum pin for the installer script below (release assets are mutable);
 # bump together with the installer version.
@@ -75,7 +83,7 @@ RUN mkdir -p /home/agent/.config/nix \
 
 RUN . /etc/profile.d/nix.sh \
  && nix profile install \
-      "github:NixOS/nixpkgs/${NIXPKGS_REV}#devenv" \
+      "github:NixOS/nixpkgs/${DEVENV_NIXPKGS_REV}#devenv" \
       "github:NixOS/nixpkgs/${NIXPKGS_REV}#direnv"
 
 # Nix profile + direnv hook for interactive/login bash sessions (the ENV PATH

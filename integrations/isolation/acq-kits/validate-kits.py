@@ -185,6 +185,53 @@ def validate_kit(kit_dir: Path, schema: dict) -> tuple[list[str], list[str]]:
                 f"(allowed: absolute path, alphanumerics . _ / -): {path!r}"
             )
 
+    # The consumer (acq kit-translate) parses spec.yaml with a line-oriented awk
+    # reader, not a YAML parser. Two spellings YAML accepts are therefore read
+    # differently by it, so reject them here rather than ship a spec the two
+    # readers disagree on:
+    #   - `readonly: yes` / `on` / `1` is a YAML boolean but the awk reader only
+    #     honors the literal string `true`, so the flag would silently be inert.
+    #   - a flow-style `command: [a, b]` is dropped by the awk reader (only block
+    #     lists are parsed), so the command would never run.
+    raw_text = spec_path.read_text()
+    for m in re.finditer(r"^[ \t]*(?:-[ \t]+)?readonly:[ \t]*([^\n#]*)", raw_text, re.MULTILINE):
+        raw_val = m.group(1).strip()
+        if raw_val not in ("true", "false"):
+            errors.append(
+                f"{kit_dir.name}: files[].readonly must be the literal true or false "
+                f"(the acq consumer only recognizes the string 'true'): {raw_val!r}"
+            )
+    if re.search(r"^[ \t]*(?:-[ \t]+)?command:[ \t]*\[", raw_text, re.MULTILINE):
+        errors.append(
+            f"{kit_dir.name}: commands[].command must be a block list (one '- token' per line); "
+            f"a flow-style [a, b] list is not parsed by the acq consumer and the command would be dropped"
+        )
+
+    # files[].readonly (quickstart ADR-0035). A consumer that honors it swaps a
+    # commands[] argv element that EQUALS the file's path for its read-only mount
+    # path, so the flag is inert (and misleading) unless the file has a source and
+    # is passed to at least one command as a whole argv token.
+    argv_tokens = {
+        tok
+        for c in spec.get("commands", []) or []
+        if isinstance(c, dict)
+        for tok in c.get("command", []) or []
+        if isinstance(tok, str)
+    }
+    for f in files:
+        if f.get("readonly") is not True:
+            continue
+        rpath = f.get("path")
+        if not f.get("source"):
+            errors.append(
+                f"{kit_dir.name}: files[{rpath!r}].readonly requires a source: (inline content cannot be staged)"
+            )
+        if rpath not in argv_tokens:
+            errors.append(
+                f"{kit_dir.name}: files[{rpath!r}].readonly is set but no commands[] argv element "
+                f"is exactly that path, so a consumer has no token to rewrite to the read-only mount"
+            )
+
     for section in ("backend_shortcuts", "backend_extras"):
         for backend in spec.get(section) or {}:
             if backend not in KNOWN_BACKENDS:

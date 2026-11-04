@@ -41,14 +41,14 @@ test("normalizeCatalog passes cost through UNCHANGED (per-million-token, no /1e6
   assert.equal(beta.cost.cacheRead, 0.125)
 })
 
-test("normalizeCatalog drops fields not modeled by the neutral v1 shape (vendor, name, costAbove200kContext)", async () => {
+test("normalizeCatalog preserves modeled display names and tiered costs while dropping vendor metadata", async () => {
   const source = JSON.parse(await readFile(fixturePath, "utf8"))
   const { models } = normalizeCatalog(source)
 
   const beta = models.find((m) => m.id === "fake-model-beta")
   assert.equal("vendor" in beta, false, "vendor must be dropped")
-  assert.equal("name" in beta, false, "name must be dropped")
-  assert.equal("costAbove200kContext" in beta, false, "costAbove200kContext must be dropped (not in neutral v1 shape)")
+  assert.equal(beta.name, "Fake Model Beta")
+  assert.deepEqual(beta.costAbove200kContext, { input: 3.5, output: 28, cacheRead: 0.25 })
 })
 
 test("normalizeCatalog omits cost entirely for a model with no cost data", async () => {
@@ -155,13 +155,9 @@ test("CLI: rejects unknown options and missing option values", async () => {
 // ---------------------------------------------------------------------------
 // Drift gate for the SHIPPED snapshot.
 //
-// The snapshot at files/home/usai-config/model-catalog-snapshot.json is a
-// hand-trimmed SUBSET of the full USAi catalog (a handful of models, so the
-// payload stays small), but every entry it keeps must be byte-equal to what
-// this normalizer produces from integrations/providers/usai/catalog.json.
-// Without this, the snapshot is a second hand-maintained copy that can silently
-// drift from its stated source -- exactly the drift this repo has been bitten by
-// before. A subset is allowed; a DIVERGENT subset is not.
+// The shipped snapshot is generated from the full production catalog. It must
+// remain exactly equal to normalizer output, including recommendations, so the
+// runtime projection cannot silently diverge from the catalog contract.
 // ---------------------------------------------------------------------------
 
 const snapshotPath = path.join(
@@ -173,7 +169,7 @@ const upstreamCatalogPath = path.join(
   "../../../../providers/usai/catalog.json",
 )
 
-test("shipped snapshot: every model matches normalizeCatalog(upstream catalog) exactly", async () => {
+test("shipped snapshot exactly matches normalizeCatalog(upstream catalog)", async () => {
   const snapshot = JSON.parse(await readFile(snapshotPath, "utf8"))
   const upstream = JSON.parse(await readFile(upstreamCatalogPath, "utf8"))
   const regenerated = normalizeCatalog(upstream)
@@ -190,21 +186,8 @@ test("shipped snapshot: every model matches normalizeCatalog(upstream catalog) e
     "normalizer produced no models[] from the upstream catalog -- gate cannot pass",
   )
 
-  const byId = new Map(regenerated.models.map((m) => [m.id, m]))
-  for (const model of snapshot.models) {
-    const fresh = byId.get(model.id)
-    assert.ok(
-      fresh,
-      `snapshot model '${model.id}' is absent from the upstream catalog -- ` +
-        `regenerate the snapshot with scripts/normalize-catalog.mjs`,
-    )
-    assert.deepEqual(
-      model,
-      fresh,
-      `snapshot model '${model.id}' has drifted from the normalizer output -- ` +
-        `regenerate rather than hand-editing`,
-    )
-  }
+  assert.equal(snapshot.models.length, 24)
+  assert.deepEqual(snapshot, regenerated)
 })
 
 test("shipped snapshot: envelope matches the normalizer and carries no credential or routing fields", async () => {
@@ -230,4 +213,47 @@ test("shipped snapshot: envelope matches the normalizer and carries no credentia
       )
     }
   }
+})
+
+// ---------------------------------------------------------------------------
+// Capability metadata (reasoning, inputModalities): carried through losslessly,
+// with unknown (absent) kept distinct from known-false / text-only.
+// ---------------------------------------------------------------------------
+
+const capabilityCatalog = (...models) => ({
+  models: models.map((model) => ({ vendor: "anthropic", name: "N", ...model })),
+})
+
+test("normalizeCatalog carries reasoning and inputModalities, canonically ordered", () => {
+  const { models } = normalizeCatalog(capabilityCatalog(
+    { id: "vision", reasoning: true, inputModalities: ["pdf", "image", "text"] },
+  ))
+  assert.equal(models[0].reasoning, true)
+  assert.deepEqual(models[0].inputModalities, ["text", "image", "pdf"])
+})
+
+test("normalizeCatalog keeps known-false and text-only distinct from unknown", () => {
+  const { models } = normalizeCatalog(capabilityCatalog(
+    { id: "known-no", reasoning: false, inputModalities: ["text"] },
+    { id: "unknown" },
+  ))
+  assert.equal(models[0].reasoning, false)
+  assert.deepEqual(models[0].inputModalities, ["text"])
+  assert.equal("reasoning" in models[1], false, "absent source must stay absent, never default to false")
+  assert.equal("inputModalities" in models[1], false, "absent source must stay absent, never default to text-only")
+})
+
+test("normalizeCatalog rejects malformed capability metadata instead of coercing it", () => {
+  for (const reasoning of ["true", 1, null]) {
+    assert.throws(() => normalizeCatalog(capabilityCatalog({ id: "m", reasoning })), /reasoning must be a boolean/)
+  }
+  for (const inputModalities of [[], "image", ["image", "hologram"], ["text", "text"], [1], null]) {
+    assert.throws(() => normalizeCatalog(capabilityCatalog({ id: "m", inputModalities })), /inputModalities must be a non-empty array/)
+  }
+})
+
+test("normalizeCatalog does not infer capabilities from the model id or name", () => {
+  const { models } = normalizeCatalog(capabilityCatalog({ id: "gpt-4-vision-reasoning", name: "Vision Reasoning" }))
+  assert.equal("reasoning" in models[0], false)
+  assert.equal("inputModalities" in models[0], false)
 })

@@ -84,7 +84,7 @@ Adopt **Option 1**.
 ### Per-kit conversion notes
 
 - **usai-provider** — `caps.network.allow: [api.gsa.usai.gov]`; the two staged
-  files (`opencode.jsonc`, `merge-global-config.mjs`) carried verbatim via
+   files (including `opencode.jsonc` and `merge-global-config.mjs`) carried verbatim via
   `files[].source`; startup merge command carried as argv. The node tooling and
   tests (`package.json`, `scripts/sync-usai-models.mjs`, `tests/`) moved with the
   kit so the new home is the single source of truth. No backend shortcut.

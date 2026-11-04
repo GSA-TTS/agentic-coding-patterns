@@ -11,15 +11,10 @@
 # hybrid/v1 vocabulary in Phase 2 — see
 # integrations/isolation/docs/decisions/0001-neutral-hybrid-v1-acq-kits.md.
 #
-# What it does, declaratively (identical intent to the former sbx kit):
-#   - caps.network: allow egress to the USAi endpoint (default-deny networks).
-#   - files: drop the USAi opencode.jsonc AND the merge script at
-#     ~/usai-config/ (staging area; not the path OpenCode reads).
-#   - commands (phase startup): merge the staged USAi config INTO OpenCode's
-#     global config path (~/.config/opencode/opencode.jsonc) without clobbering
-#     an existing global config (see README "Design: merge, don't clobber").
+# What it does: allow-list the provider endpoint and publish provider metadata
+# for acq. The OpenCode kit is the sole writer of OpenCode's global config.
 #
-# Secret: the USAi API key is NOT in this kit. opencode.jsonc reads it from the
+# Secret: the USAi API key is NOT in this kit. The OpenCode renderer reads the
 # injected USAI_API_KEY env var; acq supplies it at runtime via the active
 # backend's credential path (e.g. `acq secret set`). The real key never enters
 # the kit spec.
@@ -52,11 +47,8 @@ kind: mixin
 name: usai-provider
 displayName: USAi Provider (OpenCode)
 description: >
-  Configures the agent to use the GSA USAi OpenAI-compatible endpoint as its
-  model provider, with egress allow-listed. Targets OpenCode today: ships a
-  USAi opencode.jsonc and merges it into OpenCode's global config path at
-  startup, composing with (rather than clobbering) any global config the
-  opencode template or another kit wrote.
+  Publishes USAi provider input and allow-lists its endpoint. The OpenCode kit
+  renders the backend-selected provider generation into global configuration.
 
 caps:
   network:
@@ -66,16 +58,6 @@ caps:
       - api.gsa.usai.gov
 
 files:
-  # files/home/usai-config/{opencode.jsonc,merge-global-config.mjs} map to
-  # /home/agent/usai-config/... The neutral spec lists them explicitly with
-  # their in-guest absolute paths and a `source:` under the kit's files/ tree,
-  # so every backend's file-drop knows the payload and its target.
-  - path: /home/agent/usai-config/opencode.jsonc
-    mode: "0644"
-    source: files/home/usai-config/opencode.jsonc
-  - path: /home/agent/usai-config/merge-global-config.mjs
-    mode: "0755"
-    source: files/home/usai-config/merge-global-config.mjs
   # Vendored fallback snapshot of a handful of real USAi models in the neutral
   # acq-neutral-model-catalog/v1 shape (see scripts/normalize-catalog.mjs,
   # which regenerates it from integrations/providers/usai/catalog.json).
@@ -98,38 +80,15 @@ files:
     mode: "0644"
     source: files/home/usai-config/model-catalog-snapshot.json
 
-commands:
-  # Merge the staged USAi config into OpenCode's GLOBAL config path, without
-  # clobbering an existing global config. Runs at every start as the agent user
-  # (uid 1000, which owns /home/agent). The files above are laid down before
-  # startup runs. The merge script:
-  #   - copies the staged file verbatim (comments preserved) if no global config
-  #     exists yet; or
-  #   - deep-merges the USAi keys INTO an existing global config (USAi wins for
-  #     its own keys; unrelated keys preserved; warns on any leaf it overrides).
-  # It is idempotent: re-merging the same keys converges to the same result.
-  - phase: startup
-    user: "1000"
-    description: Merge USAi provider config into the global OpenCode config
-    command:
-      - node
-      - /home/agent/usai-config/merge-global-config.mjs
-      - --source
-      - /home/agent/usai-config/opencode.jsonc
-      - --global-dir
-      - /home/agent/.config/opencode
-
 agentContext: |
   ## USAi Provider
 
-  Your model provider is configured to use **USAi** (`api.gsa.usai.gov`), the
-  GSA OpenAI-compatible endpoint. The provider block and model catalog are
-  merged into OpenCode's global config at startup; you do not need to configure
-  a provider. The API key is injected at runtime by `acq` — it is not stored in
-  this sandbox.
+  Your provider input is selected by `acq`; the OpenCode kit renders the
+  selected generation at startup. Credentials are injected by `acq` and are
+  not stored in this sandbox.
 
 # No backend shortcuts: every backend uses the same allow-list + file-drop +
-# startup-merge mechanism for this kit.
+# projection mechanism for this kit.
 backend_shortcuts:
   sbx: {}
   msb: {}

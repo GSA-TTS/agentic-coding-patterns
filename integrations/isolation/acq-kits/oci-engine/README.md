@@ -41,8 +41,10 @@ On **every start** (the `startup` phase, run as root) — **only if podman is
 installed** — it group-scopes `/dev/net/tun` and `/dev/fuse` to the agent
 (`root:agent`, `0660`) so rootless podman networking and the fuse-overlayfs
 storage mount work, and it **re-evaluates the system storage driver**. The elevated install and startup scripts, plus the storage helper sourced by
-them, are copied into `/usr/local/lib/acq/oci-engine/` and executed/sourced only
-from those root-owned copies, not from the agent-home staging files. `/dev` is a devtmpfs
+them, run only from a host-authoritative read-only mount (when the consumer honors
+`readonly`; a missing mount file is a refusal, not a fallback) or, for a consumer
+that ignores `readonly`, from root-owned copies under `/usr/local/lib/acq/oci-engine/`,
+never from the agent-home staging files. `/dev` is a devtmpfs
 re-created each boot, so both must re-run on restart, not just at create;
 re-evaluating the driver each boot lets it **converge from `vfs` to `overlay`**
 once `fuse-overlayfs` and `/dev/fuse` are both available (a transient `/dev/fuse`
@@ -96,8 +98,11 @@ engine")** decision, declaratively:
   inside the sandbox, which is itself the security boundary.
 - **Trusted elevated code.** Files are staged in the agent home by the neutral
   kit mechanism, but root phases do not execute or source those mutable copies.
-  The root command wrappers publish the install script, startup script, and sourced
-  helper into `/usr/local/lib/acq/oci-engine/` and use only those root-owned files.
+  The root command wrappers publish the install script into
+  `/usr/local/lib/acq/oci-engine/`; the startup script and sourced helper run from
+  the read-only mount when the consumer honors `readonly` (failing closed if the
+  file is missing), else from root-owned copies published there for a consumer
+  that ignores `readonly`. Neither runs from the mutable staging copies.
 - **Least-privilege registry resolution.** `short-name-mode` defaults to
   **`enforcing`**, not `permissive`. Because there is a single search registry
   (`docker.io`), unqualified names still resolve deterministically to Docker Hub
@@ -110,6 +115,59 @@ engine")** decision, declaratively:
   which explicitly removes that guardrail.
 
 Nothing in this kit is a secret. podman needs no credentials to run rootless.
+
+### Read-only startup code
+
+The root `startup` step runs two kit files: `oci-engine-grant-devs.sh` and the
+`oci-engine-storage-driver.sh` helper it sources. Both are declared
+`readonly: true` and passed to the step as whole argv elements. A consumer that
+honors the flag (acq `msb`, quickstart ADR-0035) runs them from a
+host-authoritative read-only mount, so a guest user with `sudo` cannot edit what
+root executes on each start. A consumer that ignores the flag copies them under
+`/home/agent` as before (the *legacy* case), and the step then runs the
+root-owned copy that `oci-engine-install.sh` published.
+
+The step **fails closed**. It classifies the two tokens together:
+
+| Tokens | Behavior |
+|---|---|
+| Both under `/var/lib/acq/host/kit-files/` | Run exactly those files. If either file is missing: error on stderr, run nothing as root, exit 1. It does **not** fall back to the root-owned copy, which came from `/home/agent` at create time and is not host-authoritative across restarts. |
+| Both under `/home/agent/` | Legacy: run the root-owned copy that install published. If install published nothing, warn and exit 0, as before. |
+| Anything else (one mounted and one not, `..`, an unknown prefix, an empty token) | Refuse: error on stderr, exit 1. |
+
+`oci-engine-grant-devs.sh` applies the same rule to the helper it sources: a
+missing selected mount helper is a refusal, not a fallback. A refusal costs only
+the device grant and storage re-evaluation for that boot. Quickstart reports a
+failing startup command as a warning and continues; it never treats it as an
+escalation. `scripts/verify` fails in that state.
+
+Pairing with Quickstart: the consumer keeps the
+decision to use the read-only mount in a host-side record, so a guest cannot force
+the legacy downgrade by tampering with a guest probe. When staging a read-only
+file fails on the host, the consumer falls back to a guest copy for that file and
+leaves its `/home/agent` token in argv. If both files fall back, that is the
+legacy row above. If only one does, the pair is mixed (one mount token, one
+`/home/agent` token) and the step refuses, so one failed host copy costs the
+device grant and storage re-evaluation for that boot. The consumer's create-time
+startup script derives its rewrite table without checking whether staging
+succeeded, so it can name a mount file that was never staged; the step refuses
+that case too.
+
+The mount is enforced by the backend. A guest user with `sudo` who can unmount or
+bind-mount over `/var/lib/acq/host/kit-files` is outside what token validation
+can defend against; the read-only property rests on the backend's mount
+enforcement.
+
+The install step still trusts `/home/agent` at create time (it publishes the
+staged copies into the root-owned directory, before the agent's first session).
+The read-only mount protects the startup code on every later start.
+
+Not marked `readonly`, on purpose: `oci-engine-install.sh` (an inline install
+command copies it by path), `oci-engine-vfs-fallback.sh` (runs as the agent,
+not root), and the `docker` wrapper and `01-acq-shortnames.conf` (the install
+script copies them by path, which needs them at `/home/agent`). When the flag is
+honored, the install step does not publish the grant script or helper; the
+`startup` step configures the storage driver on that same boot.
 
 ## Network egress
 
@@ -152,11 +210,18 @@ both apply the identical file-drop + install + device-grant sequence through
 acq's kit translation. Behavioral parity: the guest ends up with a working
 rootless podman (and `docker` aliased to it) either way.
 
-## Verifying (host-side live check)
+## Installation and storage verification (legacy host-side live check)
+
+`scripts/verify` is the existing installation/storage check, not resource
+qualification. It retains its legacy two-state verdict: exit 0 means that nothing
+it counted failed, not that all evidence was available. In particular, its
+missing-rootless-field fallback checks only the agent UID. Neither that fallback,
+the installation marker, nor a successful storage build proves that memory, CPU,
+and PID limits are effective. See the [shared verdict contract](../README.md#what-a-scriptsverify-exit-code-means).
 
 `scripts/verify` creates a throwaway **msb** sandbox with this kit applied
 **through acq** (`acq --backend msb create shell … --kit …`) and confirms rootless
-podman actually works: podman reports `rootless=true`, a real `podman build` from
+installation/storage behavior: it requests `rootless=true`, a real `podman build` from
 `scratch` mounts a layer as the agent, and the `docker` -> `podman` wrapper this
 kit drops resolves and routes to podman.
 
@@ -202,3 +267,69 @@ VERIFY_OCI_IMAGE=docker.io/library/ubuntu:24.04 \
 
 The backend-agnostic gate (schema + cross-field rules) is
 `integrations/isolation/acq-kits/validate-kits.py` (`make validate-kits`).
+
+## Resource qualification (guest-only, experimental)
+
+Run `scripts/verify-resources` **inside the intended Linux guest**, as its
+non-root agent. It needs Python 3 (standard library only), an explicitly selected
+absolute installed Podman executable, and a trusted image already loaded in that
+agent's local store. The image must have `/bin/sh` and `sleep`, and its reference
+must be a fully qualified registry/repository plus `@sha256:` and 64 lowercase
+hex digits. There is no default image and no pull, install, root fallback, or
+cgroup repair. Copy the wrapper and adjacent `verify_resources.py` into the guest
+through the operator's normal trusted delivery path; the kit does not autorun it.
+
+```sh
+# In the guest; substitute the actual preloaded digest-qualified reference.
+sh scripts/verify-resources --guest --podman /usr/bin/podman \
+  --image "$PRELOADED_DIGEST_REF"
+```
+
+`--guest` is an operator acknowledgment, **not guest detection or attestation**.
+Linux and non-root checks cannot distinguish a Linux host from a guest. Never
+invoke it on the host, through a remote Podman client, or with the Docker wrapper.
+The environment is allowlisted, with the local user's home/runtime directory and
+a fixed `/usr/bin:/bin` path; every engine call uses `--remote=false`.
+
+The gate requires an explicit JSON boolean `host.security.rootless=true`, cgroup
+v2, and reported delegation of `memory`, `cpu`, and `pids` before creation. It
+creates then starts one probe, overriding its entrypoint with `/bin/sh`, with
+network `none`, user `65534:65534`, all capabilities dropped, no-new-privileges,
+128 MiB memory, one CPU, and 32 PIDs. It supplies no mounts, ignores image-declared
+volumes, disables healthchecks/logging, and uses a read-only root filesystem.
+The command is `exec sleep 120`; it is a bounded observation window, not a stress
+test. Each CLI call has a 10-second deadline and 64 KiB combined-output cap.
+
+The verifier maps the live inspected guest PID's `/proc/PID/cgroup` membership
+through `/proc/self/mountinfo` to the cgroup2 mount, rejecting traversal,
+ambiguous mappings, and symlink resolution. It reads **kernel** `memory.max`,
+`cpu.max`, and `pids.max`, not just requested inspect limits. It also checks live
+UIDs, effective capabilities and no-new-privileges, and rechecks PID start time,
+membership, and the engine's running PID. It requires exact leaf limits;
+stricter ancestor limits may further restrict the probe. No throughput, OOM,
+fork-exhaustion, hostile-image containment, or outer-VM limit claim follows.
+
+| Exit | Resource verifier result |
+|---|---|
+| `0` | Measured prerequisites, live kernel limits and exact-ID cleanup passed |
+| `1` | An observed rootful engine or wrong effective policy/limit failed |
+| `3` | Missing tools/image/controllers/evidence, malformed data, interrupted transport, or unverified cleanup; no measured failure |
+
+This follows the coverage semantics of [verify-report.sh](../verify-report.sh):
+a measured failure retains exit 1 even if another check is unverified. Cleanup
+runs in `finally` against only the full returned container ID and requires
+`container exists` to report absence. A lost/malformed create response cannot
+identify an owned container and therefore reports cleanup **UNVERIFIED**, never
+a pass. The operator must reconcile that guest's container store; there is no
+name-based or broad cleanup. Uncatchable termination cannot guarantee cleanup.
+
+Offline tests use fake executables/injected transport and synthetic kernel
+evidence; they never invoke a real engine:
+
+```sh
+python3 -I -B scripts/tests/test_oci_resource_verifier.py
+```
+
+See [resource qualification decision](docs/decisions/resource-qualification.md)
+for the trust boundary and limitations. Storage success and resource success are
+separate evidence; neither substitutes for the other.

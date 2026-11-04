@@ -14,7 +14,7 @@ live feeds -> build-catalog.mjs -> catalog.json -> per-harness emitters
 - **build-catalog.mjs** — derives `catalog.json`.
 - **catalog.json** — the generated catalog. **GENERATED — do not hand-edit.**
 - **per-harness emitters** — render `catalog.json` into each harness config
-  (e.g. the OpenCode `opencode.jsonc` model block).
+  (e.g. the OpenCode renderer contract fixture's model block).
 
 ## Checking for drift
 
@@ -34,15 +34,60 @@ comparing it would fail every offline run regardless of real drift — and a
 detector that always fires is one everybody learns to ignore, leaving genuine
 drift indistinguishable from the noise.
 
+## Role defaults (`recommendations`)
+
+`recommendations` maps a role (`primary`, `small`, `compaction`, `summary`,
+`title`) to a model id. A person chooses these; the feeds do not. So a
+regeneration carries the existing values forward from the catalog at `--out`
+rather than recomputing them.
+
+- Every value must name a model in `models[]`. A role name outside the schema,
+  or an id that is not in `models[]`, fails validation.
+- If a recommended model is no longer in the regenerated list, the build **fails**
+  and names each missing role and id. Nothing is written and nothing is
+  re-picked automatically. Choose a replacement, edit `recommendations` in
+  `catalog.json`, and re-run.
+- The file at `--out` must be absent or a real catalog (a JSON object with
+  `schemaVersion` `usai-model-catalog/v1` and a `models` array). Anything else,
+  including invalid JSON, `[]`, `null`, a number, `{}`, or a catalog with no
+  `models`, fails the build and leaves the file untouched, instead of
+  overwriting it with a catalog that has no roles.
+- A real catalog that has no `recommendations` yet is accepted: there are no
+  roles to lose, so the new catalog is written without any. Roles are only ever
+  added by a person editing `recommendations`; the build never invents them.
+  The shipped catalog always carries them, so deleting the block from it is a
+  reviewable diff, not a silent build outcome.
+- `--check` applies the same rules: a recommended model that left the feed makes
+  it fail with the message above, and `describeDrift` also names any role whose
+  value differs between the two catalogs it compares.
+
 ## Files
 
 - `catalog.schema.json` — JSON Schema (draft 2020-12), id
-  `usai-model-catalog/v1`. Defines the catalog shape.
+  `usai-model-catalog/v1`. Defines the catalog shape, including the advisory
+  `recommendations` roles (`primary`, `small`, `compaction`, `summary`, `title`),
+  which match the neutral catalog contract and the OpenCode kit renderer.
 - `catalog.json` — the generated catalog.
+
+## Capability metadata
+
+`reasoning` (boolean) and `inputModalities` (subset of `text`, `image`, `audio`,
+`video`, `pdf`) are optional per-model fields. **Absent means unknown**; `false`
+and `["text"]` mean known-unsupported and known text-only. The builder does
+**not** copy them by default. Passing `--include-capabilities` to a live-feed
+build copies them from the matched models.dev entry and labels that provenance
+in `sources.capabilities`; models.dev describes the upstream provider, not
+necessarily the USAi gateway, so that output must not be committed until each
+value is confirmed against the gateway with per-model, per-field evidence (a
+data PR description plus a committed evidence file; see the ADR). The
+`sources.capabilitiesVerified` string (`<date>; opencode <version>`) is only a
+catalog-wide release reminder, not evidence. Malformed upstream values are
+treated as unknown with a warning. Nothing is inferred from model ids or names. See
+[ADR 0006](../../isolation/docs/decisions/0006-neutral-model-capability-metadata.md).
 
 ## Safety guarantee
 
-A byte-exact round-trip test against the shipped `opencode.jsonc` is the safety
+A byte-exact round-trip test against the durable OpenCode renderer contract is the safety
 guarantee: the emitter must reproduce the current, human-reviewed config exactly.
 That test is the gate that lets us treat `catalog.json` as the source of truth
 without silently changing any shipped kit.

@@ -80,6 +80,14 @@ files:
     mode: "0755"
     source: files/home/opencode-install.sh
     description: Fetch, SHA-256-verify, and install the pinned OpenCode CLI binary (create-time, root)
+  - path: /home/agent/opencode-config/render-provider-config.mjs
+    mode: "0755"
+    source: files/home/opencode-config/render-provider-config.mjs
+    description: Render the authoritative provider-input generation into global OpenCode config
+  - path: /home/agent/opencode-config/base-config.jsonc
+    mode: "0644"
+    source: files/home/opencode-config/base-config.jsonc
+    description: Base OpenCode policy consumed only by the startup renderer
 
 commands:
   # INSTALL phase, as root, create-time once — matching goose-server's
@@ -103,6 +111,19 @@ commands:
         OPENCODE_SHA256_LINUX_X64_BASELINE="c32f6fa1164ed09287519252f0c2d52ae356aec6dd5e32522e46c8fecba1bfcc" \
         OPENCODE_SHA256_LINUX_ARM64="96ead471c33ad1486c271d40486c438ff44eadabc25c1b65ee1437941e6ec9ce" \
           sh /home/agent/opencode-install.sh
+  # acq supplies ACQ_PROVIDER_INPUT_ROOT. It resolves to the same read-only
+  # models/providers layout for every backend. This is the sole acq-owned writer
+  # of OpenCode's global config after the cutover.
+  - phase: startup
+    user: "1000"
+    description: Render current provider inputs into the global OpenCode config
+    command:
+      - node
+      - /home/agent/opencode-config/render-provider-config.mjs
+      - --global-dir
+      - /home/agent/.config/opencode
+      - --base-config
+      - /home/agent/opencode-config/base-config.jsonc
 
 # No publishedPorts: opencode is a TUI, not a web UI (same as pi-coding-agent /
 # prime-agent). Nothing to publish to the host.

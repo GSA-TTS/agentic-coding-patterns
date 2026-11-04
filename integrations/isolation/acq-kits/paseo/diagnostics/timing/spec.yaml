@@ -1,0 +1,9 @@
+# Apply explicitly alongside the local paseo kit for a diagnostic sandbox only.
+# A kit environment entry reaches startup commands AND the attach environment.
+schemaVersion: "hybrid/v1"
+kind: mixin
+name: paseo-timing
+displayName: Paseo startup timing diagnostics
+description: Enables fixed-label timing records in the Paseo kit for a diagnostic run.
+environment:
+  PASEO_KIT_TIMING: "1"

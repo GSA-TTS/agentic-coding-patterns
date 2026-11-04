@@ -1,3 +1,11 @@
+---
+title: Startup owns the daemon; attach reconciles the worktree root
+description: Initialize the primary root early and restart only when attach changes it
+status: canonical
+tier: 2
+last_updated: "2026-10-23"
+---
+
 # Decision: the startup script owns the daemon; the wrapper pins worktrees and bounces it
 
 **Status:** accepted
@@ -11,16 +19,17 @@ Two requirements pull in different directions:
    for the **startup script** owning and supervising the daemon (a `startup`
    command fires on every start, even a detached `acq create`, under the tini
    keepalive).
-2. **Worktrees must be pinned to the first project directory** — an absolute path
-   only the *entrypoint* knows, because the entrypoint's cwd IS the primary
-   workspace on `acq run`. The daemon itself has no "primary project" concept.
+2. **Worktrees must be pinned to the selected project directory.** ACQ exports
+   the primary guest mount as `ACQ_WORKSPACE`; the entrypoint's cwd can differ
+   when the operator overrides the attach directory. The daemon itself has no
+   "primary project" concept.
    And `worktrees.root` is read only at daemon boot (no HUP; see
    `worktrees-root-global-only.md`).
 
-If the startup script alone started the daemon, it would come up with the default
-`$PASEO_HOME/worktrees` root, because at startup time the primary-project cwd is
-not reliably known to it — the dependable signal is the wrapper's own `$PWD` (the
-entrypoint runs in the primary workspace on `acq run`).
+Startup can initialize the primary root from that explicit guest marker. It
+cannot overwrite existing settings on resume: the daemon may already be using a
+different project root. The wrapper's physical cwd remains authoritative for
+each attach.
 
 ## Decision
 
@@ -30,7 +39,13 @@ entrypoint runs in the primary workspace on `acq run`).
   the Paseo CLI on first boot, persists the required daemon settings in
   `config.json`, and supervises `paseo daemon run` in a respawn loop marked
   `supervisor:paseo-daemon`. The daemon comes up immediately with whatever
-  `config.json` currently says (default root on first boot).
+  `config.json` currently says. Before npm work, startup optionally seeds an
+  absent config from the physical `ACQ_WORKSPACE` directory, using the helper's
+  `--initialize-only` mode and the same config lock. The initialization step
+  preserves any existing config entry
+  (including an empty/invalid file, directory, or dangling symlink).
+  Missing/invalid workspace or ambiguous home disables this optional
+  step. No lock is held across npm installation and no nested lock is acquired.
 - **The entrypoint pins the worktree root.** On `acq run` the thin wrapper
   (`~/.local/bin/opencode`) execs the generic shim (`~/paseo-agent-shim`), which
   runs in the primary-workspace cwd, computes `<PWD>/.paseo-worktrees`, and writes
@@ -75,6 +90,23 @@ modifying `$PASEO_HOME/config.json`.
   opened via `acq run`.
 
 ## Consequences
+
+- When early initialization wins, normal attach sees `unchanged` and avoids a
+  premature restart while npm is still installing. If attach wins, its existing
+  change/restart behavior remains. There is no launch-ownership claim or guarantee
+  that every cold restart attempt disappears.
+- Both paths retain the same readiness allowance: up to 30 health probes with
+  one-second sleeps after failures, followed by the initial UI probe and up to
+  60 UI retries with one-second sleeps after failures. An already-healthy daemon
+  passes the health stage on its first probe. These are bounded attempt counts,
+  not a strict wall-clock deadline; command runtimes add time. Avoiding a restart
+  must not remove the initial health allowance. UI success still requires the
+  existing complete-bundle checks. A detached shim intentionally exits zero even
+  when readiness is exhausted; `ui_wait_end rc=1` reports that failure separately.
+- The marker names the primary guest mount, including a disposable clone's guest
+  path. Secondary mounts are ignored. An overridden attach cwd can still require
+  a different root and restart. Startup never resets a warm configuration to the
+  primary root.
 
 - The UI is available after `acq create`/`acq run` with no manual step.
 - Opening a project via `acq run` pins its worktree root and triggers exactly one

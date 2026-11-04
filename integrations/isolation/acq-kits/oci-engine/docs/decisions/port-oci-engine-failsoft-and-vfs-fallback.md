@@ -155,6 +155,18 @@ direction and flagged six implementation defects, all addressed here:
    `/usr/local/lib/acq/oci-engine/` as root-owned files, and execute/source only
    those trusted copies. The grant script does not fall back to agent-home staging.
 
+   > **Superseded in part** by the `readonly: true` startup files (quickstart
+   > ADR-0035). The grant script and storage helper are now declared `readonly`:
+   > a consumer that honors the flag runs them from a read-only host mount and the
+   > install step has nothing to publish. The startup command then fails closed:
+   > tokens under `/var/lib/acq/host/kit-files/` run only if the files exist (a
+   > missing selected file is a refusal, never a fallback to the root-owned copy);
+   > only the explicit legacy case, both tokens still `/home/agent/*`, uses the
+   > root-owned copy; any other or mixed pair is refused. The grant script
+   > re-validates the helper it sources the same way. The invariant is unchanged:
+   > root startup code never runs from an agent-writable path. The install step
+   > still trusts `/home/agent` at create time, before the agent's first session.
+
 8. **Stale device grant after podman disappears.** The no-podman startup path now
    best-effort resets `/dev/net/tun` and `/dev/fuse` to `root:root` `0600` before
    exiting, so a grant from an earlier successful boot is not intentionally left in

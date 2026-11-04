@@ -19,6 +19,7 @@ import { readFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { test } from "node:test"
+import { spawnSync } from "node:child_process"
 
 import { describeDrift, substantive } from "../scripts/build-catalog.mjs"
 
@@ -43,6 +44,12 @@ test("substantive() strips provenance and keeps rendered content", () => {
 test("identical catalogs report no drift", () => {
   const drift = describeDrift(substantive(loadCatalog()), substantive(loadCatalog()))
   assert.deepEqual(drift, [])
+})
+
+test("default --check uses the committed 24-model production catalog", () => {
+  const result = spawnSync(process.execPath, ["scripts/build-catalog.mjs", "--check"], { cwd: USAI_DIR, encoding: "utf8" })
+  assert.equal(result.status, 0, result.stderr)
+  assert.equal(loadCatalog().models.length, 24)
 })
 
 test("a sources-only difference is NOT drift", () => {

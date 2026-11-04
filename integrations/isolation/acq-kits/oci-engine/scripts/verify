@@ -210,22 +210,63 @@ info "4. Trusted root startup payloads are root-owned"
 # The root startup command must not execute or source agent-home staging files on
 # later boots. The install step publishes trusted copies under /usr/local/lib.
 trusted="$(in_sbx 'for f in /usr/local/lib/acq /usr/local/lib/acq/oci-engine /usr/local/lib/acq/oci-engine/oci-engine-install.sh /usr/local/lib/acq/oci-engine/oci-engine-grant-devs.sh /usr/local/lib/acq/oci-engine/oci-engine-storage-driver.sh; do [ -e "$f" ] || { echo "missing:$f"; continue; }; stat -c "%u:%g %a %n" "$f" 2>/dev/null || echo "stat-failed:$f"; done')"
-if printf '%s\n' "$trusted" | grep -q '^missing:'; then
-  bad "trusted root startup path missing"
-  printf '        %s\n' "$trusted" >&2
-elif printf '%s\n' "$trusted" | grep -q '^stat-failed:'; then
+# The grant script and storage helper are `readonly: true` kit files. A consumer
+# that honors the flag serves them from a host-authoritative read-only mount
+# (/var/lib/acq/host/kit-files/<slug>.<crc>) and does not publish them under
+# /usr/local/lib; one that ignores the flag publishes root-owned copies. Either is
+# fine, but ONE of them must be true for each file: a mount copy (probed here by
+# the same slug/cksum name acq derives) or a root-owned published copy. Neither
+# means the startup step has nothing to run, which FAILS this check. The startup
+# step fails closed: when the consumer honored `readonly` (no agent-home copy), a
+# missing mount file is a failure even if a root-owned copy exists, because the
+# startup step will not use that copy.
+ro_probe='for p in /home/agent/oci-engine-grant-devs.sh /home/agent/oci-engine-config/oci-engine-storage-driver.sh; do s=$(printf "%s" "${p#/}" | tr -c "A-Za-z0-9" "-" | tr -s "-"); s=${s%-}; c=$(printf "%s" "$p" | cksum | cut -d" " -f1); if [ -f "/var/lib/acq/host/kit-files/$s.$c" ]; then echo "mount:$p"; else echo "nomount:$p"; fi; done'
+ro_state="$(in_sbx "$ro_probe")"
+agent_copies="$(in_sbx 'for f in /home/agent/oci-engine-grant-devs.sh /home/agent/oci-engine-config/oci-engine-storage-driver.sh; do [ -e "$f" ] && echo "present:$f"; done; true')"
+grant_pub=0; helper_pub=0; grant_mnt=0; helper_mnt=0
+printf '%s\n' "$trusted" | grep -q '^0:0 755 /usr/local/lib/acq/oci-engine/oci-engine-grant-devs\.sh$' && grant_pub=1
+printf '%s\n' "$trusted" | grep -q '^0:0 644 /usr/local/lib/acq/oci-engine/oci-engine-storage-driver\.sh$' && helper_pub=1
+printf '%s\n' "$ro_state" | grep -q '^mount:/home/agent/oci-engine-grant-devs\.sh$' && grant_mnt=1
+printf '%s\n' "$ro_state" | grep -q '^mount:/home/agent/oci-engine-config/oci-engine-storage-driver\.sh$' && helper_mnt=1
+if printf '%s\n' "$trusted" | grep -q '^stat-failed:'; then
   bad "could not stat trusted root startup path"
   printf '        %s\n' "$trusted" >&2
-elif printf '%s\n' "$trusted" | grep -q '^0:0 755 /usr/local/lib/acq$' \
+elif printf '%s\n' "$trusted" | grep -q -E '^missing:/usr/local/lib/acq(/oci-engine(/oci-engine-install\.sh)?)?$'; then
+  bad "trusted root startup path missing"
+  printf '        %s\n' "$trusted" >&2
+elif ! { printf '%s\n' "$trusted" | grep -q '^0:0 755 /usr/local/lib/acq$' \
   && printf '%s\n' "$trusted" | grep -q '^0:0 755 /usr/local/lib/acq/oci-engine$' \
-  && printf '%s\n' "$trusted" | grep -q '^0:0 755 /usr/local/lib/acq/oci-engine/oci-engine-install\.sh$' \
-  && printf '%s\n' "$trusted" | grep -q '^0:0 755 /usr/local/lib/acq/oci-engine/oci-engine-grant-devs\.sh$' \
-  && printf '%s\n' "$trusted" | grep -q '^0:0 644 /usr/local/lib/acq/oci-engine/oci-engine-storage-driver\.sh$'; then
-  ok "trusted startup path and payloads are root-owned under /usr/local/lib/acq/oci-engine"
-  printf '        %s\n' "$(printf '%s' "$trusted" | tr '\n' ';')"
-else
+  && printf '%s\n' "$trusted" | grep -q '^0:0 755 /usr/local/lib/acq/oci-engine/oci-engine-install\.sh$'; }; then
   bad "trusted startup path ownership/mode unexpected"
   printf '        %s\n' "$trusted" >&2
+elif [ "$grant_mnt" -ne "$helper_mnt" ]; then
+  # The startup step classifies the two tokens together; a pair split between the
+  # mount and the legacy path is refused, so device grant and storage
+  # re-evaluation do not run.
+  bad "only one of the grant script and storage helper is on the read-only mount: the startup step refuses a mixed selection"
+  printf '        %s\n        %s\n' "$trusted" "$ro_state" >&2
+elif [ -z "$agent_copies" ] && { [ "$grant_mnt" -eq 0 ] || [ "$helper_mnt" -eq 0 ]; }; then
+  # No agent-home copy means the consumer honored `readonly` and selected the
+  # mount for the startup tokens. A missing mount file then makes the startup
+  # command refuse (fail closed) instead of falling back to a root-owned copy.
+  bad "readonly was honored (no agent-home copy) but a selected mount file is missing: the startup step refuses, so device grant and storage re-evaluation do NOT run"
+  printf '        %s\n        %s\n' "$trusted" "$ro_state" >&2
+elif [ "$grant_pub" -eq 0 ] && [ "$grant_mnt" -eq 0 ]; then
+  bad "startup grant script is neither on the read-only mount nor published root-owned: device grant would not run (install failed, or mount absent)"
+  printf '        %s\n        %s\n' "$trusted" "$ro_state" >&2
+elif [ "$helper_pub" -eq 0 ] && [ "$helper_mnt" -eq 0 ]; then
+  bad "storage helper is neither on the read-only mount nor published root-owned: storage re-evaluation would not run"
+  printf '        %s\n        %s\n' "$trusted" "$ro_state" >&2
+elif [ "$grant_pub" -eq 0 ] && [ -n "$agent_copies" ]; then
+  bad "grant script runs from the read-only mount but a writable agent-home copy also exists"
+  printf '        %s\n' "$agent_copies" >&2
+else
+  if [ "$grant_mnt" -eq 1 ]; then
+    ok "root startup code is on the read-only mount (consumer honored readonly)"
+  else
+    ok "root startup code published root-owned under /usr/local/lib/acq/oci-engine (consumer ignored readonly)"
+  fi
+  printf '        %s\n' "$(printf '%s %s' "$trusted" "$ro_state" | tr '\n' ';')"
 fi
 
 info "5. rootless podman info succeeds as the agent"

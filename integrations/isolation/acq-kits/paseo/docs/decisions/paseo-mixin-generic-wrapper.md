@@ -27,15 +27,21 @@ agent-neutral shim.**
 
 - **Thin wrapper** (`~/.local/bin/opencode`) — the ONLY agent-specific file:
   - **With arguments:** `exec`s the real opencode unchanged.
-  - **With no arguments:** `exec`s the generic shim (`~/paseo-agent-shim`).
+  - **With no arguments as PID 1:** `exec`s the generic shim
+    (`~/paseo-agent-shim`) to hold the sandbox entrypoint open.
+  - **With no arguments outside PID 1:** `exec`s the real OpenCode TUI. A
+    shell or `acq exec` invocation must not repin the global worktree root or
+    restart the daemon.
 - **Generic shim** (`~/paseo-agent-shim`) — knows nothing about any agent. It
   pins Paseo's worktree root to `<PWD>/.paseo-worktrees` (see
   `worktrees-root-global-only.md`), prints host-connect instructions, then
   discriminates on `$$`:
   - **PID 1** (the `acq run` entrypoint): `hold_pid1` — block forever so the
     session's sandbox stays up.
-  - **not PID 1** (a shell / `acq exec`, with a detached `acq create` holding the
-    sandbox): exit cleanly and return the terminal.
+  - **not PID 1** (if invoked directly): it still runs the root-pinning and
+    daemon checks before reporting status and returning. The thin wrapper no
+    longer sends shell or `acq exec` invocations to this path; do not call the
+    shim directly from an unrelated project directory.
   - Offers **no** TUI attach — there is no shared Paseo session to attach to
     (`paseo-single-port-daemon.md`).
 
@@ -45,8 +51,9 @@ The PID-1 hold works because the shim inherits the wrapper's process id: when th
 wrapper was the sandbox entrypoint (PID 1), `exec`ing the shim makes the shim
 PID 1, so its `$$ -eq 1` branch fires and the hold keeps the sandbox alive.
 Running the shim as a child would give it a non-1 pid and the hold would never
-trigger. The verify script asserts the wrapper `exec`s the shim, and that the
-shim carries the `$$ -eq 1` check + `hold_pid1`.
+trigger. The verify script finds these statements in the shipped sources and
+reports them as structural checks, not a live PID-1 observation. A separate
+interactive `acq run` must demonstrate the actual entrypoint hold.
 
 ## Why passthrough cannot be dropped
 
@@ -82,13 +89,13 @@ mechanical step rather than speculative code we don't exercise.
 
 ## Consequences
 
-- The kit keeps openchamber's proven PID-1 semantics (so `acq run` keeps the
-  sandbox alive), now living in the shim; the verify script's regression guards
-  assert both the exec-into-shim seam and the shim's hold.
+- The kit retains the intended PID-1 hold semantics in the shim; the detached
+  verifier checks only source structure and marks live PID-1 behavior unverified
+  until a separate interactive `acq run` establishes it.
 - No shared terminal↔browser session, by design — surfaced in `agentContext`,
   README, and TROUBLESHOOTING.
 - All reusable logic is in one agent-neutral file (`paseo-agent-shim`); the
-  agent-specific surface is a ~25-line wrapper.
+  agent-specific surface remains a thin wrapper.
 
 ## Links
 

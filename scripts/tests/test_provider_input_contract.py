@@ -1050,6 +1050,56 @@ def test_catalog_rejects_bad_provider_id(catalog_schema, bad_id):
 
 
 # ---------------------------------------------------------------------------
+# acq-neutral-model-catalog/v1 — optional capability metadata
+# ---------------------------------------------------------------------------
+
+
+def _catalog_with_model(model: dict) -> dict:
+    return {
+        "schemaVersion": "acq-neutral-model-catalog/v1",
+        "providerId": "usai",
+        "models": [{"id": "m", **model}],
+    }
+
+
+@pytest.mark.parametrize(
+    "capabilities",
+    [
+        {},
+        {"reasoning": True},
+        {"reasoning": False},
+        {"inputModalities": ["text"]},
+        {"inputModalities": ["text", "image", "audio", "video", "pdf"]},
+        {"reasoning": False, "inputModalities": ["text", "image"]},
+    ],
+)
+def test_catalog_accepts_capability_metadata(catalog_schema, capabilities):
+    """Absent (unknown), false/text-only (known), and true/image (known) are all valid."""
+    _validate(_catalog_with_model(capabilities), catalog_schema)
+
+
+@pytest.mark.parametrize(
+    "capabilities",
+    [
+        {"reasoning": "true"},
+        {"reasoning": 1},
+        {"reasoning": None},
+        {"inputModalities": []},
+        {"inputModalities": "image"},
+        {"inputModalities": ["hologram"]},
+        {"inputModalities": ["Image"]},
+        {"inputModalities": ["text", "text"]},
+        {"inputModalities": [1]},
+        {"inputModalities": None},
+    ],
+)
+def test_catalog_rejects_malformed_capability_metadata(catalog_schema, capabilities):
+    """Non-boolean reasoning and non-allowlisted/empty/duplicate modalities fail closed."""
+    with pytest.raises(jsonschema.ValidationError):
+        _validate(_catalog_with_model(capabilities), catalog_schema)
+
+
+# ---------------------------------------------------------------------------
 # Existing shipped snapshot compatibility (usai-provider kit)
 # ---------------------------------------------------------------------------
 

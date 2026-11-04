@@ -9,14 +9,14 @@
 // This script derives `integrations/providers/usai/catalog.json` (schema
 // `usai-model-catalog/v1`). It DOES NOT render any harness config — the RENDER
 // half (the opencode.jsonc emitter) lives in a later issue and consumes this
-// catalog. The byte-exact round-trip test against the shipped opencode.jsonc is
+// catalog. The byte-exact round-trip test against the renderer contract fixture is
 // the safety gate; therefore the FIRST committed catalog.json is BOOTSTRAPPED
 // from that shipped file's `// BEGIN GENERATED USAI MODELS` block so it exactly
 // represents today's models. Live-feed mode (fetch USAi + models.dev) is
 // provided for future regeneration.
 //
 // Modes:
-//   (default, no flags)     bootstrap catalog.json from the shipped opencode.jsonc
+//   (default, no flags)     bootstrap catalog.json from the prior shipped production config
 //                           GENERATED block (offline, deterministic).
 //   --models-url <path|url> read the USAi model list from a local path or URL.
 //   --no-enrichment         do not fetch/read models.dev; use only the models
@@ -27,6 +27,18 @@
 //   --opencode-jsonc <path> override the bootstrap source path.
 //   --out <path>            override the output catalog.json path.
 //   --check                 do not write; fail if catalog.json has drifted.
+//   --include-capabilities  OPT-IN: copy reasoning/input-modality values from the
+//                           matched models.dev entry into live-feed output. Off by
+//                           default because models.dev describes the upstream
+//                           provider, not what the USAi gateway forwards; output
+//                           produced with this flag must not be committed until each
+//                           value has per-model, per-field evidence (the synthetic-
+//                           image procedure covers image input only; see ADR 0006
+//                           and the opencode kit's synthetic-image-validation.md).
+//                           sources.capabilitiesVerified is a catalog-wide release
+//                           reminder, not that evidence. With the
+//                           flag, --check against a capability-free catalog.json
+//                           reports drift by design.
 //
 // What --check compares: the SUBSTANTIVE catalog — schemaVersion, gateway,
 // vendors, and models. It deliberately IGNORES the `sources` block, which
@@ -69,11 +81,11 @@ const DEFAULT_OUT = path.join(USAI_DIR, "catalog.json")
 const DEFAULT_SCHEMA = path.join(USAI_DIR, "catalog.schema.json")
 const DEFAULT_OPENCODE_JSONC = path.join(
   REPO_ROOT,
-  "integrations/isolation/acq-kits/usai-provider/files/home/usai-config/opencode.jsonc",
+  "integrations/providers/usai/tests/fixtures/opencode-production.jsonc",
 )
 // Path recorded in catalog.sources.bootstrappedFrom — repo-relative, stable.
 const OPENCODE_JSONC_REL =
-  "integrations/isolation/acq-kits/usai-provider/files/home/usai-config/opencode.jsonc"
+  "integrations/providers/usai/tests/fixtures/opencode-production.jsonc"
 
 const GENERATED_START = "// BEGIN GENERATED USAI MODELS"
 const GENERATED_END = "// END GENERATED USAI MODELS"
@@ -440,6 +452,68 @@ function normalizeLimit(value, fallback) {
 }
 
 // -----------------------------------------------------------------------------
+// Capability metadata (reasoning, input modalities).
+//
+// Three states are kept distinct on purpose: field ABSENT = unknown, `false` /
+// ["text"] = known unsupported / text-only, `true` / [..."image"...] = known
+// supported. Nothing here is inferred from a model id or name; a model with no
+// precise models.dev match carries no capability fields at all.
+//
+// models.dev describes the UPSTREAM provider's deployment, not necessarily what
+// the USAi gateway forwards. Copying it is therefore OPT-IN (--include-capabilities)
+// and provenance-labelled (sources.capabilities); the values must be confirmed
+// against the gateway by the live synthetic-image procedure before being
+// committed or relied on.
+//
+// The allowlist mirrors the modality names OpenCode's model config accepts and
+// the neutral/USAi catalog schemas. Canonical order keeps output deterministic.
+// -----------------------------------------------------------------------------
+const INPUT_MODALITIES = ["text", "image", "audio", "video", "pdf"]
+
+function normalizeInputModalities(value, where) {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(`${where} must be a non-empty array of modality names`)
+  }
+  for (const entry of value) {
+    if (!INPUT_MODALITIES.includes(entry)) {
+      throw new Error(`${where} contains unsupported modality ${JSON.stringify(entry)}; allowed: ${INPUT_MODALITIES.join(", ")}`)
+    }
+  }
+  if (new Set(value).size !== value.length) throw new Error(`${where} must not contain duplicates`)
+  return INPUT_MODALITIES.filter((modality) => value.includes(modality))
+}
+
+// Upstream data is untrusted and not ours to fail on: a malformed models.dev
+// capability field is treated as UNKNOWN (omitted) with a stderr warning, so one
+// bad upstream entry cannot abort the whole catalog build. Our own committed
+// data (bootstrap block, catalog.json) stays fail-closed.
+function capabilitiesFromModelsDev(data, id) {
+  const out = {}
+  let malformed = false
+  const unknown = (why) => {
+    malformed = true
+    process.stderr.write(`  WARNING models.dev ${id}: ${why}; capability treated as unknown\n`)
+  }
+  if (data.reasoning !== undefined) {
+    if (typeof data.reasoning === "boolean") out.reasoning = data.reasoning
+    else unknown("reasoning is not a boolean")
+  }
+  const modalities = data.modalities
+  if (modalities !== undefined) {
+    if (!modalities || typeof modalities !== "object" || Array.isArray(modalities)) {
+      unknown("modalities is not an object")
+    } else if (modalities.input !== undefined) {
+      try {
+        out.inputModalities = normalizeInputModalities(modalities.input, `modalities.input`)
+      } catch (error) {
+        unknown(error.message)
+      }
+    }
+  }
+  return { capabilities: out, malformed }
+}
+
+// -----------------------------------------------------------------------------
 // Bounded fetch + shape validation (mirrors the monolith hardening).
 // -----------------------------------------------------------------------------
 async function readBodyCapped(response, ref) {
@@ -600,7 +674,7 @@ function extractUsaiList(payload) {
 }
 
 // -----------------------------------------------------------------------------
-// Bootstrap: parse the shipped opencode.jsonc GENERATED block into catalog
+// Bootstrap: parse the renderer contract's GENERATED block into catalog
 // models, translating opencode cost keys -> catalog cost keys. This preserves
 // model ORDER and vendor grouping exactly as the block declares them.
 // -----------------------------------------------------------------------------
@@ -694,6 +768,16 @@ function bootstrapModelsFromBlock(entries) {
       }
       if (Object.keys(above).length > 0) model.costAbove200kContext = above
     }
+    if (obj.reasoning !== undefined) {
+      if (typeof obj.reasoning !== "boolean") throw new Error(`bootstrap: ${id}.reasoning must be a boolean`)
+      model.reasoning = obj.reasoning
+    }
+    if (obj.modalities !== undefined && (obj.modalities === null || typeof obj.modalities !== "object" || Array.isArray(obj.modalities))) {
+      throw new Error(`bootstrap: ${id}.modalities must be an object`)
+    }
+    if (obj.modalities?.input !== undefined) {
+      model.inputModalities = normalizeInputModalities(obj.modalities.input, `bootstrap: ${id}.modalities.input`)
+    }
     models.push(model)
   }
   reportExclusions(excluded)
@@ -769,7 +853,7 @@ export function reportUnenriched(unenriched, enrichmentAttempted) {
   }
 }
 
-function shapeFromFeeds(usaiList, modelsDevCatalog) {
+function shapeFromFeeds(usaiList, modelsDevCatalog, { includeCapabilities = false } = {}) {
   usaiList = extractUsaiList(usaiList)
   // Chat models only, preserve incoming list order but group by vendor display
   // order for a stable catalog.
@@ -800,6 +884,8 @@ function shapeFromFeeds(usaiList, modelsDevCatalog) {
   const vendorOrder = []
   const models = []
   const unenriched = []
+  let capabilityMatches = 0
+  let capabilityMalformed = 0
   for (const p of parsed) {
     if (!vendorOrder.includes(p.vendor)) vendorOrder.push(p.vendor)
     const model = { id: p.id, vendor: p.vendor, name: p.name }
@@ -807,6 +893,7 @@ function shapeFromFeeds(usaiList, modelsDevCatalog) {
     let output = Number.isInteger(p.raw.max_output_tokens) && p.raw.max_output_tokens > 0 ? p.raw.max_output_tokens : null
     let baseCost = null
     let above = null
+    let capabilities = {}
     let matched = false
     if (modelsDevCatalog) {
       for (const { models: providerModels } of providerModelMaps(p.vendor, modelsDevCatalog)) {
@@ -822,6 +909,12 @@ function shapeFromFeeds(usaiList, modelsDevCatalog) {
           const norm = normalizeCostFromModelsDev(match.data.cost)
           baseCost = norm.cost
           above = norm.costAbove200kContext
+          if (includeCapabilities) {
+            const result = capabilitiesFromModelsDev(match.data, match.id)
+            capabilities = result.capabilities
+            capabilityMatches += 1
+            if (result.malformed) capabilityMalformed += 1
+          }
           break
         }
       }
@@ -838,9 +931,14 @@ function shapeFromFeeds(usaiList, modelsDevCatalog) {
     model.maxOutputTokens = normalizeLimit(output, FALLBACK_LIMITS.output)
     if (baseCost) model.cost = baseCost
     if (above) model.costAbove200kContext = above
+    if (capabilities.reasoning !== undefined) model.reasoning = capabilities.reasoning
+    if (capabilities.inputModalities !== undefined) model.inputModalities = capabilities.inputModalities
     models.push(model)
   }
   reportUnenriched(unenriched, Boolean(modelsDevCatalog))
+  if (capabilityMalformed > 0) {
+    process.stderr.write(`${capabilityMalformed} of ${capabilityMatches} matched models had malformed capability data\n`)
+  }
   return { models, vendorOrder }
 }
 
@@ -892,6 +990,27 @@ function validateCatalog(catalog, schema) {
   }
 
   assert(catalog.schemaVersion === SCHEMA_VERSION, `schemaVersion must be "${SCHEMA_VERSION}"`, errors)
+
+  // recommendations (optional): role names come from the schema, and every
+  // value must name a model that is actually in models[].
+  if ("recommendations" in catalog) {
+    const recs = catalog.recommendations
+    if (!recs || typeof recs !== "object" || Array.isArray(recs)) {
+      errors.push("recommendations must be an object")
+    } else {
+      const roles = new Set(Object.keys(schema.properties.recommendations.properties))
+      const ids = new Set(Array.isArray(catalog.models) ? catalog.models.map((m) => m?.id) : [])
+      for (const [role, modelId] of Object.entries(recs)) {
+        if (!roles.has(role)) {
+          errors.push(`recommendations: disallowed role "${role}" (allowed: ${[...roles].join(", ")})`)
+        } else if (typeof modelId !== "string" || modelId.length === 0) {
+          errors.push(`recommendations.${role} must be a non-empty string`)
+        } else if (!ids.has(modelId)) {
+          errors.push(`recommendations.${role} references "${modelId}", which is not in models[]`)
+        }
+      }
+    }
+  }
 
   // gateway
   const gw = catalog.gateway
@@ -947,6 +1066,15 @@ function validateCatalog(catalog, schema) {
       if ("maxOutputTokens" in m) assert(Number.isInteger(m.maxOutputTokens) && m.maxOutputTokens > 0, `models[${idx}].maxOutputTokens must be a positive integer`, errors)
       validateCost(m.cost, `models[${idx}]`, errors)
       validateCost(m.costAbove200kContext, `models[${idx}]`, errors)
+      if ("reasoning" in m) assert(typeof m.reasoning === "boolean", `models[${idx}].reasoning must be a boolean`, errors)
+      if ("inputModalities" in m) {
+        const list = m.inputModalities
+        assert(
+          Array.isArray(list) && list.length > 0 && new Set(list).size === list.length && list.every((entry) => INPUT_MODALITIES.includes(entry)),
+          `models[${idx}].inputModalities must be a non-empty, unique array of ${INPUT_MODALITIES.join("|")}`,
+          errors,
+        )
+      }
     }
   }
   return errors
@@ -957,7 +1085,8 @@ function validateCatalog(catalog, schema) {
 // newline. Order is stable so the committed catalog.json is reproducible.
 // -----------------------------------------------------------------------------
 const KEY_ORDER = {
-  root: ["schemaVersion", "generatedBy", "sources", "gateway", "vendors", "models"],
+  root: ["schemaVersion", "generatedBy", "sources", "recommendations", "gateway", "vendors", "models"],
+  recommendations: ["primary", "small", "compaction", "summary", "title"],
   gateway: ["host", "baseUrl", "api", "apiKeyEnv"],
   vendor: ["key", "label", "order", "usaiBackend"],
   model: ["id", "vendor", "name", "contextWindow", "maxOutputTokens", "cost", "costAbove200kContext", "reasoning", "inputModalities"],
@@ -974,6 +1103,9 @@ function orderObject(obj, order) {
 
 function orderCatalog(catalog) {
   const out = orderObject(catalog, KEY_ORDER.root)
+  if (out.recommendations && typeof out.recommendations === "object" && !Array.isArray(out.recommendations)) {
+    out.recommendations = orderObject(out.recommendations, KEY_ORDER.recommendations)
+  }
   if (out.gateway) out.gateway = orderObject(out.gateway, KEY_ORDER.gateway)
   if (Array.isArray(out.vendors)) out.vendors = out.vendors.map((v) => orderObject(v, KEY_ORDER.vendor))
   if (Array.isArray(out.models)) {
@@ -1010,7 +1142,7 @@ function parseArgs(argv) {
   const args = { flags: new Set(), opts: {} }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
-    if (a === "--no-enrichment" || a === "--bootstrap" || a === "--check") {
+    if (a === "--no-enrichment" || a === "--bootstrap" || a === "--check" || a === "--include-capabilities") {
       args.flags.add(a)
     } else if (a === "--models-url" || a === "--models-dev" || a === "--opencode-jsonc" || a === "--out" || a === "--schema") {
       args.opts[a] = argv[++i]
@@ -1024,6 +1156,72 @@ function parseArgs(argv) {
   return args
 }
 
+/**
+ * Role defaults are curated by a human, not derived from the feeds, so a
+ * regeneration must carry them forward. Returns the existing catalog's
+ * `recommendations` object, or undefined when there is nothing to carry:
+ *   - the file does not exist (first generation), or
+ *   - the file is a catalog (right schemaVersion, models[] array) that has no
+ *     `recommendations` yet; there are no roles to lose.
+ * Anything else that exists at the output path is an error. In particular a
+ * file that parses as JSON but is not a catalog (`[]`, `null`, `123`, `{}`, a
+ * catalog with no models[]) must never be silently overwritten with a catalog
+ * that has no roles, because that is the failure this guards against.
+ */
+async function readExistingRecommendations(catalogPath) {
+  let raw
+  try {
+    raw = await readFile(catalogPath, "utf8")
+  } catch (error) {
+    if (error?.code === "ENOENT") return undefined
+    throw error
+  }
+  const refuse = (why) =>
+    new Error(
+      `cannot carry recommendations forward: ${catalogPath} ${why}.\n` +
+        `  Repair or remove it, then re-run. The catalog was NOT written.`,
+    )
+  let existing
+  try {
+    existing = JSON.parse(raw)
+  } catch {
+    throw refuse("exists but is not valid JSON")
+  }
+  if (!existing || typeof existing !== "object" || Array.isArray(existing)) {
+    throw refuse("is valid JSON but not a catalog object")
+  }
+  if (existing.schemaVersion !== SCHEMA_VERSION) {
+    throw refuse(`is not a ${SCHEMA_VERSION} catalog (schemaVersion is ${JSON.stringify(existing.schemaVersion)})`)
+  }
+  if (!Array.isArray(existing.models)) {
+    throw refuse("is a catalog without a models[] array")
+  }
+  return existing.recommendations
+}
+
+/**
+ * Keep the existing role defaults. If any recommended model is no longer in
+ * the regenerated model list, fail closed: a human must pick the replacement.
+ * No role is ever re-chosen automatically.
+ */
+function carryForwardRecommendations(recommendations, models, where = "catalog.json") {
+  if (recommendations === undefined) return undefined
+  if (!recommendations || typeof recommendations !== "object" || Array.isArray(recommendations)) {
+    throw new Error(`recommendations in ${where} must be an object. The catalog was NOT written.`)
+  }
+  const ids = new Set(models.map((m) => m.id))
+  const gone = Object.entries(recommendations).filter(([, id]) => !ids.has(id))
+  if (gone.length) {
+    throw new Error(
+      `recommended model(s) are no longer in the model list:\n` +
+        gone.map(([role, id]) => `  - ${role}: ${id}`).join("\n") +
+        `\n  Choose a replacement for each role, set it under "recommendations" in ${where}, ` +
+        `and re-run. The catalog was NOT written.`,
+    )
+  }
+  return { ...recommendations }
+}
+
 async function buildCatalog(args) {
   const schemaPath = args.opts["--schema"] || DEFAULT_SCHEMA
   const schema = JSON.parse(await readFile(schemaPath, "utf8"))
@@ -1031,6 +1229,9 @@ async function buildCatalog(args) {
   const modelsUrl = args.opts["--models-url"]
   const noEnrichment = args.flags.has("--no-enrichment")
   const forceBootstrap = args.flags.has("--bootstrap")
+  if (args.flags.has("--include-capabilities") && (!modelsUrl || forceBootstrap)) {
+    throw new Error("--include-capabilities requires --models-url and cannot be combined with --bootstrap")
+  }
 
   let catalog
   if (modelsUrl && !forceBootstrap) {
@@ -1044,20 +1245,23 @@ async function buildCatalog(args) {
       if (raw && typeof raw === "object" && !Array.isArray(raw)) modelsDevCatalog = raw
       else throw new Error("models.dev source has unexpected shape (expected provider-keyed object)")
     }
-    const { models, vendorOrder } = shapeFromFeeds(usaiList, modelsDevCatalog)
+    const includeCapabilities = args.flags.has("--include-capabilities")
+    if (includeCapabilities && !modelsDevCatalog) throw new Error("--include-capabilities requires models.dev enrichment (omit --no-enrichment)")
+    const { models, vendorOrder } = shapeFromFeeds(usaiList, modelsDevCatalog, { includeCapabilities })
     catalog = {
       schemaVersion: SCHEMA_VERSION,
       generatedBy: GENERATED_MARKER,
       sources: {
         modelsList: modelsUrl,
         enrichment: noEnrichment ? "(none)" : (args.opts["--models-dev"] || MODELS_DEV_URL),
+        ...(includeCapabilities ? { capabilities: "models.dev upstream provider data; not verified against the USAi gateway" } : {}),
       },
       gateway: buildGateway(),
       vendors: buildVendors(vendorOrder),
       models,
     }
   } else {
-    // Bootstrap from the shipped opencode.jsonc GENERATED block (default).
+    // Bootstrap from the renderer contract's GENERATED block (default).
     const opencodePath = args.opts["--opencode-jsonc"] || DEFAULT_OPENCODE_JSONC
     const jsoncText = await readFile(opencodePath, "utf8")
     const block = extractGeneratedBlock(jsoncText)
@@ -1077,6 +1281,13 @@ async function buildCatalog(args) {
       models,
     }
   }
+
+  const carried = carryForwardRecommendations(
+    await readExistingRecommendations(args.opts["--out"] || DEFAULT_OUT),
+    catalog.models,
+    args.opts["--out"] || DEFAULT_OUT,
+  )
+  if (carried !== undefined) catalog.recommendations = carried
 
   const errors = validateCatalog(catalog, schema)
   if (errors.length) {
@@ -1105,6 +1316,15 @@ function describeDrift(existing, fresh) {
   for (const key of ["schemaVersion", "generatedBy"]) {
     if (existing?.[key] !== fresh?.[key]) {
       lines.push(`${key}: ${JSON.stringify(existing?.[key])} -> ${JSON.stringify(fresh?.[key])}`)
+    }
+  }
+  const rolesBefore = existing?.recommendations ?? {}
+  const rolesAfter = fresh?.recommendations ?? {}
+  for (const role of [...new Set([...Object.keys(rolesBefore), ...Object.keys(rolesAfter)])].sort()) {
+    if (rolesBefore[role] !== rolesAfter[role]) {
+      lines.push(
+        `recommendations.${role}: ${JSON.stringify(rolesBefore[role] ?? "(none)")} -> ${JSON.stringify(rolesAfter[role] ?? "(none)")}`,
+      )
     }
   }
   if (JSON.stringify(existing?.gateway) !== JSON.stringify(fresh?.gateway)) {
@@ -1171,6 +1391,7 @@ export {
   serialize,
   substantive,
   describeDrift,
+  carryForwardRecommendations,
   parseBootstrapModels,
   bootstrapModelsFromBlock,
   shapeFromFeeds,
@@ -1178,6 +1399,7 @@ export {
   classifyVendor,
   nonChatReason,
   NON_CHAT_MODELS,
+  INPUT_MODALITIES,
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

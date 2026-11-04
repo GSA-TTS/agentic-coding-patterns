@@ -82,17 +82,18 @@ or downgrades `msb` while a sandbox has a published port), not only by accident.
 
 ## Decision
 
-**Add an identity gate: `scripts/paseo-verify-identity <sandbox>`.** It asserts
-that the host-published port and `acq exec` resolve to the **same**
-`~/.paseo/server-id`, and exits non-zero when they do not. It is read-only and
-makes no changes.
+**Add an identity gate: `scripts/paseo-verify-identity <sandbox>`.** It compares
+the live WebSocket `server_info` IDs from the published IPv4 endpoint and the
+guest daemon accessed through `acq exec`. The guest-writable `server-id` file is
+diagnostic only. It is read-only and makes no changes.
 
 Design constraints, each learned from a concrete failure:
 
 - **Compare the ids to each other, never to a remembered value.** The id changes
   whenever the VM is recreated, so any hardcoded expectation rots immediately.
-  The gate also fails when the three host probes disagree *among themselves*,
-  which means multiple backends behind one port.
+  Only the published IPv4 mapping and guest runtime determine the identity
+  verdict. `localhost` and IPv4-mapped probes are advisory: a name can reach a
+  different address family and listener.
 - **Resolve the host port from `acq ports`; never assume host == guest.** The
   post-hoc publish path maps a different host port, and a probe hardcoded to
   `6767` would silently test the wrong endpoint. Derived hex for `/proc/net/tcp`
@@ -131,11 +132,9 @@ explains what to check rather than asserting a specific failure mode.
 
 - A wrong-daemon route is caught in one command, before it presents as an
   authentication error two layers away from its cause.
-- The gate diagnoses but does **not** remediate: it prints the `kill`/restart
-  sequence and requires a human to run it. Killing a process by PID is not a
-  safe automatic action — if the listener is *not* launchd-adopted it may have
-  siblings under a supervisor, so the instructions say to investigate the parent
-  before `kill -9`.
+- The gate diagnoses but does **not** remediate. It does not recommend killing a
+  listener by PID: the listener can be the current sandbox's `msb machine` VM.
+  Confirm ownership and use the owner's supported lifecycle before remediation.
 - The gate cannot distinguish "UI not yet opened" from "host traffic landing
   elsewhere" on its own; the `"peer":"external"` vs `"peer":"loopback"` client
   counts in `daemon.log` are reported as a **warning** with both readings
@@ -163,15 +162,19 @@ defects, all fixed and re-verified:
 
 Predicate tables (post-fix):
 
-- Orphan age: observed healthy (age 1001s vs uptime 1000s) → PASS; the real
-  orphan (7 days vs 1 day) → FAIL; slack boundary 1120 → PASS, 1121 → FAIL.
+- Historical orphan-age predicate: the original test classified 7 days vs 1
+  day as FAIL and the slack boundary at 1120/1121. Host sleep later showed that
+  guest uptime can pause while host process elapsed time advances. The current
+  gate warns on age discrepancy when live host/guest IDs agree and fails if
+  identity is not established.
 - Loopback ordering: observed `127.0.0.1 ::1` + IPv4 → silent; `::1 127.0.0.1` +
   IPv4 → note; `::1` + IPv6 → silent.
 - Build compare: the two observed real paths (`microsandbox-acq/0.6.18` vs
   `microsandbox/0.7.2`) → warns; same prefix → PASS; non-Cellar path → PASS (no
   false warning when no prefix is extractable).
-- Verdict matrix: ids agree → pass; mismatch → fail; two distinct host ids →
-  fail; no host id → fail.
+- Historical verdict matrix compared file/host IDs and all host aliases. The
+  current gate compares live published IPv4 and guest runtime IDs; an absent or
+  mismatched required ID fails, while alias differences are advisory.
 - `bash -n` clean.
 
 A fourth defect was found and fixed in the standalone precursor: `mktemp -t`
@@ -216,11 +219,13 @@ bind [::1]:<port> while the IPv4 forwarder holds *:<port>   → both bind, no co
 That is the same wrong-daemon class this gate exists to catch, reachable by name
 resolution instead of by a stale forwarder, and reproducible on demand.
 
-**End-to-end confirmation of the underlying fix** (separate from the gate):
+**Historical end-to-end confirmation of the underlying fix** (separate from the current gate):
 after killing the stale forwarder, `"peer":"external"` client counts went from
 **0 → 110**, and a live agent round-trip in the browser UI succeeded. Per the
-periodic end-to-end validation discipline, the gate's own PASS path is verified
-against a live sandbox, not a mock.
+periodic end-to-end validation discipline, the earlier gate's PASS path was
+verified against a live sandbox. The revised runtime-to-runtime gate requires a
+separate live check at its own revision; the historical observation does not
+certify the new protocol parser.
 
 ## Links
 
