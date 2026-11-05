@@ -25,6 +25,10 @@ live feeds (USAi model list + models.dev)
 
 The decision behind this lifecycle is
 [ADR 0003](../../../docs/decisions/0003-repo-time-provider-catalog-refresh.md).
+For the step-by-step maintainer procedure (refresh, review, drift issue,
+onboarding), see the [provider refresh runbook](../README.md). The weekly
+offline drift report is recorded in
+[ADR 0004](../../../docs/decisions/0004-offline-catalog-drift-workflow.md).
 
 ## Refreshing the catalog (the one command)
 
