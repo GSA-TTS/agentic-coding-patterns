@@ -108,6 +108,15 @@ make ci    # Runs all pre-commit checks, tests, and validation
 
 This gives you the same safety net as installing hooks, without requiring hook installation inside your container.
 
+### Working on Windows
+
+Linux and macOS are the primary development platforms. Windows checkouts work, with a few facts worth knowing before you file a bug against your own copy:
+
+- Creating a symlink requires **Developer Mode** (which grants `SeCreateSymbolicLinkPrivilege`), or an elevated shell.
+- Without that privilege git uses `core.symlinks=false`, and the tracked `skills` symlink is checked out as a plain 14-byte file containing its target (`.agents/skills`). `skills/` then does not materialise as a directory, so a partial checkout on Windows is expected and is not a repository defect.
+- Run Node scripts through the interpreter (`node path/to/script.mjs`) rather than exec'ing them directly: Windows does not honour `#!/usr/bin/env node` shebangs.
+- `bash` on `PATH` is often WSL, not Git Bash. Use `C:\Program Files\Git\bin\bash.exe` when you need POSIX shell behaviour.
+
 ## Content Types
 
 | Type | Directory | Use For |
