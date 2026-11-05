@@ -1,4 +1,20 @@
 // =============================================================================
+// LEGACY — provider-owned renderer, kept out of the default refresh path.
+//
+// Only the lockstep test (tests/models-json-regen.test.mjs) and
+// tests/prime-agent.test.mjs use this module. The refresh command
+// (scripts/refresh.mjs) neither runs nor imports it, so a catalog refresh does
+// not rewrite the Prime Agent kit's models.json. After a refresh that changes
+// the model set, that test fails until a person regenerates the file by hand:
+//
+//   writeFileSync(<kit>/files/home/prime-agent-config/models.json,
+//                 emitPrimeAgentModelsFromCatalog(catalog))
+//
+// Ownership of that artifact is a separate decision (see
+// docs/decisions/0003-repo-time-provider-catalog-refresh.md). Do not add this
+// module to refresh-registry.json.
+// =============================================================================
+// =============================================================================
 // prime-agent.mjs — the RENDER half of the USAi catalog pipeline (prime-agent).
 //
 // Data flow:

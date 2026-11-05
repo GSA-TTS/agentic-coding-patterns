@@ -2,7 +2,6 @@
   "schemaVersion": "usai-model-catalog/v1",
   "generatedBy": "build-catalog.mjs (generated — do not hand-edit)",
   "sources": {
-    "bootstrappedFrom": "integrations/providers/usai/tests/fixtures/opencode-renderer-contract.jsonc",
     "capabilitiesVerified": "2026-11-04; opencode 2.0.30"
   },
   "recommendations": {

@@ -185,6 +185,22 @@ The committed `inputModalities` values are listed, with their evidence, in
 [the capability evidence file](../../isolation/acq-kits/opencode/docs/capability-evidence/2026-11-04-opencode-2.0.30.md).
 See [ADR 0006](../../isolation/docs/decisions/0006-neutral-model-capability-metadata.md).
 
+## Legacy provider-owned renderers
+
+`emitters/opencode.mjs` and `emitters/prime-agent.mjs` are **legacy**. Each file
+says so in its header. The refresh never runs or imports them, and neither is a
+registered artifact, so a refresh does not write any harness-native file.
+
+- `emitters/opencode.mjs` is a test-only regression contract. The OpenCode kit
+  renders its own configuration from the neutral inputs.
+- `emitters/prime-agent.mjs` still produces the Prime Agent kit's `models.json`
+  by an explicit, manual call. After a refresh that changes the model set,
+  `tests/models-json-regen.test.mjs` fails until a person regenerates that file.
+  Who owns it is a separate decision (see ADR 0003).
+
+`tests/legacy-isolation.test.mjs` fails if either module becomes a default
+refresh step.
+
 ## Safety guarantee
 
 A byte-exact round-trip test against the durable OpenCode renderer contract is the safety
