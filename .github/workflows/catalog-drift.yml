@@ -1,0 +1,117 @@
+# Scheduled, OFFLINE-ONLY provider catalog drift signal.
+#
+# Decision record: docs/decisions/0004-offline-catalog-drift-workflow.md
+#
+# - No USAi credential is used or stored. The live feed is NOT compared; the
+#   report says BLOCKED, never PASS.
+# - Nothing is committed, pushed, or opened as a pull request.
+# - One tracking issue (stable title, label `catalog-drift`) is opened or
+#   updated by the `report` job, which has `issues: write` and nothing else.
+#   The issue is never closed automatically.
+name: Catalog Drift (offline)
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  offline-check:
+    name: Offline drift check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read # checkout only
+    outputs:
+      state: ${{ steps.report.outputs.state }}
+      report: ${{ steps.report.outputs.report }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+
+      - name: Run the offline check
+        id: check
+        run: |
+          set +e
+          node integrations/providers/usai/scripts/offline-check.mjs > "$RUNNER_TEMP/check-output.txt" 2>&1
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+        shell: bash
+
+      - name: Format the report
+        id: report
+        env:
+          CHECK_EXIT_CODE: ${{ steps.check.outputs.exit_code }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          node integrations/providers/usai/scripts/drift-report.mjs \
+            --exit-code "$CHECK_EXIT_CODE" \
+            --output-file "$RUNNER_TEMP/check-output.txt" \
+            --summary "$GITHUB_STEP_SUMMARY" \
+            --issue-body "$RUNNER_TEMP/issue-body.md" \
+            --github-output "$GITHUB_OUTPUT" \
+            --run-url "$RUN_URL"
+        shell: bash
+
+      - name: Upload the issue body
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: catalog-drift-issue-body
+          path: ${{ runner.temp }}/issue-body.md
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Fail the run when the offline check did not pass
+        env:
+          STATE: ${{ steps.report.outputs.state }}
+        run: |
+          if [ "$STATE" != "ok" ]; then
+            echo "Offline check state: $STATE" >&2
+            exit 1
+          fi
+        shell: bash
+
+  report:
+    name: Open or update the tracking issue
+    needs: offline-check
+    if: ${{ always() && needs.offline-check.outputs.report == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write # open or update the single tracking issue; nothing else
+    steps:
+      - name: Download the issue body
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: catalog-drift-issue-body
+          path: ${{ runner.temp }}/report
+
+      - name: Open or update the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE_TITLE: Provider catalog drift report
+          ISSUE_LABEL: catalog-drift
+          BODY_FILE: ${{ runner.temp }}/report/issue-body.md
+        run: |
+          set -euo pipefail
+          gh label create "$ISSUE_LABEL" --description "Provider catalog drift report" --color BFD4F2 2>/dev/null || true
+          number="$(gh issue list --state open --label "$ISSUE_LABEL" --search "\"$ISSUE_TITLE\" in:title" --json number --jq '.[0].number // empty')"
+          if [ -n "$number" ]; then
+            gh issue edit "$number" --body-file "$BODY_FILE"
+          else
+            gh issue create --title "$ISSUE_TITLE" --label "$ISSUE_LABEL" --body-file "$BODY_FILE"
+          fi
+        shell: bash
