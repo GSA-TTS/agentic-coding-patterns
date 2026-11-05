@@ -267,6 +267,28 @@ patterns:
       - blueprint plan
       - service design
       - user journey map
+  - path: skills/fips-199-categorization/SKILL.md
+    id: fips-199-categorization
+    title: FIPS 199 Security Categorization Review
+    type: skill
+    status: experimental
+    categories:
+    - security
+    - compliance
+    - review
+    collection: security
+    routing:
+      task_types:
+      - analyze
+      - review
+      input_artifacts:
+      - compliance-claim
+      - documentation
+      output_artifacts:
+      - security-review
+      aliases:
+      - CIA impact review
+      - categorization review
   - path: skills/incident-evidence-review/SKILL.md
     id: incident-evidence-review
     title: Incident Evidence Review
@@ -889,6 +911,7 @@ categories:
   - compliance-claim-checker
   - dependency-analysis
   - example-agentic-session
+  - fips-199-categorization
   - incident-evidence-review
   - least-privilege-review
   - safe-code-review
@@ -908,6 +931,7 @@ categories:
   - agentic-actions-auditor
   - backdoor-review
   - documentation-review
+  - fips-199-categorization
   - incident-evidence-review
   - issue-to-merge-request
   - least-privilege-review
@@ -944,6 +968,7 @@ categories:
   - accessibility-review
   - compliance-claim-checker
   - federal-service-blueprint
+  - fips-199-categorization
   - uswds-form-flow
   incident-response:
   - incident-evidence-review
@@ -995,6 +1020,7 @@ collections:
   - backdoor-review
   - compliance-claim-checker
   - dependency-analysis
+  - fips-199-categorization
   - incident-evidence-review
   - least-privilege-review
   - safe-code-review
@@ -1012,6 +1038,7 @@ task_types:
   - dependency-analysis
   - documentation-review
   - example-agentic-session
+  - fips-199-categorization
   - incident-evidence-review
   - least-privilege-review
   - over-engineering-review
@@ -1072,6 +1099,7 @@ task_types:
   - design-artifact
   - documentation-agent
   - documentation-review
+  - fips-199-categorization
   - incident-evidence-review
   - least-privilege-review
   - over-engineering-review
@@ -1136,6 +1164,7 @@ output_artifacts:
   - backdoor-review
   - compliance-claim-checker
   - dependency-analysis
+  - fips-199-categorization
   - incident-evidence-review
   - least-privilege-review
   - safe-code-review
@@ -1168,8 +1197,8 @@ output_artifacts:
   web-prototype:
   - uswds-prototype
 stats:
-  total_patterns: 41
-  skills: 30
+  total_patterns: 42
+  skills: 31
   prompts: 3
   agents: 3
   workflows: 4
