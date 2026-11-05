@@ -792,6 +792,31 @@ patterns:
       - executive one-pager
       - presentation deck
       priority: 70
+  - path: workflows/federal-information-assessment/SKILL.md
+    id: federal-information-assessment
+    title: Federal Information Assessment Workflow
+    type: workflow
+    status: experimental
+    categories:
+    - security
+    - compliance
+    - review
+    collection: security
+    routing:
+      task_types:
+      - analyze
+      - discover
+      - orchestrate
+      input_artifacts:
+      - compliance-claim
+      - documentation
+      output_artifacts:
+      - qa-report
+      - security-review
+      aliases:
+      - federal data assessment
+      - privacy CUI FIPS review
+      - system information risk review
   - path: workflows/issue-to-merge-request/SKILL.md
     id: issue-to-merge-request
     title: Issue to Merge Request Workflow
@@ -889,6 +914,7 @@ categories:
   - compliance-claim-checker
   - dependency-analysis
   - example-agentic-session
+  - federal-information-assessment
   - incident-evidence-review
   - least-privilege-review
   - safe-code-review
@@ -908,6 +934,7 @@ categories:
   - agentic-actions-auditor
   - backdoor-review
   - documentation-review
+  - federal-information-assessment
   - incident-evidence-review
   - issue-to-merge-request
   - least-privilege-review
@@ -943,6 +970,7 @@ categories:
   compliance:
   - accessibility-review
   - compliance-claim-checker
+  - federal-information-assessment
   - federal-service-blueprint
   - uswds-form-flow
   incident-response:
@@ -995,6 +1023,7 @@ collections:
   - backdoor-review
   - compliance-claim-checker
   - dependency-analysis
+  - federal-information-assessment
   - incident-evidence-review
   - least-privilege-review
   - safe-code-review
@@ -1012,6 +1041,7 @@ task_types:
   - dependency-analysis
   - documentation-review
   - example-agentic-session
+  - federal-information-assessment
   - incident-evidence-review
   - least-privilege-review
   - over-engineering-review
@@ -1039,10 +1069,12 @@ task_types:
   - uswds-landing-page
   - uswds-prototype
   discover:
+  - federal-information-assessment
   - federal-service-blueprint
   - pattern-router
   orchestrate:
   - design-artifact
+  - federal-information-assessment
   - issue-to-merge-request
   - pattern-router
   - qa-workflow
@@ -1126,6 +1158,7 @@ output_artifacts:
   - accessibility-review
   - artifact-qa
   - documentation-review
+  - federal-information-assessment
   - over-engineering-review
   - plain-language-review
   - qa-round
@@ -1136,6 +1169,7 @@ output_artifacts:
   - backdoor-review
   - compliance-claim-checker
   - dependency-analysis
+  - federal-information-assessment
   - incident-evidence-review
   - least-privilege-review
   - safe-code-review
@@ -1168,9 +1202,9 @@ output_artifacts:
   web-prototype:
   - uswds-prototype
 stats:
-  total_patterns: 41
+  total_patterns: 42
   skills: 30
   prompts: 3
   agents: 3
-  workflows: 4
+  workflows: 5
   lessons: 1
