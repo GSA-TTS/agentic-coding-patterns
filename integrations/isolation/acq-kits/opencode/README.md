@@ -71,9 +71,13 @@ outside the closed modality allowlist fail the render. The renderer emits no
 reasoning effort or variants, but OpenCode may derive selectable variants from
 `reasoning: true` (1.x does so for openai-compatible models: low/medium/high
 reasoning-effort variants, per v1.18.35 `transform.ts` `variants()`); check
-this before any `reasoning: true` value is committed; the synthetic-image
+this before any `reasoning: true` value is committed (`false` needs a
+target-specific statement that the model's reasoning capability is unsupported;
+a rejected parameter, effort value or endpoint is not one); the synthetic-image
 procedure covers image input only and cannot substantiate `reasoning`, `audio`,
-`video`, or `pdf`. See
+`video`, or `pdf`. On OpenCode 2.0.30 the `reasoning` model field is dropped
+(variants are independent of it); see
+[reasoning validation](docs/reasoning-validation.md). See
 [ADR 0006](../../docs/decisions/0006-neutral-model-capability-metadata.md) and
 the [synthetic-image validation procedure](docs/synthetic-image-validation.md)
 (its host-run harness, `scripts/verify_image_capability.py`, is committed but has not been run live).
