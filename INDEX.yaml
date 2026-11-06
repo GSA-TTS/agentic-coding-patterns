@@ -416,6 +416,30 @@ patterns:
       - plain language
       - public audience
       - readability review
+  - path: skills/privacy-lifecycle-inventory/SKILL.md
+    id: privacy-lifecycle-inventory
+    title: Privacy Information Lifecycle Inventory
+    type: skill
+    status: experimental
+    categories:
+    - security
+    - compliance
+    - review
+    collection: security
+    routing:
+      task_types:
+      - analyze
+      - review
+      input_artifacts:
+      - compliance-claim
+      - documentation
+      output_artifacts:
+      - qa-report
+      - security-review
+      aliases:
+      - PII inventory review
+      - data lifecycle review
+      - privacy threshold review
   - path: skills/safe-shell-script-author/SKILL.md
     id: safe-shell-script-author
     title: Safe Shell Script Author
@@ -891,6 +915,7 @@ categories:
   - example-agentic-session
   - incident-evidence-review
   - least-privilege-review
+  - privacy-lifecycle-inventory
   - safe-code-review
   - safe-shell-script-author
   - secure-code-review
@@ -913,6 +938,7 @@ categories:
   - least-privilege-review
   - over-engineering-review
   - plain-language-review
+  - privacy-lifecycle-inventory
   - qa-round
   - qa-workflow
   - safe-code-review
@@ -944,6 +970,7 @@ categories:
   - accessibility-review
   - compliance-claim-checker
   - federal-service-blueprint
+  - privacy-lifecycle-inventory
   - uswds-form-flow
   incident-response:
   - incident-evidence-review
@@ -997,6 +1024,7 @@ collections:
   - dependency-analysis
   - incident-evidence-review
   - least-privilege-review
+  - privacy-lifecycle-inventory
   - safe-code-review
   - secure-code-review
   - security-review-agent
@@ -1016,6 +1044,7 @@ task_types:
   - least-privilege-review
   - over-engineering-review
   - plain-language-review
+  - privacy-lifecycle-inventory
   - safe-code-review
   - secure-code-review
   - security-review-agent
@@ -1076,6 +1105,7 @@ task_types:
   - least-privilege-review
   - over-engineering-review
   - plain-language-review
+  - privacy-lifecycle-inventory
   - qa-round
   - qa-workflow
   - safe-code-review
@@ -1128,6 +1158,7 @@ output_artifacts:
   - documentation-review
   - over-engineering-review
   - plain-language-review
+  - privacy-lifecycle-inventory
   - qa-round
   - qa-workflow
   - test-generation
@@ -1138,6 +1169,7 @@ output_artifacts:
   - dependency-analysis
   - incident-evidence-review
   - least-privilege-review
+  - privacy-lifecycle-inventory
   - safe-code-review
   - secure-code-review
   - security-review-agent
@@ -1168,8 +1200,8 @@ output_artifacts:
   web-prototype:
   - uswds-prototype
 stats:
-  total_patterns: 41
-  skills: 30
+  total_patterns: 42
+  skills: 31
   prompts: 3
   agents: 3
   workflows: 4
