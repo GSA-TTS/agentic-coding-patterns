@@ -37,6 +37,7 @@ class ManagedRuntimeTests(unittest.TestCase):
         self.user = SimpleNamespace(pw_uid=self.uid, pw_gid=os.getgid(), pw_name="agent", pw_dir=str(self.home))
         self.start_patch("RUNTIME", self.mount)
         self.start_patch("ROOT_UID", self.uid)
+        self.read_mountinfo = runtime.mountinfo
         self.start_patch("mountinfo", lambda: self.mount_record())
         # Host temp ancestors are outside the fixture ownership model. All
         # fixture directories still use the real owner/mode validator.
@@ -50,7 +51,16 @@ class ManagedRuntimeTests(unittest.TestCase):
             real_owner(fd, uid, mode)
 
         self.start_patch("directory_owner", fixture_owner)
-        self.chown = self.start_patch("os.fchown", lambda fd, uid, gid: None)
+        # Record live descriptor identity/order without changing real ownership.
+        # Root and target still share the fixture UID; this is synthetic evidence.
+        self.chown_events = []
+
+        def record_chown(fd, uid, gid):
+            st = os.fstat(fd)
+            self.chown_events.append((st.st_dev, st.st_ino, st.st_mode, uid, gid))
+
+        self.chown = self.start_patch("os.fchown")
+        self.chown.side_effect = record_chown
         self.execve = self.start_patch("os.execve")
 
     def start_patch(self, name, *args):
@@ -60,7 +70,8 @@ class ManagedRuntimeTests(unittest.TestCase):
         return value
 
     def mount_record(self, *, size="131072k", fs="tmpfs", root="/", target=None):
-        target = str(target or self.mount).replace(" ", "\\040")
+        target = str(target or self.mount).replace("\\", "\\134")
+        target = target.replace(" ", "\\040").replace("\t", "\\011").replace("\n", "\\012")
         return f"42 1 0:99 {root} {target} rw,nosuid,nodev - {fs} tmpfs rw,size={size}\n"
 
     def ready(self):
@@ -83,10 +94,71 @@ class ManagedRuntimeTests(unittest.TestCase):
 
     def refusal(self, operation):
         before = self.snapshot()
+        chowns = list(self.chown_events)
         with self.assertRaises((runtime.Refused, OSError, ValueError, IndexError)):
             operation()
         self.assertEqual(self.snapshot(), before)
+        self.assertEqual(self.chown_events, chowns)
         self.execve.assert_not_called()
+
+    def test_mountinfo_read_is_bounded_before_parsing(self):
+        limit = runtime.MAX_MOUNTINFO_BYTES
+        record = self.mount_record().encode()
+        exact = record.rstrip(b"\n") + b" " * (limit - len(record)) + b"\n"
+
+        class TrackedStream(io.BytesIO):
+            def __init__(self, data):
+                super().__init__(data)
+                self.requests = []
+
+            def read(self, size=-1):
+                self.requests.append(size)
+                return super().read(size)
+
+        for data in (exact, exact + b"x", b"\xff"):
+            with self.subTest(size=len(data)):
+                stream = TrackedStream(data)
+                with (
+                    patch.object(Path, "open", return_value=stream) as opened,
+                    patch.object(runtime, "mountinfo", self.read_mountinfo),
+                ):
+                    if data == exact:
+                        runtime.verify_mount()
+                    else:
+                        self.refusal(lambda: runtime.prepare(self.user))
+                opened.assert_called_once_with("rb")
+                self.assertEqual(stream.requests, [limit + 1])
+                self.assertTrue(stream.closed)
+
+    def test_mountinfo_line_limit_precedes_entry_parsing(self):
+        unrelated = self.mount_record(target=self.base / "unrelated")
+        exact = unrelated * (runtime.MAX_MOUNTINFO_LINES - 1) + self.mount_record()
+        with patch.object(runtime, "mountinfo", return_value=exact):
+            runtime.verify_mount()
+        overflow = "malformed\n" * (runtime.MAX_MOUNTINFO_LINES + 1)
+        with (
+            patch.object(runtime, "mountinfo", return_value=overflow),
+            patch.object(runtime, "unescape") as decode,
+        ):
+            with self.assertRaisesRegex(runtime.Refused, "exceeds 4096 lines"):
+                runtime.verify_mount()
+            self.refusal(lambda: runtime.prepare(self.user))
+            decode.assert_not_called()
+
+    def test_escaped_mount_target_requires_exact_decoded_match(self):
+        target = self.base / "runtime space\\tab\tline\n"
+        with patch.object(runtime, "RUNTIME", target):
+            valid = self.mount_record(target=target)
+            with patch.object(runtime, "mountinfo", return_value=valid):
+                runtime.verify_mount()
+            for record in (
+                self.mount_record(target=Path(str(target) + "-other")),
+                self.mount_record(target=target, fs="ext4"),
+                valid * 2,
+                valid + self.mount_record(target=target / "nested"),
+            ):
+                with self.subTest(record=record), patch.object(runtime, "mountinfo", return_value=record):
+                    self.refusal(runtime.verify_mount)
 
     def test_missing_wrong_oversized_ambiguous_and_nested_mounts_refuse_without_writes(self):
         records = [
@@ -111,8 +183,11 @@ class ManagedRuntimeTests(unittest.TestCase):
     def test_prepare_idempotent_private_stable_paths(self):
         runtime.prepare(self.user)
         before = self.snapshot()
+        published = list(self.chown_events)
         runtime.prepare(self.user)
         self.assertEqual(self.snapshot(), before)
+        self.assertEqual(self.chown_events, published)
+        self.assertEqual(self.chown.call_count, 3)
         for path in (
             self.mount / str(self.uid),
             self.mount / str(self.uid) / "storage",
@@ -120,6 +195,17 @@ class ManagedRuntimeTests(unittest.TestCase):
         ):
             self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o700)
         self.execve.assert_not_called()
+
+    def test_prepare_publishes_child_descriptors_before_parent(self):
+        runtime.prepare(self.user)
+        uid_dir = self.mount / str(self.uid)
+        expected = []
+        for path in (uid_dir / "storage", uid_dir / "libpod", uid_dir):
+            st = path.stat()
+            expected.append((st.st_dev, st.st_ino, st.st_mode, self.user.pw_uid, self.user.pw_gid))
+        self.assertEqual(self.chown_events, expected)
+        self.assertEqual(self.chown.call_count, 3)
+        self.assertTrue(all(stat.S_ISDIR(event[2]) and stat.S_IMODE(event[2]) == 0o700 for event in expected))
 
     def test_root_mode_owner_and_symlink_components_refuse(self):
         self.mount.chmod(0o777)
@@ -141,6 +227,9 @@ class ManagedRuntimeTests(unittest.TestCase):
         self.refusal(lambda: runtime.prepare(self.user))
         uid_dir.unlink()
         runtime.prepare(self.user)
+        uid_dir.chmod(0o770)
+        self.refusal(lambda: runtime.prepare(self.user))
+        uid_dir.chmod(0o700)
         storage = uid_dir / "storage"
         storage.rmdir()
         storage.symlink_to(self.home, target_is_directory=True)
@@ -156,6 +245,12 @@ class ManagedRuntimeTests(unittest.TestCase):
         self.execve.reset_mock()
         libpod.chmod(0o1777)
         self.refusal(lambda: runtime.execute(self.user, ["info"]))
+        libpod.chmod(0o1700)
+        uid_dir = self.mount / str(self.uid)
+        for path in (uid_dir / "storage", uid_dir):
+            path.chmod(0o1700)
+            self.refusal(lambda: runtime.prepare(self.user))
+            path.chmod(0o700)
 
     def test_fresh_store_is_bound_and_second_init_refuses(self):
         self.ready()
@@ -356,6 +451,17 @@ class ManagedRuntimeTests(unittest.TestCase):
             ["volume", "exists", "probe"],
         ):
             runtime.metadata_args(args)
+
+    def test_volume_names_are_narrower_than_image_references(self):
+        for name in ("name/path", "name:tag", "name@digest", "name+suffix"):
+            runtime.metadata_args(["image", "exists", name])
+            for operation in ("exists", "inspect", "create"):
+                args = ["volume", operation, name]
+                with self.subTest(args=args):
+                    self.refusal(lambda args=args: runtime.execute(self.user, args))
+        for name in ("v", "volume.name-with_1", "9volume"):
+            for operation in ("exists", "inspect", "create"):
+                runtime.metadata_args(["volume", operation, name])
 
     def test_cli_identity_and_platform_refusals(self):
         selected = SimpleNamespace(pw_uid=1001, pw_gid=1001, pw_name="agent", pw_dir=str(self.home))

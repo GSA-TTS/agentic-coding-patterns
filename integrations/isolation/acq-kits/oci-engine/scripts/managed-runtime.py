@@ -14,6 +14,8 @@ from pathlib import Path
 RUNTIME = Path("/run/acq-oci-runtime")
 ROOT_UID = 0
 MAX_SIZE = 128 * 1024 * 1024
+MAX_MOUNTINFO_BYTES = 1024 * 1024
+MAX_MOUNTINFO_LINES = 4096
 DIRECTORY = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 MARKER = "managed-store.json"
 
@@ -61,7 +63,10 @@ def directory(path, trusted=False):
 
 
 def mountinfo():
-    return Path("/proc/self/mountinfo").read_text(encoding="utf-8")
+    with Path("/proc/self/mountinfo").open("rb") as stream:
+        data = stream.read(MAX_MOUNTINFO_BYTES + 1)
+    require(len(data) <= MAX_MOUNTINFO_BYTES, "mountinfo exceeds 1 MiB")
+    return data.decode("utf-8", errors="strict")
 
 
 def unescape(value):
@@ -70,7 +75,9 @@ def unescape(value):
 
 def verify_mount():
     matches = []
-    for line in mountinfo().splitlines():
+    lines = mountinfo().splitlines()
+    require(len(lines) <= MAX_MOUNTINFO_LINES, "mountinfo exceeds 4096 lines")
+    for line in lines:
         left, right = line.split(" - ", 1)
         fields, fs = left.split(), right.split()
         target = unescape(fields[4])
@@ -265,10 +272,11 @@ def metadata_args(args):
         return
     require(
         len(args) == 3
-        and tuple(args[:2]) in {("image", "exists"), ("volume", "exists"), ("volume", "inspect"), ("volume", "create")}
-        and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:/@+-]*", args[2]) is not None,
+        and tuple(args[:2]) in {("image", "exists"), ("volume", "exists"), ("volume", "inspect"), ("volume", "create")},
         "unsupported metadata arguments; no global options or workload commands",
     )
+    pattern = r"[A-Za-z0-9][A-Za-z0-9_.-]*" if args[0] == "volume" else r"[A-Za-z0-9][A-Za-z0-9_.:/@+-]*"
+    require(re.fullmatch(pattern, args[2]) is not None, "invalid volume name or image reference")
 
 
 def execute(user, args):

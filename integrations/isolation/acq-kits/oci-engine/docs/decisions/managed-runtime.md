@@ -10,14 +10,16 @@ boot state. Changing those paths underneath an existing database is not an
 implicit migration strategy. A separate store makes the lifecycle explicit and
 leaves the default agent store alone.
 
-The operator reports a native MSB **0.7.11**, Podman **5.7** metadata-only
-stop/start observation: a fresh tmpfs at the same runtime paths, with the separate
-persistent graphroot retained, preserved a named volume's content hash. This is
-bounded operator-provided evidence, not a test run of this helper. No raw
-transcript, exact engine patch version, image digest, or volume hash is included
-here. It is not evidence of container execution, build success, resource
-enforcement, or compatibility with another backend/version. Offline fixtures
-likewise cannot qualify the native lifecycle.
+The operator reports two native MSB **0.7.11**, Podman **5.7.0** metadata-management
+observations: the original prototype stop/start retained a named volume's content
+hash, and a subsequent run of this helper retained a named-volume sentinel across
+stop/start with a fresh **64 MiB tmpfs** at the same runtime paths and the separate
+persistent graphroot retained. The second observation exercises the helper's
+native lifecycle; it is not merely a prototype result. These are bounded,
+operator-provided observations, not a new measurement by this documentation
+change. No raw private paths or hashes are needed here. Neither observation
+proves container execution, build success, resource enforcement, or compatibility
+with another backend/version. Offline fixtures cannot qualify the native lifecycle.
 
 ## Decision
 
@@ -34,17 +36,24 @@ The operator must independently provision a dedicated tmpfs mounted **exactly**
 at `/run/acq-oci-runtime`, owned by the current guest root UID 0 with mode 0755,
 and explicit positive size no greater than 128 MiB. A tmpfs ancestor, a bind of
 a subtree, a non-tmpfs mount, duplicate exact mounts, or a nested mount is not
-accepted. The helper reads `/proc/self/mountinfo` before writing and requires a
-writable mount whose filesystem root is `/`. Directory-descriptor walks reject
+accepted. Before writing, the helper bounds `/proc/self/mountinfo` to **1 MiB**
+(one extra byte detects overflow) and **4096 lines**, refusing overflow before
+entry parsing. It decodes mount-path escapes and requires a writable exact mount
+whose filesystem root is `/`. Directory-descriptor walks reject
 symlinks at every component; root preparation also rejects non-root-owned or
 group/world-writable ancestors. These checks assume a trustworthy guest kernel
-and no concurrent privileged mount changes; they are not mount attestation.
+and no hostile concurrency, including concurrent privileged mount changes or
+directory replacement. Root preparation is not designed to resist such races;
+these checks are not mount attestation.
 
 `--guest prepare --user agent` requires root and a passwd-resolved non-root
 account. It creates `/run/acq-oci-runtime/UID` with mode 0700, containing two
-0700 directories: `storage` (runroot) and `libpod` (tmpdir). Ownership passes to
-the selected user only after the new tree is complete. Repeating preparation
-validates an existing complete tree without changing it. A wrong owner, mode,
+0700 directories: `storage` (runroot) and `libpod` (tmpdir). Each child descriptor
+is chowned before the UID parent; publishing ownership of the parent is last.
+Repeating preparation validates an existing complete tree without changing it.
+Only `libpod` may subsequently have either 0700 or **01700**, because Podman can
+set its sticky bit. The UID parent and `storage` must remain 0700; 01777 is never
+accepted. A wrong owner, mode,
 symlink, missing child, or interrupted root-owned tree is a refusal, not a
 repair opportunity. Root never recursively chowns user-controlled contents.
 After a guest restart with fresh tmpfs, prepare is required again.
@@ -102,14 +111,17 @@ The intentionally small literal grammar accepts only:
 - `volume ls` or `volume ls --format json`
 - `volume exists NAME`, `volume inspect NAME`, or `volume create NAME`
 
-The last forms accept one non-option reference/name token from a conservative
-character set. There are no other flags, nested workload commands, global
-options before or after the subcommand, remote controls, arbitrary formats,
+Image references match `[A-Za-z0-9][A-Za-z0-9_.:/@+-]*`; volume names use the
+narrower `[A-Za-z0-9][A-Za-z0-9_.-]*`, both as full-token matches. Slash, colon,
+`@` and `+` are not accepted in volume names. There are no other flags, nested
+workload commands, global options before or after the subcommand, remote controls, arbitrary formats,
 mount options or driver options. This avoids global-option overrides rather
 than trying to implement all of Podman's parser. Invalid arguments fail before
 state checks or engine invocation. Podman validates names and references itself;
-its exit status is preserved. A named volume create is a metadata/store write,
-not a container workload test. There is no automatic volume deletion.
+its exit status is preserved. **Metadata management is not read-only:** even
+`info` may initialize databases and locks, and `volume create` writes directories
+and metadata. These writes are not container workload tests. There is no
+automatic volume deletion.
 
 **This helper is NOT a security sandbox or an argument permission system.** The
 agent can invoke Podman directly and controls its writable graphroot. The fixed
@@ -120,7 +132,12 @@ verifier shares the managed store; they do not acquire these flags implicitly.
 ### Existing configuration and unresolved cgroup prerequisites
 
 Replacing environment variables does **not** disable system/user configuration
-files. In particular, `/etc/containers/containers.conf` or the user's
+files. Existing configuration can select a separate volume path or external
+helpers/plugins with effects outside the graphroot, despite explicit `--root`,
+`--runroot` and `--tmpdir`. These flags do not confine writes or execution to the
+managed paths. Review those settings and their effects before using even a
+metadata command; this helper makes no filesystem or process confinement claim.
+In particular, `/etc/containers/containers.conf` or the user's
 `~/.config/containers/containers.conf` can specify a prototype `cgroup_parent`.
 The helper neither hides that effect nor supplies a replacement parent. It
 forces the requested cgroup manager only, not a cgroup hierarchy, delegation,
@@ -149,7 +166,7 @@ native guest's exact kernel/runtime revisions):
   migration permissions, process placement and asynchronous freezer state.
 - [Podman v5.7.0 CLI manual source](https://github.com/containers/podman/blob/v5.7.0/docs/source/markdown/podman.1.md):
   global root/runroot/tmpdir, cgroup manager and local/remote configuration.
-- [Podman v5.7.0 run manual source](https://github.com/containers/podman/blob/v5.7.0/docs/source/markdown/podman-run.1.md):
+- [Podman v5.7.0 run manual source](https://github.com/containers/podman/blob/v5.7.0/docs/source/markdown/podman-run.1.md.in):
   cgroup-parent selection belongs to workload configuration, not storage repair.
 
 No workload qualification follows until those execution-path prerequisites and
@@ -161,7 +178,11 @@ green result. See [resource qualification](resource-qualification.md).
 
 [Python fixtures](../../tests/managed-runtime-test.py) use temporary directories
 and injected mount/identity/exec functions; they do not mount, chown real users,
-invoke Podman or run container workloads. The [Node wrapper](../../tests/managed-runtime.test.mjs)
+invoke Podman or run container workloads. Publication tests record live fchown
+descriptor device/inode identities and order, asserting both children precede
+the parent and repeated/refused preparation performs no chown. The root and
+target share a synthetic fixture UID; this does not prove real privilege
+transitions or race resistance. The [Node wrapper](../../tests/managed-runtime.test.mjs)
 fits `node --test 'tests/*.test.mjs'`. Both must run only in the independently
 approved workspace sandbox. They are not a substitute for native testing.
 
@@ -171,4 +192,4 @@ therefore runs these offline fixtures; it does not perform native guest tests.
 ## Links / tracking
 
 - Managed-runtime implementation: [GSA-TTS/agentic-coding-patterns#588](https://github.com/GSA-TTS/agentic-coding-patterns/issues/588).
-- Native cgroup execution follow-up: [GSA-TTS/agentic-coding-quickstart#2029](https://github.com/GSA-TTS/agentic-coding-quickstart/issues/2029).
+- Native cgroup execution follow-up: [superradcompany/microsandbox#2029](https://github.com/superradcompany/microsandbox/issues/2029).
