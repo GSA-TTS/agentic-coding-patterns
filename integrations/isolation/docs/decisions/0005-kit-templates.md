@@ -11,7 +11,7 @@ impact_level: "low"
 
 > **2026-11-06 retirement note:** The Prime Agent skeleton mentioned as a
 > historical placement precedent below has been removed from the registry and
-> tree. See [the retirement decision](../../../../docs/decisions/0004-retire-prime-agent.md).
+> tree. See [the retirement decision](../../../../docs/decisions/0005-retire-prime-agent.md).
 >
 > Area-scoped ADR for `integrations/isolation/`. Extends ADR 0001 (the neutral
 > `hybrid/v1` acq-kits area) with a home for kit *templates*, and records why the

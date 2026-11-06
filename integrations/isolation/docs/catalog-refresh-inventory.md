@@ -1,6 +1,6 @@
 ---
 title: "Provider-Neutral Catalog Refresh Inventory"
-description: "Maps current model catalog refresh paths and proposes a safe boundary for later provider-neutral drift detection."
+description: "Historical model catalog refresh inventory and design proposal, recorded 2026-10-27; not current operating guidance."
 status: draft
 tier: 2
 last_updated: "2026-11-06"
@@ -10,15 +10,24 @@ last_updated: "2026-11-06"
 
 ## Purpose
 
-This inventory records the current model-catalog refresh paths, their ownership,
-and the boundary for a later provider-neutral refresh capability. It is a design
-and sequencing document only. It does not add a runtime orchestrator, network
-fetch, scheduler, emitter, or harness configuration writer.
+This document preserves the **2026-10-27 historical snapshot** of model-catalog
+refresh paths, ownership, and a proposed later provider-neutral refresh boundary.
+It is a design and sequencing record, not current operating guidance. Present-tense
+descriptions in the retained inventory and proposal below refer to that snapshot,
+not to the current tree. This document authorizes no implementation.
 
-The **Current Paths** and **Duplicate Logic And Consumer Artifacts** sections are
-an inventory of what exists today, with constraints carried over from ADR 0004. The accepted architecture remains
-[ADR 0004](decisions/0004-neutral-model-provider-discovery.md); this document
-does not change it and is not an authority over it.
+> **2026-11-06 supersession note:** The provider-owned sync scripts and the
+> catalog builder's OpenCode bootstrap mode described below have been removed.
+> For the current repository-time refresh lifecycle, see root
+> [ADR 0003](../../../docs/decisions/0003-repo-time-provider-catalog-refresh.md)
+> and the [USAi provider README](../../providers/usai/README.md). The historical
+> inventory below is not an instruction to invoke removed paths. Prime-specific
+> entries were removed during [retirement](../../../docs/decisions/0005-retire-prime-agent.md).
+
+The **Historical Paths** and **Duplicate Logic And Consumer Artifacts** sections
+retain the earlier inventory, with constraints carried over from isolation
+[ADR 0004](decisions/0004-neutral-model-provider-discovery.md). This document
+does not change that ADR and is not an authority over it.
 
 Everything about a *later* design below (ownership, the bounded host-owned step,
 the upstream gate, the test plan, and the planned order) is a **proposal**. It
@@ -30,13 +39,13 @@ accepted and merged, ADR 0004 stands as written, and this document proposes no
 guest-writable aggregate and authorizes no implementation. This document is a
 draft and stays one until ADR 0002 is accepted; it can then be promoted.
 
-ADR 0002 is not on the default branch yet, so this document cites it by path, not
-by link. Once the ADR 0002 change is merged, the path can become a link. Merge
-order does not change this document's draft status; promotion depends on ADR 0002
-being accepted. Bare "ADR 0002" in this document means that Patterns ADR, not the
-isolation network egress ADR of the same number.
+At the snapshot date, root ADR 0002 was not yet on the default branch. It now
+exists at [its repository path](../../../docs/decisions/0002-runtime-model-refresh-aggregation.md);
+its presence does not promote this historical draft. Bare "ADR 0002" in the
+retained proposal means that Patterns ADR, not the isolation network egress ADR
+of the same number.
 
-## Current Paths
+## Historical Paths
 
 ### Legacy provider refresh
 
@@ -110,7 +119,7 @@ non-chat filtering, matching, cost shaping, role selection, and OpenCode JSONC
 mutation. The provider catalog builder independently implements most of that
 fetch-and-shape work again.
 
-The current consumer artifacts are:
+The consumer artifacts recorded in the historical snapshot were:
 
 | Source | Artifact | Owner |
 | --- | --- | --- |

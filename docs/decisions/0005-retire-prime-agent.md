@@ -7,7 +7,7 @@ category: "isolation-kits"
 impact_level: "breaking"
 ---
 
-# ADR 0004 - Retire Prime Agent
+# ADR 0005 - Retire Prime Agent
 
 ## Context
 

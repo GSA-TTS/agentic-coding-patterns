@@ -33,7 +33,7 @@ For sandbox harness integrations, start with the reference
 [Pi](integrations/isolation/acq-kits/pi-coding-agent/) kit. Pi currently provides
 CLI installation only, not wired USAi model configuration. See the
 [kit catalog](integrations/isolation/acq-kits/) for other integrations and the
-[retirement decision](docs/decisions/0004-retire-prime-agent.md) for migration
+[retirement decision](docs/decisions/0005-retire-prime-agent.md) for migration
 from Prime Agent.
 
 ## Purpose

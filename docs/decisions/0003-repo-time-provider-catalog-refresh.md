@@ -11,7 +11,7 @@ impact_level: "low"
 
 > **2026-11-06 retirement note:** The Prime Agent artifact and drift test
 > described below are historical and have been removed. See
-> [ADR 0004](0004-retire-prime-agent.md). The neutral refresh decision is unchanged.
+> [ADR 0005](0005-retire-prime-agent.md). The neutral refresh decision is unchanged.
 
 ## Context and Problem Statement
 

@@ -20,7 +20,7 @@ The reference harnesses are [OpenCode](opencode/) and [Pi](pi-coding-agent/).
 Pi currently provides CLI installation only; its USAi model configuration is
 not wired. This does not remove other harness patterns or imply feature parity.
 For migration from the retired Prime Agent kit, see
-[the retirement decision](../../../docs/decisions/0004-retire-prime-agent.md).
+[the retirement decision](../../../docs/decisions/0005-retire-prime-agent.md).
 
 | Kit | Purpose |
 |-----|---------|

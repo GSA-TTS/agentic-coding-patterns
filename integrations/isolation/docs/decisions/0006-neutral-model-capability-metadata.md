@@ -14,7 +14,7 @@ risk_treatment: "mitigate"
 
 > **2026-11-06 retirement note:** The Prime Agent consumer mentioned below is
 > historical and has been removed; it no longer needs a schema migration. See
-> [the retirement decision](../../../../docs/decisions/0004-retire-prime-agent.md).
+> [the retirement decision](../../../../docs/decisions/0005-retire-prime-agent.md).
 >
 > Area-scoped ADR for `integrations/isolation/`. Extends ADR 0004's neutral
 > catalog (`acq-neutral-model-catalog/v1`) with two optional per-model
