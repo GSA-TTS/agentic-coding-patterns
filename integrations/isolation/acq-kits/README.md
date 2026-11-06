@@ -16,6 +16,12 @@ not agent behavior. (Behavioral patterns live in `skills/`, `prompts/`, etc.)
 
 ## Available kits
 
+The reference harnesses are [OpenCode](opencode/) and [Pi](pi-coding-agent/).
+Pi currently provides CLI installation only; its USAi model configuration is
+not wired. This does not remove other harness patterns or imply feature parity.
+For migration from the retired Prime Agent kit, see
+[the retirement decision](../../../docs/decisions/0004-retire-prime-agent.md).
+
 | Kit | Purpose |
 |-----|---------|
 | [`usai-provider/`](usai-provider/) | Configure the agent to use the GSA USAi model provider (OpenCode today), with egress allow-listed. |
@@ -26,7 +32,6 @@ not agent behavior. (Behavioral patterns live in `skills/`, `prompts/`, etc.)
 | [`opencode/`](opencode/) | Install the OpenCode v2 terminal AI coding agent from pinned, SHA-256-verified npm platform tarballs. Agent-harness kit; no ports. |
 | [`paseo/`](paseo/) | Self-host the [Paseo](https://github.com/getpaseo/paseo) daemon + browser web UI (for coding agents) inside the sandbox on one port. Opt-in; agent-generic wrapper, no shared TUI session. |
 | [`opendesign/`](opendesign/) | Run [OpenDesign](https://github.com/nexu-io/open-design) headlessly inside the sandbox as a browser design workspace, reusing the existing OpenCode CLI and ACQ-injected USAi credentials. Opt-in. |
-| [`prime-agent/`](prime-agent/) | Install [PrimeIntellect-ai/prime-agent](https://github.com/PrimeIntellect-ai/prime-agent), a terminal AI coding assistant with an embedded IPython tool. Opt-in; TUI, no ports. |
 | [`pi-coding-agent/`](pi-coding-agent/) | Install [earendil-works/pi](https://github.com/earendil-works/pi) (`@earendil-works/pi-coding-agent`), a plain terminal AI coding agent (read/write/edit/bash tools only). Opt-in; TUI, no ports. |
 
 Each kit is self-contained: a `spec.yaml` (`hybrid/v1`), any `files/` payload, a

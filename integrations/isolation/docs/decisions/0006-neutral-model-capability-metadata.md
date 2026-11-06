@@ -12,6 +12,10 @@ risk_treatment: "mitigate"
 
 # ADR 0006 (isolation) — Carry reasoning and input-modality capability metadata in the neutral model catalog
 
+> **2026-11-06 retirement note:** The Prime Agent consumer mentioned below is
+> historical and has been removed; it no longer needs a schema migration. See
+> [the retirement decision](../../../../docs/decisions/0004-retire-prime-agent.md).
+>
 > Area-scoped ADR for `integrations/isolation/`. Extends ADR 0004's neutral
 > catalog (`acq-neutral-model-catalog/v1`) with two optional per-model
 > capability fields. ADR 0004 reserves changes to the neutral catalog field set

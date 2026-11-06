@@ -3,7 +3,7 @@ title: "Provider-Neutral Catalog Refresh Inventory"
 description: "Maps current model catalog refresh paths and proposes a safe boundary for later provider-neutral drift detection."
 status: draft
 tier: 2
-last_updated: "2026-10-27"
+last_updated: "2026-11-06"
 ---
 
 # Provider-Neutral Catalog Refresh Inventory
@@ -69,14 +69,12 @@ provider-neutral refresh entrypoint.
   `--check` and report added, removed, and changed model IDs.
 
 Its output is `usai-model-catalog/v1`, which includes USAi routing metadata and
-vendor-specific enrichment choices. It is consumed by these legacy emitters:
+vendor-specific enrichment choices. Its legacy emitter is:
 
 - `integrations/providers/usai/emitters/opencode.mjs` renders the OpenCode
   generated model block.
-- `integrations/providers/usai/emitters/prime-agent.mjs` renders the Prime
-  Agent `models.json` artifact.
 
-The builder, its catalog schema, and both emitters are legacy provider-owned
+The builder, its catalog schema, and that emitter are legacy provider-owned
 authoring tools. They remain useful for their current committed artifacts but
 must not become the runtime provider-neutral refresh mechanism.
 
@@ -118,7 +116,6 @@ The current consumer artifacts are:
 | --- | --- | --- |
 | Legacy sync script | USAi OpenCode JSONC model block and role defaults | USAi provider kit, OpenCode-specific |
 | USAi catalog OpenCode emitter | USAi OpenCode JSONC model block | OpenCode-specific emitter |
-| USAi catalog Prime Agent emitter | Prime Agent `models.json` | Prime Agent-specific emitter |
 | Neutral normalizer | Metadata-only USAi fallback snapshot | USAi provider kit |
 
 The duplicate legacy paths must not be expanded. Removing or migrating them is
@@ -149,7 +146,7 @@ only from the host-authoritative provider-input mount (also required by ADR
 0004).
 
 Refresh and projection code must not render or write configuration for OpenCode,
-Prime Agent, Goose, Codex, Claude, Copilot, or any other harness. It must not
+Pi, Goose, Codex, Claude, Copilot, or any other harness. It must not
 import a harness emitter or use a harness configuration file as an input or
 output (also required by ADR 0004).
 

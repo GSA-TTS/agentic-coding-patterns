@@ -9,6 +9,10 @@ impact_level: "low"
 
 # ADR 0005 (isolation) — Ship scope-layer kits as copy-and-rename templates under `acq-kits/examples/`
 
+> **2026-11-06 retirement note:** The Prime Agent skeleton mentioned as a
+> historical placement precedent below has been removed from the registry and
+> tree. See [the retirement decision](../../../../docs/decisions/0004-retire-prime-agent.md).
+>
 > Area-scoped ADR for `integrations/isolation/`. Extends ADR 0001 (the neutral
 > `hybrid/v1` acq-kits area) with a home for kit *templates*, and records why the
 > team and personal scope layers are shipped as templates rather than as kits.
