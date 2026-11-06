@@ -1,24 +1,33 @@
 ---
 title: "Provider-Neutral Catalog Refresh Inventory"
-description: "Maps current model catalog refresh paths and proposes a safe boundary for later provider-neutral drift detection."
+description: "Historical model catalog refresh inventory and design proposal, recorded 2026-10-27; not current operating guidance."
 status: draft
 tier: 2
-last_updated: "2026-10-27"
+last_updated: "2026-11-06"
 ---
 
 # Provider-Neutral Catalog Refresh Inventory
 
 ## Purpose
 
-This inventory records the current model-catalog refresh paths, their ownership,
-and the boundary for a later provider-neutral refresh capability. It is a design
-and sequencing document only. It does not add a runtime orchestrator, network
-fetch, scheduler, emitter, or harness configuration writer.
+This document preserves the **2026-10-27 historical snapshot** of model-catalog
+refresh paths, ownership, and a proposed later provider-neutral refresh boundary.
+It is a design and sequencing record, not current operating guidance. Present-tense
+descriptions in the retained inventory and proposal below refer to that snapshot,
+not to the current tree. This document authorizes no implementation.
 
-The **Current Paths** and **Duplicate Logic And Consumer Artifacts** sections are
-an inventory of what exists today, with constraints carried over from ADR 0004. The accepted architecture remains
-[ADR 0004](decisions/0004-neutral-model-provider-discovery.md); this document
-does not change it and is not an authority over it.
+> **2026-11-06 supersession note:** The provider-owned sync scripts and the
+> catalog builder's OpenCode bootstrap mode described below have been removed.
+> For the current repository-time refresh lifecycle, see root
+> [ADR 0003](../../../docs/decisions/0003-repo-time-provider-catalog-refresh.md)
+> and the [USAi provider README](../../providers/usai/README.md). The historical
+> inventory below is not an instruction to invoke removed paths. Prime-specific
+> entries were removed during [retirement](../../../docs/decisions/0005-retire-prime-agent.md).
+
+The **Historical Paths** and **Duplicate Logic And Consumer Artifacts** sections
+retain the earlier inventory, with constraints carried over from isolation
+[ADR 0004](decisions/0004-neutral-model-provider-discovery.md). This document
+does not change that ADR and is not an authority over it.
 
 Everything about a *later* design below (ownership, the bounded host-owned step,
 the upstream gate, the test plan, and the planned order) is a **proposal**. It
@@ -30,13 +39,13 @@ accepted and merged, ADR 0004 stands as written, and this document proposes no
 guest-writable aggregate and authorizes no implementation. This document is a
 draft and stays one until ADR 0002 is accepted; it can then be promoted.
 
-ADR 0002 is not on the default branch yet, so this document cites it by path, not
-by link. Once the ADR 0002 change is merged, the path can become a link. Merge
-order does not change this document's draft status; promotion depends on ADR 0002
-being accepted. Bare "ADR 0002" in this document means that Patterns ADR, not the
-isolation network egress ADR of the same number.
+At the snapshot date, root ADR 0002 was not yet on the default branch. It now
+exists at [its repository path](../../../docs/decisions/0002-runtime-model-refresh-aggregation.md);
+its presence does not promote this historical draft. Bare "ADR 0002" in the
+retained proposal means that Patterns ADR, not the isolation network egress ADR
+of the same number.
 
-## Current Paths
+## Historical Paths
 
 ### Legacy provider refresh
 
@@ -69,14 +78,12 @@ provider-neutral refresh entrypoint.
   `--check` and report added, removed, and changed model IDs.
 
 Its output is `usai-model-catalog/v1`, which includes USAi routing metadata and
-vendor-specific enrichment choices. It is consumed by these legacy emitters:
+vendor-specific enrichment choices. Its legacy emitter is:
 
 - `integrations/providers/usai/emitters/opencode.mjs` renders the OpenCode
   generated model block.
-- `integrations/providers/usai/emitters/prime-agent.mjs` renders the Prime
-  Agent `models.json` artifact.
 
-The builder, its catalog schema, and both emitters are legacy provider-owned
+The builder, its catalog schema, and that emitter are legacy provider-owned
 authoring tools. They remain useful for their current committed artifacts but
 must not become the runtime provider-neutral refresh mechanism.
 
@@ -112,13 +119,12 @@ non-chat filtering, matching, cost shaping, role selection, and OpenCode JSONC
 mutation. The provider catalog builder independently implements most of that
 fetch-and-shape work again.
 
-The current consumer artifacts are:
+The consumer artifacts recorded in the historical snapshot were:
 
 | Source | Artifact | Owner |
 | --- | --- | --- |
 | Legacy sync script | USAi OpenCode JSONC model block and role defaults | USAi provider kit, OpenCode-specific |
 | USAi catalog OpenCode emitter | USAi OpenCode JSONC model block | OpenCode-specific emitter |
-| USAi catalog Prime Agent emitter | Prime Agent `models.json` | Prime Agent-specific emitter |
 | Neutral normalizer | Metadata-only USAi fallback snapshot | USAi provider kit |
 
 The duplicate legacy paths must not be expanded. Removing or migrating them is
@@ -149,7 +155,7 @@ only from the host-authoritative provider-input mount (also required by ADR
 0004).
 
 Refresh and projection code must not render or write configuration for OpenCode,
-Prime Agent, Goose, Codex, Claude, Copilot, or any other harness. It must not
+Pi, Goose, Codex, Claude, Copilot, or any other harness. It must not
 import a harness emitter or use a harness configuration file as an input or
 output (also required by ADR 0004).
 

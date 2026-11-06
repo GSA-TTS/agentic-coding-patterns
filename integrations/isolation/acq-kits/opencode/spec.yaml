@@ -44,7 +44,7 @@
 # so silently degrading TO one on a hash mismatch would defeat the kit.
 #
 # NEUTRAL (backend-agnostic) form, structured like the sibling `openchamber` /
-# `pi-coding-agent` / `prime-agent` kits. acq's kit-translate layer maps the
+# `pi-coding-agent` kits. acq's kit-translate layer maps the
 # declarative caps/files/commands/agent below onto whichever isolation backend
 # acq has active (sbx, msb) — this kit carries no backend-specific config.
 schemaVersion: "hybrid/v1"
@@ -151,8 +151,8 @@ commands:
       - --base-config
       - /home/agent/opencode-config/base-config.jsonc
 
-# No publishedPorts: opencode is a TUI, not a web UI (same as pi-coding-agent /
-# prime-agent). Nothing to publish to the host.
+# No publishedPorts: opencode is a TUI, not a web UI (same as pi-coding-agent).
+# Nothing to publish to the host.
 
 agentContext: |
   ## OpenCode (terminal AI coding agent)

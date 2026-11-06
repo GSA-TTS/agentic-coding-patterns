@@ -31,7 +31,7 @@
 #     deliberately do NOT default to "permissive".
 #
 # NEUTRAL (backend-agnostic) hybrid/v1 form, structured like the sibling kits
-# (prime-agent / usai-provider). acq's kit-translate layer maps the declarative
+# (opencode / usai-provider). acq's kit-translate layer maps the declarative
 # caps/files/commands/environment below onto whichever isolation backend acq has
 # active (sbx, msb) — this kit carries no backend-specific config and no backend
 # shortcut (podman has no native primitive on either backend; see README parity).

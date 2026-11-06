@@ -9,6 +9,10 @@ impact_level: "low"
 
 # ADR 0003 - Refresh the USAi Provider Catalog at Repository Time, Through One Command
 
+> **2026-11-06 retirement note:** The Prime Agent artifact and drift test
+> described below are historical and have been removed. See
+> [ADR 0005](0005-retire-prime-agent.md). The neutral refresh decision is unchanged.
+
 ## Context and Problem Statement
 
 The USAi model list changes. The repository keeps a provider-neutral catalog
