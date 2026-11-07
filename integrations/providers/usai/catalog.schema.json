@@ -18,7 +18,7 @@
     },
     "sources": {
       "type": "object",
-      "description": "Provenance: free-form record of where fields were derived from (e.g. modelsList, enrichment, bootstrappedFrom).",
+      "description": "Provenance: free-form record of where fields were derived from (e.g. modelsList, enrichment, capabilitiesVerified).",
       "additionalProperties": {
         "type": "string"
       }

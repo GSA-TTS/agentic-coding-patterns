@@ -25,6 +25,10 @@ live feeds (USAi model list + models.dev)
 
 The decision behind this lifecycle is
 [ADR 0003](../../../docs/decisions/0003-repo-time-provider-catalog-refresh.md).
+For the step-by-step maintainer procedure (refresh, review, drift issue,
+onboarding), see the [provider refresh runbook](../README.md). The weekly
+offline drift report is recorded in
+[ADR 0004](../../../docs/decisions/0004-offline-catalog-drift-workflow.md).
 
 ## Refreshing the catalog (the one command)
 
@@ -184,6 +188,16 @@ treated as unknown with a warning. Nothing is inferred from model ids or names.
 The committed `inputModalities` values are listed, with their evidence, in
 [the capability evidence file](../../isolation/acq-kits/opencode/docs/capability-evidence/2026-11-04-opencode-2.0.30.md).
 See [ADR 0006](../../isolation/docs/decisions/0006-neutral-model-capability-metadata.md).
+
+## Legacy provider-owned renderer
+
+`emitters/opencode.mjs` is **legacy**. Its header says so. It is a test-only
+regression contract: the OpenCode kit renders its own configuration from the
+neutral inputs. The refresh never runs or imports it, and it is not a registered
+artifact, so a refresh does not write any harness-native file.
+
+`tests/legacy-isolation.test.mjs` fails if an emitter becomes a default refresh
+step.
 
 ## Safety guarantee
 
