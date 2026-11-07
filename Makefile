@@ -48,6 +48,7 @@ refresh-usai-catalog-check:  ## Report drift between the USAi catalog artifacts 
 	node integrations/providers/usai/scripts/refresh.mjs --check
 
 test-kits:  ## Run the acq-kits node test suites + providers/usai emitters
+	node --test integrations/isolation/acq-kits/oci-engine/tests/*.test.mjs
 	@if command -v node >/dev/null 2>&1; then \
 		echo "==> opencode kit tests" && \
 		(cd integrations/isolation/acq-kits/opencode && npm test) && \
