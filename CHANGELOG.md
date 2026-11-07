@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.0.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.19.0...v2.0.0) (2026-11-07)
+
+
+### ⚠ BREAKING CHANGES
+
+* **integrations:** the Prime Agent kit path and emitter export are removed. Select OpenCode or Pi explicitly; no automatic fallback or configuration conversion. Pi is still CLI-install-only with USAi configuration deferred; this change claims no operational parity.
+
+### Features
+
+* **integrations:** retire Prime Agent reference harness ([#585](https://github.com/GSA-TTS/agentic-coding-patterns/issues/585)) ([60e411e](https://github.com/GSA-TTS/agentic-coding-patterns/commit/60e411e0954e06ad3e725080c00b06b05161acb5))
+* **oci-engine:** add opt-in volatile metadata runtime ([#589](https://github.com/GSA-TTS/agentic-coding-patterns/issues/589)) ([a945b56](https://github.com/GSA-TTS/agentic-coding-patterns/commit/a945b56f81c44b9292b4ceddfb530a9cefe0631f))
+
 ## [1.19.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.18.0...v1.19.0) (2026-11-05)
 
 
