@@ -268,6 +268,88 @@ VERIFY_OCI_IMAGE=docker.io/library/ubuntu:24.04 \
 The backend-agnostic gate (schema + cross-field rules) is
 `integrations/isolation/acq-kits/validate-kits.py` (`make validate-kits`).
 
+## Managed runtime (guest-only, opt-in metadata experiment)
+
+`scripts/managed-runtime.py` separates stable, volatile runtime paths from a
+**new** persistent graphroot. It is not installed or selected by `spec.yaml`,
+startup scripts, the Docker wrapper, or either verifier. It needs Python 3
+(standard library only) and local `/usr/bin/podman` in the intended Linux guest.
+Deliver the reviewed helper through a trusted path; root must not run an
+agent-writable copy. `--guest` acknowledges guest placement but does not detect
+or attest it. Do not run these commands on the host.
+
+Before preparation, the operator must independently provide a dedicated,
+writable tmpfs **exactly** at `/run/acq-oci-runtime`, root-owned 0755, with an
+explicit positive size at most 128 MiB. The helper accepts at most 1 MiB and
+4096 lines of mountinfo before entry parsing and verifies no-symlink directory
+paths; it does not create or repair mounts. Root preparation assumes trusted
+guest state with no hostile concurrent mount or directory changes. Operators must
+also review existing system/user Podman configuration, including any prototype
+`cgroup_parent` in `containers.conf`. That configuration remains effective:
+the helper does not hide, edit or fix it. It can also select a separate volume
+path or external helpers/plugins with effects outside the graphroot despite
+explicit root/runroot/tmpdir flags. Those flags are not confinement controls.
+
+From the kit directory, using the trusted delivered copy **inside the guest**:
+
+```sh
+# Root, once per fresh runtime tmpfs; no Podman execution occurs here.
+python3 -I -B scripts/managed-runtime.py --guest prepare --user agent
+
+# Agent, once for a NEW dedicated store (re-running initialization refuses).
+python3 -I -B scripts/managed-runtime.py --guest init-store
+
+# Agent, supported metadata calls; Podman is never invoked as root.
+python3 -I -B scripts/managed-runtime.py --guest exec -- info --format json
+python3 -I -B scripts/managed-runtime.py --guest exec -- volume ls
+```
+
+Prepared paths are `/run/acq-oci-runtime/UID/storage` (runroot) and
+`/run/acq-oci-runtime/UID/libpod` (tmpdir), in a user-owned 0700 UID directory.
+Both children are created 0700. On subsequent checks, only `libpod` may be
+0700 or 01700 (Podman's private sticky directory); the UID parent and `storage`
+must remain 0700. World-accessible sticky mode 01777 is refused.
+The dedicated persistent graphroot is the passwd user's
+`~/.local/share/acq-oci-runtime/store`. Its parent contains a strict, path-bound
+JSON marker. Existing or interrupted initialization is refused, not adopted or
+deleted. After stop/start, retain the graphroot, provide fresh tmpfs at the same
+path, and repeat root `prepare`; do **not** repeat `init-store`.
+
+Only `info [--format json]`, `images`, `image exists REFERENCE`,
+`volume ls [--format json]`, and `volume exists|inspect|create NAME` are supported.
+Volume names must fully match `[A-Za-z0-9][A-Za-z0-9_.-]*`; image references keep
+the broader `[A-Za-z0-9][A-Za-z0-9_.:/@+-]*` character set.
+Global options and workload commands are refused. Exec replaces inherited
+environment configuration with a small fixed allowlist and supplies explicit
+local-engine, store/runtime and `cgroupfs` flags. It does not migrate storage,
+change drivers, reset Podman, override cgroup parents, or change limits.
+**Metadata management is not read-only:** `info` may initialize databases and
+locks, and `volume create` writes directories and metadata.
+
+**Not a security sandbox or an argument permission system.** The operator/agent
+controls the writable graphroot and can call Podman outside this helper. Default
+`podman`, `docker`, and the existing verifiers do not implicitly use this store.
+Operator-reported native MSB 0.7.11 / Podman 5.7.0 evidence includes the original
+prototype's volume-hash preservation and a subsequent run of this helper that
+retained a named-volume sentinel across stop/start with fresh **64 MiB tmpfs**
+at the same runtime paths. This bounded metadata-management evidence exercises
+the helper lifecycle but does **not** qualify workloads or resources. Direct
+parent/delegation and freezer prerequisites remain unresolved for workload exec.
+See the [managed-runtime decision](docs/decisions/managed-runtime.md) for the
+bounded evidence, pinned public sources, configuration prerequisites, exact
+argument contract and interrupted-state handling.
+
+Offline validation commands, from the repository root, **only inside the approved
+workspace sandbox**:
+
+```sh
+python3 -I -B integrations/isolation/acq-kits/oci-engine/tests/managed-runtime-test.py
+node --test 'integrations/isolation/acq-kits/oci-engine/tests/*.test.mjs'
+```
+
+The wrapper needs no Node packages. The root `make test-kits` target includes
+these fixtures, so the existing kit CI job runs them.
+
 ## Resource qualification (guest-only, experimental)
 
 Run `scripts/verify-resources` **inside the intended Linux guest**, as its

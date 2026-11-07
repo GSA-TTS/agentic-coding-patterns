@@ -7,21 +7,16 @@
 # explicitly allowlisted via --tools; verified against pi's own README). By
 # upstream design philosophy ("features other agents bake in, you build with
 # extensions") pi has no built-in MCP support, no sub-agents, no permission
-# popups, and no plan mode — and, unlike the sibling prime-agent kit, NO
-# embedded Python/IPython kernel to bootstrap. This is the SIMPLEST kit in
-# this family: ONE install step, at STARTUP, unprivileged, no install phase,
+# popups, and no plan mode — and NO embedded Python/IPython kernel to bootstrap.
+# This kit has ONE install step, at STARTUP, unprivileged, no install phase,
 # no supervisor loop.
 #
-# SEQUENCING NOTE (per a completed consensus vote): this kit is being shipped
-# AHEAD of the in-flight prime-agent kit specifically to validate the
-# unprivileged/agent-owned/startup-only pattern on a materially simpler target —
-# pi's own installer needs no native-module postinstall step and no Python
-# runtime, so there is no "install phase vs. startup phase, because a failed
-# native build must not crash sandbox create" tension the way there is for
-# openchamber's better-sqlite3 dependency. prime-agent's own heavier
-# kernel-bootstrap complexity is deliberately deferred, not abandoned.
+# STARTUP-ONLY DESIGN: pi's own installer needs no native-module postinstall
+# step and no Python runtime, so there is no "install phase vs. startup phase,
+# because a failed native build must not crash sandbox create" tension as for
+# openchamber's better-sqlite3 dependency.
 #
-# WHAT pi-coding-agent IS: a TUI, not a web UI — like prime-agent (contrast
+# WHAT pi-coding-agent IS: a TUI, not a web UI (contrast
 # openchamber / paseo, which each publish a browser-UI port). Publishes NO
 # ports.
 #
@@ -35,8 +30,7 @@
 # MODEL PROVIDER CONFIG IS DELIBERATELY DEFERRED, not merely out of scope:
 # pairing a models.json install step with a hand-written placeholder catalog
 # (empty models[] array) provides ZERO functional value with no USAi-catalog
-# pi emitter yet to populate it (contrast prime-agent's own placeholder,
-# which ships a real, populated model list). Rather than ship functionless
+# pi emitter yet to populate it. Rather than ship functionless
 # scaffolding, that step is cut from this kit entirely and will land
 # together with the real emitter in a follow-up. This kit's own allow-list
 # is pi's install host only; model-provider egress (e.g. api.gsa.usai.gov)
@@ -44,8 +38,7 @@
 #
 # AGENTS.md / CLAUDE.md: pi supports project-level AGENTS.md/CLAUDE.md loading
 # and a global ~/.pi/agent/AGENTS.md. This kit deliberately does NOT touch
-# either — the same single-responsibility boundary prime-agent's kit draws
-# around its own equivalent surface. Leave that to the user or another kit.
+# either. Leave that to the user or another kit.
 #
 # NAMING: the kit is named `pi-coding-agent`, not the bare upstream
 # shorthand `pi` — see README.md "Naming" for why.
@@ -104,7 +97,7 @@ commands:
       - sh
       - /home/agent/pi-coding-agent-install.sh
 
-# NO publishedPorts: pi is a TUI, not a web UI (same as prime-agent). Nothing
+# NO publishedPorts: pi is a TUI, not a web UI. Nothing
 # to publish to the host.
 
 agentContext: |

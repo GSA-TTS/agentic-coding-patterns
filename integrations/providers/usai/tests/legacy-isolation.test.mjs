@@ -17,8 +17,8 @@ const REPO_ROOT = path.resolve(USAI_DIR, "../../..")
 const read = (rel) => readFileSync(path.join(REPO_ROOT, rel), "utf8")
 const EMITTERS = readdirSync(path.join(USAI_DIR, "emitters")).filter((name) => name.endsWith(".mjs"))
 
-test("both emitters are labelled legacy in their headers", () => {
-  assert.deepEqual(EMITTERS.sort(), ["opencode.mjs", "prime-agent.mjs"])
+test("every emitter is labelled legacy in its header", () => {
+  assert.deepEqual(EMITTERS.sort(), ["opencode.mjs"])
   for (const name of EMITTERS) {
     const head = read(`integrations/providers/usai/emitters/${name}`).split("\n").slice(0, 3).join("\n")
     assert.match(head, /LEGACY/, name)

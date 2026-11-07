@@ -28,6 +28,14 @@ This repository is part of a three-repo ecosystem:
 | **Security issues** | See [SECURITY.md](SECURITY.md) — direct fixes preferred |
 | **Run validation locally** | `make setup && make validate` |
 
+For sandbox harness integrations, start with the reference
+[OpenCode](integrations/isolation/acq-kits/opencode/) or
+[Pi](integrations/isolation/acq-kits/pi-coding-agent/) kit. Pi currently provides
+CLI installation only, not wired USAi model configuration. See the
+[kit catalog](integrations/isolation/acq-kits/) for other integrations and the
+[retirement decision](docs/decisions/0005-retire-prime-agent.md) for migration
+from Prime Agent.
+
 ## Purpose
 
 This repository is a **community space** for sharing reusable patterns, workflows, and lessons learned.
