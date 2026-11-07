@@ -6,12 +6,10 @@
 // or by hand, and only ever writes one thing: a tracking issue.
 //
 // Where the file comes from:
-//   - .github/workflows/catalog-drift.yml when it exists in the checkout;
-//     otherwise that test is SKIPPED with an explicit message (a maintainer lands
-//     the file separately because the contributing agent's token has no
-//     `workflow` scope).
-//   - CATALOG_DRIFT_WORKFLOW=<path> runs the same policy against any file, so a
-//     reviewer can check a candidate before it is committed:
+//   - .github/workflows/catalog-drift.yml, which must exist: a missing file
+//     FAILS the test.
+//   - CATALOG_DRIFT_WORKFLOW=<path> runs the same policy against one more file,
+//     so a reviewer can check a candidate before it is committed:
 //       CATALOG_DRIFT_WORKFLOW=tmp/catalog-drift.yml node --test tests/catalog-drift-workflow.test.mjs
 // The checker itself is also proven against a built-in good workflow and a set
 // of mutations, which always run.
@@ -155,14 +153,8 @@ test("the policy checker rejects each forbidden pattern", () => {
   }
 })
 
-test("the committed .github/workflows/catalog-drift.yml satisfies the policy", (t) => {
-  if (!existsSync(COMMITTED)) {
-    t.skip(
-      ".github/workflows/catalog-drift.yml is not in this checkout yet: a maintainer lands it (the agent token has no `workflow` scope). " +
-        "Run with CATALOG_DRIFT_WORKFLOW=<path> to check a candidate file.",
-    )
-    return
-  }
+test("the committed .github/workflows/catalog-drift.yml exists and satisfies the policy", () => {
+  assert.ok(existsSync(COMMITTED), `the drift workflow is missing: ${COMMITTED}`)
   assert.deepEqual(workflowViolations(readFileSync(COMMITTED, "utf8")), [])
 })
 
@@ -179,7 +171,8 @@ test("the file named by CATALOG_DRIFT_WORKFLOW satisfies the policy", (t) => {
 
 test("the workflow runs only the offline scripts and never the live refresh", () => {
   const candidates = [COMMITTED, process.env.CATALOG_DRIFT_WORKFLOW && path.resolve(process.cwd(), process.env.CATALOG_DRIFT_WORKFLOW)]
-  for (const file of candidates.filter((f) => f && existsSync(f))) {
+  for (const file of candidates.filter(Boolean)) {
+    assert.ok(existsSync(file), `workflow file is missing: ${file}`)
     const text = readFileSync(file, "utf8")
     assert.match(text, /scripts\/offline-check\.mjs/, file)
     assert.match(text, /scripts\/drift-report\.mjs/, file)
