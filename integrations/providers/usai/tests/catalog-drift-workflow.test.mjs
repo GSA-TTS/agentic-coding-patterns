@@ -115,8 +115,8 @@ export function workflowViolations(text) {
         if (/\bgh\s+pr\b|\bgh\s+issue\s+(close|delete|lock)\b/.test(step.run)) {
           problems.push(`${where}: runs a gh command outside open-or-update issue`)
         }
-        for (const call of step.run.match(/\bgh\s+api\b[^\n|]*/g) ?? []) {
-          if (/\s(-X|--method|-f|-F|--field|--raw-field|--input)\b/.test(call) || !/--paginate\b/.test(call)) {
+        for (const call of step.run.replace(/\\\n/g, " ").match(/\bgh\s+api\b[^\n|]*/g) ?? []) {
+          if (/\s(-X|-f|-F|--method\b|--field\b|--raw-field\b|--input\b)/.test(call) || !/--paginate\b/.test(call)) {
             problems.push(`${where}: gh api is allowed only as a read-only --paginate listing`)
           }
         }
@@ -156,6 +156,8 @@ test("the policy checker rejects each forbidden pattern", () => {
     ["gh pr", mutate("run: gh issue list", "run: gh pr create"), /outside open-or-update/],
     ["gh api write", mutate("run: gh issue list", "run: gh api -X POST repos/o/r/issues"), /read-only --paginate/],
     ["gh api input", mutate("run: gh issue list", "run: gh api --paginate --input x repos/o/r/issues"), /read-only --paginate/],
+    ["gh api attached flag", mutate("run: gh issue list", "run: gh api --paginate -XPOST repos/o/r/issues"), /read-only --paginate/],
+    ["gh api continued flag", mutate("run: gh issue list", "run: |\n          gh api --paginate repos/o/r/issues \\\n            -X POST"), /read-only --paginate/],
     ["gh issue close", mutate("run: gh issue list", "run: gh issue close 1"), /outside open-or-update/],
     ["a secret", mutate("${{ github.token }}", "${{ secrets.USAI_API_KEY }}"), /secret or a credential/],
     ["expression in run", mutate('echo "$VALUE"', 'echo "${{ github.actor }}"'), /interpolated into a run/],
