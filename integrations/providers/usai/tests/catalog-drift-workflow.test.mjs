@@ -27,6 +27,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = path.resolve(HERE, "../../../..")
 const COMMITTED = path.join(REPO_ROOT, ".github", "workflows", "catalog-drift.yml")
 const ALLOWED_TRIGGERS = ["schedule", "workflow_dispatch"]
+const REPORT_JOB = "report"
 const SHA_PIN = /^[^@\s]+@[0-9a-f]{40}$/
 
 const GOOD = `name: Catalog Drift (offline)
@@ -95,6 +96,9 @@ export function workflowViolations(text) {
         if (level === "write" && scope === "issues" && Object.keys(permissions).length !== 1) {
           problems.push(`job ${name}: issues: write must be the only permission`)
         }
+        if (level === "write" && scope === "issues" && name !== REPORT_JOB) {
+          problems.push(`job ${name}: issues: write is only allowed on the ${REPORT_JOB} job`)
+        }
       }
     }
     for (const [index, step] of (job?.steps ?? []).entries()) {
@@ -108,13 +112,20 @@ export function workflowViolations(text) {
       if (typeof step.run === "string") {
         if (/\$\{\{/.test(step.run)) problems.push(`${where}: an expression is interpolated into a run: string`)
         if (/\bgit\s+(push|commit|tag|add)\b/.test(step.run)) problems.push(`${where}: runs a git write command`)
-        if (/\bgh\s+pr\b|\bgh\s+issue\s+(close|delete|lock)\b|\bgh\s+api\b/.test(step.run)) {
+        if (/\bgh\s+pr\b|\bgh\s+issue\s+(close|delete|lock)\b/.test(step.run)) {
           problems.push(`${where}: runs a gh command outside open-or-update issue`)
+        }
+        for (const call of step.run.match(/\bgh\s+api\b[^\n|]*/g) ?? []) {
+          if (/\s(-X|--method|-f|-F|--field|--raw-field|--input)\b/.test(call) || !/--paginate\b/.test(call)) {
+            problems.push(`${where}: gh api is allowed only as a read-only --paginate listing`)
+          }
         }
         if (/curl|wget|\bnpm\s+(i|install)\b|pip\s+install/.test(step.run)) problems.push(`${where}: installs or fetches something`)
       }
     }
   }
+  const reportPermissions = doc?.jobs?.[REPORT_JOB]?.permissions
+  if (reportPermissions?.issues !== "write") problems.push(`the ${REPORT_JOB} job must have issues: write`)
   return problems
 }
 
@@ -136,10 +147,15 @@ test("the policy checker rejects each forbidden pattern", () => {
     ["contents write", mutate("      contents: read\n", "      contents: write\n"), /contents: write/],
     ["pull-requests write", mutate("      contents: read\n", "      pull-requests: write\n"), /pull-requests: write/],
     ["issues write with others", mutate("      issues: write\n", "      issues: write\n      contents: read\n"), /issues: write must be the only/],
+    ["issues write on the check job", mutate("      contents: read\n", "      issues: write\n"), /issues: write is only allowed on the report job/],
+    ["issues write on another job", mutate("  report:\n    needs: offline-check\n", "  other:\n    runs-on: ubuntu-latest\n    permissions:\n      issues: write\n    steps: []\n  report:\n    needs: offline-check\n"), /job other: issues: write is only allowed/],
+    ["report job without issues write", mutate("      issues: write\n    steps", "      issues: read\n    steps"), /report job must have issues: write/],
     ["no job permissions", mutate("    permissions:\n      contents: read\n", ""), /permissions must be declared/],
     ["git push", mutate(echo, "          git push origin HEAD\n"), /git write command/],
     ["git commit", mutate(echo, "          git commit -am x\n"), /git write command/],
     ["gh pr", mutate("run: gh issue list", "run: gh pr create"), /outside open-or-update/],
+    ["gh api write", mutate("run: gh issue list", "run: gh api -X POST repos/o/r/issues"), /read-only --paginate/],
+    ["gh api input", mutate("run: gh issue list", "run: gh api --paginate --input x repos/o/r/issues"), /read-only --paginate/],
     ["gh issue close", mutate("run: gh issue list", "run: gh issue close 1"), /outside open-or-update/],
     ["a secret", mutate("${{ github.token }}", "${{ secrets.USAI_API_KEY }}"), /secret or a credential/],
     ["expression in run", mutate('echo "$VALUE"', 'echo "${{ github.actor }}"'), /interpolated into a run/],
