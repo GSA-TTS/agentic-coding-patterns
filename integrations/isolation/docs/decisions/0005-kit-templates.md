@@ -59,8 +59,9 @@ record covers the two structural decisions that document depends on.
 ### Placement
 
 - **(A)** `acq-kits/<name>/` with a `kits.yaml` entry whose parity note says
-  TEMPLATE, not applied by acq. No validator change; `prime-agent` already sits
-  in the registry as a skeleton, so there is precedent.
+  TEMPLATE, not applied by acq. No validator change; at the time of writing,
+  `prime-agent` sat in the registry as a skeleton (later retired in
+  GSA-TTS/agentic-coding-patterns#584 / #585), so there was precedent.
 - **(B)** `acq-kits/examples/<name>/`, schema- and `files[]`-validated by
   `validate-kits.py` but exempt from the registry cross-check. (chosen)
 
