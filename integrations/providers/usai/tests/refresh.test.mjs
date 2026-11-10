@@ -714,7 +714,9 @@ test("guard: the registry paths all exist in the repository", () => {
   for (const artifact of registry.derived) assert.ok(existsSync(artifact.script), artifact.script)
 })
 
-test("guard: no workflow runs the refresh (this slice adds none; the key is not a repository secret)", () => {
+test("guard: no workflow runs the refresh or names the key (the key is not a repository secret)", () => {
+  // The offline drift workflow (docs/decisions/0004-offline-catalog-drift-workflow.md)
+  // runs offline-check.mjs and drift-report.mjs, never refresh.mjs or the Make targets.
   const workflows = path.join(REPO_ROOT, ".github", "workflows")
   for (const file of readdirSync(workflows)) {
     const text = read(path.join(workflows, file))

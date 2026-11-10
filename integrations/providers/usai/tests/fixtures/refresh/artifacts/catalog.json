@@ -2,7 +2,8 @@
   "schemaVersion": "usai-model-catalog/v1",
   "generatedBy": "build-catalog.mjs (generated — do not hand-edit)",
   "sources": {
-    "bootstrappedFrom": "integrations/providers/usai/tests/fixtures/opencode-renderer-contract.jsonc"
+    "modelsList": "offline:usai-models.json",
+    "enrichment": "offline:models-dev.json"
   },
   "recommendations": {
     "primary": "claude-sonnet-5",
