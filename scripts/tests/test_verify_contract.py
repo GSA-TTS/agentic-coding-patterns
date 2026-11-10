@@ -44,6 +44,7 @@ LIB = ACQ_KITS / "verify-report.sh"
 # new kit silently inherit a contract it does not implement.
 UNCONVERTED = {
     "agentic-coding-playbook",
+    "cloud-gov",
     "oci-engine",
     "opencode",
     "openchamber",

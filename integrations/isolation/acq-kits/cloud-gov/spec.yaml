@@ -1,0 +1,129 @@
+# spec.yaml - cloud-gov (a neutral acq mixin kit, hybrid/v1)
+#
+# Configures a sandbox for cloud.gov work:
+#   - attempt to install the Cloud Foundry CLI (`cf`) at startup, after CA trust
+#     (best effort: a failed download does not fail sandbox start, so consumers
+#     must check `cf version` before relying on it);
+#   - allow-list exact cloud.gov control-plane and documentation hosts;
+#   - document the per-backend secret binding needed for CF OAuth token injection
+#     (acq secret set on msb, sbx secret set-custom on sbx) without placing the
+#     real token in files readable by the agent.
+#
+# AUTH MODEL: the kit does NOT store or expose a Cloud Foundry token. Users bind
+# one from `cf oauth-token` to api.fr.cloud.gov with the backend's secret
+# mechanism (msb: acq secret set; sbx: sbx secret set-custom, see README
+# Prerequisites). The backend injects a placeholder in CF_OAUTH_TOKEN and swaps
+# it on the egress path for requests to the CF API host; the raw token stays in
+# the host-side secret store / backend proxy.
+schemaVersion: "hybrid/v1"
+kind: mixin
+name: cloud-gov
+displayName: cloud.gov Cloud Foundry CLI
+description: >
+  Attempts to install the Cloud Foundry CLI at startup (best effort) and
+  allow-lists exact cloud.gov control-plane
+  and documentation hosts so agents can inspect cloud.gov metadata and call the
+  Cloud Foundry API through proxied egress. Cloud Foundry authorization is
+  supplied through the backend's custom secret mechanism, using a token from `cf
+  oauth-token`, so credentials are not stored in the kit or exposed as real token
+  material in the sandbox environment.
+
+caps:
+  network:
+    allow:
+      # Exact cloud.gov control-plane and documentation hosts. Avoid wildcard
+      # semantics so sbx and msb translate the same least-privilege egress shape.
+      - api.fr.cloud.gov:443
+      - uaa.fr.cloud.gov:443
+      - login.fr.cloud.gov:443
+      - doppler.fr.cloud.gov:443
+      - log-cache.fr.cloud.gov:443
+      - cloud.gov:443
+      - www.cloud.gov:443
+      - docs.cloud.gov:443
+      # Upstream Cloud Foundry documentation.
+      - docs.cloudfoundry.org:443
+      - cli.cloudfoundry.org:443
+      # Pinned CF CLI release tarballs used by cloud-gov-install-cf-cli.sh.
+      - github.com:443
+      - objects.githubusercontent.com:443
+      # github.com redirects release downloads to this host (observed for the
+      # pinned v8.19.0 tarballs); without it the redirect hop is blocked.
+      - release-assets.githubusercontent.com:443
+
+files:
+  - path: /home/agent/cloud-gov-install-cf-cli.sh
+    mode: "0755"
+    source: files/home/cloud-gov-install-cf-cli.sh
+    description: Install or verify the Cloud Foundry CLI at sandbox startup
+  - path: /home/agent/cloud-gov-configure-cf-auth.sh
+    mode: "0755"
+    source: files/home/cloud-gov-configure-cf-auth.sh
+    description: Target cloud.gov and format-check any injected token placeholder
+
+commands:
+  # Startup, NOT install: the CF CLI download is HTTPS, and on an intercepted
+  # network it needs the CA-trust kit's CA, which that kit installs in its own
+  # startup step. An install-phase command runs at create time before that, so
+  # the fetch failed (curl exit 60) and failed the whole create. Startup
+  # commands run in kit order and the global bundle lists
+  # zscaler-ca-certificate first, so it should run before this step (confirmed
+  # live on sbx, not enforced by this kit).
+  # Runs as the agent user and installs into ~/.local/bin. Non-fatal: a failed
+  # download is logged by the script and must not block sandbox start; the step
+  # is idempotent (no-op once `cf` exists) so replaying each start retries a
+  # failed fetch.
+  - phase: startup
+    user: "1000"
+    description: Install the Cloud Foundry CLI if it is missing (after CA trust)
+    command:
+      - sh
+      - -c
+      - |
+        sh /home/agent/cloud-gov-install-cf-cli.sh \
+          || echo "cloud-gov: WARNING: cf CLI is not installed; see TROUBLESHOOTING.md" >&2
+        exit 0
+  - phase: startup
+    user: "1000"
+    description: Target cloud.gov and format-check the injected placeholder
+    command:
+      - sh
+      - /home/agent/cloud-gov-configure-cf-auth.sh
+
+agentContext: |
+  ## cloud.gov
+
+  This sandbox is set up for cloud.gov work: sandbox startup ATTEMPTS to install
+  the Cloud Foundry CLI (`cf`) into `~/.local/bin`, and egress is allow-listed for
+  exact cloud.gov API, login/UAA, log streaming, and cloud.gov / Cloud Foundry
+  documentation hosts. Public app routes and custom domains require
+  project-specific exact host allow-list entries.
+
+  A successful sandbox start does NOT mean `cf` is ready: the install is
+  non-fatal, so a failed download only logs a warning. Before using `cf`, run
+  `PATH="$HOME/.local/bin:$PATH" cf version`. If it fails, tell the user `cf` is
+  not installed (see the kit's TROUBLESHOOTING.md and the sandbox startup log)
+  instead of assuming it exists.
+
+  Authorization is handled through the backend's secret injection path. The sandbox may
+  contain a backend placeholder in `CF_OAUTH_TOKEN`, but not the real token. The
+  user should bind it from a host shell where they are already logged in to
+  cloud.gov. On msb:
+
+  ```
+  cf oauth-token | acq secret set -g cloud-gov --host api.fr.cloud.gov --env CF_OAUTH_TOKEN
+  ```
+
+  On sbx (acq cannot feed sbx's proxy for this host; use sbx directly):
+
+  ```
+  sbx secret set-custom --host api.fr.cloud.gov --env CF_OAUTH_TOKEN --command "$(command -v cf) oauth-token"
+  ```
+
+  If `CF_OAUTH_TOKEN` is unset or an authenticated call returns 401, say so and
+  point the user to the kit's TROUBLESHOOTING.md instead of retrying.
+
+  Do not ask the user to paste the token into chat or write it to the workspace.
+  Use `cf` for unauthenticated targeting and direct HTTPS CF API calls for
+  placeholder-backed authenticated checks; real token material remains outside
+  agent-readable files.

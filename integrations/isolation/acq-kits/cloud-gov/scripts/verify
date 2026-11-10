@@ -1,0 +1,453 @@
+#!/usr/bin/env bash
+#
+# verify - host-side validation for the cloud-gov acq mixin kit.
+#
+# By default this runs offline checks only. Set RUN_ACQ=1 to create a throwaway
+# sandbox and verify the CF CLI plus exact cloud.gov/docs network reachability.
+#
+# On a TLS-intercepting network (for example Zscaler) the CF CLI download only
+# works if the CA-trust kit is applied BEFORE this kit. The global kit bundle
+# already applies zscaler-ca-certificate first, so run on an intercepted network
+# without CA_KIT to reproduce that create. CA_KIT is only for a bundle that has
+# NO CA-trust kit: sbx rejects a second kit with the same name as a bundled one
+# ("duplicate kit name"), so do not point it at a kit the bundle already has.
+#
+# The CA-before-fetch failure is specific to the sbx file-drop path: msb trusts
+# host CAs natively (--trust-host-cas), so an msb run cannot reproduce it. Set
+# ACQ_BACKEND=sbx (or msb) to pass `--backend` to acq for the sandbox create,
+# exec, and rm calls without changing your persisted default backend. It is
+# required with RUN_ACQ=1 so the token precondition is checked against the
+# backend that will actually run.
+
+# Tests source this file for the helpers below without running any checks. Run as
+# a script, the variable is refused rather than treated as a pass.
+if [ "${CLOUD_GOV_VERIFY_LIB_ONLY:-0}" = "1" ] && ! (return 0 2>/dev/null); then
+  echo "CLOUD_GOV_VERIFY_LIB_ONLY is for sourcing only" >&2
+  exit 2
+fi
+
+set -uo pipefail
+
+CLOUD_GOV_API="https://api.fr.cloud.gov"
+
+# Succeeds only when `cf api` exits 0 and prints exactly one `api endpoint:` line
+# whose value is exactly $CLOUD_GOV_API. A substring or regex match would also
+# accept lookalikes such as https://api.fr.cloud.gov.example.net.
+host_cf_targets_cloud_gov() {
+  local out endpoint
+  out="$(cf api 2>/dev/null)" || return 1
+  [ "$(printf '%s\n' "$out" | grep -c '^api endpoint:')" -eq 1 ] || return 1
+  endpoint="$(printf '%s\n' "$out" | sed -n 's/^api endpoint:[[:space:]]*//p' | sed 's/[[:space:]]*$//')"
+  [ "$endpoint" = "$CLOUD_GOV_API" ]
+}
+
+host_status=""
+host_control() {
+  # Only after a rejection, and only if the host cf targets exactly
+  # $CLOUD_GOV_API, so a token for some other Cloud Foundry is never read or sent
+  # here. Needs curl >= 7.55 (-H @-); an older curl sends no header and would read
+  # as "expired".
+  command -v cf >/dev/null 2>&1 && command -v curl >/dev/null 2>&1 || return 0
+  host_cf_targets_cloud_gov || return 0
+  local host_token
+  host_token="$(cf oauth-token 2>/dev/null || true)"
+  case "$host_token" in
+    [Bb]earer\ ?*)
+      host_status="$(printf 'Authorization: %s\n' "$host_token" \
+        | curl -sS -o /dev/null -w '%{http_code}' -H @- "$CLOUD_GOV_API/v3/organizations" 2>/dev/null || true)"
+      ;;
+  esac
+  host_token=""
+}
+
+if [ "${CLOUD_GOV_VERIFY_LIB_ONLY:-0}" = "1" ]; then
+  return 0
+fi
+
+KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+REPO_ROOT="$(cd "$KIT_DIR/../../../.." && pwd)"
+SBX_NAME="cloud-gov-verify-$$"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/cloud-gov-verify.XXXXXX")"
+CREATE_LOG="$WORK/create.log"
+KEEP="${KEEP:-0}"
+RUN_ACQ="${RUN_ACQ:-0}"
+CA_KIT="${CA_KIT:-}"
+ACQ_BACKEND="${ACQ_BACKEND:-}"
+ACQ_BACKEND_ARGS=()
+case "$ACQ_BACKEND" in
+  "") ;;
+  sbx|msb) ACQ_BACKEND_ARGS=(--backend "$ACQ_BACKEND") ;;
+  *)
+    printf 'ACQ_BACKEND must be sbx or msb (got: %s)\n' "$ACQ_BACKEND" >&2
+    exit 2
+    ;;
+esac
+if [ "${RUN_ACQ:-0}" = "1" ] && [ -z "$ACQ_BACKEND" ]; then
+  # The token binding differs by backend (sbx custom secret vs acq store), and
+  # the backend acq would pick is not known before create, so a precondition
+  # checked against the wrong store gives wrong setup advice.
+  printf 'RUN_ACQ=1 requires ACQ_BACKEND=sbx or ACQ_BACKEND=msb\n' >&2
+  exit 2
+fi
+# Bash 3.2 (macOS) treats an empty array as unset under `set -u`; the +"..."
+# form expands to nothing when no backend was requested.
+acq_b() { acq ${ACQ_BACKEND_ARGS[@]+"${ACQ_BACKEND_ARGS[@]}"} "$@"; }
+
+pass=0
+fail=0
+ok() { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass + 1)); }
+bad() { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail + 1)); }
+skip() { printf '  \033[33mSKIP\033[0m %s\n' "$1"; }
+info() { printf '\n\033[1m%s\033[0m\n' "$1"; }
+
+cleanup() {
+  if [ "$KEEP" = "1" ]; then
+    printf '\nKEEP=1 set; leaving sandbox %s and %s in place.\n' "$SBX_NAME" "$WORK" >&2
+    return
+  fi
+  acq_b rm "$SBX_NAME" >/dev/null 2>&1 || true
+  rm -rf "$WORK" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT INT TERM
+
+in_acq() { acq_b exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true; }
+
+info "0. Offline preconditions"
+if [ -f "$KIT_DIR/spec.yaml" ]; then
+  ok "kit spec.yaml present"
+else
+  bad "spec.yaml missing"
+  exit 1
+fi
+if [ -f "$KIT_DIR/files/home/cloud-gov-install-cf-cli.sh" ]; then
+  ok "install script present"
+else
+  bad "install script missing"
+fi
+if [ -f "$KIT_DIR/files/home/cloud-gov-configure-cf-auth.sh" ]; then
+  ok "auth script present"
+else
+  bad "auth script missing"
+fi
+
+if command -v bash >/dev/null 2>&1; then
+  for script in \
+    "$KIT_DIR/files/home/cloud-gov-install-cf-cli.sh" \
+    "$KIT_DIR/files/home/cloud-gov-configure-cf-auth.sh"; do
+    if bash -n "$script"; then
+      ok "$(basename "$script") parses"
+    else
+      bad "$(basename "$script") has a shell syntax error"
+    fi
+  done
+else
+  skip "bash not on PATH - skipped shell parse checks"
+fi
+
+info "0b. CF CLI fetch ordering"
+if ! python3 -c 'import yaml' >/dev/null 2>&1; then
+  skip "fetch-ordering check needs python3 + pyyaml"
+elif python3 - "$KIT_DIR/spec.yaml" <<'PY'
+import sys
+import yaml
+
+spec = yaml.safe_load(open(sys.argv[1]))
+for cmd in spec.get("commands", []):
+    if "cloud-gov-install-cf-cli.sh" in " ".join(cmd["command"]):
+        sys.exit(0 if cmd.get("phase") == "startup" else 1)
+sys.exit(1)
+PY
+then
+  ok "CF CLI fetch is a startup command, not install"
+else
+  bad "CF CLI fetch must be a startup command, not an install-phase command"
+fi
+
+info "1. Auth placeholder guard"
+AUTH_SCRIPT="$KIT_DIR/files/home/cloud-gov-configure-cf-auth.sh"
+AUTH_PATH="$(mktemp -d "${TMPDIR:-/tmp}/cloud-gov-auth-path.XXXXXX")"
+for bin in sh mkdir chmod; do
+  ln -s "$(command -v "$bin")" "$AUTH_PATH/$bin"
+done
+
+AUTH_WORK="$(mktemp -d "${TMPDIR:-/tmp}/cloud-gov-auth.XXXXXX")"
+if HOME="$AUTH_WORK" PATH="$AUTH_PATH" CF_OAUTH_TOKEN="acq_placeholder_abcdefghijklmnopqrstuvwxyz012345" sh "$AUTH_SCRIPT" >/dev/null 2>&1; then
+  ok "auth script accepts acq placeholder"
+else
+  bad "auth script rejected acq placeholder"
+fi
+rm -rf "$AUTH_WORK" >/dev/null 2>&1 || true
+
+AUTH_WORK="$(mktemp -d "${TMPDIR:-/tmp}/cloud-gov-auth.XXXXXX")"
+MSB_PLACEHOLDER='$'MSB_SECRET_PLACEHOLDER
+if HOME="$AUTH_WORK" PATH="$AUTH_PATH" CF_OAUTH_TOKEN="$MSB_PLACEHOLDER" sh "$AUTH_SCRIPT" >/dev/null 2>&1; then
+  ok "auth script accepts msb guest secret placeholder"
+else
+  bad "auth script rejected msb guest secret placeholder"
+fi
+rm -rf "$AUTH_WORK" >/dev/null 2>&1 || true
+
+AUTH_WORK="$(mktemp -d "${TMPDIR:-/tmp}/cloud-gov-auth.XXXXXX")"
+if HOME="$AUTH_WORK" PATH="$AUTH_PATH" CF_OAUTH_TOKEN="bearer TOKEN_HEADER.TOKEN_BODY.TOKEN_SIGNATURE" sh "$AUTH_SCRIPT" >/dev/null 2>&1; then
+  bad "auth script accepted bearer/JWT token material"
+else
+  ok "auth script rejects bearer/JWT token material"
+fi
+rm -rf "$AUTH_WORK" >/dev/null 2>&1 || true
+
+AUTH_WORK="$(mktemp -d "${TMPDIR:-/tmp}/cloud-gov-auth.XXXXXX")"
+if HOME="$AUTH_WORK" PATH="$AUTH_PATH" CF_OAUTH_TOKEN="TOKEN_HEADER.TOKEN_BODY.TOKEN_SIGNATURE" sh "$AUTH_SCRIPT" >/dev/null 2>&1; then
+  bad "auth script accepted JWT-like token material"
+else
+  ok "auth script rejects JWT-like token material"
+fi
+rm -rf "$AUTH_WORK" "$AUTH_PATH" >/dev/null 2>&1 || true
+
+info "2. Network allow-list assumptions"
+if grep -q '\*' "$KIT_DIR/spec.yaml"; then
+  bad "spec.yaml contains wildcard egress"
+else
+  ok "spec.yaml avoids wildcard egress"
+fi
+
+EXPECTED_HOSTS=$(mktemp "${TMPDIR:-/tmp}/cloud-gov-expected-hosts.XXXXXX")
+ACTUAL_HOSTS=$(mktemp "${TMPDIR:-/tmp}/cloud-gov-actual-hosts.XXXXXX")
+cat >"$EXPECTED_HOSTS" <<'HOSTS'
+api.fr.cloud.gov:443
+uaa.fr.cloud.gov:443
+login.fr.cloud.gov:443
+doppler.fr.cloud.gov:443
+log-cache.fr.cloud.gov:443
+cloud.gov:443
+www.cloud.gov:443
+docs.cloud.gov:443
+docs.cloudfoundry.org:443
+cli.cloudfoundry.org:443
+github.com:443
+objects.githubusercontent.com:443
+release-assets.githubusercontent.com:443
+HOSTS
+python3 - "$KIT_DIR/spec.yaml" >"$ACTUAL_HOSTS" <<'PY'
+import sys
+from pathlib import Path
+
+in_allow = False
+for line in Path(sys.argv[1]).read_text().splitlines():
+    if line == "    allow:":
+        in_allow = True
+        continue
+    if in_allow and line.startswith("      - "):
+        print(line.split("- ", 1)[1].strip().strip('"'))
+        continue
+    if in_allow and line and not line.startswith("      "):
+        break
+PY
+while IFS= read -r host; do
+  if grep -qx -- "$host" "$ACTUAL_HOSTS"; then
+    ok "spec.yaml allows $host"
+  else
+    bad "spec.yaml missing $host"
+  fi
+done <"$EXPECTED_HOSTS"
+while IFS= read -r host; do
+  if grep -qx -- "$host" "$EXPECTED_HOSTS"; then
+    :
+  else
+    bad "spec.yaml has unexpected egress host $host"
+  fi
+done <"$ACTUAL_HOSTS"
+rm -f "$EXPECTED_HOSTS" "$ACTUAL_HOSTS"
+
+info "3. Validate the neutral kit spec"
+VALIDATOR="$REPO_ROOT/integrations/isolation/acq-kits/validate-kits.py"
+if ! command -v python3 >/dev/null 2>&1; then
+  skip "validate-kits.py not run (python3 not on PATH)"
+elif [ ! -f "$VALIDATOR" ]; then
+  skip "validate-kits.py not found at $VALIDATOR"
+elif ! python3 -c 'import jsonschema, yaml' >/dev/null 2>&1; then
+  skip "validate-kits.py needs jsonschema + pyyaml"
+else
+  if val_out="$(python3 "$VALIDATOR" --root "$REPO_ROOT" 2>&1)"; then
+    ok "acq-kits validate-kits.py passes"
+  else
+    bad "validate-kits.py failed:"
+    while IFS= read -r line; do
+      printf '    | %s\n' "$line" >&2
+    done <<EOF
+$val_out
+EOF
+  fi
+fi
+
+if [ "$RUN_ACQ" != "1" ]; then
+  info "4. Live sandbox check"
+  skip "RUN_ACQ=1 not set - skipped live cloud.gov sandbox verification"
+  printf '\nSummary\n  %d passed, %d failed\n' "$pass" "$fail"
+  [ "$fail" -eq 0 ]
+  exit $?
+fi
+
+info "4. Live sandbox preconditions"
+if ! command -v acq >/dev/null 2>&1; then
+  bad "acq not on PATH"
+  exit 1
+fi
+ok "acq on PATH"
+
+SBX_BIND_HINT='sbx secret set-custom --host api.fr.cloud.gov --env CF_OAUTH_TOKEN --command "$(command -v cf) oauth-token"'
+ACQ_BIND_HINT='cf oauth-token | acq secret set -g cloud-gov --host api.fr.cloud.gov --env CF_OAUTH_TOKEN'
+if [ "$ACQ_BACKEND" = "sbx" ]; then
+  # acq cannot feed sbx's proxy for an arbitrary host (sbx set-custom takes no
+  # stdin), so the acq store is not the source of truth on sbx: sbx must hold the
+  # custom secret itself.
+  if ! command -v sbx >/dev/null 2>&1; then
+    bad "ACQ_BACKEND=sbx but sbx is not on PATH"
+    exit 1
+  fi
+  sbx_ls="$(sbx secret ls 2>/dev/null || true)"
+  if printf '%s\n' "$sbx_ls" | grep 'CF_OAUTH_TOKEN' | grep -q 'api.fr.cloud.gov'; then
+    ok "sbx has a CF_OAUTH_TOKEN custom secret for api.fr.cloud.gov (scope not checked; step 8 proves it reaches this sandbox)"
+  else
+    bad "RUN_ACQ=1 with ACQ_BACKEND=sbx requires a CF_OAUTH_TOKEN custom secret in sbx"
+    printf '  Register it from a host shell with: %s\n' "$SBX_BIND_HINT" >&2
+    exit 1
+  fi
+elif acq secret has -g cloud-gov >/dev/null 2>&1; then
+  ok "global cloud-gov secret is set"
+else
+  bad "RUN_ACQ=1 requires a global cloud-gov secret for authenticated verification"
+  printf '  Set it from a host shell with: %s\n' "$ACQ_BIND_HINT" >&2
+  exit 1
+fi
+
+info "5. Create sandbox with the kit"
+printf '  creating %s (workspace %s, backend %s)...\n' "$SBX_NAME" "$WORK" "$ACQ_BACKEND"
+# ACQ_EXTRA_KITS bypasses acq's interactive configured-kit picker. It is
+# whitespace-separated and ordered: the CA kit (if any) must come first so its
+# startup step trusts the intercepting CA before this kit fetches the CF CLI.
+EXTRA_KITS="$KIT_DIR"
+if [ -n "$CA_KIT" ]; then
+  EXTRA_KITS="$CA_KIT $KIT_DIR"
+  printf '  CA kit first: %s\n' "$CA_KIT"
+fi
+if ACQ_EXTRA_KITS="$EXTRA_KITS" acq_b create --name "$SBX_NAME" opencode "$WORK" >"$CREATE_LOG" 2>&1; then
+  ok "sandbox created with cloud-gov kit"
+  # acq names the backend that actually ran (for example `acq(msb): ...`); show it
+  # so a run is never cited as sbx evidence when it ran on msb.
+  used="$(grep -oE 'acq\((sbx|msb)\)' "$CREATE_LOG" | head -1)"
+  printf '  backend in create log: %s\n' "${used:-<not stated>}"
+  if [ "$used" != "acq($ACQ_BACKEND)" ]; then
+    bad "requested backend $ACQ_BACKEND but create log reports ${used:-no backend}"
+  fi
+else
+  bad "acq create failed"
+  sed 's/^/  | /' "$CREATE_LOG" >&2
+  exit 1
+fi
+
+info "6. CF CLI installed"
+cf_version="$(in_acq 'cf version')"
+if [ -z "$cf_version" ]; then
+  # A bare non-login exec may lack ~/.local/bin; retry so the failure message
+  # says whether cf is missing or only off PATH.
+  cf_version="$(in_acq 'PATH="$HOME/.local/bin:$PATH" cf version')"
+  [ -n "$cf_version" ] && printf '  note: cf is installed but ~/.local/bin is not on this exec PATH\n'
+fi
+printf '  %s\n' "${cf_version:-<no output>}"
+case "$cf_version" in
+  *"cf version"*) ok "cf CLI reports a version" ;;
+  *) bad "cf CLI did not report a version" ;;
+esac
+
+info "7. cloud.gov API and docs reachable"
+for url in \
+  https://api.fr.cloud.gov/v3/info \
+  https://uaa.fr.cloud.gov/ \
+  https://login.fr.cloud.gov/ \
+  https://doppler.fr.cloud.gov/ \
+  https://log-cache.fr.cloud.gov/ \
+  https://cloud.gov/ \
+  https://www.cloud.gov/ \
+  https://docs.cloud.gov/ \
+  https://docs.cloudfoundry.org/ \
+  https://cli.cloudfoundry.org/; do
+  status="$(in_acq "curl -sS -o /dev/null -w '%{http_code}' '$url'")"
+  printf '  %s -> %s\n' "$url" "${status:-<none>}"
+  # Some allow-listed service roots intentionally return 404; any HTTP response
+  # proves DNS, TLS, and egress to the intended host succeeded.
+  case "$status" in
+    [1-5][0-9][0-9]) ok "$url reachable" ;;
+    *) bad "$url not reachable (status ${status:-none})" ;;
+  esac
+done
+
+info "8. Authenticated CF API wiring"
+# A bare 401 cannot tell an expired token from a failed placeholder injection, so
+# take two measurements and report which one failed:
+#   - sandbox: what CF_OAUTH_TOKEN looks like in an exec session (class only, never
+#     the value), the HTTP status, and the API's error detail;
+#   - control (only after a 401/403): the host's own token against the same
+#     endpoint, right now.
+probe_script='
+if [ -z "$CF_OAUTH_TOKEN" ]; then
+  echo "class=unset"
+else
+  case "$CF_OAUTH_TOKEN" in
+    [Bb][Ee][Aa][Rr][Ee][Rr]*|*.*.*) echo "class=raw-token-shape" ;;
+    *) echo "class=opaque-value" ;;
+  esac
+fi
+body="$(mktemp)"
+curl -sS -o "$body" -w "status=%{http_code}\n" -H "Authorization: $CF_OAUTH_TOKEN" https://api.fr.cloud.gov/v3/organizations
+grep -o "\"detail\": *\"[^\"]*\"" "$body" | head -1 | sed "s/^/detail=/"
+rm -f "$body"'
+probe_out="$(in_acq "$probe_script")"
+probe_field() { printf '%s\n' "$probe_out" | sed -n "s/^$1=//p" | head -1; }
+probe_class="$(probe_field class)"
+auth_status="$(probe_field status)"
+auth_detail="$(probe_field detail)"
+printf '  sandbox: CF_OAUTH_TOKEN class=%s, authenticated /v3/organizations -> %s %s\n' \
+  "${probe_class:-<none>}" "${auth_status:-<none>}" "$auth_detail"
+refresh_hint="$ACQ_BIND_HINT"
+if [ "$ACQ_BACKEND" = "sbx" ]; then refresh_hint="$SBX_BIND_HINT"; fi
+case "$auth_status" in
+  2*)
+    case "$probe_class" in
+      opaque-value) ok "authenticated CF API probe succeeded with a placeholder-class value" ;;
+      raw-token-shape) bad "probe succeeded but the sandbox CF_OAUTH_TOKEN has a raw-token shape: the real token is in the sandbox" ;;
+      *) bad "probe returned $auth_status but CF_OAUTH_TOKEN class is ${probe_class:-unknown}; not counting it as placeholder-backed auth" ;;
+    esac
+    ;;
+  401|403)
+    host_control
+    printf '  control: host token -> %s\n' "${host_status:-<unavailable: cf not logged in, not targeting api.fr.cloud.gov, or not on PATH>}"
+    case "$probe_class" in
+      unset)
+        bad "CF_OAUTH_TOKEN is not set in the sandbox exec environment (binding did not reach it, or exec does not carry it); on sbx check 'sbx secret ls' for a CF_OAUTH_TOKEN custom secret and create a new sandbox: $refresh_hint"
+        ;;
+      raw-token-shape)
+        bad "sandbox CF_OAUTH_TOKEN has a raw-token shape, not a backend placeholder"
+        ;;
+      *)
+        case "$host_status" in
+          2*)
+            bad "host token is accepted (HTTP $host_status) but the sandbox request was rejected (status $auth_status): the backend did not substitute the placeholder, or holds a stale secret; not a token-expiry problem"
+            ;;
+          401|403)
+            bad "host token is also rejected (HTTP $host_status): the token may be expired or revoked, or lack the scope or authorization this endpoint needs; check 'cf target' and 'cf login', then: $refresh_hint"
+            ;;
+          *)
+            bad "authenticated probe rejected (status $auth_status) and no host control was available; token expiry and injection failure cannot be told apart"
+            ;;
+        esac
+        ;;
+    esac
+    ;;
+  *) bad "authenticated CF API probe failed (status ${auth_status:-none})" ;;
+esac
+
+info "Summary"
+printf '  %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" -eq 0 ] && printf '  \033[32mAll checks passed.\033[0m\n' || printf '  \033[31mSome checks failed - see notes above.\033[0m\n'
+
+[ "$fail" -eq 0 ]
