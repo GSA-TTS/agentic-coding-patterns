@@ -31,7 +31,7 @@
 #     deliberately do NOT default to "permissive".
 #
 # NEUTRAL (backend-agnostic) hybrid/v1 form, structured like the sibling kits
-# (prime-agent / usai-provider). acq's kit-translate layer maps the declarative
+# (opencode / usai-provider). acq's kit-translate layer maps the declarative
 # caps/files/commands/environment below onto whichever isolation backend acq has
 # active (sbx, msb) — this kit carries no backend-specific config and no backend
 # shortcut (podman has no native primitive on either backend; see README parity).
@@ -67,7 +67,7 @@ description: >
 #    default). We DECLARE these explicitly in caps.network.allow so the runtime
 #    works even on a `strict` tier that carries no baseline — a kit should name
 #    the egress its own function needs rather than silently depend on a baseline
-#    (finding #5). deny-by-default is preserved: these are an allow-LIST.
+#    deny-by-default is preserved: these are an allow-LIST.
 #
 # No entry begins with a leading `*` (YAML would parse a bare leading-`*` host as
 # an alias and break the translated spec — the documented alias trap).
@@ -183,11 +183,11 @@ commands:
   # costs only the device grant and storage re-evaluation, and `scripts/verify`
   # fails in that state. GATED ON PODMAN: revokes any stale device grant
   # and exits if podman is absent (install fell soft, or the base had its own
-  # engine and the kit early-outed) — no engine, no device grant (finding #3).
+  # engine and the kit early-outed) — no engine, no device grant.
   # Otherwise re-grants /dev/net/tun + /dev/fuse to the agent (/dev is a devtmpfs
   # re-created each boot, so the create-time grant is lost on restart) AND
   # re-evaluates the system storage driver so a transient /dev/fuse miss at create
-  # is not permanently pinned to vfs (finding #4). Cheap + idempotent; runs to
+  # is not permanently pinned to vfs. Cheap + idempotent; runs to
   # completion (NOT background: true). Schema note: `user` is a numeric uid
   # (^[0-9]+$); "0" is root, which the chown, /dev/net create, and
   # /etc/containers write require.
@@ -263,7 +263,7 @@ commands:
 #                                base whose agent account is not named "agent").
 #   OCI_ENGINE_SELFTEST_TIMEOUT — seconds to bound the per-boot rootless self-test
 #                                build (default 120) so a wedged mount cannot hang
-#                                the boot sequence (finding #6).
+#                                the boot sequence.
 environment:
   OCI_ENGINE_PKGS: "podman podman-compose fuse-overlayfs uidmap passt slirp4netns"
   OCI_ENGINE_SHORT_NAME_MODE: "enforcing"
@@ -273,11 +273,24 @@ environment:
 agentContext: |
   ## OCI Engine (rootless podman)
 
-  This sandbox has a rootless **podman** OCI engine installed, and `docker`
-  aliases to it — so `docker run …`, `docker build …`, and `docker compose …`
-  all work (they route to podman; `docker compose` uses the podman-compose
-  provider). The engine runs **rootless as you (the agent)**, never as root, and
-  is daemonless (no dockerd, no socket to start).
+  This opt-in kit attempts to provide rootless **podman** and a `docker` alias
+  (compose uses podman-compose). Installation is fail-soft; a pre-existing
+  functional engine may also cause an early-out. Availability, rootless mode,
+  storage operation, and effective resource limits must be checked separately.
+  The installation marker and the legacy `scripts/verify` storage/install result
+  do not qualify memory, CPU, or PID limits.
+
+  The experimental `scripts/verify-resources` is a separate guest-only check.
+  Run it only inside the intended Linux guest as the non-root agent, with
+  `--guest --podman /absolute/installed/podman --image registry/repository@sha256:DIGEST`
+  using the actual fully qualified preloaded 64-hex digest reference. It needs
+  Python 3 and the adjacent helper; it never pulls or installs anything, enables
+  controllers, or falls back to root. Explicit rootless=true and delegated
+  cgroup-v2 memory/cpu/pids precede a network-none, non-root bounded probe. The
+  result requires live kernel limits and verified exact-ID cleanup, not marker
+  presence. Exit 0 is measured success, 1 an observed failure, and 3 unverified
+  evidence (an observed failure takes precedence). See the kit README and
+  docs/decisions/resource-qualification.md for limits and operator prerequisites.
 
   Unqualified image names resolve to **Docker Hub** by default. Short-name
   resolution is `enforcing`: an ambiguous unqualified name fails closed rather

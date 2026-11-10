@@ -141,8 +141,8 @@ the device grant and storage re-evaluation for that boot. Quickstart reports a
 failing startup command as a warning and continues; it never treats it as an
 escalation. `scripts/verify` fails in that state.
 
-Pairing with Quickstart: GSA-TTS/agentic-coding-quickstart#637 makes the
-decision to use the read-only mount a host-side record, so a guest cannot force
+Pairing with Quickstart: the consumer keeps the
+decision to use the read-only mount in a host-side record, so a guest cannot force
 the legacy downgrade by tampering with a guest probe. When staging a read-only
 file fails on the host, the consumer falls back to a guest copy for that file and
 leaves its `/home/agent` token in argv. If both files fall back, that is the
@@ -210,11 +210,18 @@ both apply the identical file-drop + install + device-grant sequence through
 acq's kit translation. Behavioral parity: the guest ends up with a working
 rootless podman (and `docker` aliased to it) either way.
 
-## Verifying (host-side live check)
+## Installation and storage verification (legacy host-side live check)
+
+`scripts/verify` is the existing installation/storage check, not resource
+qualification. It retains its legacy two-state verdict: exit 0 means that nothing
+it counted failed, not that all evidence was available. In particular, its
+missing-rootless-field fallback checks only the agent UID. Neither that fallback,
+the installation marker, nor a successful storage build proves that memory, CPU,
+and PID limits are effective. See the [shared verdict contract](../README.md#what-a-scriptsverify-exit-code-means).
 
 `scripts/verify` creates a throwaway **msb** sandbox with this kit applied
 **through acq** (`acq --backend msb create shell … --kit …`) and confirms rootless
-podman actually works: podman reports `rootless=true`, a real `podman build` from
+installation/storage behavior: it requests `rootless=true`, a real `podman build` from
 `scratch` mounts a layer as the agent, and the `docker` -> `podman` wrapper this
 kit drops resolves and routes to podman.
 
@@ -260,3 +267,151 @@ VERIFY_OCI_IMAGE=docker.io/library/ubuntu:24.04 \
 
 The backend-agnostic gate (schema + cross-field rules) is
 `integrations/isolation/acq-kits/validate-kits.py` (`make validate-kits`).
+
+## Managed runtime (guest-only, opt-in metadata experiment)
+
+`scripts/managed-runtime.py` separates stable, volatile runtime paths from a
+**new** persistent graphroot. It is not installed or selected by `spec.yaml`,
+startup scripts, the Docker wrapper, or either verifier. It needs Python 3
+(standard library only) and local `/usr/bin/podman` in the intended Linux guest.
+Deliver the reviewed helper through a trusted path; root must not run an
+agent-writable copy. `--guest` acknowledges guest placement but does not detect
+or attest it. Do not run these commands on the host.
+
+Before preparation, the operator must independently provide a dedicated,
+writable tmpfs **exactly** at `/run/acq-oci-runtime`, root-owned 0755, with an
+explicit positive size at most 128 MiB. The helper accepts at most 1 MiB and
+4096 lines of mountinfo before entry parsing and verifies no-symlink directory
+paths; it does not create or repair mounts. Root preparation assumes trusted
+guest state with no hostile concurrent mount or directory changes. Operators must
+also review existing system/user Podman configuration, including any prototype
+`cgroup_parent` in `containers.conf`. That configuration remains effective:
+the helper does not hide, edit or fix it. It can also select a separate volume
+path or external helpers/plugins with effects outside the graphroot despite
+explicit root/runroot/tmpdir flags. Those flags are not confinement controls.
+
+From the kit directory, using the trusted delivered copy **inside the guest**:
+
+```sh
+# Root, once per fresh runtime tmpfs; no Podman execution occurs here.
+python3 -I -B scripts/managed-runtime.py --guest prepare --user agent
+
+# Agent, once for a NEW dedicated store (re-running initialization refuses).
+python3 -I -B scripts/managed-runtime.py --guest init-store
+
+# Agent, supported metadata calls; Podman is never invoked as root.
+python3 -I -B scripts/managed-runtime.py --guest exec -- info --format json
+python3 -I -B scripts/managed-runtime.py --guest exec -- volume ls
+```
+
+Prepared paths are `/run/acq-oci-runtime/UID/storage` (runroot) and
+`/run/acq-oci-runtime/UID/libpod` (tmpdir), in a user-owned 0700 UID directory.
+Both children are created 0700. On subsequent checks, only `libpod` may be
+0700 or 01700 (Podman's private sticky directory); the UID parent and `storage`
+must remain 0700. World-accessible sticky mode 01777 is refused.
+The dedicated persistent graphroot is the passwd user's
+`~/.local/share/acq-oci-runtime/store`. Its parent contains a strict, path-bound
+JSON marker. Existing or interrupted initialization is refused, not adopted or
+deleted. After stop/start, retain the graphroot, provide fresh tmpfs at the same
+path, and repeat root `prepare`; do **not** repeat `init-store`.
+
+Only `info [--format json]`, `images`, `image exists REFERENCE`,
+`volume ls [--format json]`, and `volume exists|inspect|create NAME` are supported.
+Volume names must fully match `[A-Za-z0-9][A-Za-z0-9_.-]*`; image references keep
+the broader `[A-Za-z0-9][A-Za-z0-9_.:/@+-]*` character set.
+Global options and workload commands are refused. Exec replaces inherited
+environment configuration with a small fixed allowlist and supplies explicit
+local-engine, store/runtime and `cgroupfs` flags. It does not migrate storage,
+change drivers, reset Podman, override cgroup parents, or change limits.
+**Metadata management is not read-only:** `info` may initialize databases and
+locks, and `volume create` writes directories and metadata.
+
+**Not a security sandbox or an argument permission system.** The operator/agent
+controls the writable graphroot and can call Podman outside this helper. Default
+`podman`, `docker`, and the existing verifiers do not implicitly use this store.
+Operator-reported native MSB 0.7.11 / Podman 5.7.0 evidence includes the original
+prototype's volume-hash preservation and a subsequent run of this helper that
+retained a named-volume sentinel across stop/start with fresh **64 MiB tmpfs**
+at the same runtime paths. This bounded metadata-management evidence exercises
+the helper lifecycle but does **not** qualify workloads or resources. Direct
+parent/delegation and freezer prerequisites remain unresolved for workload exec.
+See the [managed-runtime decision](docs/decisions/managed-runtime.md) for the
+bounded evidence, pinned public sources, configuration prerequisites, exact
+argument contract and interrupted-state handling.
+
+Offline validation commands, from the repository root, **only inside the approved
+workspace sandbox**:
+
+```sh
+python3 -I -B integrations/isolation/acq-kits/oci-engine/tests/managed-runtime-test.py
+node --test 'integrations/isolation/acq-kits/oci-engine/tests/*.test.mjs'
+```
+
+The wrapper needs no Node packages. The root `make test-kits` target includes
+these fixtures, so the existing kit CI job runs them.
+
+## Resource qualification (guest-only, experimental)
+
+Run `scripts/verify-resources` **inside the intended Linux guest**, as its
+non-root agent. It needs Python 3 (standard library only), an explicitly selected
+absolute installed Podman executable, and a trusted image already loaded in that
+agent's local store. The image must have `/bin/sh` and `sleep`, and its reference
+must be a fully qualified registry/repository plus `@sha256:` and 64 lowercase
+hex digits. There is no default image and no pull, install, root fallback, or
+cgroup repair. Copy the wrapper and adjacent `verify_resources.py` into the guest
+through the operator's normal trusted delivery path; the kit does not autorun it.
+
+```sh
+# In the guest; substitute the actual preloaded digest-qualified reference.
+sh scripts/verify-resources --guest --podman /usr/bin/podman \
+  --image "$PRELOADED_DIGEST_REF"
+```
+
+`--guest` is an operator acknowledgment, **not guest detection or attestation**.
+Linux and non-root checks cannot distinguish a Linux host from a guest. Never
+invoke it on the host, through a remote Podman client, or with the Docker wrapper.
+The environment is allowlisted, with the local user's home/runtime directory and
+a fixed `/usr/bin:/bin` path; every engine call uses `--remote=false`.
+
+The gate requires an explicit JSON boolean `host.security.rootless=true`, cgroup
+v2, and reported delegation of `memory`, `cpu`, and `pids` before creation. It
+creates then starts one probe, overriding its entrypoint with `/bin/sh`, with
+network `none`, user `65534:65534`, all capabilities dropped, no-new-privileges,
+128 MiB memory, one CPU, and 32 PIDs. It supplies no mounts, ignores image-declared
+volumes, disables healthchecks/logging, and uses a read-only root filesystem.
+The command is `exec sleep 120`; it is a bounded observation window, not a stress
+test. Each CLI call has a 10-second deadline and 64 KiB combined-output cap.
+
+The verifier maps the live inspected guest PID's `/proc/PID/cgroup` membership
+through `/proc/self/mountinfo` to the cgroup2 mount, rejecting traversal,
+ambiguous mappings, and symlink resolution. It reads **kernel** `memory.max`,
+`cpu.max`, and `pids.max`, not just requested inspect limits. It also checks live
+UIDs, effective capabilities and no-new-privileges, and rechecks PID start time,
+membership, and the engine's running PID. It requires exact leaf limits;
+stricter ancestor limits may further restrict the probe. No throughput, OOM,
+fork-exhaustion, hostile-image containment, or outer-VM limit claim follows.
+
+| Exit | Resource verifier result |
+|---|---|
+| `0` | Measured prerequisites, live kernel limits and exact-ID cleanup passed |
+| `1` | An observed rootful engine or wrong effective policy/limit failed |
+| `3` | Missing tools/image/controllers/evidence, malformed data, interrupted transport, or unverified cleanup; no measured failure |
+
+This follows the coverage semantics of [verify-report.sh](../verify-report.sh):
+a measured failure retains exit 1 even if another check is unverified. Cleanup
+runs in `finally` against only the full returned container ID and requires
+`container exists` to report absence. A lost/malformed create response cannot
+identify an owned container and therefore reports cleanup **UNVERIFIED**, never
+a pass. The operator must reconcile that guest's container store; there is no
+name-based or broad cleanup. Uncatchable termination cannot guarantee cleanup.
+
+Offline tests use fake executables/injected transport and synthetic kernel
+evidence; they never invoke a real engine:
+
+```sh
+python3 -I -B scripts/tests/test_oci_resource_verifier.py
+```
+
+See [resource qualification decision](docs/decisions/resource-qualification.md)
+for the trust boundary and limitations. Storage success and resource success are
+separate evidence; neither substitutes for the other.

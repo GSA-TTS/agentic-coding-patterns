@@ -18,7 +18,7 @@
     },
     "sources": {
       "type": "object",
-      "description": "Provenance: free-form record of where fields were derived from (e.g. modelsList, enrichment, bootstrappedFrom).",
+      "description": "Provenance: free-form record of where fields were derived from (e.g. modelsList, enrichment, capabilitiesVerified).",
       "additionalProperties": {
         "type": "string"
       }
@@ -30,7 +30,9 @@
       "properties": {
         "primary": { "type": "string", "minLength": 1 },
         "small": { "type": "string", "minLength": 1 },
-        "compaction": { "type": "string", "minLength": 1 }
+        "compaction": { "type": "string", "minLength": 1 },
+        "summary": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 1 }
       }
     },
     "gateway": {

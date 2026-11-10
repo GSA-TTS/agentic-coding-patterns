@@ -14,6 +14,14 @@ nist_controls: ["SC-7", "AC-4", "CM-7", "SI-10"]
 > kit spec (ADR 0001) and the network egress tiers (ADR 0002). Provider input
 > bundles are versioned independently so the mechanism can preserve a stable
 > provider layout while backends supply their proven read-only guest root.
+>
+> **Proposed amendment (not in effect).** [Patterns ADR 0002](../../../../docs/decisions/0002-runtime-model-refresh-aggregation.md)
+> is a proposed record. If it is accepted, it would supersede part of this
+> record: the guest-local writable aggregate at `/var/lib/acq/models/catalog.json`,
+> the orchestrator that writes it in the guest, the in-guest placement of Layer 2
+> steps 1 to 4, and Layer 3's reading of that file. Until it is accepted, this
+> record is unchanged and remains the accepted design. The text below is
+> unchanged.
 
 ## Context and Problem Statement
 

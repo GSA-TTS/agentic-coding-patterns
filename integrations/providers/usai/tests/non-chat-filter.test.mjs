@@ -14,7 +14,6 @@ import { test } from "node:test"
 
 import {
   NON_CHAT_MODELS,
-  bootstrapModelsFromBlock,
   nonChatReason,
   shapeFromFeeds,
 } from "../scripts/build-catalog.mjs"
@@ -90,29 +89,19 @@ test("the live-feed path drops non-chat models", () => {
   )
 })
 
-test("the BOOTSTRAP path drops non-chat models too", () => {
-  const entries = [
-    { id: "claude-opus-5", obj: { name: "Claude Opus 5" } },
-    { id: "cohere_english_v3", obj: { name: "Cohere English v3" } },
-    { id: "text-embedding-005", obj: { name: "Text Embedding 005" } },
-  ]
-  const { models } = bootstrapModelsFromBlock(entries)
-  assert.deepEqual(
-    models.map((m) => m.id),
-    ["claude-opus-5"],
-  )
-})
-
 test("an excluded model's vendor does not leak into the vendor list", () => {
-  const { models, vendorsSeen } = bootstrapModelsFromBlock([
-    { id: "claude-opus-5", obj: { name: "Claude Opus 5" } },
-    { id: "cohere_english_v3", obj: { name: "Cohere English v3" } },
-  ])
+  const { models, vendorOrder } = shapeFromFeeds(
+    [
+      { id: "claude-opus-5", owned_by: "Anthropic" },
+      { id: "cohere_english_v3", owned_by: "Cohere" },
+    ],
+    null,
+  )
   assert.deepEqual(
     models.map((m) => m.id),
     ["claude-opus-5"],
   )
-  assert.equal(vendorsSeen.has("cohere"), false, "excluded-only vendors must not appear")
+  assert.equal(vendorOrder.includes("cohere"), false, "excluded-only vendors must not appear")
 })
 
 test("name is consulted, not just id", () => {

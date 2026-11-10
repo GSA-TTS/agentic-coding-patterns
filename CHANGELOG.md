@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.19.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.18.0...v1.19.0) (2026-11-05)
+
+
+### Features
+
+* **oci-engine:** qualify bounded rootless resource controls ([#562](https://github.com/GSA-TTS/agentic-coding-patterns/issues/562)) ([cf6d7a5](https://github.com/GSA-TTS/agentic-coding-patterns/commit/cf6d7a524b0106b8050e63ee9d0f9a88df0f6571))
+* **opencode:** add live image-capability verification script (not yet run) ([#572](https://github.com/GSA-TTS/agentic-coding-patterns/issues/572)) ([f0a951f](https://github.com/GSA-TTS/agentic-coding-patterns/commit/f0a951f363f26031a28faaafff70ab116b14cde2))
+* **paseo:** bump pinned Paseo CLI to 0.15.0 ([#560](https://github.com/GSA-TTS/agentic-coding-patterns/issues/560)) ([0c4e1a8](https://github.com/GSA-TTS/agentic-coding-patterns/commit/0c4e1a82231e0f03bbb42039d51f210c0776ee42))
+* **usai-catalog:** carry verified capability metadata through a catalog refresh ([#578](https://github.com/GSA-TTS/agentic-coding-patterns/issues/578)) ([fcd94e5](https://github.com/GSA-TTS/agentic-coding-patterns/commit/fcd94e5e12ae0b91ddc7857aec89f28bcf36785e))
+* **usai-catalog:** publish verified image input modality for 12 USAi models ([#575](https://github.com/GSA-TTS/agentic-coding-patterns/issues/575)) ([907d486](https://github.com/GSA-TTS/agentic-coding-patterns/commit/907d486720eaf1288ea8603332d8919bc905554c))
+* **usai-catalog:** single refresh entrypoint for the catalog and neutral artifacts ([#573](https://github.com/GSA-TTS/agentic-coding-patterns/issues/573)) ([0c1b145](https://github.com/GSA-TTS/agentic-coding-patterns/commit/0c1b1451a81605557a5528a7f8aa5aa54190086f))
+
+
+### Bug Fixes
+
+* **ci:** validate pending release comparisons against their commit ([#570](https://github.com/GSA-TTS/agentic-coding-patterns/issues/570)) ([0961019](https://github.com/GSA-TTS/agentic-coding-patterns/commit/0961019bd24b67ab929e807f8b3b73cf2256de02))
+* **deps:** update Ruff package and hook together to 0.17.3 ([#568](https://github.com/GSA-TTS/agentic-coding-patterns/issues/568)) ([a6266dd](https://github.com/GSA-TTS/agentic-coding-patterns/commit/a6266dde2f912b13c52efaf9406e01e050766f1b))
+* **opencode:** prepare agent-owned sandbox scratch directory ([#561](https://github.com/GSA-TTS/agentic-coding-patterns/issues/561)) ([89a66b2](https://github.com/GSA-TTS/agentic-coding-patterns/commit/89a66b2279145595c32dfda84b3ddb9f141d2f14))
+* **paseo:** launch real opencode outside PID 1 ([#559](https://github.com/GSA-TTS/agentic-coding-patterns/issues/559)) ([ce4aa08](https://github.com/GSA-TTS/agentic-coding-patterns/commit/ce4aa08162b22858cda85e7fae0345326ea6f1a3))
+* **paseo:** verify runtime identity without false orphan verdicts ([#567](https://github.com/GSA-TTS/agentic-coding-patterns/issues/567)) ([1062244](https://github.com/GSA-TTS/agentic-coding-patterns/commit/1062244d75c9883bcfa9500a1a1e32f523969987))
+* **usai-catalog:** allow summary and title roles in catalog recommendations schema ([#551](https://github.com/GSA-TTS/agentic-coding-patterns/issues/551)) ([ad2aadd](https://github.com/GSA-TTS/agentic-coding-patterns/commit/ad2aaddd6c8a4239b665c8d192b1b4d9e260298d))
+* **usai:** retire stale references to the removed model sync script ([#552](https://github.com/GSA-TTS/agentic-coding-patterns/issues/552)) ([95be9b9](https://github.com/GSA-TTS/agentic-coding-patterns/commit/95be9b9bee6916cb69a93b60816ca292f9f3c6d5))
+
 ## [1.18.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.17.0...v1.18.0) (2026-10-28)
 
 

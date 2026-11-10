@@ -9,6 +9,10 @@ impact_level: "low"
 
 # ADR 0005 (isolation) — Ship scope-layer kits as copy-and-rename templates under `acq-kits/examples/`
 
+> **2026-11-06 retirement note:** The Prime Agent skeleton mentioned as a
+> historical placement precedent below has been removed from the registry and
+> tree. See [the retirement decision](../../../../docs/decisions/0005-retire-prime-agent.md).
+>
 > Area-scoped ADR for `integrations/isolation/`. Extends ADR 0001 (the neutral
 > `hybrid/v1` acq-kits area) with a home for kit *templates*, and records why the
 > team and personal scope layers are shipped as templates rather than as kits.
@@ -55,8 +59,9 @@ record covers the two structural decisions that document depends on.
 ### Placement
 
 - **(A)** `acq-kits/<name>/` with a `kits.yaml` entry whose parity note says
-  TEMPLATE, not applied by acq. No validator change; `prime-agent` already sits
-  in the registry as a skeleton, so there is precedent.
+  TEMPLATE, not applied by acq. No validator change; at the time of writing,
+  `prime-agent` sat in the registry as a skeleton (later retired in
+  GSA-TTS/agentic-coding-patterns#584 / #585), so there was precedent.
 - **(B)** `acq-kits/examples/<name>/`, schema- and `files[]`-validated by
   `validate-kits.py` but exempt from the registry cross-check. (chosen)
 

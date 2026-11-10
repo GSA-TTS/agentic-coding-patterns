@@ -1,12 +1,13 @@
-"""Tests for the safe-kit-update foundation (quickstart#235, patterns#273).
+"""Tests for the safe-kit-update foundation and retired integration drift.
 
-Three concerns, all additive/no-behavior-change:
+Shared contracts:
 
 1. `provenance` schema field — additive + backward-compatible on hybrid/v1.
 2. Renderer ownership — provider kits no longer ship an OpenCode config or
    writer; policy belongs to the OpenCode kit.
 3. Provider-package drift guard — the retired provider-owned config and writers
-   must remain absent from both neutral and SBX compatibility packages.
+    must remain absent from both neutral and SBX compatibility packages.
+4. Retired harness assets must stay absent without removing reference harnesses.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from pathlib import Path
 
 import jsonschema
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 SCHEMA_PATH = ROOT / "schemas" / "kit-hybrid-v1.schema.json"
@@ -156,3 +158,98 @@ class TestRendererOwnership:
             assert not (root / "files/home/usai-config/opencode.jsonc").exists()
             assert not (root / "files/home/usai-config/merge-global-config.mjs").exists()
             assert not (root / "scripts/sync-usai-models.mjs").exists()
+
+    def test_orphaned_usai_model_list_fixtures_stay_removed(self):
+        # These feed fixtures belonged to the retired sync script's tests and
+        # have no remaining consumer.
+        for root in (ACQ_USAI, SBX_USAI):
+            assert not (root / "tests/fixtures/usai-models.json").exists()
+
+
+INTEGRATIONS = ROOT / "integrations"
+# Frozen byte-exact renderer-contract fixture: its comment is part of the
+# contract digest and must not be edited.
+FROZEN_FIXTURES = {
+    INTEGRATIONS / "providers/usai/tests/fixtures/opencode-production.jsonc",
+}
+
+
+def _integration_files(suffixes: tuple[str, ...]) -> list[Path]:
+    return [
+        p for p in INTEGRATIONS.rglob("*") if p.is_file() and p.suffix in suffixes and "node_modules" not in p.parts
+    ]
+
+
+class TestRetiredRefreshCommand:
+    def test_no_live_instruction_to_run_the_retired_npm_script(self):
+        offenders = [
+            str(p.relative_to(ROOT))
+            for p in _integration_files((".md", ".json", ".mjs", ".yaml", ".yml", ".sh", ""))
+            if p not in FROZEN_FIXTURES and re.search(r"sync:usai-models", p.read_text(errors="replace"))
+        ]
+        assert offenders == []
+
+    def test_node_test_scripts_have_tests(self):
+        # An npm "test" script over a glob that matches nothing passes with
+        # "tests 0", which reads as evidence when there is none.
+        offenders = []
+        for pkg in INTEGRATIONS.rglob("package.json"):
+            if "node_modules" in pkg.parts:
+                continue
+            script = json.loads(pkg.read_text()).get("scripts", {}).get("test", "")
+            if "node --test" in script and not list(pkg.parent.glob("tests/**/*.test.mjs")):
+                offenders.append(str(pkg.relative_to(ROOT)))
+        assert offenders == []
+
+
+class TestRetiredHarnessAssets:
+    def test_registry_and_reference_harnesses(self):
+        kits = ROOT / "integrations/isolation/acq-kits"
+        registry = yaml.safe_load((kits / "kits.yaml").read_text())
+        assert "prime-agent" not in registry["kits"]
+        for name, payload in (
+            ("opencode", "files/home/opencode-install.sh"),
+            ("pi-coding-agent", "files/home/pi-coding-agent-install.sh"),
+        ):
+            assert name in registry["kits"]
+            spec = yaml.safe_load((kits / name / "spec.yaml").read_text())
+            assert spec["name"] == name
+            assert (kits / name / "README.md").is_file()
+            assert (kits / name / payload).is_file()
+            assert any(entry.get("source") == payload for entry in spec["files"])
+
+    def test_dedicated_kit_emitter_and_consumers_stay_removed(self):
+        # Git does not track empty directories; inspect payloads so this also
+        # works in a checkout with empty directories left after file removal.
+        kit = ROOT / "integrations/isolation/acq-kits/prime-agent"
+        assert not kit.is_file() and not kit.is_symlink()
+        assert not any(path.is_file() or path.is_symlink() for path in kit.rglob("*"))
+        provider = ROOT / "integrations/providers/usai"
+        for relative in (
+            "emitters/prime-agent.mjs",
+            "tests/prime-agent.test.mjs",
+            "tests/models-json-regen.test.mjs",
+        ):
+            path = provider / relative
+            assert not path.exists() and not path.is_symlink(), relative
+
+    def test_no_stale_dedicated_invokes_or_registry_references(self):
+        # Scan executable/config surfaces, not historical ADR prose. Exempt
+        # only this guard's own negative assertions, not whole test directories.
+        paths = [ROOT / "Makefile", ROOT / "INDEX.yaml"]
+        for directory in (INTEGRATIONS, ROOT / "scripts", ROOT / "schemas", ROOT / ".github"):
+            paths.extend(
+                p
+                for p in directory.rglob("*")
+                if p.is_file()
+                and p.suffix in ("", ".py", ".mjs", ".js", ".sh", ".json", ".jsonc", ".yaml", ".yml")
+                and "node_modules" not in p.parts
+                and "__pycache__" not in p.parts
+            )
+        retired = re.compile(r"prime[-_ ]agent|emitPrimeAgentModelsFromCatalog|models-json-regen", re.IGNORECASE)
+        offenders = [
+            str(p.relative_to(ROOT))
+            for p in paths
+            if p != Path(__file__).resolve() and retired.search(p.read_text(errors="replace"))
+        ]
+        assert offenders == []

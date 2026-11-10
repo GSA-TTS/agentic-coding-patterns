@@ -12,6 +12,10 @@ risk_treatment: "mitigate"
 
 # ADR 0006 (isolation) — Carry reasoning and input-modality capability metadata in the neutral model catalog
 
+> **2026-11-06 retirement note:** The Prime Agent consumer mentioned below is
+> historical and has been removed; it no longer needs a schema migration. See
+> [the retirement decision](../../../../docs/decisions/0005-retire-prime-agent.md).
+>
 > Area-scoped ADR for `integrations/isolation/`. Extends ADR 0004's neutral
 > catalog (`acq-neutral-model-catalog/v1`) with two optional per-model
 > capability fields. ADR 0004 reserves changes to the neutral catalog field set
@@ -85,8 +89,9 @@ photos, other harnesses, repeat runs and OpenCode 1.x were not tested.
   [Evidence required before a value is published](#evidence-required-before-a-value-is-published)).
 - Declaring a capability must not silently turn on request-time behavior
   (reasoning effort, thinking budgets, variants). The renderer emits none of
-  these; note that OpenCode itself may derive selectable variants from
-  `reasoning: true` (see the OpenCode kit README).
+  these. OpenCode 1.x is believed to derive selectable variants from
+  `reasoning: true` (see the OpenCode kit README; not re-tested), but on the
+  pinned 2.0.30 the field is dropped (see [Amendment](#amendment-2026-11-04-reasoning-stays-absent)).
 - Harness-neutral vocabulary; harness syntax stays inside the harness kit
   (ADR 0004, Layer 3).
 - Deployability: `additionalProperties: false` on the neutral model means a
@@ -154,7 +159,7 @@ substantiates image input only.
 | `inputModalities` includes `image` | The synthetic-image procedure for that model: an exact-token read, repeated over several independently generated images, and a text-only control (explicit `["text"]`), repeated on the same images, that never returns the token. A single run is not enough. |
 | `inputModalities` includes `audio`, `video`, or `pdf` | Its own probe, with a known-content input of that type that cannot be answered from text or the model id, repeated samples, and a text-only control. An image probe says nothing about these. No such probe exists yet, so these values are not published. |
 | `inputModalities: ["text"]` (known text-only) | A negative result is also a claim. Record the failed attempts and the exact rejection or error, so a transient outage is not published as "unsupported". |
-| `reasoning: true` or `false` | A separate procedure that checks the **target OpenCode version's** behavior, not just the gateway's: whether the model reasons at all, which variants OpenCode derives from the field (1.x derives low/medium/high variants for openai-compatible models), and request-time effects such as effort or thinking-budget parameters sent to the gateway. An image probe says nothing about this. No such procedure exists yet, so `reasoning` is not published. |
+| `reasoning: true` or `false` | No procedure can currently substantiate it on OpenCode 2.0.30 or the USAi gateway: OpenCode drops the field, and the gateway exposes no reasoning signal or working control. See [`reasoning-validation.md`](../../acq-kits/opencode/docs/reasoning-validation.md). **Decision rule: no value is published and the field stays absent for every model.** Revisit only if a future OpenCode or gateway exposes an observable control, meaning a consumer that reads the field and changes behavior with it, or a gateway signal (a reasoning stream field or `reasoning_tokens`) plus a documented switch that demonstrably changes it **on the target model** (for `true`), or an explicit gateway or vendor statement for the target model that its reasoning capability itself is unsupported (for `false`; a rejected parameter, effort value or endpoint is not such a statement). A null observation, a rejected control, or a control that works only on another model, leaves the model indeterminate and the field absent. An image probe says nothing about this. |
 
 ### Evidence record
 
@@ -185,7 +190,7 @@ it once the format has been used.
 
 | Neutral | OpenCode model config |
 |---|---|
-| `reasoning` | `reasoning` (boolean) |
+| `reasoning` | `reasoning` (boolean). **Not applied on 2.0.30** (see Amendment) |
 | `inputModalities` | `modalities.input` |
 
 Observed against the kit's pinned OpenCode (v2.0.30) on a throwaway config:
@@ -199,7 +204,8 @@ and an explicit `modalities.input: ["text"]` disables image handling on both
 implementation sandbox, so the config-field syntax rests on the pinned
 binary's observed behavior and MUST be re-confirmed against the V2
 configuration guide during review. The effect of `reasoning` on request
-behavior is **not** established by this record.
+behavior is **not** established by this record; the Amendment below records
+what was later observed on 2.0.30.
 
 ### Versioning and compatibility
 
@@ -265,6 +271,97 @@ record.
 - AI-generated change: requires human and independent adversarial review
   before any push.
 
+## Amendment (2026-11-04): `reasoning` stays absent
+
+Status of the record is unchanged. This section adds to it; the text above is
+kept as written.
+
+### Decision
+
+The owner of the epic accepted keeping `reasoning` **absent for every model**.
+No `reasoning: true` or `false` value is published, and none will be unless a
+future OpenCode or gateway exposes an observable control, or the gateway or
+vendor states explicitly that a given model's reasoning capability is
+unsupported (see the evidence table). A rejected parameter, effort value or
+endpoint is not such a statement.
+
+### Evidence
+
+Live probe on 2026-11-04 against OpenCode 2.0.30 (the pinned binary) and the
+USAi gateway; full method and limits are in
+[`reasoning-validation.md`](../../acq-kits/opencode/docs/reasoning-validation.md).
+
+- A provider model with `reasoning: true` or `false` makes 2.0.30 log a
+  `WARN` configuration normalization diagnostic (`kind=unsupported`) with the
+  text `omitted unsupported legacy setting`. The OpenCode config field is
+  **dropped**. The binary lists it with other legacy model settings it omits.
+- Against a local stand-in gateway, request bodies, events and usage were
+  identical for the field absent, `true` and `false`. Two runs per setting
+  against the live gateway (three models) showed no difference either.
+- Variants (`model#low`, `#medium`, `#high`, which send `reasoning_effort`) work
+  with the field absent, so they do not depend on it. This was tested against
+  the stand-in gateway only.
+- The gateway returned no reasoning stream field and no `reasoning_tokens` for
+  the four models examined, and the effort and disable switches tried had no
+  observable effect, so there is no usable positive or negative control on
+  any model. Every model is therefore *Indeterminate*: a null observation
+  (no signal, wrong answers, low token counts) is not evidence that a model
+  does not reason, and a control working on another model cannot establish a
+  value for the target. `true` needs target-specific positive evidence (a signal plus that
+  model's own switch changing it; a control that is merely accepted is not
+  evidence). `false` (known-unsupported) needs an explicit target-specific
+  statement from the gateway or vendor that the model's reasoning capability
+  itself is unsupported (it does not reason). Capability statement: "model X
+  is not a reasoning model". Control rejection, which is never enough: an
+  error that `reasoning.effort`, an effort value or an endpoint is
+  unsupported, because a reasoning-capable model can reject a request control
+  while reasoning through its supported API. An OFF/ON run with no
+  difference is not enough either, because an ignored switch looks the same. The
+  gateway's reporting telemetry does not establish internal reasoning.
+
+The samples are small (four gateway models in depth, single-digit runs, one
+date). This is evidence for the decision, not proof.
+
+### Effect on the OpenCode mapping
+
+On the pinned 2.0.30 the `reasoning` row of the mapping table is a no-op:
+OpenCode omits the field, and a published value would claim something that no
+check on this path can observe.
+
+The renderer
+(`integrations/isolation/acq-kits/opencode/files/home/opencode-config/render-provider-config.mjs`)
+**still emits** `reasoning` into the model block when the neutral model carries
+it, after validating that it is a boolean, and its tests assert that emission.
+With the committed catalog and snapshots carrying no `reasoning`, nothing is
+emitted today. If a value were supplied, emitting it is harmless on 2.0.30
+beyond one logged warning per model (observed with `--print-logs` against the
+stand-in gateway). What OpenCode 1.x does with it (possibly deriving variants,
+per the kit README) was **not tested**.
+
+### Consequences
+
+- Nothing changes in the catalog or the snapshots: neither carries `reasoning`.
+- The `reasoning` field and its type stay in the neutral and USAi schemas as
+  optional. Absent means unknown.
+- Consumers MUST treat absent `reasoning` as unknown, not as "does not reason".
+- Unsuccessful or unobserved reasoning (no signal, failed task, or a positive
+  control that exists only on another model) stays *Indeterminate* and the
+  field stays absent. `false` is never concluded from a null observation or
+  from a rejected parameter, value or endpoint.
+- Producers should not supply `reasoning` for OpenCode 2.0.30 consumers unless
+  the behavior is re-verified. The renderer does not enforce this today; it
+  would emit a supplied value.
+- This amendment is documentation only. The renderer and its tests were not
+  changed.
+
+### Unresolved
+
+- OpenCode 1.x behavior with the field (variants, requests) is not tested.
+- Cost and latency effects were not measured.
+- Models other than those examined were not probed.
+- Consumers outside the OpenCode kit (for example the Quickstart projection)
+  were not examined.
+
 ## Links
 
 - ADR 0004 (isolation) — neutral model-provider discovery and the neutral
@@ -274,5 +371,7 @@ record.
 - `../../acq-kits/opencode/docs/synthetic-image-validation.md` — the live
   procedure for image input only. Other fields and modalities need their own
   evidence.
+- `../../acq-kits/opencode/docs/reasoning-validation.md` — the reasoning
+  investigation behind the Amendment.
 - Tracking: GSA-TTS/agentic-coding-patterns#366 within
   GSA-TTS/agentic-coding-patterns#357.

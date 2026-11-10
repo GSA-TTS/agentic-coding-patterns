@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "usai-refresh-registry/v1",
+  "artifacts": [
+    {
+      "id": "catalog",
+      "kind": "catalog",
+      "path": "integrations/providers/usai/catalog.json"
+    },
+    {
+      "id": "neutral-snapshot",
+      "kind": "derived",
+      "path": "integrations/isolation/acq-kits/usai-provider/files/home/usai-config/model-catalog-snapshot.json",
+      "generator": {
+        "script": "integrations/isolation/acq-kits/usai-provider/scripts/normalize-catalog.mjs",
+        "args": ["--source", "{catalog}", "--out", "{out}"]
+      }
+    }
+  ]
+}

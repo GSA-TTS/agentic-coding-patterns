@@ -29,7 +29,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.13'
           cache: 'pip'
@@ -73,7 +73,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
           cache: 'pip'
@@ -157,6 +157,21 @@ jobs:
             envsubst '${MLC_GITHUB_TOKEN}' \
             < .markdown-link-check.json > .markdown-link-check.ci.json
 
+      # Only the generated next-release comparison needs a pre-publication
+      # target. Check that comparison against the real commit; do not ignore it.
+      - name: Prepare pending release comparison
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          git fetch --no-tags origin "$BASE_SHA"
+          git show "$BASE_SHA:CHANGELOG.md" > "$RUNNER_TEMP/base-changelog.md"
+          python3 scripts/prepare_link_check.py \
+            --event-name "$EVENT_NAME" --event "$GITHUB_EVENT_PATH" \
+            --changelog CHANGELOG.md --base-changelog "$RUNNER_TEMP/base-changelog.md" \
+            --config .markdown-link-check.ci.json
+
       - uses: tcort/github-action-markdown-link-check@e047c5b37f24ab722bbef1a27b6fab7f96bc4068 # v1.1.3
         with:
           config-file: ".markdown-link-check.ci.json"
@@ -176,7 +191,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.13'
           cache: 'pip'

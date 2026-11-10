@@ -58,12 +58,18 @@ symptom means the kit wasn't applied, or the merge step didn't run.
 
 ## A model appears in the list but fails at runtime
 
-**Cause:** the generated model catalog can drift from what USAi currently serves
-(models added/removed/renamed upstream).
+**Cause:** the vendored model snapshot can drift from what USAi currently
+serves (models added/removed/renamed upstream). The snapshot is derived from
+`integrations/providers/usai/catalog.json`, which is refreshed in the repository
+and shipped with a kit release; a sandbox never regenerates it.
 
-**Fix:** regenerate the catalog from this kit directory: `npm run
-sync:usai-models`, then re-apply/recreate the sandbox. The generator only
-rewrites the region between the `BEGIN/END GENERATED USAI MODELS` markers.
+**Fix:** update to a kit release that carries a refreshed snapshot, then
+re-apply or recreate the sandbox. A maintainer can compare the committed
+catalog with the live gateway by running `make refresh-usai-catalog-check` from
+the repository root (see `integrations/providers/usai/README.md`). The check
+changes no tracked file. It reads the gateway credential from the environment
+variable named in the catalog's `gateway.apiKeyEnv`, so run it on a maintainer
+host, not inside a sandbox.
 
 ## A global-key override warning appeared at startup
 

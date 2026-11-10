@@ -56,3 +56,6 @@ node_modules/
 Thumbs.db
 deleteme/
 .markdown-link-check.ci.json
+
+# USAi catalog refresh: staged source pull (see integrations/providers/usai/README.md)
+/tmp/usai-source/

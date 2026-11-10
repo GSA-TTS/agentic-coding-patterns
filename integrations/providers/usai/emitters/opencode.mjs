@@ -1,4 +1,14 @@
 // =============================================================================
+// LEGACY — test-only regression contract. NOT a refresh step.
+//
+// The OpenCode kit renders its own native configuration from provider-neutral
+// inputs; nothing outside tests/ imports this module, and the refresh command
+// (scripts/refresh.mjs) neither runs nor imports it. It is kept only so the
+// byte-exact round-trip in tests/emitters.test.mjs still proves that
+// catalog.json losslessly represents the previously shipped config. See
+// docs/decisions/0003-repo-time-provider-catalog-refresh.md.
+// =============================================================================
+// =============================================================================
 // opencode.mjs — the RENDER half of the USAi catalog pipeline (opencode target).
 //
 // Data flow:

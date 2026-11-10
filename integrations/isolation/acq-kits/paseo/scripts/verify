@@ -15,7 +15,8 @@
 #      byte-complete over the host port (identity encoding; integrity guard), the
 #      in-guest 0.0.0.0 bind (reachable via create-time publish) over the host port, the
 #      install ran with lifecycle scripts disabled (hardening #2), the npm cache
-#      remains agent-owned, the respawn supervisor, the PID-1 hold, the
+#      remains agent-owned, the respawn supervisor, the PID-1 hold's source
+#      structure (live hold requires a separate interactive observation), the
 #      worktree-root pin, daemon self-heal, and that projects are pre-populated
 #      from the mounted host dirs — including that a read-write extra workspace IS
 #      registered and a ":ro" one is SKIPPED.
@@ -73,6 +74,18 @@ RUN_SBX="${RUN_SBX:-0}"
 SBX_KIT_DIR="${SBX_KIT_DIR:-}"
 # Container port the daemon binds (API + WS + web UI). Keep in sync with spec.
 PASEO_PORT="${PASEO_PORT:-6767}"
+# This value is embedded in guest shell source below. Reject every non-decimal
+# byte before constructing a command; bound length before numeric conversion.
+if [[ ! "$PASEO_PORT" =~ ^[0-9]{1,5}$ ]] ||
+   [ "$((10#$PASEO_PORT))" -lt 1 ] || [ "$((10#$PASEO_PORT))" -gt 65535 ]; then
+  printf 'Invalid PASEO_PORT (expected decimal 1..65535)\n' >&2
+  exit 1
+fi
+PASEO_PORT="$((10#$PASEO_PORT))"
+if [ "$PASEO_PORT" -ne 6767 ]; then
+  printf 'Invalid PASEO_PORT (kit spec publishes container port 6767)\n' >&2
+  exit 1
+fi
 REMOVED_DAEMON_LAUNCH_PATTERN='paseo[[:space:]]+daemon[[:space:]]+start|paseo[[:space:]]+daemon[[:space:]]+(start|run)[^#]*--(listen|web-ui|foreground)'
 # How long to wait for the background startup, which on FIRST boot also installs
 # the Paseo CLI (npm). Override with READY_TIMEOUT.
@@ -87,9 +100,10 @@ printf 'gitdir: /tmp/paseo-verify-repo-b.git\n' > "$RW_CHILD_REPO_B/.git"
 
 pass=0
 fail=0
+skipped=0
 ok()   { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass+1)); }
 bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail+1)); }
-skip() { printf '  \033[33mSKIP\033[0m %s\n' "$1"; }
+skip() { printf '  \033[33mSKIP\033[0m %s\n' "$1"; skipped=$((skipped+1)); }
 warn() { printf '  \033[33mWARN\033[0m %s\n' "$1"; }
 info() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 
@@ -225,17 +239,27 @@ fi
 
 if [ -z "$DRIVER" ]; then
   info "Live sandbox checks (2-9): SKIPPED"
+  skipped=$((skipped+1))
   echo "  Set RUN_ACQ=1 to run the live end-to-end check via acq (preferred)." >&2
   echo "  (RUN_SBX=1 also works but needs a pre-translated sbx-v2 kit; see header.)" >&2
   info "Summary"
   printf '  %d passed, %d failed\n' "$pass" "$fail"
-  [ "$fail" -eq 0 ] && printf '  \033[32mOffline gate passed.\033[0m\n' || printf '  \033[31mOffline gate failed — see above.\033[0m\n'
-  exit "$([ "$fail" -eq 0 ] && echo 0 || echo 1)"
+  if [ "$fail" -gt 0 ]; then
+    printf '  \033[31mOffline gate failed — see above.\033[0m\n'
+  elif [ "$skipped" -gt 0 ]; then
+    printf '  \033[33mMeasured offline checks passed; %s skipped/unverified.\033[0m\n' "$skipped"
+  else
+    printf '  \033[32mOffline gate passed.\033[0m\n'
+  fi
+  [ "$fail" -eq 0 ] || exit 1
+  [ "$skipped" -eq 0 ] || exit 3
+  exit 0
 fi
 
 if ! command -v "$DRIVER" >/dev/null 2>&1; then
-  echo "  RUN_${DRIVER^^}=1 set but '$DRIVER' not on PATH. Install it and retry." >&2
-  exit 1
+  case "$DRIVER" in acq) driver_label=ACQ ;; sbx) driver_label=SBX ;; esac
+  echo "  RUN_${driver_label}=1 set but '$DRIVER' not on PATH. Install it and retry." >&2
+  exit 3
 fi
 echo "  driver: $DRIVER"
 
@@ -318,14 +342,15 @@ if [ "$DRIVER" = "acq" ]; then
 else
   if [ -z "$SBX_KIT_DIR" ]; then
     info "Live sandbox checks (2-9): SKIPPED"
+    skipped=$((skipped+1))
     echo "  RUN_SBX=1 needs a PRE-TRANSLATED sbx-v2 kit dir in SBX_KIT_DIR." >&2
     echo "  sbx cannot parse the neutral hybrid/v1 spec directly. Prefer RUN_ACQ=1," >&2
     echo "  which translates automatically." >&2
     info "Summary"
     printf '  %d passed, %d failed\n' "$pass" "$fail"
-    [ "$fail" -eq 0 ] && printf '  \033[32mOffline gate passed; live checks skipped.\033[0m\n' \
-      || printf '  \033[31mOffline gate failed — see above.\033[0m\n'
-    exit "$([ "$fail" -eq 0 ] && echo 0 || echo 1)"
+    [ "$fail" -eq 0 ] || { printf '  \033[31mOffline gate failed — see above.\033[0m\n'; exit 1; }
+    printf '  \033[33mMeasured offline checks passed; live checks skipped/unverified.\033[0m\n'
+    exit 3
   fi
   create_kits=(--kit "$SBX_KIT_DIR")
   if [ -n "$ZSCALER_KIT_DIR" ] && [ -f "$ZSCALER_KIT_DIR/spec.yaml" ]; then
@@ -463,26 +488,28 @@ else
   bundle="$(in_sbx "curl -fsS http://127.0.0.1:$PASEO_PORT/ 2>/dev/null" \
             | grep -oE '/_expo/static/js/web/index-[0-9a-f]+\.js' | head -1)"
   if [ -z "$bundle" ]; then
-    warn "could not find the /_expo/static/js/web/index-<hash>.js bundle in index.html; skipping"
+    skip "could not find the /_expo/static/js/web/index-<hash>.js bundle in index.html; large-asset integrity unverified"
   else
     # In-guest identity baseline (isolates the daemon from the transport).
-    g_stat="$(in_sbx "curl -fsS -H 'Accept-Encoding: identity' -o /dev/null -w '%{http_code} %{size_download}' 'http://127.0.0.1:$PASEO_PORT$bundle' 2>/dev/null")"
+    g_stat="$(in_sbx "curl -fsS -H 'Accept-Encoding: identity' -o /dev/null -w '%{http_code} %{size_download}' 'http://127.0.0.1:$PASEO_PORT$bundle' 2>/dev/null && printf ' GUEST_FETCH_DONE'")"
+    case "$g_stat" in *' GUEST_FETCH_DONE') g_stat="${g_stat% GUEST_FETCH_DONE}" ;; *) g_stat="" ;; esac
     g_code="${g_stat%% *}"; g_size="${g_stat##* }"
     if [ "$g_code" = "200" ] && [ "${g_size:-0}" -gt 1000000 ] 2>/dev/null; then
       ok "in-guest: daemon serves the full identity bundle ($g_size bytes)"
     else
-      warn "in-guest identity fetch was '$g_stat' (expected '200 <big>'); using >1MB heuristic for the host check"
+      skip "in-guest identity fetch was '$g_stat' (expected '200 <big>'); exact size comparison unverified"
       g_size=""
     fi
     # HOST end-to-end, identity, NO --compressed. Compare bytes to the baseline.
     h_out="$(curl -fsS -H 'Accept-Encoding: identity' -o /dev/null \
                -w '%{http_code} %{size_download}' "http://$HOST_HP$bundle" 2>/dev/null)"; h_rc=$?
     h_code="${h_out%% *}"; h_size="${h_out##* }"
-    if [ "$h_rc" -eq 0 ] && [ "$h_code" = "200" ] && \
-       { { [ -n "$g_size" ] && [ "$h_size" = "$g_size" ]; } || \
-         { [ -z "$g_size" ] && [ "${h_size:-0}" -gt 1000000 ] 2>/dev/null; }; }; then
+    if [ "$h_rc" -eq 0 ] && [ "$h_code" = "200" ] &&
+       [ -n "$g_size" ] && [ "$h_size" = "$g_size" ]; then
       ok "HOST end-to-end: full identity bundle delivered over $HOST_HP (${h_size} bytes)"
       host_fetch_ok=yes   # 6b gates its host-reachability assert on this
+    elif [ -z "$g_size" ]; then
+      skip "HOST identity fetch cannot be tied to an in-guest baseline; host reachability unverified (host='$h_out' rc=$h_rc)"
     else
       # rc=18/56 or a short count = real truncation; rc!=0 with size 0 on identity
       # is a transport error (identity needs no decoder), so it IS meaningful here.
@@ -608,12 +635,18 @@ info "6d. Hardening: npm cache remains agent-owned"
 # root-owned files under ~/.npm and later blocks ordinary agent npm commands. Run
 # this even when install fails, because stale root-owned cache files may be the
 # reason install failed.
-bad_cache_owner="$(in_sbx 'if [ -d "$HOME/.npm" ]; then find "$HOME/.npm" -not -user "$(id -u)" -print -quit 2>/dev/null; fi')"
-if [ -n "$bad_cache_owner" ]; then
-  bad "npm cache contains files not owned by the agent user: $bad_cache_owner"
-else
-  ok "npm cache has no non-agent-owned files under ~/.npm"
-fi
+cache_probe="$(in_sbx 'if [ ! -d "$HOME/.npm" ]; then printf CACHE_ABSENT; exit; fi; owner=$(id -u) || exit; [ -r "$HOME/.npm" ] && [ -x "$HOME/.npm" ] || exit; errors=$(mktemp) || exit; result=$(find "$HOME/.npm" -not -user "$owner" -print -quit 2>"$errors"); rc=$?; if [ "$rc" -ne 0 ] || [ -s "$errors" ]; then rm -f "$errors"; exit; fi; rm -f "$errors"; [ -z "$result" ] || printf "%s\n" "$result"; printf CACHE_PROBE_DONE')"
+case "$cache_probe" in
+  CACHE_ABSENT) skip "npm cache directory absent; ownership unverified" ;;
+  *CACHE_PROBE_DONE)
+    bad_cache_owner="${cache_probe%CACHE_PROBE_DONE}"
+    if [ -n "$bad_cache_owner" ]; then
+      bad "npm cache contains files not owned by the agent user: $bad_cache_owner"
+    else
+      ok "npm cache has no non-agent-owned files under ~/.npm"
+    fi ;;
+  *) skip "npm cache ownership probe did not complete; ownership unverified" ;;
+esac
 
 info "7. Respawn supervisor running (auto-restart) — the daemon"
 # The daemon runs under a respawn loop marked "supervisor:paseo-daemon" in its
@@ -626,56 +659,47 @@ case "${daemon_sup:-0}" in
   *) bad "found ${daemon_sup} paseo-daemon supervisors (expected 1 — duplicate respawner?)" ;;
 esac
 
-info "8. Entrypoint holds PID 1 when it IS the entrypoint, exits cleanly otherwise — regression guard"
+info "8. Entrypoint structure and non-PID-1 behavior (PID-1 runtime requires a separate live run)"
 # The kit's entrypoint behavior is split: a thin per-agent wrapper
 # (~/.local/bin/opencode) that either passes through to the real agent binary or
 # EXECs the generic shim (~/paseo-agent-shim), and the shim, which carries the
 # PID-1 hold. We check three invariants:
-#   (a) the thin wrapper EXECs the shim on the no-arg path (so the shim inherits
-#       the wrapper's pid — PID 1 on the `acq run` path; a child would break hold);
+#   (a) the thin wrapper EXECs the shim only as PID 1, preserving the pid for
+#       the hold; outside PID 1 it execs the real OpenCode binary;
 #   (b) the shim discriminates on `$$ -eq 1` and calls hold_pid1 on that branch;
-#   (c) live: run the wrapper no-arg + no-TTY via exec (NOT PID 1) and confirm it
-#       RETURNS promptly rather than hanging.
+#       these source checks do NOT demonstrate the live PID-1 handoff;
+#   (c) the offline wrapper tests exercise no-arg non-PID-1 passthrough with a
+#       fake real binary. Do NOT run the real TUI from a read-write guest mount
+#       merely to verify its routing; real TUI behavior remains unverified here.
 wrapper_src="$(in_sbx 'cat ~/.local/bin/opencode 2>/dev/null')"
 shim_src="$(in_sbx 'cat ~/paseo-agent-shim 2>/dev/null')"
 if [ -z "$wrapper_src" ]; then
   bad "could not read ~/.local/bin/opencode from the sandbox"
 elif printf '%s\n' "$wrapper_src" | grep -Eq 'exec[[:space:]]+sh[[:space:]]+"?\$SHIM"?|exec[[:space:]]+sh[[:space:]]+.*paseo-agent-shim'; then
-  ok "thin wrapper execs the generic shim on the no-arg path (preserves PID for the hold)"
+  skip "wrapper source contains exec-to-shim; actual PID-1 branch not observed"
 else
   bad "thin wrapper does not exec the shim — no-arg path won't inherit PID 1, breaking the hold"
 fi
+skip "PID-1 hold not observed by this detached sandbox probe; validate an interactive acq run separately"
 if [ -z "$shim_src" ]; then
   bad "could not read ~/paseo-agent-shim from the sandbox to check the PID-1 discriminator"
 else
   if printf '%s\n' "$shim_src" | grep -Eq '\$\$"?[[:space:]]*-eq[[:space:]]*1'; then
-    ok "shim discriminates on PID 1 (\$\$ -eq 1) before deciding to hold vs. exit"
+    skip "shim source checks PID 1; actual sandbox entrypoint hold not observed"
   else
     bad "shim has no \$\$ -eq 1 check — it cannot tell the acq run (PID 1) path from acq exec"
   fi
   if printf '%s\n' "$shim_src" | grep -Eq '^[[:space:]]*hold_pid1[[:space:]]*$'; then
-    ok "shim calls hold_pid1 on the PID-1 branch"
+    skip "shim source contains hold_pid1; runtime hold not observed"
   else
     bad "shim does not call hold_pid1 — the acq run entrypoint could return and stop the sandbox"
   fi
 fi
-wrapper_probe="$(in_sbx '
-  if command -v timeout >/dev/null 2>&1; then
-    timeout 20 opencode </dev/null >/dev/null 2>&1
-    echo "rc=$?"
-  else
-    echo "rc=notimeout"
-  fi
-')"
-case "$wrapper_probe" in
-  *rc=124*)      bad "entrypoint HUNG when NOT PID 1 (via exec); it should exit cleanly on that path" ;;
-  *rc=notimeout*) skip "could not run the wrapper-exit probe (no 'timeout' in sandbox)" ;;
-  *)             ok "wrapper exits cleanly when NOT PID 1 (${wrapper_probe})" ;;
-esac
+skip "real TUI routing not run in this verifier; offline wrapper fixtures cover the non-PID-1 branch"
 
 info "9. Worktree root pinned under the project + daemon self-heals — regression guards"
-# (a) worktree-root pin: running the wrapper no-arg from the PRIMARY WORKSPACE cwd
-#     should set worktrees.root to <workspace>/.paseo-worktrees in config.json.
+# (a) worktree-root pin: the startup-seeded config should retain the primary
+#     workspace root. A non-PID-1 wrapper must not repin it from its own cwd.
 #
 #     WHERE IS THE PRIMARY WORKSPACE INSIDE THE GUEST? acq bind-mounts the first
 #     positional path at the SAME (canonicalized) absolute path in the guest, and
@@ -685,25 +709,30 @@ info "9. Worktree root pinned under the project + daemon self-heals — regressi
 #     file /var/lib/acq/workspace; that is the cwd the real entrypoint gets. On
 #     macOS the canonical path differs from $WORK only by the /var -> /private/var
 #     symlink, so we read the guest's recorded value (authoritative) and fall back
-#     to $WORK. Run the wrapper from that cwd, then read back config.json.
+#     to $WORK. Read back config.json without invoking the non-PID-1 wrapper.
 GUEST_WS="${GUEST_WS:-}"
 if [ -z "$GUEST_WS" ]; then
   GUEST_WS="$(in_sbx 'cat /var/lib/acq/workspace 2>/dev/null')"
   [ -n "$GUEST_WS" ] || GUEST_WS="$WORK"
 fi
-# Run the wrapper from the guest workspace cwd, then read back config.json.
-pin_out="$(in_sbx "cd '$GUEST_WS' 2>/dev/null && (command -v timeout >/dev/null 2>&1 && timeout 30 opencode </dev/null >/dev/null 2>&1; true); cat \"\${PASEO_HOME:-\$HOME/.paseo}/config.json\" 2>/dev/null")"
-if printf '%s' "$pin_out" | grep -q "\"root\": \"$GUEST_WS/.paseo-worktrees\""; then
-  ok "worktrees.root pinned under the project ($GUEST_WS/.paseo-worktrees)"
-elif printf '%s' "$pin_out" | grep -Eq '"root": *"[^"]*/\.paseo-worktrees"'; then
-  # It IS pinned to some <dir>/.paseo-worktrees, just not the exact dir we probed.
-  # That still proves the mechanism; surface the actual value and pass.
-  _actual="$(printf '%s' "$pin_out" | grep -Eo '"root": *"[^"]*/\.paseo-worktrees"' | head -1)"
-  ok "worktrees.root pinned under a project dir ($_actual); differs from probed cwd '$GUEST_WS'"
-else
-  bad "worktrees.root not pinned to any <project>/.paseo-worktrees — config.json was:"
-  printf '%s\n' "$pin_out" | sed 's/^/    | /'
-fi
+# Startup owns the initial root; read only worktrees.root, not an unrelated
+# object with a matching root key.
+check_worktrees_root() {
+  local expected="$1" observed="$2"
+  if [ "$observed" = "valid:$expected" ]; then
+    ok "configured worktrees.root equals the primary guest workspace ($expected); physical containment and seed provenance unverified"
+    return
+  fi
+  case "$observed" in
+    valid:*) skip "worktrees.root differs from '$expected'; startup may have preserved existing config" ;;
+    missing) skip "no config exists; optional startup seed not measured" ;;
+    transport) skip "could not query guest config; root state unverified" ;;
+    *) bad "Paseo config is unreadable, invalid JSON, or has no valid worktrees.root" ;;
+  esac
+}
+pin_out="$(in_sbx "node -e 'const fs = require(\"fs\"); const p = (process.env.PASEO_HOME || process.env.HOME + \"/.paseo\") + \"/config.json\"; try { const c = JSON.parse(fs.readFileSync(p, \"utf8\")); const root = c?.worktrees?.root; process.stdout.write(typeof root === \"string\" && root.startsWith(\"/\") && !/[\\u0000-\\u001f\\u007f]/.test(root) ? \"valid:\" + root : \"invalid\"); } catch (e) { process.stdout.write(e.code === \"ENOENT\" ? \"missing\" : \"invalid\"); }' && printf PROBE_DONE")"
+case "$pin_out" in *PROBE_DONE) pin_out="${pin_out%PROBE_DONE}" ;; *) pin_out=transport ;; esac
+check_worktrees_root "$GUEST_WS/.paseo-worktrees" "$pin_out"
 
 # (b) daemon self-heal: if the daemon dies, supervisor:paseo-daemon must relaunch
 #     it. Kill ONLY the daemon tree (argv matches "paseo daemon run" but NOT the
@@ -784,9 +813,26 @@ else
   }
 
   rw_base="$(basename "$RW_FIXTURE")"
-  rw_child_a_base="$(basename "$RW_CHILD_REPO_A")"
-  rw_child_b_base="$(basename "$RW_CHILD_REPO_B")"
   ro_base="$(basename "$RO_FIXTURE")"
+
+  # The registrar supplies the /proc/mounts spelling to Paseo; the API may
+  # return that spelling or its physical guest path. Require a resolvable guest
+  # directory, then compare either exact spelling (never a suffix or regex).
+  quote_guest_path() { printf "'%s'" "${1//\'/\'\\\'\'}"; }
+  host_physical_path() { (cd -P -- "$1" 2>/dev/null && pwd -P); }
+  guest_physical_path() {
+    local target="$1"
+    # Host /var may be /private/var in the guest. For host-owned fixtures,
+    # resolve the host spelling before passing it across the mount boundary.
+    if [ "${2:-}" = host ]; then
+      target="$(host_physical_path "$target")" || return 1
+    fi
+    in_sbx "cd $(quote_guest_path "$target") 2>/dev/null && pwd -P"
+  }
+  registered_fixture_path() {
+    [ -n "$2" ] && { printf '%s\n' "$project_roots" | grep -Fqx -- "$1" ||
+                       printf '%s\n' "$project_roots" | grep -Fqx -- "$2"; }
+  }
 
   # Expected set: qualifying rw virtiofs mounts, expanded by the actual registrar
   # helper so this live check cannot drift from paseo-register-mounts.mjs.
@@ -822,9 +868,11 @@ else
     while :; do
       project_roots="$(list_project_roots)"
       missing=""
-      for m in $expected_projects; do
-        printf '%s\n' "$project_roots" | grep -qx "$m" || missing="$missing $m"
-      done
+      while IFS= read -r m; do
+        [ -n "$m" ] || continue
+        physical_m="$(guest_physical_path "$m")"
+        registered_fixture_path "$m" "$physical_m" || missing="${missing}${missing:+, }$m"
+      done <<< "$expected_projects"
       [ -z "$missing" ] && break
       [ "$(date +%s)" -ge "$reg_deadline" ] && break
       sleep "$POLL_INTERVAL"
@@ -838,8 +886,13 @@ else
     fi
 
     # POSITIVE: child repos under the read-write parent fixture must be registered.
-    if printf '%s\n' "$project_roots" | grep -q "${rw_base}/${rw_child_a_base}\$" && \
-       printf '%s\n' "$project_roots" | grep -q "${rw_base}/${rw_child_b_base}\$"; then
+    # Compare the child fixtures by the same rule as the aggregate set.
+    guest_rw_a="$(guest_physical_path "$RW_CHILD_REPO_A" host)"
+    guest_rw_b="$(guest_physical_path "$RW_CHILD_REPO_B" host)"
+    guest_rw_parent="$(guest_physical_path "$RW_FIXTURE" host)"
+    guest_ro="$(guest_physical_path "$RO_FIXTURE" host)"
+    if registered_fixture_path "$RW_CHILD_REPO_A" "$guest_rw_a" &&
+       registered_fixture_path "$RW_CHILD_REPO_B" "$guest_rw_b"; then
       ok "child repos under read-write parent fixture ($rw_base) registered as projects"
     else
       bad "child repos under read-write parent fixture ($rw_base) were NOT registered"
@@ -847,7 +900,9 @@ else
 
     # NEGATIVE: the parent fixture should not be registered when direct child repos
     # were found and registered instead.
-    if printf '%s\n' "$project_roots" | grep -q "${rw_base}\$"; then
+    if [ -z "$guest_rw_parent" ]; then
+      skip "read-write parent mount not resolvable in guest; expansion unverified"
+    elif registered_fixture_path "$RW_FIXTURE" "$guest_rw_parent"; then
       bad "read-write parent fixture ($rw_base) was registered instead of only its child repos"
     else
       ok "read-write parent fixture ($rw_base) correctly expanded to child repos"
@@ -858,7 +913,9 @@ else
     # :ro — in which case we skip rather than falsely fail).
     ro_is_ro="$(in_sbx "awk '\$3==\"virtiofs\" && \$4 ~ /^ro/ && \$2 ~ /${ro_base}\$/ {print \"yes\"}' /proc/mounts | head -1")"
     if [ "$ro_is_ro" = "yes" ]; then
-      if printf '%s\n' "$project_roots" | grep -q "${ro_base}\$"; then
+      if [ -z "$guest_ro" ]; then
+        skip "read-only mount not resolvable in guest; exclusion unverified"
+      elif registered_fixture_path "$RO_FIXTURE" "$guest_ro"; then
         bad "read-only fixture ($ro_base) was wrongly registered (should be skipped)"
       else
         ok "read-only fixture ($ro_base) correctly skipped"
@@ -877,6 +934,13 @@ else
 fi
 
 info "Summary"
-[ "$fail" -eq 0 ] && printf '  \033[32mAll checks passed.\033[0m\n' || printf '  \033[31mSome checks failed — see notes above.\033[0m\n'
+if [ "$fail" -gt 0 ]; then
+  printf '  \033[31mSome checks failed — see notes above.\033[0m\n'
+elif [ "$skipped" -gt 0 ]; then
+  printf '  \033[33mMeasured checks passed; %s skipped/unverified (including live PID-1 hold and real TUI).\033[0m\n' "$skipped"
+else
+  printf '  \033[32mAll measured checks passed.\033[0m\n'
+fi
 
-[ "$fail" -eq 0 ]
+[ "$fail" -eq 0 ] || exit 1
+[ "$skipped" -eq 0 ] || exit 3

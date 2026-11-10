@@ -85,7 +85,7 @@ kits:
       OpenChamber, 4096 for the shared server) are expressed with the neutral
       top-level `publishedPorts` list, and the never-exiting startup supervisor is
       marked with the neutral `background: true` flag (both added to the hybrid/v1
-      schema in #276). acq's translator/adapter maps publishedPorts + background to
+      schema). acq's translator/adapter maps publishedPorts + background to
       each backend's native port-publish and detached-hook primitives, so the
       ports are published and the supervisor is detached at create time on both
       backends with no manual step. The install+supervise script
@@ -154,23 +154,6 @@ kits:
       already in the balanced baseline (ADR-0002); a strict tier fails the install
       soft.
 
-  prime-agent:
-    backends: [sbx, msb]
-    parity: |
-      Opt-in mixin that installs PrimeIntellect-ai/prime-agent (MIT), a terminal
-      AI coding assistant with an embedded IPython tool. Written entirely in the
-      neutral vocabulary with no backend shortcut or extras: an install-phase
-      script (files/home/prime-agent-install.sh) installs the CLI at create time,
-      and two startup-phase scripts drop the USAi model catalog
-      (files/home/prime-agent-install-models-json.sh) and bootstrap the IPython
-      kernel (files/home/prime-agent-bootstrap-kernel.sh). Publishes NO ports
-      (prime-agent is a TUI, not a web UI) — unlike openchamber/paseo. SKELETON
-      only: the three scripts are placeholders; the real install/CA-bundle/
-      kernel logic and the generated model catalog
-      (files/home/prime-agent-config/models.json) are intentionally deferred to
-      follow-up work for the prime-agent kit. Model-provider egress is the
-      usai-provider kit's job, not this one.
-
   pi-coding-agent:
     backends: [sbx, msb]
     parity: |
@@ -182,12 +165,10 @@ kits:
       startup-phase script (files/home/pi-coding-agent-install.sh) installs the
       CLI via the standard npm registry path (npm install -g --ignore-scripts,
       pinned version, unprivileged per-user npm prefix, no pi.dev egress).
-      Publishes NO ports (a TUI, not a web UI) — like prime-agent, unlike
-      openchamber/paseo. No install phase — unlike prime-agent's still-in-flight
-      skeleton, this kit is startup-only throughout, matching openchamber's
-      settled pattern; shipped ahead of prime-agent to validate that pattern on
-      a materially simpler target with no native-module or Python-kernel
-      bootstrap step. Model-provider config (USAi models.json) is deliberately
+      Publishes NO ports (a TUI, not a web UI), unlike openchamber/paseo.
+      No install phase: this kit is startup-only throughout, with no
+      native-module or Python-kernel bootstrap step.
+      Model-provider config (USAi models.json) is deliberately
       deferred — no emitter exists yet to populate it — and will land in a
       follow-up alongside a real pi USAi-catalog emitter. Model-provider egress
       is the usai-provider kit's job, not this one.
