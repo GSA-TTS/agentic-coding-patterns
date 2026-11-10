@@ -1525,10 +1525,71 @@ def test_windows_contract_rejects_lookalike_interpreters(tmp_path, suffix, sheba
 
 
 @pytest.mark.usefixtures("windows_platform")
-def test_windows_contract_ignores_interpreter_beyond_shebang_read_limit(tmp_path):
-    """The first line is read only up to a bounded length, so a far-away interpreter is not seen."""
+def test_windows_contract_rejects_first_line_beyond_shebang_read_limit(tmp_path):
+    """An over-limit first line is refused, so an interpreter past the cutoff is never seen."""
     padded = "#!/usr/bin/env " + " " * 8192 + "python3\n"
     bundle_path = _make_bundle_with_normalizer(tmp_path, "normalize.py", padded)
+    with pytest.raises(ContractError, match="shebang"):
+        validate_bundle(bundle_path, {"acme-ai": "ACME_AI_API_KEY"})
+
+
+def _padded_shebang(prefix, suffix="", *, extra=0):
+    """Return a first line of exactly ``MAX_SHEBANG_BYTES + extra`` bytes, newline included.
+
+    ``extra=0`` sits exactly at the read limit and is complete; ``extra > 0`` is
+    over it, so the parser cannot see the whole line.
+    """
+    pad = validator.MAX_SHEBANG_BYTES + extra - len(prefix) - len(suffix) - 1
+    return (prefix + " " * pad + suffix).encode() + b"\n"
+
+
+def _write_normalizer(bundle_path, name, raw):
+    """Replace the bundle's normalizer with byte-exact content (no newline translation)."""
+    (bundle_path.parent / name).write_bytes(raw)
+
+
+@pytest.mark.usefixtures("windows_platform")
+def test_windows_contract_accepts_complete_first_line_at_shebang_read_limit(tmp_path):
+    """A line that ends exactly at the limit is complete and still accepted."""
+    bundle_path = _make_bundle_with_normalizer(tmp_path, "normalize.py", "")
+    raw = _padded_shebang("#!/usr/bin/env python3")
+    assert len(raw) == validator.MAX_SHEBANG_BYTES
+    _write_normalizer(bundle_path, "normalize.py", raw)
+
+    validate_bundle(bundle_path, {"acme-ai": "ACME_AI_API_KEY"})
+
+
+@pytest.mark.usefixtures("windows_platform")
+def test_windows_contract_rejects_first_line_one_byte_over_shebang_read_limit(tmp_path):
+    """One byte past the limit is already unparseable, even with an allowlisted interpreter."""
+    bundle_path = _make_bundle_with_normalizer(tmp_path, "normalize.py", "")
+    raw = _padded_shebang("#!/usr/bin/env python3", extra=1)
+    assert len(raw) == validator.MAX_SHEBANG_BYTES + 1
+    _write_normalizer(bundle_path, "normalize.py", raw)
+
+    with pytest.raises(ContractError, match="shebang"):
+        validate_bundle(bundle_path, {"acme-ai": "ACME_AI_API_KEY"})
+
+
+@pytest.mark.usefixtures("windows_platform")
+@pytest.mark.parametrize(
+    "suffix,shebang",
+    [
+        (".py", "#!/usr/bin/env python3"),
+        (".py", "#!/usr/bin/python3"),
+        (".mjs", "#!/usr/bin/env node"),
+        (".mjs", "#!/usr/bin/node"),
+    ],
+)
+def test_windows_contract_rejects_trailing_token_beyond_shebang_read_limit(tmp_path, suffix, shebang):
+    """An allowlisted interpreter before the cutoff must not vouch for a token after it."""
+    name = f"normalize{suffix}"
+    bundle_path = _make_bundle_with_normalizer(tmp_path, name, "")
+    # Padding pushes the forbidden argument well past the read window, so a
+    # truncating parser sees only "shebang <interpreter>" and accepts it.
+    raw = _padded_shebang(shebang, " -u", extra=64)
+    _write_normalizer(bundle_path, name, raw)
+
     with pytest.raises(ContractError, match="shebang"):
         validate_bundle(bundle_path, {"acme-ai": "ACME_AI_API_KEY"})
 

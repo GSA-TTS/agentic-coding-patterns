@@ -177,14 +177,28 @@ def normalizer_shebang_interpreter(path: Path) -> str:
     verify. The result is lower-cased, has any trailing ``.exe`` removed, and is
     compared against the allowlist by exact match. As with a kernel, ``#!`` must be the first two bytes and tokens
     are separated by ASCII spaces or tabs only. Returns an empty string when the
-    file has no shebang, is not decodable text, cannot be read, or names an
+    file has no shebang, is not decodable text, cannot be read, names an
     interpreter in an untrusted directory, behind an unsupported ``env`` form
-    (options, assignments), or followed by extra tokens.
+    (options, assignments), is followed by extra tokens, or has a first line
+    longer than ``MAX_SHEBANG_BYTES``.
+
+    Only a *complete* first line is ever parsed. A line that does not end inside
+    the read window is refused rather than partially parsed: its unseen tail can
+    hold a forbidden trailing token, so accepting the visible prefix would let an
+    allowlisted interpreter at the front vouch for an unread argument at the
+    back.
     """
     try:
         with path.open("rb") as handle:
-            first_line = handle.readline(MAX_SHEBANG_BYTES)
+            # Ask for one byte past the limit. ``readline`` stops at a newline or
+            # at the byte count, so a buffer longer than the limit proves the
+            # first line did not end inside it. The extra byte is what makes that
+            # distinction exact: a line of exactly MAX_SHEBANG_BYTES bytes still
+            # ends within the limit and is parsed, while anything longer is not.
+            first_line = handle.readline(MAX_SHEBANG_BYTES + 1)
     except OSError:
+        return ""
+    if len(first_line) > MAX_SHEBANG_BYTES:
         return ""
     if not first_line.startswith(b"#!"):
         return ""
