@@ -108,9 +108,11 @@ jobs:
         run: |
           set -euo pipefail
           gh label create "$ISSUE_LABEL" --description "Provider catalog drift report" --color BFD4F2 2>/dev/null || true
-          # The search is fuzzy, so keep only issues whose title is EXACTLY the
-          # stable title. Never edit a near-match; refuse if more than one matches.
-          exact="$(gh issue list --state open --label "$ISSUE_LABEL" --limit 100 --search "\"$ISSUE_TITLE\" in:title" --json number,title | jq -r --arg title "$ISSUE_TITLE" '.[] | select(.title == $title) | .number')"
+          # List EVERY open labelled issue (all pages), then keep only those whose
+          # title is EXACTLY the stable title (pull requests are skipped). A failed
+          # or partial listing aborts before any issue is created or edited.
+          # Never edit a near-match; refuse if more than one matches.
+          exact="$(gh api --paginate "repos/$GH_REPO/issues?state=open&labels=$ISSUE_LABEL&per_page=100" | jq -r --arg title "$ISSUE_TITLE" '.[] | select(.pull_request == null and .title == $title) | .number')"
           count="$(printf '%s' "$exact" | grep -c . || true)"
           if [ "$count" -gt 1 ]; then
             echo "Refusing to edit: $count open issues have the exact title '$ISSUE_TITLE'. Close the duplicates by hand." >&2
