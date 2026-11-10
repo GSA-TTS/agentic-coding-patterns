@@ -18,7 +18,9 @@ def main() -> None:
         "models": source["availableModels"],
         "recommendations": source["recommendedModels"],
     }
-    args.out.write_text(json.dumps(output, indent=2) + "\n")
+    # Write LF on every platform: the committed snapshot is byte-compared, and
+    # Path.write_text defaults to os.linesep translation on Windows (CRLF).
+    args.out.write_text(json.dumps(output, indent=2) + "\n", newline="\n")
 
 
 if __name__ == "__main__":
