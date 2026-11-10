@@ -15,10 +15,54 @@
 # The CA-before-fetch failure is specific to the sbx file-drop path: msb trusts
 # host CAs natively (--trust-host-cas), so an msb run cannot reproduce it. Set
 # ACQ_BACKEND=sbx (or msb) to pass `--backend` to acq for the sandbox create,
-# exec, and rm calls without changing your persisted default backend. Unset uses
-# acq's own selection.
+# exec, and rm calls without changing your persisted default backend. It is
+# required with RUN_ACQ=1 so the token precondition is checked against the
+# backend that will actually run.
+
+# Tests source this file for the helpers below without running any checks. Run as
+# a script, the variable is refused rather than treated as a pass.
+if [ "${CLOUD_GOV_VERIFY_LIB_ONLY:-0}" = "1" ] && ! (return 0 2>/dev/null); then
+  echo "CLOUD_GOV_VERIFY_LIB_ONLY is for sourcing only" >&2
+  exit 2
+fi
 
 set -uo pipefail
+
+CLOUD_GOV_API="https://api.fr.cloud.gov"
+
+# Succeeds only when `cf api` exits 0 and prints exactly one `api endpoint:` line
+# whose value is exactly $CLOUD_GOV_API. A substring or regex match would also
+# accept lookalikes such as https://api.fr.cloud.gov.example.net.
+host_cf_targets_cloud_gov() {
+  local out endpoint
+  out="$(cf api 2>/dev/null)" || return 1
+  [ "$(printf '%s\n' "$out" | grep -c '^api endpoint:')" -eq 1 ] || return 1
+  endpoint="$(printf '%s\n' "$out" | sed -n 's/^api endpoint:[[:space:]]*//p' | sed 's/[[:space:]]*$//')"
+  [ "$endpoint" = "$CLOUD_GOV_API" ]
+}
+
+host_status=""
+host_control() {
+  # Only after a rejection, and only if the host cf targets exactly
+  # $CLOUD_GOV_API, so a token for some other Cloud Foundry is never read or sent
+  # here. Needs curl >= 7.55 (-H @-); an older curl sends no header and would read
+  # as "expired".
+  command -v cf >/dev/null 2>&1 && command -v curl >/dev/null 2>&1 || return 0
+  host_cf_targets_cloud_gov || return 0
+  local host_token
+  host_token="$(cf oauth-token 2>/dev/null || true)"
+  case "$host_token" in
+    [Bb]earer\ ?*)
+      host_status="$(printf 'Authorization: %s\n' "$host_token" \
+        | curl -sS -o /dev/null -w '%{http_code}' -H @- "$CLOUD_GOV_API/v3/organizations" 2>/dev/null || true)"
+      ;;
+  esac
+  host_token=""
+}
+
+if [ "${CLOUD_GOV_VERIFY_LIB_ONLY:-0}" = "1" ]; then
+  return 0
+fi
 
 KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 REPO_ROOT="$(cd "$KIT_DIR/../../../.." && pwd)"
@@ -38,6 +82,13 @@ case "$ACQ_BACKEND" in
     exit 2
     ;;
 esac
+if [ "${RUN_ACQ:-0}" = "1" ] && [ -z "$ACQ_BACKEND" ]; then
+  # The token binding differs by backend (sbx custom secret vs acq store), and
+  # the backend acq would pick is not known before create, so a precondition
+  # checked against the wrong store gives wrong setup advice.
+  printf 'RUN_ACQ=1 requires ACQ_BACKEND=sbx or ACQ_BACKEND=msb\n' >&2
+  exit 2
+fi
 # Bash 3.2 (macOS) treats an empty array as unset under `set -u`; the +"..."
 # form expands to nothing when no backend was requested.
 acq_b() { acq ${ACQ_BACKEND_ARGS[@]+"${ACQ_BACKEND_ARGS[@]}"} "$@"; }
@@ -270,7 +321,7 @@ else
 fi
 
 info "5. Create sandbox with the kit"
-printf '  creating %s (workspace %s, backend %s)...\n' "$SBX_NAME" "$WORK" "${ACQ_BACKEND:-default}"
+printf '  creating %s (workspace %s, backend %s)...\n' "$SBX_NAME" "$WORK" "$ACQ_BACKEND"
 # ACQ_EXTRA_KITS bypasses acq's interactive configured-kit picker. It is
 # whitespace-separated and ordered: the CA kit (if any) must come first so its
 # startup step trusts the intercepting CA before this kit fetches the CF CLI.
@@ -285,7 +336,7 @@ if ACQ_EXTRA_KITS="$EXTRA_KITS" acq_b create --name "$SBX_NAME" opencode "$WORK"
   # so a run is never cited as sbx evidence when it ran on msb.
   used="$(grep -oE 'acq\((sbx|msb)\)' "$CREATE_LOG" | head -1)"
   printf '  backend in create log: %s\n' "${used:-<not stated>}"
-  if [ -n "$ACQ_BACKEND" ] && [ "$used" != "acq($ACQ_BACKEND)" ]; then
+  if [ "$used" != "acq($ACQ_BACKEND)" ]; then
     bad "requested backend $ACQ_BACKEND but create log reports ${used:-no backend}"
   fi
 else
@@ -337,24 +388,6 @@ info "8. Authenticated CF API wiring"
 #     the value), the HTTP status, and the API's error detail;
 #   - control (only after a 401/403): the host's own token against the same
 #     endpoint, right now.
-host_status=""
-host_control() {
-  # Only after a rejection, and only if the host cf targets api.fr.cloud.gov, so a
-  # token for some other Cloud Foundry is never sent here. Needs curl >= 7.55
-  # (-H @-); an older curl sends no header and would read as "expired".
-  command -v cf >/dev/null 2>&1 && command -v curl >/dev/null 2>&1 || return 0
-  cf api 2>/dev/null | grep -q 'api.fr.cloud.gov' || return 0
-  local host_token
-  host_token="$(cf oauth-token 2>/dev/null || true)"
-  case "$host_token" in
-    [Bb]earer\ ?*)
-      host_status="$(printf 'Authorization: %s\n' "$host_token" \
-        | curl -sS -o /dev/null -w '%{http_code}' -H @- https://api.fr.cloud.gov/v3/organizations 2>/dev/null || true)"
-      ;;
-  esac
-  host_token=""
-}
-
 probe_script='
 if [ -z "$CF_OAUTH_TOKEN" ]; then
   echo "class=unset"
@@ -375,10 +408,8 @@ auth_status="$(probe_field status)"
 auth_detail="$(probe_field detail)"
 printf '  sandbox: CF_OAUTH_TOKEN class=%s, authenticated /v3/organizations -> %s %s\n' \
   "${probe_class:-<none>}" "${auth_status:-<none>}" "$auth_detail"
-effective_backend="${ACQ_BACKEND:-${used#acq(}}"
-effective_backend="${effective_backend%)}"
 refresh_hint="$ACQ_BIND_HINT"
-if [ "$effective_backend" = "sbx" ]; then refresh_hint="$SBX_BIND_HINT"; fi
+if [ "$ACQ_BACKEND" = "sbx" ]; then refresh_hint="$SBX_BIND_HINT"; fi
 case "$auth_status" in
   2*)
     case "$probe_class" in
@@ -403,7 +434,7 @@ case "$auth_status" in
             bad "host token is accepted (HTTP $host_status) but the sandbox request was rejected (status $auth_status): the backend did not substitute the placeholder, or holds a stale secret; not a token-expiry problem"
             ;;
           401|403)
-            bad "host token is also rejected (HTTP $host_status): the token expired or was revoked; run 'cf login', then: $refresh_hint"
+            bad "host token is also rejected (HTTP $host_status): the token may be expired or revoked, or lack the scope or authorization this endpoint needs; check 'cf target' and 'cf login', then: $refresh_hint"
             ;;
           *)
             bad "authenticated probe rejected (status $auth_status) and no host control was available; token expiry and injection failure cannot be told apart"

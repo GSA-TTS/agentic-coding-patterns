@@ -103,8 +103,9 @@ archive only; `~/.local/bin/cf` is agent-writable by design.
 
 Authority note for the sbx `--command` binding: unless scoped with `--sandbox`,
 it is global, and while the host `cf` session is valid any sandbox's request to
-`api.fr.cloud.gov` is authorized as the user with a currently resolved token. This
-is a wider and longer-lived grant than a pasted short-lived token. Scope it to a
+`api.fr.cloud.gov` may be authorized as the user (refresh behavior was not
+measured). This is potentially a wider and longer-lived grant than a pasted
+short-lived token. Scope it to a
 sandbox where possible and remove it when done.
 
 ## Consequences

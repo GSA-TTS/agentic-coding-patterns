@@ -120,8 +120,8 @@ the value in its own store and sbx's proxy never receives it, and the sandbox
 then sees no `CF_OAUTH_TOKEN`. A dynamic `--command` source keeps the token off
 argv and shell history, and sbx resolves it on the host. Whether each request
 gets a freshly minted token or a cached one was not measured here; if a long
-session starts getting 401s, re-run `scripts/verify` step 8 to tell expiry from a
-failed injection:
+session starts getting 401s, re-run `scripts/verify` step 8 to separate a
+host-token problem (expiry, revocation, scope) from a failed injection:
 
 ```bash
 sbx secret set-custom --host api.fr.cloud.gov --env CF_OAUTH_TOKEN \
@@ -133,8 +133,9 @@ Use the absolute path to `cf`: the command is replayed by the sbx daemon, whose
 
 **Authority.** Without `--sandbox`, this secret is global: while your host `cf`
 session is valid, every sandbox's request to `api.fr.cloud.gov` is authorized as
-you, and each use resolves a current token. That is a wider and longer-lived grant
-than a pasted short-lived token. Prefer `--sandbox <name>` for a specific sandbox,
+you, and requests may resolve a current token (refresh behavior was not measured
+here). That is potentially a wider and longer-lived grant than a pasted
+short-lived token. Prefer `--sandbox <name>` for a specific sandbox,
 and remove the secret (`sbx secret rm`) when you no longer need it. The placeholder (`sbx-cs-...`) is captured when
 a sandbox is created, so create a new sandbox after registering; an existing one
 needs its `CF_OAUTH_TOKEN` updated to the printed placeholder. Observed working
@@ -192,7 +193,7 @@ curl -H "Authorization: $CF_OAUTH_TOKEN" https://api.fr.cloud.gov/v3/organizatio
 ```
 
 If authenticated API calls fail, run `scripts/verify` with `RUN_ACQ=1` (its step 8
-separates an expired token from a failed injection). On msb, refresh the secret
+separates a host-token problem from a failed injection). On msb, refresh the secret
 with `cf oauth-token | acq secret set ...`; on sbx, check `sbx secret ls` for a
 `CF_OAUTH_TOKEN` custom secret, and recreate the sandbox so the placeholder is
 injected. Do not paste the token into chat or commit it to the workspace.
@@ -223,15 +224,18 @@ verify that `cf` is installed, cloud.gov/docs endpoints are reachable, and the
 injected placeholder reaches the CF API through a direct HTTPS request. If
 that last probe is rejected, `verify` also sends the host's own `cf oauth-token`
 to the same endpoint and reports the sandbox variable's class (never its value),
-so an expired token and a failed placeholder injection are told apart.
+so a host-token problem (expiry, revocation, or scope) and a failed placeholder
+injection are told apart. The host token is only read and sent when `cf api`
+reports exactly `https://api.fr.cloud.gov`.
 `RUN_ACQ=1` requires the token binding from Prerequisites (a global `cloud-gov`
-acq secret, or on `ACQ_BACKEND=sbx` a `CF_OAUTH_TOKEN` custom secret in sbx). On an
+acq secret on `ACQ_BACKEND=msb`, or a `CF_OAUTH_TOKEN` custom secret in sbx on
+`ACQ_BACKEND=sbx`). `ACQ_BACKEND` is required with `RUN_ACQ=1`, so the secret is
+checked against the backend that will run. On an
 intercepted network, run it as is: the global bundle supplies the CA kit ahead
 of this one, which is the live regression for the CA-before-fetch ordering. Set
 `CA_KIT=<path>` only if your bundle has no CA-trust kit (a kit with the same
-name as one already in the bundle is rejected by sbx). Set
-`ACQ_BACKEND=sbx` (or `msb`) to pass `--backend` to `acq` without changing your
-persisted default; the CA-before-fetch failure only reproduces on sbx, because
+name as one already in the bundle is rejected by sbx). `ACQ_BACKEND`
+passes `--backend` to `acq` without changing your persisted default; the CA-before-fetch failure only reproduces on sbx, because
 msb trusts host CAs natively. The script prints which backend the create log
 names and fails if it differs from the one requested. Set `KEEP=1` with
 `RUN_ACQ=1` to keep the sandbox for inspection.

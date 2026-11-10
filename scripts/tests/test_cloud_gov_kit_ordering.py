@@ -284,3 +284,117 @@ def test_auth_script_accepts_known_placeholder_shape_and_then_creates_config_dir
     )
     assert res.returncode == 0, res.stderr
     assert (home / ".cf").is_dir()
+
+
+VERIFY = KIT / "scripts" / "verify"
+BASH = "/bin/bash"
+
+
+def _verify_stubs(tmp_path: Path, cf_api_out: str, cf_api_rc: int = 0):
+    """Stub cf/curl/acq/sbx that record every call; return (bin dir, call log)."""
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    log = tmp_path / "calls.log"
+    _stub(
+        bindir / "cf",
+        f'echo "cf $*" >> "{log}"\n'
+        'case "$1" in\n'
+        f"  api) printf '%s\\n' '{cf_api_out}'; exit {cf_api_rc} ;;\n"
+        "  oauth-token) echo 'bearer HOSTTOKEN' ;;\n"
+        "esac\n",
+    )
+    _stub(bindir / "curl", f'echo "curl $*" >> "{log}"; cat >> "{log}"; printf 200\n')
+    for name in ("acq", "sbx"):
+        _stub(bindir / name, f'echo "{name} $*" >> "{log}"; exit 1\n')
+    return bindir, log
+
+
+def _run_host_control(tmp_path: Path, cf_api_out: str, cf_api_rc: int = 0) -> str:
+    bindir, log = _verify_stubs(tmp_path, cf_api_out, cf_api_rc)
+    script = f'CLOUD_GOV_VERIFY_LIB_ONLY=1 . "{VERIFY}"; host_control; echo "status=$host_status"'
+    res = subprocess.run(
+        [BASH, "-c", script],
+        env={"PATH": f"{bindir}:{SYSTEM_PATH}", "HOME": str(tmp_path)},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert res.returncode == 0, res.stderr
+    return res.stdout + (log.read_text() if log.exists() else "")
+
+
+def test_host_control_sends_token_only_for_exact_cloud_gov_endpoint(tmp_path):
+    out = _run_host_control(tmp_path, "api endpoint:   https://api.fr.cloud.gov")
+    assert "cf oauth-token" in out
+    assert "curl " in out and "status=200" in out
+
+
+@pytest.mark.parametrize(
+    "cf_api_out,cf_api_rc",
+    [
+        ("api endpoint:   https://api.fr.cloud.gov.example.net", 0),
+        ("api endpoint:   https://evil.example/api.fr.cloud.gov", 0),
+        ("api endpoint:   https://xapi.fr.cloud.gov", 0),
+        ("api endpoint:   http://api.fr.cloud.gov", 0),
+        ("api endpoint:   https://api.fr.cloud.gov\napi endpoint:   https://other.example", 0),
+        ("api endpoint:   https://api.fr.cloud.gov", 1),
+        ("No api endpoint set.", 0),
+    ],
+)
+def test_host_control_rejects_lookalike_and_failed_lookups(tmp_path, cf_api_out, cf_api_rc):
+    out = _run_host_control(tmp_path, cf_api_out, cf_api_rc)
+    assert "cf oauth-token" not in out
+    assert "curl " not in out
+    assert "status=\n" in out or out.rstrip().endswith("status=")
+
+
+def _run_live_verify(tmp_path: Path, backend: str | None):
+    bindir, log = _verify_stubs(tmp_path, "api endpoint:   https://api.fr.cloud.gov")
+    env = {
+        "PATH": f"{bindir}:{SYSTEM_PATH}:/usr/local/bin",
+        "HOME": str(tmp_path),
+        "RUN_ACQ": "1",
+        "TMPDIR": str(tmp_path),
+    }
+    if backend:
+        env["ACQ_BACKEND"] = backend
+    res = subprocess.run([BASH, str(VERIFY)], env=env, capture_output=True, text=True, timeout=120)
+    return res, (log.read_text() if log.exists() else "")
+
+
+def test_live_verify_requires_explicit_backend_before_any_secret_check(tmp_path):
+    res, calls = _run_live_verify(tmp_path, None)
+    assert res.returncode == 2
+    assert "ACQ_BACKEND" in res.stderr
+    assert "secret" not in calls and "create" not in calls
+
+
+def test_live_verify_sbx_checks_the_sbx_store_not_acq(tmp_path):
+    res, calls = _run_live_verify(tmp_path, "sbx")
+    assert res.returncode != 0
+    assert "sbx secret ls" in calls
+    assert "acq secret has" not in calls
+    assert "sbx secret set-custom" in res.stderr
+
+
+def test_live_verify_msb_checks_the_acq_store_not_sbx(tmp_path):
+    res, calls = _run_live_verify(tmp_path, "msb")
+    assert res.returncode != 0
+    assert "acq secret has" in calls
+    assert "sbx " not in calls
+    assert "acq secret set" in res.stderr
+
+
+def test_verify_script_is_executable():
+    assert os.access(VERIFY, os.X_OK)
+
+
+def test_lib_only_env_is_refused_when_executed(tmp_path):
+    res = subprocess.run(
+        [BASH, str(VERIFY)],
+        env={"PATH": SYSTEM_PATH, "HOME": str(tmp_path), "CLOUD_GOV_VERIFY_LIB_ONLY": "1"},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert res.returncode == 2

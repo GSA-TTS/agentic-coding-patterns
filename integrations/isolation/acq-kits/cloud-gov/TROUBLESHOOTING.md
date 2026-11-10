@@ -52,11 +52,13 @@ or no current user.
 
 **Causes and fixes:**
 
-- **Missing or expired host-side token.** Cloud Foundry OAuth tokens are
-  short-lived. If `scripts/verify` reports `authenticated /v3/organizations ->
-  401` or `403`, read the lines above its FAIL: it also sends the host's own
-  token to the same endpoint as a control. A rejected control means the token
-  expired (run `cf login` first); an accepted control with a rejected sandbox
+- **Missing, stale, or unauthorized host-side token.** Cloud Foundry OAuth tokens
+  are short-lived. If `scripts/verify` reports `authenticated /v3/organizations ->
+  401` or `403`, read the lines above its FAIL: when the host `cf` targets exactly
+  `https://api.fr.cloud.gov`, it also sends the host's own token to the same
+  endpoint as a control. A rejected control means the token may be expired or
+  revoked, or may lack the scope or authorization the endpoint needs (check
+  `cf target`, then run `cf login`); an accepted control with a rejected sandbox
   request means the backend did not substitute the placeholder or holds a stale
   secret, which re-minting the token will not fix. A `class=unset` result on sbx
   most likely means sbx's proxy has no `CF_OAUTH_TOKEN` custom secret for this
@@ -91,7 +93,7 @@ or no current user.
   # msb
   cf oauth-token | acq secret set <sandbox-name> cloud-gov --host api.fr.cloud.gov --env CF_OAUTH_TOKEN
   # sbx (see `sbx secret ls` for the scope of each CF_OAUTH_TOKEN entry)
-  sbx secret set-custom --sandbox <sandbox-name> --host api.fr.cloud.gov --env CF_OAUTH_TOKEN \\
+  sbx secret set-custom --sandbox <sandbox-name> --host api.fr.cloud.gov --env CF_OAUTH_TOKEN \
     --command "$(command -v cf) oauth-token"
   ```
 
