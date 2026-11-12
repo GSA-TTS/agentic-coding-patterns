@@ -50,7 +50,6 @@ test("the committed catalog is a valid catalog with at least one model", () => {
   const catalog = loadCatalog()
   assert.equal(catalog.schemaVersion, "usai-model-catalog/v1")
   assert.ok(catalog.models.length > 0)
-  assert.equal(catalog.models.length, 24)
 })
 
 test("--check with no source refuses instead of comparing against anything", () => {

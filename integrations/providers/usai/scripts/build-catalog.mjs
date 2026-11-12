@@ -688,6 +688,7 @@ function buildVendors(vendorKeysInOrder) {
 // eligible once their completion endpoint is available.
 const NON_CHAT_MODELS = {
   cohere_english_v3: "embedding model; /chat/completions returns 403 AccessDeniedException",
+  "cohere-v4": "embedding model; /embeddings returns 1536-dim vectors, /chat/completions returns 403 AccessDeniedException",
   "text-embedding-005": "embedding model; /chat/completions returns 400 (no generation support)",
 }
 
