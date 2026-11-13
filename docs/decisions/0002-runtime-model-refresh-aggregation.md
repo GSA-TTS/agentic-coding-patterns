@@ -1,5 +1,5 @@
 ---
-title: "Defer runtime model refresh and aggregation until host authority is established"
+title: "Runtime model refresh: initial delivery and deferred host aggregation proposal"
 status: "proposed"
 date: "2026-10-25"
 decision_makers: ["Patterns maintainers"]
@@ -9,7 +9,48 @@ proposes_to_supersede_in_part:  # takes effect only if this record is accepted
   - "integrations/isolation/docs/decisions/0004-neutral-model-provider-discovery.md"
 ---
 
-# ADR 0002 - Defer Runtime Model Refresh and Aggregation Until Host Authority Is Established
+# ADR 0002 - Runtime Model Refresh and Deferred Host Aggregation
+
+## Current Requirement (2026-11-13)
+
+This record remains **proposed**, not accepted. Its original blanket deferral
+below is retained as proposal history; it is not the current implementation
+requirement and does not block the approved initial delivery.
+
+The operator explicitly approved the
+[initial-delivery amendment to isolation ADR 0004](../../integrations/isolation/docs/decisions/0004-neutral-model-provider-discovery.md#approved-initial-delivery-amendment-2026-11-13):
+trusted data-only discovery inside the VM, live-required preparation before
+OpenCode launches, OpenCode on MSB first, and reuse of the existing matcher and
+models.dev enrichment. A v3 bundle selects a closed trusted adapter rather than
+executing a provider normalizer. Snapshot-only operation is explicit and marked
+degraded; required discovery failure blocks launch instead of silently using a
+snapshot. Optional enrichment failure does not invalidate successful membership.
+
+Host authority over pinned inputs, routing, credential ownership, and the
+read-only generation is preserved. In-VM observations supply model metadata to
+the existing harness-owned renderer; they do not change host lifecycle state or
+become a shared catalog authority. The initial delivery adds no orchestrator kit,
+cache, scheduler, runtime dependency graph, or persistent writable aggregate.
+Its required foreground launch barrier replaces the assumption that startup
+dispatch or a previous marker proves current readiness.
+
+The earlier proposal assumed a host model view could satisfy the consumer's
+freshness need. The current renderer uses snapshots, and the credential probe
+does not retain the models response. Neither supplies the required live model
+membership before launch. The approved bounded in-VM adapter addresses that gap
+without choosing a host-owned aggregation architecture.
+
+This reconciliation does not accept this ADR or claim runtime implementation,
+Quickstart integration, or VM qualification. The production USAi manifest must
+remain v2 until both runtime and consumer are ready. Pi and SBX are outside the
+first release. Any later host-owned cache or aggregation proposal needs fresh
+review against the amended ADR 0004; the historical supersession list below must
+not be accepted unchanged as a decision about the initial release.
+
+## Historical Deferral Proposal (Not in Effect)
+
+All references below to "this decision" describe the original proposal. They do
+not supersede the current requirement above or the accepted ADR 0004 amendment.
 
 ## Context and Problem Statement
 
