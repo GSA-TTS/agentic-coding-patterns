@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.0.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.19.0...v2.0.0) (2026-11-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* **integrations:** the Prime Agent kit path and emitter export are removed. Select OpenCode or Pi explicitly; no automatic fallback or configuration conversion. Pi is still CLI-install-only with USAi configuration deferred; this change claims no operational parity.
+
+### Features
+
+* **integrations:** retire Prime Agent reference harness ([#585](https://github.com/GSA-TTS/agentic-coding-patterns/issues/585)) ([60e411e](https://github.com/GSA-TTS/agentic-coding-patterns/commit/60e411e0954e06ad3e725080c00b06b05161acb5))
+* **oci-engine:** add opt-in volatile metadata runtime ([#589](https://github.com/GSA-TTS/agentic-coding-patterns/issues/589)) ([a945b56](https://github.com/GSA-TTS/agentic-coding-patterns/commit/a945b56f81c44b9292b4ceddfb530a9cefe0631f))
+* **paseo:** bump pinned Paseo CLI to 0.15.4 ([#592](https://github.com/GSA-TTS/agentic-coding-patterns/issues/592)) ([1ff65ef](https://github.com/GSA-TTS/agentic-coding-patterns/commit/1ff65efd684655304864aae502ab7e88fae16973))
+* **providers:** add data-only discovery bundle v3 ([#595](https://github.com/GSA-TTS/agentic-coding-patterns/issues/595)) ([395319f](https://github.com/GSA-TTS/agentic-coding-patterns/commit/395319f2a22a004a6fedb12196b33fab6a2b5995))
+* **usai-catalog:** legacy renderer disposition, offline drift report and refresh runbook ([#582](https://github.com/GSA-TTS/agentic-coding-patterns/issues/582)) ([abd854b](https://github.com/GSA-TTS/agentic-coding-patterns/commit/abd854b7ca05c3abc8e67be22ba25bda4df5bb57))
+
 ## [1.19.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.18.0...v1.19.0) (2026-11-05)
 
 
