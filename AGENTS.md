@@ -258,6 +258,8 @@ The agent SHOULD test portability claims when possible.
 
 ## 8. Validation Workflow
 
+- **Directly executed scripts:** verify version control preserves executability (Git: `100755`) with `make validate-executable-modes`, not filesystem permissions alone. Do not use blanket `chmod` or change global VCS settings. Scripts launched by an interpreter need no execute bit unless their distribution contract requires it.
+
 ### 8.1 Required Commands
 
 Before committing, the agent MUST run:
