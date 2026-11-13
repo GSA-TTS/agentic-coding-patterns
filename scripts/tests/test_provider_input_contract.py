@@ -255,7 +255,7 @@ def test_runtime_validator_rejects_unknown_bundle_version(tmp_path):
     shutil.copytree(FIXTURES_DIR / "acme-ai", bundle_dir)
     bundle_path = bundle_dir / "bundle.json"
     bundle = json.loads(bundle_path.read_text())
-    bundle["schemaVersion"] = "acq-provider-input-bundle/v3"
+    bundle["schemaVersion"] = "acq-provider-input-bundle/v999"
     bundle_path.write_text(json.dumps(bundle))
     with pytest.raises(ContractError, match="unsupported bundle schemaVersion"):
         validate_bundle(bundle_path, {"acme-ai": "ACME_AI_API_KEY"})
