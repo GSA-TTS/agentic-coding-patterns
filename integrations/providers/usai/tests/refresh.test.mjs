@@ -429,6 +429,7 @@ test("CLI: refresh --from <fixtures> --check works when the checkout path contai
       SCHEMA_REL,
       "integrations/providers/usai/scripts/refresh.mjs",
       "integrations/providers/usai/scripts/build-catalog.mjs",
+      "integrations/providers/usai/scripts/model-catalog-core.mjs",
     ]) {
       mkdirSync(path.dirname(path.join(root, rel)), { recursive: true })
       cpSync(path.join(REPO_ROOT, rel), path.join(root, rel))
