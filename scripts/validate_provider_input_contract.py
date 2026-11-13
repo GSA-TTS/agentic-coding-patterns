@@ -25,14 +25,20 @@ SUPPORTED_BUNDLE_SCHEMAS = {
 }
 HOST_CREDENTIAL_BINDINGS = SCHEMAS / "provider-credential-bindings.json"
 
-# The normalizer is run by the host at materialization time. POSIX expresses its
-# executability through mode bits (st_mode & 0o111) and os.access(X_OK). Windows
-# reports no mode bits and os.access(X_OK) is trivially true there, so those
-# checks are a no-op and must be replaced by a content-based contract instead:
-# an allowed extension paired with a shebang naming a supported interpreter. The
-# currently supported normalizer types are .mjs (run via Node) and .py (run via
-# the selected Python). Interpreters are matched exactly (after lower-casing and
-# dropping a trailing ".exe"), never by prefix, so look-alike names are refused.
+# Host-time validation checks normalizer artifacts before materialization; the
+# validator only inspects the file and its launcher metadata and never executes
+# it. The backend materializer stages the bundle, including the normalizer, for
+# the guest, and provider-shipped normalizers execute in the guest under the
+# containment contract in
+# integrations/isolation/docs/decisions/0004-neutral-model-provider-discovery.md.
+# POSIX expresses a normalizer's executability through mode bits
+# (st_mode & 0o111) and os.access(X_OK). Windows reports no mode bits and
+# os.access(X_OK) is trivially true there, so those checks are a no-op and must
+# be replaced by a content-based contract instead: an allowed extension paired
+# with a shebang naming an allowlisted interpreter. The currently supported
+# normalizer types are .mjs (Node) and .py (Python). Interpreters are matched
+# exactly (after lower-casing and dropping a trailing ".exe"), never by prefix,
+# so look-alike names are refused.
 NORMALIZER_LAUNCHERS = {
     ".mjs": frozenset({"node"}),
     ".py": frozenset({"python", "python3", "py"}),
@@ -271,7 +277,7 @@ def validate_bundle(
         # the executability contract there, and on Windows enforce the
         # extension + shebang launcher contract instead (see NORMALIZER_LAUNCHERS),
         # so a data file without a runnable association is rejected rather than
-        # materialized as trusted executable code.
+        # staged as a normalizer.
         if not _is_windows():
             if not normalizer_path.stat().st_mode & 0o111:
                 raise ContractError(f"{bundle_path}: normalizerPath must be an executable file")
