@@ -1,0 +1,5 @@
+# Byte-compared fixture snapshots must stay LF in the working tree. Tests compare
+# normalizer output (always LF) against these files byte for byte, so a checkout
+# with core.autocrlf=true (the Windows default in Git for Windows) would otherwise
+# rewrite them to CRLF and fail the comparison. Scope is deliberately narrow.
+integrations/isolation/schemas/fixtures/*/snapshot.json text eol=lf
