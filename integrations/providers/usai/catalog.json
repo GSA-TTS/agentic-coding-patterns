@@ -2,6 +2,8 @@
   "schemaVersion": "usai-model-catalog/v1",
   "generatedBy": "build-catalog.mjs (generated — do not hand-edit)",
   "sources": {
+    "modelsList": "https://api.gsa.usai.gov/api/v1/models",
+    "enrichment": "https://models.dev/api.json",
     "capabilitiesVerified": "2026-11-04; opencode 2.0.30"
   },
   "recommendations": {
@@ -166,6 +168,32 @@
         "output": 15,
         "cacheRead": 0.3,
         "cacheWrite": 3.75
+      }
+    },
+    {
+      "id": "claude-haiku-5.5",
+      "vendor": "anthropic",
+      "name": "Claude Haiku 5.5",
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
+      "cost": {
+        "input": 0.1,
+        "output": 0.5,
+        "cacheRead": 0.01,
+        "cacheWrite": 0.125
+      }
+    },
+    {
+      "id": "claude-opus-5.5",
+      "vendor": "anthropic",
+      "name": "Claude Opus 5.5",
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
+      "cost": {
+        "input": 4,
+        "output": 20,
+        "cacheRead": 0.2,
+        "cacheWrite": 5
       }
     },
     {
@@ -364,6 +392,25 @@
       ]
     },
     {
+      "id": "gpt-6-luna-guardrails-high",
+      "vendor": "openai",
+      "name": "GPT 6 Luna Guardrails High",
+      "contextWindow": 1050000,
+      "maxOutputTokens": 128000,
+      "cost": {
+        "input": 0.1,
+        "output": 0.5,
+        "cacheRead": 0.01,
+        "cacheWrite": 0.125
+      },
+      "costAbove200kContext": {
+        "input": 0.2,
+        "output": 0.75,
+        "cacheRead": 0.02,
+        "cacheWrite": 0.25
+      }
+    },
+    {
       "id": "gemini-3.8-flash",
       "vendor": "google",
       "name": "Gemini 3.8 Flash",
@@ -412,27 +459,15 @@
       ]
     },
     {
-      "id": "gemini-2.5-flash",
+      "id": "gemini-4-argon",
       "vendor": "google",
-      "name": "Gemini 2.5 Flash",
+      "name": "Gemini 4 Argon",
       "contextWindow": 1048576,
       "maxOutputTokens": 65536,
       "cost": {
-        "input": 0.3,
-        "output": 2.5,
-        "cacheRead": 0.03
-      }
-    },
-    {
-      "id": "gemini-2.5-flash-lite",
-      "vendor": "google",
-      "name": "Gemini 2.5 Flash Lite",
-      "contextWindow": 1048576,
-      "maxOutputTokens": 65536,
-      "cost": {
-        "input": 0.1,
-        "output": 0.4,
-        "cacheRead": 0.01
+        "input": 2,
+        "output": 10,
+        "cacheRead": 0.1
       }
     },
     {

@@ -33,11 +33,13 @@ test("every explicitly excluded id is rejected, and carries a reason", () => {
   }
 })
 
-test("cohere_english_v3 is excluded by exact id, not by pattern", () => {
-  assert.equal(/embedding|embed/.test("cohere_english_v3"), false)
-  assert.ok(nonChatReason("cohere_english_v3"), "must still be excluded")
-  assert.ok(Object.hasOwn(NON_CHAT_MODELS, "cohere_english_v3"))
-})
+for (const id of ["cohere_english_v3", "cohere-v4"]) {
+  test(`${id} is excluded by exact id, not by pattern`, () => {
+    assert.equal(/embedding|embed/.test(id), false)
+    assert.ok(nonChatReason(id), "must still be excluded")
+    assert.ok(Object.hasOwn(NON_CHAT_MODELS, id))
+  })
+}
 
 test("the id pattern is substring, not word-boundary (default-deny)", () => {
   // `_` is a word character, so `\bembed\b` matches no underscore-delimited id.

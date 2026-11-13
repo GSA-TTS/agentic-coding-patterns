@@ -35,6 +35,9 @@ const RENDERER_CONTRACTS = [
   },
 ]
 const CATALOG_JSON = path.join(USAI_DIR, "catalog.json")
+// The renderer contract is frozen, so it is compared against the frozen fixture
+// catalog; comparing it against the live catalog would fail on every refresh.
+const CONTRACT_CATALOG_JSON = path.join(HERE, "fixtures/refresh/artifacts/catalog.json")
 
 const BEGIN_MARKER = "// BEGIN GENERATED USAI MODELS"
 const END_MARKER = "// END GENERATED USAI MODELS"
@@ -93,7 +96,7 @@ for (const { label, file } of RENDERER_CONTRACTS) {
   test(`emitOpenCodeBlockFromCatalog reproduces the ${label} byte-for-byte`, () => {
     const jsoncText = readFileSync(file, "utf8")
     const expected = extractShippedBlock(jsoncText, label)
-    const actual = emitOpenCodeBlockFromCatalog(JSON.parse(readFileSync(CATALOG_JSON, "utf8")))
+    const actual = emitOpenCodeBlockFromCatalog(JSON.parse(readFileSync(CONTRACT_CATALOG_JSON, "utf8")))
 
     if (expected !== actual) {
       // Print a targeted diff before the assertion fails.
@@ -115,7 +118,7 @@ test("the committed catalog remains renderable under the OpenCode contract", () 
 
 test("the OpenCode renderer preserves the prior shipped model block and role defaults", () => {
   const shipped = readFileSync(RENDERER_CONTRACTS[0].file, "utf8")
-  const catalog = JSON.parse(readFileSync(CATALOG_JSON, "utf8"))
+  const catalog = JSON.parse(readFileSync(CONTRACT_CATALOG_JSON, "utf8"))
   const facts = {
     schemaVersion: "acq-provider-facts/v1",
     providerId: "usai",
