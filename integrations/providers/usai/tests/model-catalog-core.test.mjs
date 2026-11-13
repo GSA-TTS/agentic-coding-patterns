@@ -106,9 +106,7 @@ test("empty, missing, unknown and near-match enrichment never fabricate limits",
   assert.deepEqual(enrichModelMetadata({ ...model, contextWindow: 12345 }, null).metadata, { contextWindow: 12345 })
 })
 
-test("runtime empty membership stays empty; the authoring builder still rejects an empty feed", () => {
-  const advertised = []
-  assert.deepEqual(advertised.map((entry) => enrichModelMetadata(entry, catalog)), [])
+test("authoring builder retains empty-feed rejection", () => {
   assert.throws(() => builder.shapeFromFeeds([], catalog), /model list is empty/)
 })
 
