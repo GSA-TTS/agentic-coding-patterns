@@ -1,4 +1,4 @@
-.PHONY: setup validate validate-kits validate-provider-input-contract refresh-usai-catalog refresh-usai-catalog-check test-kits generate generate-check test coverage security ci clean search install-hooks help
+.PHONY: setup validate validate-executable-modes validate-kits validate-provider-input-contract refresh-usai-catalog refresh-usai-catalog-check test-kits generate generate-check test coverage security ci clean search install-hooks help
 
 PYTHON ?= python3
 
@@ -34,6 +34,10 @@ install-hooks:  ## Install pre-commit hooks (opt-in for contributors)
 
 validate:  ## Run all validators (frontmatter + sensitive terms)
 	$(PYTHON) scripts/validate_repo.py
+	$(PYTHON) scripts/validate_executable_modes.py
+
+validate-executable-modes:  ## Verify Git-index modes for required executable entrypoints
+	$(PYTHON) scripts/validate_executable_modes.py
 
 validate-kits:  ## Validate neutral acq-kits specs against the hybrid/v1 schema (strict: warnings fail)
 	$(PYTHON) integrations/isolation/acq-kits/validate-kits.py --strict
@@ -114,7 +118,7 @@ ci:  ## Full CI check (validate + security + test + pre-commit checks)
 	fi
 	@echo ""
 	@echo "==> Running validators..."
-	$(PYTHON) scripts/validate_repo.py
+	@$(MAKE) --no-print-directory validate
 	@echo ""
 	@echo "==> Scanning for unsafe shell patterns..."
 	$(PYTHON) scripts/scan_unsafe_shell.py .

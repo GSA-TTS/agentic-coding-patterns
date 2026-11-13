@@ -76,6 +76,11 @@ repos:
         entry: python scripts/validate_repo.py
         language: unsupported
         pass_filenames: false
+      - id: validate-executable-modes
+        name: Validate Git executable modes
+        entry: python scripts/validate_executable_modes.py
+        language: unsupported
+        pass_filenames: false
       - id: validate-acq-kits
         name: Validate acq-kits (hybrid/v1 schema)
         entry: python integrations/isolation/acq-kits/validate-kits.py --strict
