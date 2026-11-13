@@ -53,10 +53,11 @@
 //               gitignored — an explicit `--out` run is a deliberate,
 //               reviewable action, same as sync-usai-models.mjs's snapshot.
 
+import { realpathSync } from "node:fs"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import path from "node:path"
 import process from "node:process"
-import { fileURLToPath, pathToFileURL } from "node:url"
+import { fileURLToPath } from "node:url"
 
 // This file lives at <kit>/scripts/normalize-catalog.mjs. The USAi catalog
 // lives at <repo>/integrations/providers/usai/catalog.json, i.e.
@@ -270,14 +271,26 @@ async function main() {
   process.stdout.write(`Wrote ${neutralCatalog.models.length} normalized models to ${out}\n`)
 }
 
-// Compare URL against URL so the check is portable: on Windows
-// `process.argv[1]` is a `C:\...` path, which a `file://${...}` template turns
-// into `file://C:\...`, while `import.meta.url` is `file:///C:/...`. Those never
-// match, so this script would exit 0 without doing anything.
-if (
-  process.argv[1] &&
-  import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href
-) {
+// Run main() only when this file is the program being run. Compare canonical
+// paths, never the strings Node hands us: `import.meta.url` names the module
+// file Node resolved, while `process.argv[1]` is the path that was typed. On
+// Windows a `C:\...` argv makes a `file://${...}` template produce
+// `file://C:\...` against `import.meta.url`'s `file:///C:/...`; a launch through
+// a symlink, a directory junction, or a differently-cased path on a
+// case-insensitive filesystem disagrees the same way. Either mismatch skips
+// main() and exits 0 having done nothing, so resolve both sides first.
+function isMainModule() {
+  if (!process.argv[1]) return false
+  try {
+    return realpathSync(path.resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    // An unresolvable script path (or `node -e`, which has none) means this
+    // file is being imported, not run.
+    return false
+  }
+}
+
+if (isMainModule()) {
   main().catch((error) => {
     console.error(`normalize-catalog: failed: ${error.message}`)
     process.exit(1)
