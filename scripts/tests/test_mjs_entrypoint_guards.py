@@ -113,7 +113,7 @@ def _symlink_skip_reason() -> str | None:
         except (OSError, NotImplementedError) as error:
             return (
                 "creating symlinks requires SeCreateSymbolicLinkPrivilege on Windows "
-                "(enable Developer Mode or run elevated) or a symlink-capable filesystem "
+                "(granted by Developer Mode, an elevated shell, or policy) or a symlink-capable filesystem "
                 f"on this host: {error}"
             )
     return None
@@ -136,7 +136,9 @@ def test_no_source_file_uses_the_non_portable_argv1_guard():
             if NON_PORTABLE_GUARD.search(line):
                 offenders.append(f"{path.relative_to(ROOT).as_posix()}:{lineno}: {line.strip()}")
     assert offenders == [], (
-        "non-portable entrypoint guard(s) found (use pathToFileURL(resolve(argv[1])).href):\n" + "\n".join(offenders)
+        "non-portable entrypoint guard(s) found (compare canonical paths, e.g. "
+        "realpathSync(resolve(process.argv[1])) with realpathSync(fileURLToPath(import.meta.url))):\n"
+        + "\n".join(offenders)
     )
 
 
