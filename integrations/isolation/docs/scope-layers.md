@@ -204,6 +204,14 @@ GitHub routing is the same for every team, so it belongs in the global layer
 kit. Until it is there, a team kit carries it, and should drop it once the
 global layer does.
 
+For a GitHub Enterprise Server host, `acq`'s GitHub support does not apply
+(it covers `github.com` only), so copy the
+[github-enterprise-kit template](../acq-kits/examples/github-enterprise-kit/):
+it carries a tighter form of this step for one host (both SSH forms as values
+of one `insteadOf` key, with a slash after the host in the `ssh://` form so a
+look-alike host or a URL with a port is not rewritten), plus the egress entry
+and `GH_HOST` for `gh`.
+
 ### Personal kit
 
 | Need | Mechanism |
