@@ -46,7 +46,22 @@ injected token, and `GH_HOST` for `gh`. The token itself is never in the kit.
    - Prefer a **fine-grained** token limited to the repositories you need, if
      your GHES version and organization policy allow them, with repository
      permissions *Contents* (read and write), *Pull requests* and *Issues* (read
-     and write, only if the agent uses them), and *Metadata* (read).
+     and write, only if the agent uses them), and *Metadata* (read). This link
+     opens the creation form with those permissions and a 30-day expiry filled
+     in; replace `HOST`:
+
+     ```text
+     https://HOST/settings/personal-access-tokens/new?name=acq-sandbox&expires_in=30&contents=write&pull_requests=write&issues=write
+     ```
+
+     Add `&target_name=ORG` when the repositories belong to an organization
+     (the default owner is your own account), and drop `pull_requests` or
+     `issues` if the agent does not need them. Then choose **Only select
+     repositories** and pick the repositories yourself: the link cannot do
+     that. GitHub documents these URL parameters in the GHES 3.14 and 3.15 docs
+     and for github.com; the 3.16 through 3.22 docs do not mention them, and
+     the link has not been tried against a GHES instance. If the form opens
+     empty or partly filled, set the same values by hand.
    - Otherwise a **classic** token with the `repo` scope. Add `read:org` only if
      a `gh` command you use needs it.
    - Set an expiry.
