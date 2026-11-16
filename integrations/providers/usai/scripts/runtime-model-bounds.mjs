@@ -21,6 +21,23 @@ export function modelId(value) {
   return safeKey(value)
 }
 
+// models.dev IDs are not gateway deployment IDs: e.g. Vertex uses @default.
+// Bound their printable token alphabet without narrowing it to gateway syntax.
+export function upstreamModelId(value) {
+  if (typeof value !== "string" || !/^[\x21-\x7e]{1,512}$/.test(value)) throw new Error("invalid upstream model identity")
+  return safeKey(value)
+}
+
+// Optional upstream metadata must satisfy the renderer's contract before it
+// leaves the optional boundary. One unusable limit cannot poison membership.
+export function usableRuntimeMetadata(metadata) {
+  const result = { ...metadata }
+  for (const key of ["contextWindow", "maxOutputTokens"]) {
+    if (result[key] !== undefined && (!Number.isSafeInteger(result[key]) || result[key] <= 0)) delete result[key]
+  }
+  return result
+}
+
 // Inspect JSON tokens before JSON.parse allocates its object graph. Recursion is
 // bounded before descent; decoded duplicate/unsafe keys are refused. Error text
 // deliberately never contains response bytes (which could echo credentials).
@@ -112,7 +129,7 @@ export function validateMetadata(catalog) {
     if (provider.models === undefined) continue
     for (const [id, data] of Object.entries(record(provider.models))) {
       if (++count > RUNTIME_LIMITS.cardinality) throw new Error("metadata model limit")
-      modelId(id); record(data)
+      upstreamModelId(id); record(data)
     }
   }
   return catalog

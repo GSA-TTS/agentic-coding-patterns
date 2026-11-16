@@ -10,9 +10,10 @@ import * as builtin7 from "node:process"
 import * as builtin8 from "node:url"
 import * as builtin9 from "node:child_process"
 import * as builtin10 from "node:fs/promises"
-import * as builtin11 from "node:path"
-import * as builtin12 from "node:url"
-import * as builtin13 from "node:perf_hooks"
+import * as builtin11 from "node:fs"
+import * as builtin12 from "node:path"
+import * as builtin13 from "node:url"
+import * as builtin14 from "node:perf_hooks"
 
 // Source: integrations/providers/usai/scripts/model-catalog-core.mjs
 const module0 = await (async () => {
@@ -511,6 +512,23 @@ function modelId(value) {
   return safeKey(value)
 }
 
+// models.dev IDs are not gateway deployment IDs: e.g. Vertex uses @default.
+// Bound their printable token alphabet without narrowing it to gateway syntax.
+function upstreamModelId(value) {
+  if (typeof value !== "string" || !/^[\x21-\x7e]{1,512}$/.test(value)) throw new Error("invalid upstream model identity")
+  return safeKey(value)
+}
+
+// Optional upstream metadata must satisfy the renderer's contract before it
+// leaves the optional boundary. One unusable limit cannot poison membership.
+function usableRuntimeMetadata(metadata) {
+  const result = { ...metadata }
+  for (const key of ["contextWindow", "maxOutputTokens"]) {
+    if (result[key] !== undefined && (!Number.isSafeInteger(result[key]) || result[key] <= 0)) delete result[key]
+  }
+  return result
+}
+
 // Inspect JSON tokens before JSON.parse allocates its object graph. Recursion is
 // bounded before descent; decoded duplicate/unsafe keys are refused. Error text
 // deliberately never contains response bytes (which could echo credentials).
@@ -602,13 +620,13 @@ function validateMetadata(catalog) {
     if (provider.models === undefined) continue
     for (const [id, data] of Object.entries(record(provider.models))) {
       if (++count > RUNTIME_LIMITS.cardinality) throw new Error("metadata model limit")
-      modelId(id); record(data)
+      upstreamModelId(id); record(data)
     }
   }
   return catalog
 }
 
-return { RUNTIME_LIMITS, record, safeKey, modelId, boundedJson, validatedFacts, validatedDiscoveryDescriptor, validateMetadata }
+return { RUNTIME_LIMITS, record, safeKey, modelId, upstreamModelId, usableRuntimeMetadata, boundedJson, validatedFacts, validatedDiscoveryDescriptor, validateMetadata }
 })()
 
 // Source: integrations/providers/usai/scripts/runtime-model-discovery.mjs
@@ -618,7 +636,7 @@ const { open, readdir, lstat } = builtin0
 const path = builtin1.default
 const { performance } = builtin2
 const { classifyVendor, generateDisplayName, nonChatReason, enrichModelMetadata, normalizeInputModalities } = module0
-const { RUNTIME_LIMITS, boundedJson, record, modelId, validatedFacts, validatedDiscoveryDescriptor, validateMetadata } = module1
+const { RUNTIME_LIMITS, boundedJson, record, modelId, validatedFacts, validatedDiscoveryDescriptor, validateMetadata, usableRuntimeMetadata } = module1
 
 const METADATA_URL = "https://models.dev/api.json"
 
@@ -789,7 +807,7 @@ async function discoverRuntimeModels(providerRoot, { mode = "live-required", cre
       for (const input of inputs) {
         input.catalog.models = input.catalog.models.map((model) => {
           try {
-            const enriched = enrichModelMetadata(model, metadata).metadata
+            const enriched = usableRuntimeMetadata(enrichModelMetadata(model, metadata).metadata)
             return { ...model, ...enriched, metadataProvenance: {
               ...model.metadataProvenance,
               ...Object.fromEntries(Object.keys(enriched).map((key) => [key, "models.dev-unverified"])),
@@ -1674,23 +1692,47 @@ return { INPUT_MODALITIES, stripJsonc, parseJsonc, deepMerge, renderProviderConf
 const module4 = await (async () => {
 // Source for the standalone guest artifact; do not stage this module itself.
 const { spawn } = builtin9
-const { readFile } = builtin10
-const path = builtin11.default
-const { pathToFileURL, fileURLToPath } = builtin12
-const { performance } = builtin13
+const { readFile, lstat, realpath, access } = builtin10
+const { constants } = builtin11
+const path = builtin12.default
+const { pathToFileURL, fileURLToPath } = builtin13
+const { performance } = builtin14
 const { discoverRuntimeModels } = module2
 const { boundedJson, RUNTIME_LIMITS, record, validatedFacts } = module1
 const { renderProviderConfig, ownershipFromRendered, withProviderConfigLock, parseJsonc } = module3
 
+// Only the trusted guest launcher supplies this path, never provider data.
+// Node loads extra roots at process startup. Preserve that one trust setting,
+// not NODE_OPTIONS, preload hooks, proxy variables or TLS-disable switches.
+async function discoveryChildEnvironment(environment) {
+  const childEnv = { USAI_API_KEY: environment.USAI_API_KEY ?? "" }
+  const caPath = environment.NODE_EXTRA_CA_CERTS
+  if (caPath === undefined) return childEnv
+  if (typeof caPath !== "string" || !path.isAbsolute(caPath) || path.normalize(caPath) !== caPath ||
+      await realpath(caPath) !== caPath) throw new Error("invalid guest CA path")
+  const stat = await lstat(caPath)
+  if (!stat.isFile() || stat.size === 0 || stat.size > 2 * 1024 * 1024 || (stat.mode & 0o022) !== 0) throw new Error("guest CA bundle must be a bounded read-only regular file")
+  await access(caPath, constants.R_OK)
+  let writable = true
+  try { await access(caPath, constants.W_OK) } catch (error) {
+    if (!["EACCES", "EPERM", "EROFS"].includes(error.code)) throw error
+    writable = false
+  }
+  if (writable) throw new Error("guest CA bundle must not be writable by the preparation user")
+  childEnv.NODE_EXTRA_CA_CERTS = caPath
+  return childEnv
+}
+
 // Pipes rather than Node's deserializing IPC channel: cap bytes BEFORE parsing.
 // Child stdout is one result; stderr is discarded so response/credential bytes
 // cannot reach logs. Await close (not merely exit/kill) before releasing the lock.
-function runDiscoveryChild({ providerRoot, mode, deadline, artifact, credentials = process.env, spawnImpl = spawn }) {
+async function runDiscoveryChild({ providerRoot, mode, deadline, artifact, credentials = process.env, spawnImpl = spawn }) {
+  const environment = await discoveryChildEnvironment(credentials)
   return new Promise((resolve, reject) => {
     const remaining = deadline - performance.now()
     if (remaining <= 0) { reject(new Error("preparation deadline")); return }
     const child = spawnImpl(process.execPath, [artifact, "--discovery-child", providerRoot, mode, String(remaining)], {
-      env: { USAI_API_KEY: credentials.USAI_API_KEY ?? "" },
+      env: environment,
       stdio: ["ignore", "pipe", "ignore"],
     })
     let failure
@@ -1745,7 +1787,7 @@ async function prepareRuntimeModels(providerRoot, globalDir, options = {}) {
     const checkDeadline = () => { if (performance.now() >= deadline) throw new Error("preparation deadline") }
     // Check immediately before atomic rename, after temporary-file flush.
     transactionOptions.checkDeadline = checkDeadline
-    const result = await runDiscoveryChild({ providerRoot, mode, deadline, artifact, credentials: options.credentials })
+    const result = await runDiscoveryChild({ providerRoot, mode, deadline, artifact, credentials: options.credentials, spawnImpl: options.spawnImpl })
     const rendered = renderProviderConfig(result.inputs)
     checkDeadline()
     await publish(rendered, ownershipFromRendered(rendered))
@@ -1783,7 +1825,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   })
 }
 
-return { runDiscoveryChild, prepareRuntimeModels, runtimePreparationMain }
+return { discoveryChildEnvironment, runDiscoveryChild, prepareRuntimeModels, runtimePreparationMain }
 })()
 
 export const { prepareRuntimeModels, runDiscoveryChild, runtimePreparationMain } = module4

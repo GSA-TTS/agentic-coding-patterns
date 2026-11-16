@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { performance } from "node:perf_hooks"
-import { boundedJson, RUNTIME_LIMITS, validatedFacts, validateMetadata } from "../scripts/runtime-model-bounds.mjs"
+import { boundedJson, RUNTIME_LIMITS, validatedFacts, validateMetadata, upstreamModelId } from "../scripts/runtime-model-bounds.mjs"
 import { discoverRuntimeModels, METADATA_URL, requestJson } from "../scripts/runtime-model-discovery.mjs"
 import { artifactPath, buildRuntimeArtifact } from "../scripts/build-runtime-artifact.mjs"
 
@@ -26,6 +26,32 @@ async function fixture(t, catalog = snapshot) {
 
 test("standalone artifact is byte-identical to the closed canonical source build", async () => {
   assert.equal(await readFile(artifactPath, "utf8"), await buildRuntimeArtifact())
+})
+
+test("committed models.dev fixture including Vertex @default IDs enriches known live membership", async (t) => {
+  const root = await fixture(t)
+  const metadata = await readFile(new URL("./fixtures/models-dev.json", import.meta.url), "utf8")
+  assert.ok(metadata.includes('"claude-opus-5@default"'))
+  assert.equal(upstreamModelId("claude-opus-5@default"), "claude-opus-5@default")
+  for (const id of ["__proto__", "constructor", "prototype", "bad id", "x\n", "x".repeat(513)]) assert.throws(() => upstreamModelId(id))
+  const result = await discoverRuntimeModels(root, { credentials: { USAI_API_KEY: "fixture" }, fetchImpl: async (url) => url === facts.modelsUrl
+    ? json({ data: [{ id: "gpt-5.2", owned_by: "openai" }] })
+    : new Response(metadata, { headers: { "content-type": "application/json" } }) })
+  assert.equal(result.metadataOutcome, "available-unverified")
+  assert.equal(result.inputs[0].catalog.models[0].contextWindow, 400000)
+  assert.equal(result.inputs[0].catalog.models[0].maxOutputTokens, 128000)
+})
+
+test("unsafe integer upstream limits are individually omitted without losing membership or valid sibling limits", async (t) => {
+  const root = await fixture(t)
+  for (const limit of [{ context: 1e20, output: 1e20 }, { context: 1e20, output: 64 }, { context: 128, output: 1e20 }]) {
+    const result = await discoverRuntimeModels(root, { credentials: { USAI_API_KEY: "fixture" }, fetchImpl: async (url) => url === facts.modelsUrl
+      ? json({ data: [{ id: "gpt-5.2" }] }) : json({ azure: { models: { "gpt-5.2": { limit } } } }) })
+    const model = result.inputs[0].catalog.models[0]
+    assert.equal(model.id, "gpt-5.2")
+    assert.equal(model.contextWindow, Number.isSafeInteger(limit.context) ? limit.context : undefined)
+    assert.equal(model.maxOutputTokens, Number.isSafeInteger(limit.output) ? limit.output : undefined)
+  }
 })
 
 test("lexical bounds refuse deep, wide, long, duplicate and prototype-shaped JSON before matching", () => {

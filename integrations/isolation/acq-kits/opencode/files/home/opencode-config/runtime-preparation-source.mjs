@@ -1,6 +1,7 @@
 // Source for the standalone guest artifact; do not stage this module itself.
 import { spawn } from "node:child_process"
-import { readFile } from "node:fs/promises"
+import { readFile, lstat, realpath, access } from "node:fs/promises"
+import { constants } from "node:fs"
 import path from "node:path"
 import { pathToFileURL, fileURLToPath } from "node:url"
 import { performance } from "node:perf_hooks"
@@ -8,15 +9,38 @@ import { discoverRuntimeModels } from "../../../../../../providers/usai/scripts/
 import { boundedJson, RUNTIME_LIMITS, record, validatedFacts } from "../../../../../../providers/usai/scripts/runtime-model-bounds.mjs"
 import { renderProviderConfig, ownershipFromRendered, withProviderConfigLock, parseJsonc } from "./render-provider-config.mjs"
 
+// Only the trusted guest launcher supplies this path, never provider data.
+// Node loads extra roots at process startup. Preserve that one trust setting,
+// not NODE_OPTIONS, preload hooks, proxy variables or TLS-disable switches.
+export async function discoveryChildEnvironment(environment) {
+  const childEnv = { USAI_API_KEY: environment.USAI_API_KEY ?? "" }
+  const caPath = environment.NODE_EXTRA_CA_CERTS
+  if (caPath === undefined) return childEnv
+  if (typeof caPath !== "string" || !path.isAbsolute(caPath) || path.normalize(caPath) !== caPath ||
+      await realpath(caPath) !== caPath) throw new Error("invalid guest CA path")
+  const stat = await lstat(caPath)
+  if (!stat.isFile() || stat.size === 0 || stat.size > 2 * 1024 * 1024 || (stat.mode & 0o022) !== 0) throw new Error("guest CA bundle must be a bounded read-only regular file")
+  await access(caPath, constants.R_OK)
+  let writable = true
+  try { await access(caPath, constants.W_OK) } catch (error) {
+    if (!["EACCES", "EPERM", "EROFS"].includes(error.code)) throw error
+    writable = false
+  }
+  if (writable) throw new Error("guest CA bundle must not be writable by the preparation user")
+  childEnv.NODE_EXTRA_CA_CERTS = caPath
+  return childEnv
+}
+
 // Pipes rather than Node's deserializing IPC channel: cap bytes BEFORE parsing.
 // Child stdout is one result; stderr is discarded so response/credential bytes
 // cannot reach logs. Await close (not merely exit/kill) before releasing the lock.
-export function runDiscoveryChild({ providerRoot, mode, deadline, artifact, credentials = process.env, spawnImpl = spawn }) {
+export async function runDiscoveryChild({ providerRoot, mode, deadline, artifact, credentials = process.env, spawnImpl = spawn }) {
+  const environment = await discoveryChildEnvironment(credentials)
   return new Promise((resolve, reject) => {
     const remaining = deadline - performance.now()
     if (remaining <= 0) { reject(new Error("preparation deadline")); return }
     const child = spawnImpl(process.execPath, [artifact, "--discovery-child", providerRoot, mode, String(remaining)], {
-      env: { USAI_API_KEY: credentials.USAI_API_KEY ?? "" },
+      env: environment,
       stdio: ["ignore", "pipe", "ignore"],
     })
     let failure
@@ -71,7 +95,7 @@ export async function prepareRuntimeModels(providerRoot, globalDir, options = {}
     const checkDeadline = () => { if (performance.now() >= deadline) throw new Error("preparation deadline") }
     // Check immediately before atomic rename, after temporary-file flush.
     transactionOptions.checkDeadline = checkDeadline
-    const result = await runDiscoveryChild({ providerRoot, mode, deadline, artifact, credentials: options.credentials })
+    const result = await runDiscoveryChild({ providerRoot, mode, deadline, artifact, credentials: options.credentials, spawnImpl: options.spawnImpl })
     const rendered = renderProviderConfig(result.inputs)
     checkDeadline()
     await publish(rendered, ownershipFromRendered(rendered))

@@ -82,11 +82,25 @@ Nonterminal pagination signals fail rather than silently truncating membership.
 Exact-ID curated snapshot capabilities survive live reconstruction; snapshot
 limits/prices do not, because that format cannot distinguish provider facts
 from authoring defaults. Optional models.dev limits/prices remain unverified.
+Unsafe-integer upstream limits are omitted independently rather than failing
+otherwise valid membership. Upstream IDs use their own bounded syntax so Vertex
+`@default` metadata does not invalidate the full enrichment feed.
 Success prints only source and metadata outcomes. It does not prove a host
 generation/attempt barrier, fresh OpenCode enumeration or a successful model
 request. Host launch-path integration and live MSB qualification remain required.
 
 Required preparation uses a five-second lock wait without stale-lock stealing.
+
+For enterprise TLS, the trusted guest launcher may set `NODE_EXTRA_CA_CERTS`
+to a canonical absolute, readable regular CA bundle (at most 2 MiB), without
+symlink components or group/other write bits and not writable by the preparation
+user. For example, the Zscaler kit's root-owned system trust bundle at
+`/etc/ssl/certs/ca-certificates.crt` is usable by the unprivileged guest. The
+provisioner must protect the bundle and parent directories from replacement;
+provider inputs must not select trust roots. This validated path is forwarded
+to the child, but `NODE_OPTIONS` and TLS-disable settings are not. TLS and
+hostname validation remain enabled. See the ADR for the complete trust contract.
+
 On lock failure, inspect ownership and confirm the owner has stopped before
 separately authorized manual cleanup; do not remove an active owner's lock.
 See [ADR 0007](../../../../../docs/decisions/0007-bounded-runtime-model-preparation.md)

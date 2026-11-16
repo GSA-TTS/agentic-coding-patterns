@@ -3,7 +3,7 @@ import { open, readdir, lstat } from "node:fs/promises"
 import path from "node:path"
 import { performance } from "node:perf_hooks"
 import { classifyVendor, generateDisplayName, nonChatReason, enrichModelMetadata, normalizeInputModalities } from "./model-catalog-core.mjs"
-import { RUNTIME_LIMITS, boundedJson, record, modelId, validatedFacts, validatedDiscoveryDescriptor, validateMetadata } from "./runtime-model-bounds.mjs"
+import { RUNTIME_LIMITS, boundedJson, record, modelId, validatedFacts, validatedDiscoveryDescriptor, validateMetadata, usableRuntimeMetadata } from "./runtime-model-bounds.mjs"
 
 export const METADATA_URL = "https://models.dev/api.json"
 
@@ -174,7 +174,7 @@ export async function discoverRuntimeModels(providerRoot, { mode = "live-require
       for (const input of inputs) {
         input.catalog.models = input.catalog.models.map((model) => {
           try {
-            const enriched = enrichModelMetadata(model, metadata).metadata
+            const enriched = usableRuntimeMetadata(enrichModelMetadata(model, metadata).metadata)
             return { ...model, ...enriched, metadataProvenance: {
               ...model.metadataProvenance,
               ...Object.fromEntries(Object.keys(enriched).map((key) => [key, "models.dev-unverified"])),
