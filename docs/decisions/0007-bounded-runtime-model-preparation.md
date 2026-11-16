@@ -152,8 +152,10 @@ pipe caps, lock refusal, pre-rename failure and concurrent publication. The real
 loopback TLS test generates synthetic CA/server material with OpenSSL at test
 runtime and runs the generated parent and child, proving extra-root success,
 untrusted-TLS refusal, credential separation and unsafe-limit omission through
-publication. Its test-owned spawn seam only redirects sockets with a preload;
-there is no production network override, preload option or disabled TLS check.
+publication. Its test-owned preload replaces native fetch with a buffered
+`https.request` implementation using real loopback TLS. It does not qualify
+production fetch streaming, redirects or DNS. There is no production network
+override, preload option or disabled TLS check.
 It requires OpenSSL and a non-root sandbox with loopback networking, not external
 network access. No certificate/private-key files are committed. Execute
 these only in an independently justified sandbox. Live MSB qualification and

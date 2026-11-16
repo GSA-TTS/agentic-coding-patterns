@@ -43,8 +43,8 @@ test("generated parent/child uses validated extra CA trust, refuses untrusted TL
   t.after(() => new Promise((resolve) => { server.closeAllConnections(); server.close(resolve) }))
   const port = server.address().port
   // The test-owned spawn seam supplies a preload, not an environment or CLI
-  // feature of the production artifact. Only socket routing changes: HTTPS,
-  // servername, certificate validation and Node's extra-root loading stay real.
+  // feature of the production artifact. This buffered https.request replacement
+  // keeps TLS/extra-root loading real; native-fetch streaming/redirects are not tested.
   const hook = path.join(root, "loopback-fixture.mjs")
   await writeFile(hook, `import https from "node:https"
 globalThis.fetch = async (url, options) => {
