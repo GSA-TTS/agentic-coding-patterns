@@ -228,7 +228,8 @@ test("explicit YAML supports extends and rejects malformed, missing and unreadab
 
 test("required and extended configuration reject non-mappings before fixes", (t) => {
   const root = fixture(t, { "a.md": "text" });
-  for (const text of ["null\n", "true\n", "42\n", "scalar\n", "- MD047\n", "[]\n", "\n"]) {
+  for (const text of ["null\n", "true\n", "42\n", "scalar\n", "- MD047\n", "[]\n", "\n",
+    "2026-11-17\n", "2026-11-17T12:00:00Z\n", "!!binary YWJj\n"]) {
     for (const extended of [false, true]) {
       put(root, ".markdownlint.yaml", extended ? "extends: parent.yaml\n" : text);
       put(root, "parent.yaml", text);

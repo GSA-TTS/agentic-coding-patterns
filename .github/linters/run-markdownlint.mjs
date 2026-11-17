@@ -13,7 +13,8 @@ import { markdownFiles } from "./markdown-files.mjs";
 
 const configParsers = [(text) => {
   const config = load(text);
-  if (!config || typeof config !== "object" || Array.isArray(config)) {
+  if (!config || typeof config !== "object" ||
+      ![Object.prototype, null].includes(Object.getPrototypeOf(config))) {
     throw new Error("Markdown configuration must be a YAML mapping");
   }
   return config;
