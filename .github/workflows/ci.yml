@@ -231,5 +231,13 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Setup Python for producer/schema contract tests
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+
+      - name: Install declared schema-validation dependencies
+        run: python -m pip install -e .
+
       - name: Run acq-kits node tests
         run: make test-kits
