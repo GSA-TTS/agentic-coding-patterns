@@ -226,6 +226,23 @@ test("explicit YAML supports extends and rejects malformed, missing and unreadab
   assert.equal(fs.readFileSync(path.join(root, "a.md"), "utf8"), "text");
 });
 
+test("required and extended configuration reject non-mappings before fixes", (t) => {
+  const root = fixture(t, { "a.md": "text" });
+  for (const text of ["null\n", "true\n", "42\n", "scalar\n", "- MD047\n", "[]\n", "\n"]) {
+    for (const extended of [false, true]) {
+      put(root, ".markdownlint.yaml", extended ? "extends: parent.yaml\n" : text);
+      put(root, "parent.yaml", text);
+      for (const args of [[], ["--fix"]]) {
+        const result = run(root, ...args);
+        assert.equal(result.status, 4, `${JSON.stringify({ text, extended, args })}: ${result.stderr}`);
+        assert.equal(fs.readFileSync(path.join(root, "a.md"), "utf8"), "text");
+      }
+    }
+  }
+  put(root, ".markdownlint.yaml", "{}\n");
+  assert.equal(run(root).status, 1, "an explicit empty mapping uses engine defaults");
+});
+
 test("ambient rc and alternate config files cannot override the required YAML", (t) => {
   const root = fixture(t, { "a.md": "text" });
   put(root, ".markdownlintrc", '{"default":false}');

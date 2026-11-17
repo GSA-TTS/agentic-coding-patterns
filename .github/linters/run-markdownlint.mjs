@@ -11,7 +11,13 @@ import markdownIt from "markdown-it";
 import { load } from "js-yaml";
 import { markdownFiles } from "./markdown-files.mjs";
 
-const configParsers = [load];
+const configParsers = [(text) => {
+  const config = load(text);
+  if (!config || typeof config !== "object" || Array.isArray(config)) {
+    throw new Error("Markdown configuration must be a YAML mapping");
+  }
+  return config;
+}];
 
 export const markdownItFactory = () => markdownIt({ html: true });
 

@@ -62,7 +62,9 @@ line, optional column, severity, rule names, detail and context.
   engine's `extends` behavior and YAML parser. Do not merge ambient `run-con`
   configuration, environment overrides, alternate auto-discovered files or
   user-level configuration. Missing or malformed required configuration fails
-  closed rather than silently falling back to defaults.
+  closed rather than silently falling back to defaults. Required and extended
+  configurations must be mappings; null, scalar, sequence and empty documents
+  are rejected. An explicit empty mapping is permitted.
 - Support only no-argument check mode, `--fix` and `--count-only`. Reject other
   arguments, including positional paths and unused CLI flags. Count wins when
   combined with fix, as before, and does not load the lint configuration.
@@ -80,8 +82,10 @@ line, optional column, severity, rule names, detail and context.
 
 The Node tests under `.github/linters/tests` exercise actual filesystem fixtures
 and engine APIs, not source-text assertions. They are included in `make
-test-kits`. That target requires the linter npm dependencies to be installed;
-the CI job running it must provision those dependencies before execution.
+test-kits`. That target performs a locked `npm ci` with lifecycle scripts
+disabled before running tests. It prefers cached artifacts but may download
+missing packages; network-isolated execution requires a populated package cache.
+Dependency auditing remains a separate CI gate at its existing threshold.
 
 The optional migration suite accepts `MARKDOWNLINT_BASELINE_CLI`, the absolute
 path to an independently installed and reviewed CLI 0.49.1 using the original
