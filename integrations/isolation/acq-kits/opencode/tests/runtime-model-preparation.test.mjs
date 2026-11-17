@@ -7,6 +7,7 @@ import os from "node:os"
 import path from "node:path"
 import { performance } from "node:perf_hooks"
 import { runDiscoveryChild } from "../files/home/opencode-config/runtime-preparation-source.mjs"
+import { runtimePreparationMain } from "../files/home/opencode-config/runtime-model-preparation.mjs"
 import { parseJsonc, renderProviderConfig, ownershipFromRendered, withProviderConfigLock } from "../files/home/opencode-config/render-provider-config.mjs"
 import { runtimeFailure, failureOutcome, FAILURE_BYTES } from "../../../../providers/usai/scripts/runtime-model-outcome.mjs"
 
@@ -53,6 +54,9 @@ test("parent validates real child failure bytes and exit consistency before trus
   for (const [body, code, expected] of [
     [text, 1, "transient"], [text, 0, "hard"], [text, 2, "hard"],
     [text + " ".repeat(FAILURE_BYTES), 1, "hard"],
+    ...Object.entries(JSON.parse(text)).flatMap(([key, original]) =>
+      [[original], {}, null, true, 1].map((value) => [JSON.stringify({ ...JSON.parse(text), [key]: value }), 1, "hard"])),
+    ...["__proto__", "constructor", "toString"].map((stage) => [JSON.stringify({ ...JSON.parse(text), stage }), 1, "hard"]),
     [text.slice(0, -1) + ',"extra":"synthetic-outcome-canary"}', 1, "hard"],
     [text.slice(0, -1) + ',"\\u0072eason":"connection"}', 1, "hard"],
     ['{"outcome":"failure","failureClass":"transient"}', 1, "hard"],
@@ -64,6 +68,25 @@ test("parent validates real child failure bytes and exit consistency before trus
     await assert.rejects(runDiscoveryChild({ providerRoot: root, mode: "live-required", deadline: performance.now() + 3000, artifact: worker }), (error) => {
       assert.equal(error.outcome.failureClass, expected)
       assert.equal(JSON.stringify(error.outcome).includes("synthetic-outcome-canary"), false)
+      return true
+    })
+  }
+})
+
+test("generated exported main rejects bad arguments and base config with closed input outcomes", async (t) => {
+  const root = await fixture(t)
+  const canary = "synthetic-exported-main-canary"
+  const badConfig = path.join(root, canary + ".jsonc")
+  await writeFile(badConfig, `{${canary}`)
+  for (const argv of [
+    ["--unknown", canary], ["--base-config"],
+    ["--discovery-child", canary, "live-required", "invalid"],
+    ["--base-config", path.join(root, canary, "missing.jsonc")],
+    ["--base-config", badConfig],
+  ]) {
+    await assert.rejects(runtimePreparationMain(argv), (error) => {
+      assert.deepEqual(error.outcome, { schemaVersion: "acq-runtime-model-outcome/v1", outcome: "failure", stage: "input", reason: "invalid-input", failureClass: "hard" })
+      for (const forbidden of [canary, root, "ENOENT"]) assert.equal((String(error) + JSON.stringify(error)).includes(forbidden), false)
       return true
     })
   }

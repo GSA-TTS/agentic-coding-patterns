@@ -127,6 +127,7 @@ export async function prepareRuntimeModels(providerRoot, globalDir, options = {}
 // Explicit CLI, not a lifecycle/launch barrier. The host must bind a successful
 // invocation to its immutable generation and attempt before launching OpenCode.
 export async function runtimePreparationMain(argv = process.argv.slice(2)) {
+  try {
   if (argv[0] === "--discovery-child") {
     if (argv.length !== 4 || !Number.isFinite(Number(argv[3])) || Number(argv[3]) <= 0 || Number(argv[3]) > RUNTIME_LIMITS.totalMs) throw new Error("invalid child invocation")
     const result = await discoverRuntimeModels(argv[1], { mode: argv[2], deadline: performance.now() + Number(argv[3]) })
@@ -145,6 +146,7 @@ export async function runtimePreparationMain(argv = process.argv.slice(2)) {
     args["--global-dir"] ?? path.join(process.env.HOME ?? "/home/agent", ".config/opencode"),
     { mode: args["--mode"], baseConfig })
   process.stdout.write(JSON.stringify(result) + "\n")
+  } catch (error) { throw preserveRuntimeFailure(error, "input", "input") }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {

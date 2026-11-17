@@ -41,7 +41,7 @@ export async function requestJson(url, { headers = {}, limit, deadline, fetchImp
   try {
     let response
     try { response = await fetchImpl(url, { headers, redirect: "error", signal: controller.signal, credentials: "omit" }) }
-    catch (error) { throw trustedProvider ? requestFailure(error, controller.signal.aborted) : runtimeFailure("membership", "unknown") }
+    catch (error) { throw trustedProvider ? requestFailure(error, controller.signal.aborted ? controller.signal.reason : undefined) : runtimeFailure("membership", "unknown") }
     // Identity precedes status: an off-origin 429/5xx is never availability evidence.
     if (response.redirected || (response.url && response.url !== url) || (response.status !== 200 && response.url !== url)) throw runtimeFailure("membership", "identity")
     if (response.status !== 200) {
@@ -63,7 +63,7 @@ export async function requestJson(url, { headers = {}, limit, deadline, fetchImp
       try { next = await iterator.next() }
       catch (error) {
         // A truncated body is integrity failure even if its final read timed out.
-        throw size || !trustedProvider ? runtimeFailure("membership", "response") : requestFailure(error, controller.signal.aborted)
+        throw size || !trustedProvider ? runtimeFailure("membership", "response") : requestFailure(error, controller.signal.aborted ? controller.signal.reason : undefined)
       }
       if (next.done) break
       const chunk = next.value

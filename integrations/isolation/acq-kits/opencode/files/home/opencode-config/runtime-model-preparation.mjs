@@ -663,7 +663,8 @@ const stages = Object.freeze({
 const failures = new WeakMap()
 
 function runtimeFailure(stage, kind) {
-  if (!stages[stage]?.includes(kind)) throw new Error("invalid internal failure kind")
+  if (typeof stage !== "string" || typeof kind !== "string" || !Object.hasOwn(stages, stage) ||
+      !Object.hasOwn(reasons, kind) || !stages[stage].includes(kind)) throw new Error("invalid internal failure kind")
   const [reason, failureClass] = reasons[kind]
   const outcome = Object.freeze({ schemaVersion: FAILURE_VERSION, outcome: "failure", stage, reason, failureClass })
   const error = new Error(`bounded discovery / preparation failed: ${reason}`)
@@ -685,9 +686,9 @@ function preserveRuntimeFailure(error, stage, kind) {
 function parseFailure(text) {
   const value = record(boundedJson(text, FAILURE_BYTES))
   const keys = ["schemaVersion", "outcome", "stage", "reason", "failureClass"]
-  if (Object.keys(value).length !== keys.length || keys.some((key) => !Object.hasOwn(value, key)) ||
-      value.schemaVersion !== FAILURE_VERSION || value.outcome !== "failure") throw runtimeFailure("child", "protocol")
-  const kind = stages[value.stage]?.find((key) => reasons[key][0] === value.reason && reasons[key][1] === value.failureClass)
+  if (Object.keys(value).length !== keys.length || keys.some((key) => !Object.hasOwn(value, key) || typeof value[key] !== "string") ||
+      value.schemaVersion !== FAILURE_VERSION || value.outcome !== "failure" || !Object.hasOwn(stages, value.stage)) throw runtimeFailure("child", "protocol")
+  const kind = stages[value.stage].find((key) => reasons[key][0] === value.reason && reasons[key][1] === value.failureClass)
   if (!kind) throw runtimeFailure("child", "protocol")
   return runtimeFailure(value.stage, kind)
 }
@@ -695,33 +696,45 @@ function parseFailure(text) {
 // Called ONLY at the request I/O boundary, not around decoding, parsing or
 // validation. Inspect a bounded cause graph; any unrecognized code/type, TLS
 // evidence, cycle or excessive graph defeats all transient evidence.
-function requestFailure(error, aborted = false) {
+function requestFailure(error, abortReason) {
   const codes = new Set(["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EAI_AGAIN", "ENETUNREACH", "EHOSTUNREACH", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT", "UND_ERR_SOCKET"])
+  const undiciNames = Object.freeze({
+    UND_ERR_CONNECT_TIMEOUT: "ConnectTimeoutError", UND_ERR_HEADERS_TIMEOUT: "HeadersTimeoutError",
+    UND_ERR_BODY_TIMEOUT: "BodyTimeoutError", UND_ERR_SOCKET: "SocketError",
+  })
   const pending = [error], seen = new Set()
-  let transient = false, hard = false, tls = false
+  let transient = false, cancelled = false, hard = false, tls = false
   try {
+    // The caller passes only its own fired controller's reason. A boolean,
+    // name/code marker or unrelated AbortError is not cancellation evidence.
+    const hasAbortReason = abortReason instanceof DOMException && abortReason.name === "AbortError" && abortReason.code === 20
     while (pending.length) {
       const item = pending.pop()
       if (!item || typeof item !== "object" || seen.has(item) || seen.size >= 16) { hard = true; continue }
       seen.add(item)
       const code = item.code
+      const actualAbort = hasAbortReason && item === abortReason
+      const abortWrapper = hasAbortReason && item instanceof Error && item.name === "AbortError" && code === "ABORT_ERR" && item.cause === abortReason
+      if (actualAbort) cancelled = true
       if (typeof code === "string" && /^(?:ERR_TLS_|ERR_SSL_|CERT_|DEPTH_|SELF_SIGNED_|UNABLE_TO_)/.test(code)) tls = true
       if (code !== undefined) {
         if (codes.has(code)) transient = true
-        else if (!(aborted && (code === "ABORT_ERR" || (code === 20 && item.name === "AbortError")))) hard = true
+        else if (!actualAbort && !abortWrapper) hard = true
       }
-      if (!["Error", "TypeError", "AggregateError", "AbortError", "TimeoutError"].includes(item.name)) hard = true
+      const genericName = ["Error", "TypeError", "AggregateError"].includes(item.name)
+      const undiciName = typeof code === "string" && Object.hasOwn(undiciNames, code) && item.name === undiciNames[code]
+      if (!genericName && !undiciName && !actualAbort && !abortWrapper) hard = true
       if (item.cause !== undefined) pending.push(item.cause)
       if (item.errors !== undefined) {
         if (!Array.isArray(item.errors) || item.errors.length > 16) hard = true
         else pending.push(...item.errors)
       }
-      if (code === undefined && item.cause === undefined && !item.errors?.length && !aborted) hard = true
+      if (code === undefined && item.cause === undefined && !item.errors?.length && !actualAbort) hard = true
     }
   } catch { hard = true }
   if (tls) return runtimeFailure("membership", "tls")
   if (hard) return runtimeFailure("membership", "unknown")
-  if (aborted) return runtimeFailure("membership", "abort")
+  if (cancelled) return runtimeFailure("membership", "abort")
   return runtimeFailure("membership", transient ? "connection" : "unknown")
 }
 
@@ -773,7 +786,7 @@ async function requestJson(url, { headers = {}, limit, deadline, fetchImpl = fet
   try {
     let response
     try { response = await fetchImpl(url, { headers, redirect: "error", signal: controller.signal, credentials: "omit" }) }
-    catch (error) { throw trustedProvider ? requestFailure(error, controller.signal.aborted) : runtimeFailure("membership", "unknown") }
+    catch (error) { throw trustedProvider ? requestFailure(error, controller.signal.aborted ? controller.signal.reason : undefined) : runtimeFailure("membership", "unknown") }
     // Identity precedes status: an off-origin 429/5xx is never availability evidence.
     if (response.redirected || (response.url && response.url !== url) || (response.status !== 200 && response.url !== url)) throw runtimeFailure("membership", "identity")
     if (response.status !== 200) {
@@ -795,7 +808,7 @@ async function requestJson(url, { headers = {}, limit, deadline, fetchImpl = fet
       try { next = await iterator.next() }
       catch (error) {
         // A truncated body is integrity failure even if its final read timed out.
-        throw size || !trustedProvider ? runtimeFailure("membership", "response") : requestFailure(error, controller.signal.aborted)
+        throw size || !trustedProvider ? runtimeFailure("membership", "response") : requestFailure(error, controller.signal.aborted ? controller.signal.reason : undefined)
       }
       if (next.done) break
       const chunk = next.value
@@ -1948,6 +1961,7 @@ async function prepareRuntimeModels(providerRoot, globalDir, options = {}) {
 // Explicit CLI, not a lifecycle/launch barrier. The host must bind a successful
 // invocation to its immutable generation and attempt before launching OpenCode.
 async function runtimePreparationMain(argv = process.argv.slice(2)) {
+  try {
   if (argv[0] === "--discovery-child") {
     if (argv.length !== 4 || !Number.isFinite(Number(argv[3])) || Number(argv[3]) <= 0 || Number(argv[3]) > RUNTIME_LIMITS.totalMs) throw new Error("invalid child invocation")
     const result = await discoverRuntimeModels(argv[1], { mode: argv[2], deadline: performance.now() + Number(argv[3]) })
@@ -1966,6 +1980,7 @@ async function runtimePreparationMain(argv = process.argv.slice(2)) {
     args["--global-dir"] ?? path.join(process.env.HOME ?? "/home/agent", ".config/opencode"),
     { mode: args["--mode"], baseConfig })
   process.stdout.write(JSON.stringify(result) + "\n")
+  } catch (error) { throw preserveRuntimeFailure(error, "input", "input") }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
