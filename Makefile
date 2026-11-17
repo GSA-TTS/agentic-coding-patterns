@@ -47,7 +47,9 @@ refresh-usai-catalog:  ## Refresh the USAi catalog and its neutral artifacts fro
 refresh-usai-catalog-check:  ## Report drift between the USAi catalog artifacts and one fresh source pull (needs USAI_API_KEY; changes no tracked file)
 	node integrations/providers/usai/scripts/refresh.mjs --check
 
-test-kits:  ## Run the acq-kits node test suites + providers/usai emitters
+test-kits:  ## Install locked linter dependencies, then run kit and adapter tests
+	npm ci --prefix .github/linters --ignore-scripts --no-audit --no-fund --prefer-offline
+	node --test .github/linters/tests/*.test.mjs
 	node integrations/providers/usai/scripts/build-runtime-artifact.mjs --check
 	node --test integrations/isolation/acq-kits/oci-engine/tests/*.test.mjs
 	@if command -v node >/dev/null 2>&1; then \
