@@ -3,7 +3,7 @@ title: "Bounded runtime model preparation"
 description: "Trusted guest discovery and atomic OpenCode preparation, separate from host launch wiring."
 status: experimental
 tier: 2
-last_updated: "2026-11-16"
+last_updated: "2026-11-17"
 ---
 
 # Bounded runtime model preparation
@@ -82,6 +82,67 @@ stay absent when upstream metadata is unavailable. Explicit nonlive snapshot
 mode preserves snapshot limits as before, without claiming them as live facts.
 
 ## Bounds and transaction
+
+### Versioned failure outcome (no fallback)
+
+Successful JS return values and CLI stdout retain their existing shapes. A failed
+child or preparation CLI now writes one closed JSON object to stdout and exits
+**1**, including transient failures:
+
+```json
+{"schemaVersion":"acq-runtime-model-outcome/v1","outcome":"failure","stage":"membership","reason":"provider-unavailable","failureClass":"transient"}
+```
+
+Those five fields are mandatory and no others are accepted. Failure JSON is at
+most 1,024 UTF-8 bytes, including whitespace. The parent caps the pipe, then
+requires failure exit 1, valid UTF-8, bounded JSON with no duplicate keys, the
+exact field set, known version, and an allowed stage/reason/class combination.
+Exit 0 requires the existing success envelope, never a failure envelope. Signals,
+other exits, malformed/truncated output, extra properties, unknown types and
+oversized output are hard failures. A structured failure plus nonzero exit is
+expected; a nonzero exit alone is not transient evidence. Child stderr is
+discarded. Host-facing stderr remains the fixed human-readable failure line.
+Neither stream includes exceptions, raw status values, URLs, headers, credentials,
+digests or filesystem paths in a failure. JS rejection errors expose the same
+closed object as `error.outcome`; internal propagation uses a private WeakMap,
+not a duck-typed exception property. The internal reason table lives in
+`integrations/providers/usai/scripts/runtime-model-outcome.mjs`.
+
+Allowed stage/reason pairs (class is hard unless marked transient):
+
+| Stage | Reasons |
+| --- | --- |
+| `input` | `invalid-input` |
+| `trust` | `invalid-trust` |
+| `membership` | `authentication`, `response-identity`, `tls`, `http-refused`, `invalid-response`, `unknown` |
+| `membership` (transient) | `provider-throttled`, `provider-unavailable`, `connection`, `request-abort` |
+| `child` | `child-protocol`, `child-crash` |
+| `preparation` | `parent-deadline`, `lock`, `render`, `unknown` |
+
+Transient HTTP classification requires an observed 429 or 500–599 response from
+the exact requested provider URL with no redirect. Missing or mismatched response
+identity takes precedence over status. Only the membership call made after host
+facts validation enables transient classification. Authentication, TLS/trust,
+unsafe input, identity, partial/malformed JSON, protocol, crash, lock, render and
+unknown failures remain hard. Input and curated capabilities are checked before
+network use; no exception-message substring determines classification.
+
+At the request I/O boundary only, connection evidence is limited to `ECONNRESET`,
+`ECONNREFUSED`, `ETIMEDOUT`, `EAI_AGAIN`, `ENETUNREACH`, `EHOSTUNREACH`,
+`UND_ERR_CONNECT_TIMEOUT`, `UND_ERR_HEADERS_TIMEOUT`, `UND_ERR_BODY_TIMEOUT`, and
+`UND_ERR_SOCKET`. A bounded cause/aggregate graph is inspected; TLS/certificate
+codes, unknown codes or exception types, unclassified leaf errors, cycles and
+overlarge graphs defeat transient evidence. An explicit abort by this request's
+controller is transient only at the I/O boundary, without harder evidence.
+An error after any response bytes is hard truncation, not a transient read error.
+Decoding, JSON parsing and shape/bounds checks are outside network-error catches.
+The whole 45-second parent deadline is always hard: a child may be spinning in
+synchronous parsing rather than waiting on the network. Optional metadata failure
+still means `metadataOutcome: unavailable` on a live membership success.
+
+This classification is not permission to reuse a prior result. The parent still
+fails nonzero and discovery failures leave prior config untouched. Host-bound
+last-good reuse, generation/credential epochs and freshness policy are deferred.
 
 Membership requests are sequential, in provider order. The inventory cap is
 eight providers and 500 models per provider, not a promise that eight slow requests

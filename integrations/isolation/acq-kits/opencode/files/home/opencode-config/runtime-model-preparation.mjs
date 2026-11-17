@@ -629,14 +629,114 @@ function validateMetadata(catalog) {
 return { RUNTIME_LIMITS, record, safeKey, modelId, upstreamModelId, usableRuntimeMetadata, boundedJson, validatedFacts, validatedDiscoveryDescriptor, validateMetadata }
 })()
 
-// Source: integrations/providers/usai/scripts/runtime-model-discovery.mjs
+// Source: integrations/providers/usai/scripts/runtime-model-outcome.mjs
 const module2 = await (async () => {
+// Closed failure-only wire protocol. Success API/CLI shapes remain unchanged.
+const { boundedJson, record } = module1
+
+const FAILURE_VERSION = "acq-runtime-model-outcome/v1"
+const FAILURE_BYTES = 1024
+const reasons = Object.freeze({
+  input: ["invalid-input", "hard"],
+  trust: ["invalid-trust", "hard"],
+  authentication: ["authentication", "hard"],
+  identity: ["response-identity", "hard"],
+  tls: ["tls", "hard"],
+  http: ["http-refused", "hard"],
+  response: ["invalid-response", "hard"],
+  unknown: ["unknown", "hard"],
+  throttled: ["provider-throttled", "transient"],
+  unavailable: ["provider-unavailable", "transient"],
+  connection: ["connection", "transient"],
+  abort: ["request-abort", "transient"],
+  protocol: ["child-protocol", "hard"],
+  crash: ["child-crash", "hard"],
+  deadline: ["parent-deadline", "hard"],
+  lock: ["lock", "hard"],
+  render: ["render", "hard"],
+})
+const stages = Object.freeze({
+  input: ["input"], trust: ["trust"],
+  membership: ["authentication", "identity", "tls", "http", "response", "unknown", "throttled", "unavailable", "connection", "abort"],
+  child: ["protocol", "crash"], preparation: ["deadline", "lock", "render", "unknown"],
+})
+const failures = new WeakMap()
+
+function runtimeFailure(stage, kind) {
+  if (!stages[stage]?.includes(kind)) throw new Error("invalid internal failure kind")
+  const [reason, failureClass] = reasons[kind]
+  const outcome = Object.freeze({ schemaVersion: FAILURE_VERSION, outcome: "failure", stage, reason, failureClass })
+  const error = new Error(`bounded discovery / preparation failed: ${reason}`)
+  Object.defineProperty(error, "outcome", { value: outcome, enumerable: true })
+  failures.set(error, outcome)
+  return error
+}
+
+// Never trust an exception's name, message, outcome property or nested cause as
+// a wire envelope. Only errors minted in this module carry internal authority.
+function failureOutcome(error, stage = "preparation", kind = "unknown") {
+  return failures.get(error) ?? failures.get(runtimeFailure(stage, kind))
+}
+
+function preserveRuntimeFailure(error, stage, kind) {
+  return failures.has(error) ? error : runtimeFailure(stage, kind)
+}
+
+function parseFailure(text) {
+  const value = record(boundedJson(text, FAILURE_BYTES))
+  const keys = ["schemaVersion", "outcome", "stage", "reason", "failureClass"]
+  if (Object.keys(value).length !== keys.length || keys.some((key) => !Object.hasOwn(value, key)) ||
+      value.schemaVersion !== FAILURE_VERSION || value.outcome !== "failure") throw runtimeFailure("child", "protocol")
+  const kind = stages[value.stage]?.find((key) => reasons[key][0] === value.reason && reasons[key][1] === value.failureClass)
+  if (!kind) throw runtimeFailure("child", "protocol")
+  return runtimeFailure(value.stage, kind)
+}
+
+// Called ONLY at the request I/O boundary, not around decoding, parsing or
+// validation. Inspect a bounded cause graph; any unrecognized code/type, TLS
+// evidence, cycle or excessive graph defeats all transient evidence.
+function requestFailure(error, aborted = false) {
+  const codes = new Set(["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EAI_AGAIN", "ENETUNREACH", "EHOSTUNREACH", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT", "UND_ERR_SOCKET"])
+  const pending = [error], seen = new Set()
+  let transient = false, hard = false, tls = false
+  try {
+    while (pending.length) {
+      const item = pending.pop()
+      if (!item || typeof item !== "object" || seen.has(item) || seen.size >= 16) { hard = true; continue }
+      seen.add(item)
+      const code = item.code
+      if (typeof code === "string" && /^(?:ERR_TLS_|ERR_SSL_|CERT_|DEPTH_|SELF_SIGNED_|UNABLE_TO_)/.test(code)) tls = true
+      if (code !== undefined) {
+        if (codes.has(code)) transient = true
+        else if (!(aborted && (code === "ABORT_ERR" || (code === 20 && item.name === "AbortError")))) hard = true
+      }
+      if (!["Error", "TypeError", "AggregateError", "AbortError", "TimeoutError"].includes(item.name)) hard = true
+      if (item.cause !== undefined) pending.push(item.cause)
+      if (item.errors !== undefined) {
+        if (!Array.isArray(item.errors) || item.errors.length > 16) hard = true
+        else pending.push(...item.errors)
+      }
+      if (code === undefined && item.cause === undefined && !item.errors?.length && !aborted) hard = true
+    }
+  } catch { hard = true }
+  if (tls) return runtimeFailure("membership", "tls")
+  if (hard) return runtimeFailure("membership", "unknown")
+  if (aborted) return runtimeFailure("membership", "abort")
+  return runtimeFailure("membership", transient ? "connection" : "unknown")
+}
+
+return { FAILURE_VERSION, FAILURE_BYTES, runtimeFailure, failureOutcome, preserveRuntimeFailure, parseFailure, requestFailure }
+})()
+
+// Source: integrations/providers/usai/scripts/runtime-model-discovery.mjs
+const module3 = await (async () => {
 // Trusted usai-openai-list/v1 adapter. No provider code is imported or executed.
 const { open, readdir, lstat } = builtin0
 const path = builtin1.default
 const { performance } = builtin2
 const { classifyVendor, generateDisplayName, nonChatReason, enrichModelMetadata, normalizeInputModalities } = module0
 const { RUNTIME_LIMITS, boundedJson, record, modelId, validatedFacts, validatedDiscoveryDescriptor, validateMetadata, usableRuntimeMetadata } = module1
+const { runtimeFailure, requestFailure, preserveRuntimeFailure } = module2
 
 const METADATA_URL = "https://models.dev/api.json"
 
@@ -659,14 +759,29 @@ async function readBoundedFile(filename, limit) {
   } finally { await file.close() }
 }
 
-async function requestJson(url, { headers = {}, limit, deadline, fetchImpl = fetch }) {
+async function requestJson(url, { headers = {}, limit, deadline, fetchImpl = fetch, trustedProvider = false }) {
+  if (trustedProvider) {
+    try {
+      const route = new URL(url)
+      if (route.protocol !== "https:" || route.username || route.password || route.port || route.search || route.hash) throw new Error()
+    } catch { throw runtimeFailure("input", "input") }
+  }
   const remaining = deadline - performance.now()
-  if (remaining <= 0) throw new Error("discovery deadline")
+  if (remaining <= 0) throw runtimeFailure("preparation", "deadline")
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), Math.min(RUNTIME_LIMITS.requestMs, remaining))
   try {
-    const response = await fetchImpl(url, { headers, redirect: "error", signal: controller.signal, credentials: "omit" })
-    if (response.status !== 200 || response.redirected || (response.url && response.url !== url)) throw new Error("discovery HTTP failure")
+    let response
+    try { response = await fetchImpl(url, { headers, redirect: "error", signal: controller.signal, credentials: "omit" }) }
+    catch (error) { throw trustedProvider ? requestFailure(error, controller.signal.aborted) : runtimeFailure("membership", "unknown") }
+    // Identity precedes status: an off-origin 429/5xx is never availability evidence.
+    if (response.redirected || (response.url && response.url !== url) || (response.status !== 200 && response.url !== url)) throw runtimeFailure("membership", "identity")
+    if (response.status !== 200) {
+      const kind = [401, 403].includes(response.status) ? "authentication"
+        : trustedProvider && response.status === 429 ? "throttled"
+        : trustedProvider && Number.isInteger(response.status) && response.status >= 500 && response.status <= 599 ? "unavailable" : "http"
+      throw runtimeFailure("membership", kind)
+    }
     const length = response.headers.get("content-length")
     if (length !== null && (!/^\d+$/.test(length) || Number(length) > limit)) throw new Error("response byte limit")
     const type = response.headers.get("content-type") ?? ""
@@ -674,14 +789,23 @@ async function requestJson(url, { headers = {}, limit, deadline, fetchImpl = fet
     if (!response.body) throw new Error("missing response body")
     let size = 0
     const chunks = []
-    for await (const chunk of response.body) {
+    const iterator = response.body[Symbol.asyncIterator]()
+    for (;;) {
+      let next
+      try { next = await iterator.next() }
+      catch (error) {
+        // A truncated body is integrity failure even if its final read timed out.
+        throw size || !trustedProvider ? runtimeFailure("membership", "response") : requestFailure(error, controller.signal.aborted)
+      }
+      if (next.done) break
+      const chunk = next.value
       size += chunk.byteLength
       if (size > limit) throw new Error("response byte limit")
       chunks.push(chunk)
     }
     return boundedJson(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks)), limit)
-  } catch {
-    throw new Error("bounded discovery request failed")
+  } catch (error) {
+    throw preserveRuntimeFailure(error, "membership", "response")
   } finally { clearTimeout(timer); controller.abort() }
 }
 
@@ -764,16 +888,17 @@ function snapshotCatalog(catalog, providerId) {
 }
 
 async function discoverRuntimeModels(providerRoot, { mode = "live-required", credentials = process.env, fetchImpl = fetch, deadline = performance.now() + RUNTIME_LIMITS.totalMs } = {}) {
+  try {
   if (!["live-required", "snapshot"].includes(mode)) throw new Error("unsupported preparation mode")
   if (typeof providerRoot !== "string" || !path.isAbsolute(providerRoot)) throw new Error("required absolute provider root missing")
   const inventory = path.join(providerRoot, "models", "providers")
   if (!(await lstat(inventory)).isDirectory()) throw new Error("required provider inventory missing")
   const entries = await readdir(inventory, { withFileTypes: true })
-  if (entries.length > RUNTIME_LIMITS.providers || entries.some((entry) => !entry.isDirectory())) throw new Error("invalid provider inventory")
+  if (entries.length > RUNTIME_LIMITS.providers || entries.some((entry) => !entry.isDirectory() || entry.name !== "usai")) throw new Error("invalid provider inventory")
   const inputs = []
   let count = 0
   for (const entry of entries.sort((a, b) => a.name < b.name ? -1 : 1)) {
-    if (performance.now() >= deadline) throw new Error("discovery deadline")
+    if (performance.now() >= deadline) throw runtimeFailure("preparation", "deadline")
     const directory = path.join(inventory, entry.name)
     const facts = validatedFacts(boundedJson(await readBoundedFile(path.join(directory, "facts.json"), 65536), 65536))
     if (entry.name !== facts.providerId) throw new Error("provider identity mismatch")
@@ -783,12 +908,15 @@ async function discoverRuntimeModels(providerRoot, { mode = "live-required", cre
       models = snapshot.models.filter((model) => !nonChatReason(model.id, model.name ?? ""))
     } else {
       validatedDiscoveryDescriptor(boundedJson(await readBoundedFile(path.join(directory, "discovery.json"), 4096), 4096), facts.providerId)
+      retainExactCapabilities(snapshot.models.map((model) => ({ ...model })), snapshot)
       const key = credentials[facts.keyEnv]
-      if (typeof key !== "string" || !key || key.length > 8192 || /[\r\n]/.test(key)) throw new Error("required discovery credential missing or invalid")
-      models = retainExactCapabilities(membershipModels(await requestJson(facts.modelsUrl, {
+      if (typeof key !== "string" || !key || key.length > 8192 || /[\r\n]/.test(key)) throw runtimeFailure("membership", "authentication")
+      const body = await requestJson(facts.modelsUrl, {
         headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
-        limit: RUNTIME_LIMITS.membershipBytes, deadline, fetchImpl,
-      })), snapshot)
+        limit: RUNTIME_LIMITS.membershipBytes, deadline, fetchImpl, trustedProvider: true,
+      })
+      try { models = retainExactCapabilities(membershipModels(body), snapshot) }
+      catch { throw runtimeFailure("membership", "response") }
     }
     count += models.length
     const ids = new Set(models.map((model) => model.id))
@@ -818,20 +946,21 @@ async function discoverRuntimeModels(providerRoot, { mode = "live-required", cre
       metadataOutcome = "available-unverified"
     } catch { /* Optional metadata is unknown; membership remains authoritative. */ }
   }
-  if (performance.now() >= deadline) throw new Error("discovery deadline")
+  if (performance.now() >= deadline) throw runtimeFailure("preparation", "deadline")
   const result = { inputs, sourceOutcome: mode === "snapshot" ? "snapshot-nonlive" : "live", metadataOutcome }
   // A gateway can echo the request credential even in a syntactically valid
   // model ID. Fail rather than carrying that value into IPC or user config.
   const key = credentials.USAI_API_KEY
   if (typeof key === "string" && key && JSON.stringify(result).includes(key)) throw new Error("credential echo refused")
   return result
+  } catch (error) { throw preserveRuntimeFailure(error, "input", "input") }
 }
 
 return { METADATA_URL, readBoundedFile, requestJson, discoverRuntimeModels }
 })()
 
 // Source: integrations/isolation/acq-kits/opencode/files/home/opencode-config/render-provider-config.mjs
-const module3 = await (async () => {
+const module4 = await (async () => {
 // Render host-projected, provider-neutral inputs into OpenCode's global config.
 // This is the only kit that writes OpenCode configuration for provider inputs.
 
@@ -1689,7 +1818,7 @@ return { INPUT_MODALITIES, stripJsonc, parseJsonc, deepMerge, renderProviderConf
 })()
 
 // Source: integrations/isolation/acq-kits/opencode/files/home/opencode-config/runtime-preparation-source.mjs
-const module4 = await (async () => {
+const module5 = await (async () => {
 // Source for the standalone guest artifact; do not stage this module itself.
 const { spawn } = builtin9
 const { readFile, lstat, realpath, access } = builtin10
@@ -1697,9 +1826,10 @@ const { constants } = builtin11
 const path = builtin12.default
 const { pathToFileURL, fileURLToPath } = builtin13
 const { performance } = builtin14
-const { discoverRuntimeModels } = module2
+const { discoverRuntimeModels } = module3
 const { boundedJson, RUNTIME_LIMITS, record, validatedFacts } = module1
-const { renderProviderConfig, ownershipFromRendered, withProviderConfigLock, parseJsonc } = module3
+const { runtimeFailure, failureOutcome, preserveRuntimeFailure, parseFailure, FAILURE_BYTES } = module2
+const { renderProviderConfig, ownershipFromRendered, withProviderConfigLock, parseJsonc } = module4
 
 // Only the trusted guest launcher supplies this path, never provider data.
 // Node loads extra roots at process startup. Preserve that one trust setting,
@@ -1727,53 +1857,70 @@ async function discoveryChildEnvironment(environment) {
 // Child stdout is one result; stderr is discarded so response/credential bytes
 // cannot reach logs. Await close (not merely exit/kill) before releasing the lock.
 async function runDiscoveryChild({ providerRoot, mode, deadline, artifact, credentials = process.env, spawnImpl = spawn }) {
-  const environment = await discoveryChildEnvironment(credentials)
+  let environment
+  try { environment = await discoveryChildEnvironment(credentials) }
+  catch { throw runtimeFailure("trust", "trust") }
   return new Promise((resolve, reject) => {
     const remaining = deadline - performance.now()
-    if (remaining <= 0) { reject(new Error("preparation deadline")); return }
-    const child = spawnImpl(process.execPath, [artifact, "--discovery-child", providerRoot, mode, String(remaining)], {
+    if (remaining <= 0) { reject(runtimeFailure("preparation", "deadline")); return }
+    let child
+    try { child = spawnImpl(process.execPath, [artifact, "--discovery-child", providerRoot, mode, String(remaining)], {
       env: environment,
       stdio: ["ignore", "pipe", "ignore"],
-    })
+    }) } catch { reject(runtimeFailure("child", "crash")); return }
     let failure
     let size = 0
     const chunks = []
-    const terminate = (message) => {
-      failure ??= new Error(message)
+    const terminate = (error) => {
+      failure ??= error
       child.kill("SIGKILL")
     }
-    const timer = setTimeout(() => terminate("preparation deadline"), remaining)
-    child.on("error", () => { failure ??= new Error("discovery child failed") })
+    const timer = setTimeout(() => terminate(runtimeFailure("preparation", "deadline")), remaining)
+    child.on("error", () => { failure ??= runtimeFailure("child", "crash") })
+    child.stdout.on("error", () => terminate(runtimeFailure("child", "protocol")))
     child.stdout.on("data", (chunk) => {
       size += chunk.length
-      if (size > RUNTIME_LIMITS.resultBytes) terminate("discovery result byte limit")
+      if (size > RUNTIME_LIMITS.resultBytes) terminate(runtimeFailure("child", "protocol"))
       else if (!failure) chunks.push(chunk)
     })
     child.once("close", (code, signal) => {
       clearTimeout(timer)
-      if (failure || code !== 0 || signal || performance.now() >= deadline) {
-        reject(failure ?? new Error("discovery child failed or expired")); return
+      if (failure || signal || performance.now() >= deadline) {
+        reject(failure ?? runtimeFailure(performance.now() >= deadline ? "preparation" : "child", performance.now() >= deadline ? "deadline" : "crash")); return
       }
       try {
-        const result = boundedJson(Buffer.concat(chunks).toString("utf8"), RUNTIME_LIMITS.resultBytes)
+        if (code !== 0 && (code !== 1 || size > FAILURE_BYTES)) throw runtimeFailure("child", "protocol")
+        const text = new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks))
+        if (code === 1) {
+          const error = parseFailure(text)
+          if (mode === "snapshot" && error.outcome.failureClass === "transient") throw runtimeFailure("child", "protocol")
+          if (performance.now() >= deadline) { reject(runtimeFailure("preparation", "deadline")); return }
+          reject(error); return
+        }
+        const result = boundedJson(text, RUNTIME_LIMITS.resultBytes)
         record(result)
-        if (!Array.isArray(result.inputs) || result.inputs.length > RUNTIME_LIMITS.providers ||
+        if (Object.keys(result).length !== 3 || !Array.isArray(result.inputs) || result.inputs.length > RUNTIME_LIMITS.providers ||
             result.sourceOutcome !== (mode === "snapshot" ? "snapshot-nonlive" : "live") ||
             !["not-requested", "unavailable", "available-unverified"].includes(result.metadataOutcome)) throw new Error("invalid discovery result")
         const providers = new Set()
         for (const input of result.inputs) {
+          record(input)
+          if (Object.keys(input).length !== 2 || !Object.hasOwn(input, "facts") || !Object.hasOwn(input, "catalog")) throw runtimeFailure("child", "protocol")
           validatedFacts(input.facts)
           if (providers.has(input.facts.providerId)) throw new Error("duplicate result provider")
           providers.add(input.facts.providerId)
           if (!Array.isArray(input.catalog?.models) || input.catalog.models.length > RUNTIME_LIMITS.models) throw new Error("invalid result models")
         }
+        if (performance.now() >= deadline) { reject(runtimeFailure("preparation", "deadline")); return }
         resolve(result)
-      } catch { reject(new Error("invalid bounded discovery result")) }
+      } catch { reject(runtimeFailure("child", "protocol")) }
     })
   })
 }
 
 async function prepareRuntimeModels(providerRoot, globalDir, options = {}) {
+  let stage = "input", kind = "input"
+  try {
   const mode = options.mode ?? "live-required"
   if (!["live-required", "snapshot"].includes(mode)) throw new Error("unsupported preparation mode")
   if (!providerRoot || !path.isAbsolute(providerRoot)) throw new Error("required absolute provider root missing")
@@ -1782,17 +1929,20 @@ async function prepareRuntimeModels(providerRoot, globalDir, options = {}) {
   // Missing artifacts fail even for an authoritative empty inventory.
   await readFile(artifact)
   const transactionOptions = { baseConfig: options.baseConfig ?? {}, noLockRecovery: true, lockWaitMs: RUNTIME_LIMITS.lockMs }
-  return withProviderConfigLock(globalDir, async (publish) => {
+  stage = "preparation"; kind = "lock"
+  return await withProviderConfigLock(globalDir, async (publish) => {
     const deadline = performance.now() + RUNTIME_LIMITS.totalMs
-    const checkDeadline = () => { if (performance.now() >= deadline) throw new Error("preparation deadline") }
+    const checkDeadline = () => { if (performance.now() >= deadline) throw runtimeFailure("preparation", "deadline") }
     // Check immediately before atomic rename, after temporary-file flush.
     transactionOptions.checkDeadline = checkDeadline
     const result = await runDiscoveryChild({ providerRoot, mode, deadline, artifact, credentials: options.credentials, spawnImpl: options.spawnImpl })
+    kind = "render"
     const rendered = renderProviderConfig(result.inputs)
     checkDeadline()
     await publish(rendered, ownershipFromRendered(rendered))
     return { sourceOutcome: result.sourceOutcome, metadataOutcome: result.metadataOutcome }
   }, transactionOptions)
+  } catch (error) { throw preserveRuntimeFailure(error, stage, kind) }
 }
 
 // Explicit CLI, not a lifecycle/launch barrier. The host must bind a successful
@@ -1819,7 +1969,11 @@ async function runtimePreparationMain(argv = process.argv.slice(2)) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
-  runtimePreparationMain().catch(() => {
+  runtimePreparationMain().catch((error) => {
+    // v1 failure stdout is machine-readable; stderr remains fixed human text.
+    // Child and parent both exit 1, including typed transient failures. No reuse.
+    const outcome = failureOutcome(error, "input", "input")
+    process.stdout.write(JSON.stringify(outcome) + "\n")
     console.error("opencode preparation failed; prior configuration is not a successful preparation")
     process.exitCode = 1
   })
@@ -1828,4 +1982,4 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
 return { discoveryChildEnvironment, runDiscoveryChild, prepareRuntimeModels, runtimePreparationMain }
 })()
 
-export const { prepareRuntimeModels, runDiscoveryChild, runtimePreparationMain } = module4
+export const { prepareRuntimeModels, runDiscoveryChild, runtimePreparationMain } = module5

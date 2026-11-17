@@ -7,6 +7,7 @@ import { pathToFileURL, fileURLToPath } from "node:url"
 import { performance } from "node:perf_hooks"
 import { discoverRuntimeModels } from "../../../../../../providers/usai/scripts/runtime-model-discovery.mjs"
 import { boundedJson, RUNTIME_LIMITS, record, validatedFacts } from "../../../../../../providers/usai/scripts/runtime-model-bounds.mjs"
+import { runtimeFailure, failureOutcome, preserveRuntimeFailure, parseFailure, FAILURE_BYTES } from "../../../../../../providers/usai/scripts/runtime-model-outcome.mjs"
 import { renderProviderConfig, ownershipFromRendered, withProviderConfigLock, parseJsonc } from "./render-provider-config.mjs"
 
 // Only the trusted guest launcher supplies this path, never provider data.
@@ -35,53 +36,70 @@ export async function discoveryChildEnvironment(environment) {
 // Child stdout is one result; stderr is discarded so response/credential bytes
 // cannot reach logs. Await close (not merely exit/kill) before releasing the lock.
 export async function runDiscoveryChild({ providerRoot, mode, deadline, artifact, credentials = process.env, spawnImpl = spawn }) {
-  const environment = await discoveryChildEnvironment(credentials)
+  let environment
+  try { environment = await discoveryChildEnvironment(credentials) }
+  catch { throw runtimeFailure("trust", "trust") }
   return new Promise((resolve, reject) => {
     const remaining = deadline - performance.now()
-    if (remaining <= 0) { reject(new Error("preparation deadline")); return }
-    const child = spawnImpl(process.execPath, [artifact, "--discovery-child", providerRoot, mode, String(remaining)], {
+    if (remaining <= 0) { reject(runtimeFailure("preparation", "deadline")); return }
+    let child
+    try { child = spawnImpl(process.execPath, [artifact, "--discovery-child", providerRoot, mode, String(remaining)], {
       env: environment,
       stdio: ["ignore", "pipe", "ignore"],
-    })
+    }) } catch { reject(runtimeFailure("child", "crash")); return }
     let failure
     let size = 0
     const chunks = []
-    const terminate = (message) => {
-      failure ??= new Error(message)
+    const terminate = (error) => {
+      failure ??= error
       child.kill("SIGKILL")
     }
-    const timer = setTimeout(() => terminate("preparation deadline"), remaining)
-    child.on("error", () => { failure ??= new Error("discovery child failed") })
+    const timer = setTimeout(() => terminate(runtimeFailure("preparation", "deadline")), remaining)
+    child.on("error", () => { failure ??= runtimeFailure("child", "crash") })
+    child.stdout.on("error", () => terminate(runtimeFailure("child", "protocol")))
     child.stdout.on("data", (chunk) => {
       size += chunk.length
-      if (size > RUNTIME_LIMITS.resultBytes) terminate("discovery result byte limit")
+      if (size > RUNTIME_LIMITS.resultBytes) terminate(runtimeFailure("child", "protocol"))
       else if (!failure) chunks.push(chunk)
     })
     child.once("close", (code, signal) => {
       clearTimeout(timer)
-      if (failure || code !== 0 || signal || performance.now() >= deadline) {
-        reject(failure ?? new Error("discovery child failed or expired")); return
+      if (failure || signal || performance.now() >= deadline) {
+        reject(failure ?? runtimeFailure(performance.now() >= deadline ? "preparation" : "child", performance.now() >= deadline ? "deadline" : "crash")); return
       }
       try {
-        const result = boundedJson(Buffer.concat(chunks).toString("utf8"), RUNTIME_LIMITS.resultBytes)
+        if (code !== 0 && (code !== 1 || size > FAILURE_BYTES)) throw runtimeFailure("child", "protocol")
+        const text = new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks))
+        if (code === 1) {
+          const error = parseFailure(text)
+          if (mode === "snapshot" && error.outcome.failureClass === "transient") throw runtimeFailure("child", "protocol")
+          if (performance.now() >= deadline) { reject(runtimeFailure("preparation", "deadline")); return }
+          reject(error); return
+        }
+        const result = boundedJson(text, RUNTIME_LIMITS.resultBytes)
         record(result)
-        if (!Array.isArray(result.inputs) || result.inputs.length > RUNTIME_LIMITS.providers ||
+        if (Object.keys(result).length !== 3 || !Array.isArray(result.inputs) || result.inputs.length > RUNTIME_LIMITS.providers ||
             result.sourceOutcome !== (mode === "snapshot" ? "snapshot-nonlive" : "live") ||
             !["not-requested", "unavailable", "available-unverified"].includes(result.metadataOutcome)) throw new Error("invalid discovery result")
         const providers = new Set()
         for (const input of result.inputs) {
+          record(input)
+          if (Object.keys(input).length !== 2 || !Object.hasOwn(input, "facts") || !Object.hasOwn(input, "catalog")) throw runtimeFailure("child", "protocol")
           validatedFacts(input.facts)
           if (providers.has(input.facts.providerId)) throw new Error("duplicate result provider")
           providers.add(input.facts.providerId)
           if (!Array.isArray(input.catalog?.models) || input.catalog.models.length > RUNTIME_LIMITS.models) throw new Error("invalid result models")
         }
+        if (performance.now() >= deadline) { reject(runtimeFailure("preparation", "deadline")); return }
         resolve(result)
-      } catch { reject(new Error("invalid bounded discovery result")) }
+      } catch { reject(runtimeFailure("child", "protocol")) }
     })
   })
 }
 
 export async function prepareRuntimeModels(providerRoot, globalDir, options = {}) {
+  let stage = "input", kind = "input"
+  try {
   const mode = options.mode ?? "live-required"
   if (!["live-required", "snapshot"].includes(mode)) throw new Error("unsupported preparation mode")
   if (!providerRoot || !path.isAbsolute(providerRoot)) throw new Error("required absolute provider root missing")
@@ -90,17 +108,20 @@ export async function prepareRuntimeModels(providerRoot, globalDir, options = {}
   // Missing artifacts fail even for an authoritative empty inventory.
   await readFile(artifact)
   const transactionOptions = { baseConfig: options.baseConfig ?? {}, noLockRecovery: true, lockWaitMs: RUNTIME_LIMITS.lockMs }
-  return withProviderConfigLock(globalDir, async (publish) => {
+  stage = "preparation"; kind = "lock"
+  return await withProviderConfigLock(globalDir, async (publish) => {
     const deadline = performance.now() + RUNTIME_LIMITS.totalMs
-    const checkDeadline = () => { if (performance.now() >= deadline) throw new Error("preparation deadline") }
+    const checkDeadline = () => { if (performance.now() >= deadline) throw runtimeFailure("preparation", "deadline") }
     // Check immediately before atomic rename, after temporary-file flush.
     transactionOptions.checkDeadline = checkDeadline
     const result = await runDiscoveryChild({ providerRoot, mode, deadline, artifact, credentials: options.credentials, spawnImpl: options.spawnImpl })
+    kind = "render"
     const rendered = renderProviderConfig(result.inputs)
     checkDeadline()
     await publish(rendered, ownershipFromRendered(rendered))
     return { sourceOutcome: result.sourceOutcome, metadataOutcome: result.metadataOutcome }
   }, transactionOptions)
+  } catch (error) { throw preserveRuntimeFailure(error, stage, kind) }
 }
 
 // Explicit CLI, not a lifecycle/launch barrier. The host must bind a successful
@@ -127,7 +148,11 @@ export async function runtimePreparationMain(argv = process.argv.slice(2)) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
-  runtimePreparationMain().catch(() => {
+  runtimePreparationMain().catch((error) => {
+    // v1 failure stdout is machine-readable; stderr remains fixed human text.
+    // Child and parent both exit 1, including typed transient failures. No reuse.
+    const outcome = failureOutcome(error, "input", "input")
+    process.stdout.write(JSON.stringify(outcome) + "\n")
     console.error("opencode preparation failed; prior configuration is not a successful preparation")
     process.exitCode = 1
   })

@@ -74,7 +74,7 @@ test("live discovery requires a closed host descriptor; descriptorless v2 snapsh
   let calls = 0
   const options = { credentials: { USAI_API_KEY: "fixture" }, fetchImpl: async () => { calls++; return json({ data: [] }) } }
   await rm(filename)
-  await assert.rejects(discoverRuntimeModels(root, options), { code: "ENOENT" })
+  await assert.rejects(discoverRuntimeModels(root, options), (error) => error.outcome?.reason === "invalid-input")
   assert.equal((await discoverRuntimeModels(root, { ...options, mode: "snapshot" })).sourceOutcome, "snapshot-nonlive")
   for (const value of [
     { ...descriptor, providerId: "other" }, { ...descriptor, adapter: "other/v1" },
@@ -101,7 +101,7 @@ test("partial or ambiguous pagination fails, including empty partial lists; term
     let calls = 0
     await assert.rejects(discoverRuntimeModels(root, { credentials: { USAI_API_KEY: "fixture" }, fetchImpl: async () => {
       calls++; return json({ data: [], ...continuation })
-    } }), /pagination/)
+    } }), (error) => error.outcome?.reason === "invalid-response")
     assert.equal(calls, 1, "no metadata or pagination follow-up")
   }
   const result = await discoverRuntimeModels(root, { credentials: { USAI_API_KEY: "fixture" }, fetchImpl: async () =>
@@ -155,7 +155,7 @@ test("500 models per provider succeeds, while the provider inventory remains cap
   } })
   assert.equal(result.inputs[0].catalog.models.length, 500)
   for (let n = 0; n < 8; n++) await mkdir(path.join(root, "models/providers", `extra-${n}`))
-  await assert.rejects(discoverRuntimeModels(root, { fetchImpl: () => assert.fail("inventory must fail before requests") }), /inventory/)
+  await assert.rejects(discoverRuntimeModels(root, { fetchImpl: () => assert.fail("inventory must fail before requests") }), (error) => error.outcome?.reason === "invalid-input")
 })
 
 test("facts permit only exact declared HTTPS 443 destinations and owned credentials", () => {

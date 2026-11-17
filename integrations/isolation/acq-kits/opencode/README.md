@@ -78,6 +78,24 @@ node /home/agent/opencode-config/runtime-model-preparation.mjs \
 Default mode is `live-required`; explicit `--mode snapshot` returns a
 `snapshot-nonlive` source outcome instead. Missing roots/artifacts and required
 discovery failures are nonzero failures, never authoritative empty results.
+
+Successful CLI stdout is unchanged. Failures now emit one closed
+`acq-runtime-model-outcome/v1` JSON object on **stdout**, with exactly
+`schemaVersion`, `outcome: "failure"`, `stage`, `reason`, and `failureClass`.
+Both `hard` and `transient` failures exit **1**; stderr is fixed human-readable
+text, not the machine protocol. Failure output is capped at 1,024 UTF-8 bytes
+and contains no raw exception, status, URL, header, token, digest or path.
+JS failures expose the same closed record through `error.outcome`.
+The parent validates version, field set, size, duplicate keys, allowed values and
+exit consistency before propagating child failures. Only trusted exact-origin
+provider 429/5xx, allowlisted request connection errors or an explicit request
+abort can be transient; TLS, auth, unsafe input, malformed/partial output,
+unknown errors, lock/render failures and whole-parent deadline expiry are hard.
+Hard evidence wins even when nested errors also carry transient-looking codes.
+Optional metadata unavailability remains live membership success. **There is no
+fallback or last-good reuse in this version**; a nonzero result cannot authorize
+launch with the prior config. See ADR 0007 for the closed vocabulary and future
+host binding requirements.
 Nonterminal pagination signals fail rather than silently truncating membership.
 Exact-ID curated snapshot capabilities survive live reconstruction; snapshot
 limits/prices do not, because that format cannot distinguish provider facts

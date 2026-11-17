@@ -58,9 +58,17 @@ globalThis.fetch = async (url, options) => {
       const chunks = []
       response.on("data", (chunk) => chunks.push(chunk))
       response.on("error", reject)
-      response.on("end", () => resolve(new Response(Buffer.concat(chunks), { status: response.statusCode, headers: response.headers })))
+      response.on("end", () => {
+        const result = new Response(Buffer.concat(chunks), { status: response.statusCode, headers: response.headers })
+        Object.defineProperty(result, "url", { value: url })
+        resolve(result)
+      })
     })
-    request.on("error", reject)
+    request.on("error", (error) => {
+      // Even genuine TLS failure wrapped with transient-looking evidence is hard.
+      error.cause = Object.assign(new Error("synthetic-tls-canary"), { code: "ECONNRESET" })
+      reject(error)
+    })
     request.end()
   })
 }
@@ -83,7 +91,7 @@ globalThis.fetch = async (url, options) => {
     return spawn(executable, ["--import", pathToFileURL(hook).href, ...args], options)
   }
   const credentials = { USAI_API_KEY: "synthetic-fixture", NODE_OPTIONS: "--not-allowed", NODE_TLS_REJECT_UNAUTHORIZED: "0" }
-  await assert.rejects(prepareRuntimeModels(providerRoot, globalDir, { credentials, spawnImpl }), /child failed/)
+   await assert.rejects(prepareRuntimeModels(providerRoot, globalDir, { credentials, spawnImpl }), (error) => error.outcome?.failureClass === "hard" && error.outcome.reason === "tls")
   assert.deepEqual(await readFile(filename), before)
   assert.equal(requests.length, 0, "untrusted TLS must fail before authenticated HTTP")
 
