@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import stat
 import subprocess
 import sys
@@ -51,7 +52,8 @@ def test_accepts_index_755_when_disk_mode_is_644_and_interpreter_executes(tmp_pa
     validator.validate_executable_modes(repo, {"tool.py"})
     result = subprocess.run([sys.executable, str(tool)], check=True, capture_output=True, text=True)
     assert result.stdout == "ran\n"
-    assert stat.S_IMODE(tool.stat().st_mode) == 0o644
+    if os.name == "posix":  # Native Windows has no POSIX permission bits to assert.
+        assert stat.S_IMODE(tool.stat().st_mode) == 0o644
 
 
 def test_rejects_missing_and_untracked_paths(tmp_path):
@@ -94,39 +96,90 @@ def test_reports_git_errors(tmp_path):
         validator.git_index_modes(outside_repo)
 
 
-def test_discovers_guest_payloads_normalizers_and_verify_entrypoints(tmp_path, monkeypatch):
-    root = tmp_path
-    kit = root / "integrations/isolation/acq-kits/example"
-    (kit / "files/home").mkdir(parents=True)
-    (kit / "scripts").mkdir()
-    (kit / "files/home/run.sh").write_text("", encoding="utf-8")
-    (kit / "files/home/data.txt").write_text("", encoding="utf-8")
-    (kit / "scripts/verify-resources").write_text("", encoding="utf-8")
-    (kit / "scripts/interpreter-only.py").write_text("", encoding="utf-8")
-    (kit / "scripts/verify").write_text("", encoding="utf-8")
-    (kit / "spec.yaml").write_text("files: []\n", encoding="utf-8")
-    manifest = root / "integrations/providers/example/provider-input.json"
-    manifest.parent.mkdir(parents=True)
-    (manifest.parent / "normalize.mjs").write_text("", encoding="utf-8")
+def _kit_repo(tmp_path: Path) -> Path:
+    repo = _repo(tmp_path)
+    kit = "integrations/isolation/acq-kits/example"
+    spec = "files:\n  - {source: files/home/run.sh, mode: '0755'}\n  - {source: files/home/data.txt, mode: '0644'}\n"
+    for name in (
+        "files/home/run.sh",
+        "files/home/data.txt",
+        "scripts/verify-resources",
+        "scripts/interpreter-only.py",
+    ):
+        _add(repo, f"{kit}/{name}")
+    _add(repo, f"{kit}/scripts/verify")
+    spec_path = repo / kit / "spec.yaml"
+    spec_path.write_text(spec, encoding="utf-8")
+    _add(repo, "integrations/providers/example/normalize.mjs")
+    manifest = repo / "integrations/providers/example/provider-input.json"
     manifest.write_text('{"normalizerPath": "normalize.mjs"}', encoding="utf-8")
+    _git(repo, "add", ".")
+    return repo
 
-    monkeypatch.setattr(
-        validator,
-        "_load_yaml",
-        lambda _path: {
-            "files": [
-                {"source": "files/home/run.sh", "mode": "0755"},
-                {"source": "files/home/data.txt", "mode": "0644"},
-            ]
-        },
+
+KIT = "integrations/isolation/acq-kits/example"
+EXPECTED_KIT_PATHS = {
+    f"{KIT}/files/home/run.sh",
+    f"{KIT}/scripts/verify-resources",
+    f"{KIT}/scripts/verify",
+    "integrations/providers/example/normalize.mjs",
+}
+
+
+def test_discovers_guest_payloads_normalizers_and_verify_entrypoints(tmp_path):
+    repo = _kit_repo(tmp_path)
+
+    assert validator.discover_executable_paths(repo) == EXPECTED_KIT_PATHS
+
+
+def test_default_discovery_keeps_staged_verify_when_working_tree_copy_is_deleted(tmp_path):
+    repo = _kit_repo(tmp_path)
+    _git(repo, "update-index", "--chmod=-x", f"{KIT}/scripts/verify")
+    (repo / KIT / "scripts/verify").unlink()
+
+    assert f"{KIT}/scripts/verify" in validator.discover_executable_paths(repo)
+    with pytest.raises(validator.ExecutableModeError, match=r"scripts/verify \(expected 100755 stage 0; found 100644"):
+        validator.validate_executable_modes(repo)
+
+
+def test_default_discovery_uses_staged_spec_not_unstaged_edit(tmp_path):
+    repo = _kit_repo(tmp_path)
+    (repo / KIT / "spec.yaml").write_text("files: []\n", encoding="utf-8")
+
+    assert f"{KIT}/files/home/run.sh" in validator.discover_executable_paths(repo)
+
+
+def test_default_discovery_uses_staged_manifest_not_unstaged_deletion(tmp_path):
+    repo = _kit_repo(tmp_path)
+    (repo / "integrations/providers/example/provider-input.json").unlink()
+
+    assert "integrations/providers/example/normalize.mjs" in validator.discover_executable_paths(repo)
+
+
+def test_default_discovery_ignores_unstaged_new_files(tmp_path):
+    repo = _kit_repo(tmp_path)
+    (repo / KIT / "scripts/detach-probe").write_text("", encoding="utf-8")
+
+    assert validator.discover_executable_paths(repo) == EXPECTED_KIT_PATHS
+
+
+def test_unmerged_spec_fails_closed(tmp_path):
+    repo = _kit_repo(tmp_path)
+    spec = f"{KIT}/spec.yaml"
+    blob = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", f":{spec}"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+    _git(repo, "update-index", "--force-remove", spec)
+    subprocess.run(
+        ["git", "-C", str(repo), "update-index", "--index-info"],
+        input=f"100644 {blob} 1\t{spec}\n",
+        check=True,
+        capture_output=True,
+        text=True,
     )
 
-    assert validator.discover_executable_paths(root) == {
-        "integrations/isolation/acq-kits/example/files/home/run.sh",
-        "integrations/isolation/acq-kits/example/scripts/verify-resources",
-        "integrations/isolation/acq-kits/example/scripts/verify",
-        "integrations/providers/example/normalize.mjs",
-    }
+    with pytest.raises(validator.ExecutableModeError, match="unmerged"):
+        validator.discover_executable_paths(repo)
 
 
 def test_full_ci_reuses_the_validate_target():
