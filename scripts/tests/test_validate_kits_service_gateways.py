@@ -913,3 +913,24 @@ class TestServiceGatewaysValidator:
         (kit / "x.yaml").symlink_to("a/b/c.yaml")
         errors, _warnings = validate_kit(kit, _load_schema())
         assert any("symlink" in e for e in errors), errors
+
+    @pytest.mark.parametrize(
+        "volumes_yaml",
+        [
+            "    volumes: ['./link/../../x:/m']\n",
+            "    volumes:\n      - type: bind\n        source: link/../../x\n        target: /m\n",
+        ],
+    )
+    def test_rejects_symlink_then_dotdot_bind_source(self, tmp_path, volumes_yaml):
+        # Compose normalizes "link/.." lexically to the kit root's parent chain,
+        # but resolving symlinks first would land back inside the kit.
+        validate_kit = _load_validate_kit()
+        kit = _write_kit(
+            tmp_path / "kits" / "symdotdot",
+            self._gateway_spec("[compose.yaml]"),
+            "services:\n  gateway:\n    image: ghcr.io/example/gateway:1.0.0\n    expose: [8080]\n" + volumes_yaml,
+        )
+        (kit / "deep" / "a" / "b").mkdir(parents=True)
+        (kit / "link").symlink_to("deep/a/b")
+        errors, _warnings = validate_kit(kit, _load_schema())
+        assert any("outside the kit" in e for e in errors), errors

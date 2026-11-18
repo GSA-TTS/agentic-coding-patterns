@@ -384,9 +384,14 @@ def _compose_escape_errors(compose_doc: object, project_dir: Path, kit_dir: Path
             # one is a named volume.
             is_long_bind = isinstance(volume, dict) and volume.get("type") == "bind"
             if source.startswith(".") or is_long_bind:
-                source_path = (project_dir / source).resolve()
+                # Compose normalizes ".." lexically (never through symlinks) while
+                # the daemon follows symlinks at mount time, so the source must stay
+                # inside the kit under both interpretations.
+                kit_root = kit_dir.resolve()
+                lexical = Path(os.path.normpath(project_dir / source))
                 try:
-                    source_path.relative_to(kit_dir.resolve())
+                    lexical.relative_to(kit_root)
+                    lexical.resolve().relative_to(kit_root)
                 except ValueError:
                     errors.append(f"{prefix} declares a volume source outside the kit: {source!r}")
         for ref in _as_list(service.get("volumes_from")):
