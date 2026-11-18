@@ -103,9 +103,8 @@ globalThis.fetch = async (url, options) => {
     const config = parseJsonc(await readFile(filename, "utf8"))
     const model = config.provider.usai.models["gpt-5.2"]
     assert.ok(model, "unsafe metadata cannot discard valid membership")
-    assert.equal(model.limit?.context, Number.isSafeInteger(value.context) ? value.context : undefined)
-    // The existing renderer emits output only with a usable context limit.
-    assert.equal(model.limit?.output, Number.isSafeInteger(value.context) && Number.isSafeInteger(value.output) ? value.output : undefined)
+    const completeLimits = Number.isSafeInteger(value.context) && Number.isSafeInteger(value.output)
+    assert.deepEqual(model.limit, completeLimits ? { context: value.context, output: value.output } : undefined)
     assert.equal(config.theme, "preserve")
   }
   for (const request of requests) assert.equal(request.authorization, request.url === "/v1/models" ? "Bearer synthetic-fixture" : undefined)

@@ -38,6 +38,18 @@ export function usableRuntimeMetadata(metadata) {
   return result
 }
 
+function scalarEnd(text, start) {
+  let end = start
+  while (end < text.length && !/[\t\n\r ,\]}]/.test(text[end])) {
+    if (end - start > 64) throw new Error("JSON scalar limit")
+    end++
+  }
+  const token = text.slice(start, end)
+  if (!/^(?:true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)$/.test(token)) throw new Error("invalid JSON scalar")
+  if (/^[-0-9]/.test(token) && !Number.isFinite(Number(token))) throw new Error("non-finite JSON number")
+  return end
+}
+
 // Inspect JSON tokens before JSON.parse allocates its object graph. Recursion is
 // bounded before descent; decoded duplicate/unsafe keys are refused. Error text
 // deliberately never contains response bytes (which could echo credentials).
@@ -83,14 +95,7 @@ export function boundedJson(text, maxBytes) {
         space()
       }
     }
-    const start = i
-    while (i < text.length && !/[\t\n\r ,\]}]/.test(text[i])) {
-      if (i - start > 64) throw new Error("JSON scalar limit")
-      i++
-    }
-    const token = text.slice(start, i)
-    if (!/^(?:true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)$/.test(token)) throw new Error("invalid JSON scalar")
-    if (/^[-0-9]/.test(token) && !Number.isFinite(Number(token))) throw new Error("non-finite JSON number")
+    i = scalarEnd(text, i)
   }
   value(0); space()
   if (i !== text.length) throw new Error("trailing JSON data")

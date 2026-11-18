@@ -6,12 +6,13 @@ import { fileURLToPath, pathToFileURL } from "node:url"
 import os from "node:os"
 import path from "node:path"
 import { performance } from "node:perf_hooks"
-import { runDiscoveryChild } from "../files/home/opencode-config/runtime-preparation-source.mjs"
+import { runDiscoveryChild, prepareRuntimeModels } from "../files/home/opencode-config/runtime-preparation-source.mjs"
 import { runtimePreparationMain } from "../files/home/opencode-config/runtime-model-preparation.mjs"
 import { parseJsonc, renderProviderConfig, ownershipFromRendered, withProviderConfigLock } from "../files/home/opencode-config/render-provider-config.mjs"
 import { runtimeFailure, failureOutcome, FAILURE_BYTES } from "../../../../providers/usai/scripts/runtime-model-outcome.mjs"
 
 const artifact = fileURLToPath(new URL("../files/home/opencode-config/runtime-model-preparation.mjs", import.meta.url))
+const sourceArtifact = fileURLToPath(new URL("../files/home/opencode-config/runtime-preparation-source.mjs", import.meta.url))
 const facts = { schemaVersion: "acq-provider-facts/v1", providerId: "usai", apiProtocol: "openai-compatible", host: "gateway.example.test", baseUrl: "https://gateway.example.test/v1", modelsUrl: "https://gateway.example.test/v1/models", keyEnv: "USAI_API_KEY" }
 
 async function fixture(t) {
@@ -65,7 +66,7 @@ test("parent validates real child failure bytes and exit consistency before trus
   ]) {
     const worker = path.join(root, "worker.mjs")
     await writeFile(worker, `process.stdout.write(${JSON.stringify(body)}); process.exitCode = ${code}`)
-    await assert.rejects(runDiscoveryChild({ providerRoot: root, mode: "live-required", deadline: performance.now() + 3000, artifact: worker }), (error) => {
+    await assert.rejects(runDiscoveryChild({ providerRoot: root, mode: "live-required", deadline: performance.now() + 3000, artifact: worker, credentials: {} }), (error) => {
       assert.equal(error.outcome.failureClass, expected)
       assert.equal(JSON.stringify(error.outcome).includes("synthetic-outcome-canary"), false)
       return true
@@ -169,7 +170,7 @@ test("parent deadline kills and reaps a synchronously blocked child; oversized p
     await writeFile(worker, source)
     let child, closed = false
     const start = performance.now()
-    await assert.rejects(runDiscoveryChild({ providerRoot: root, mode: "live-required", deadline: start + timeout, artifact: worker,
+    await assert.rejects(runDiscoveryChild({ providerRoot: root, mode: "live-required", deadline: start + timeout, artifact: worker, credentials: {},
       spawnImpl: (...args) => { child = spawn(...args); child.once("close", () => { closed = true }); return child },
     }), expected)
     assert.equal(closed, true, "rejection must wait for child close")
@@ -177,6 +178,160 @@ test("parent deadline kills and reaps a synchronously blocked child; oversized p
     assert.ok(performance.now() - start < timeout + 3000)
   }
 })
+
+async function cancellationParent(root, modulePath) {
+  const worker = path.join(root, "spinning-worker.mjs")
+  await writeFile(worker, 'process.stdout.write("ready", () => { for (;;) {} })')
+  const parent = path.join(root, "cancellation-parent.mjs")
+  await writeFile(parent, `import assert from "node:assert/strict"
+import { spawn } from "node:child_process"
+import { readFile, readdir } from "node:fs/promises"
+import { prepareRuntimeModels } from ${JSON.stringify(pathToFileURL(modulePath).href)}
+const root = ${JSON.stringify(root)}
+const signals = ["SIGINT", "SIGTERM"]
+const listeners = signals.map((signal) => process.listenerCount(signal))
+const before = await readFile(root + "/config/opencode.jsonc")
+let child, closed = false
+try {
+  await prepareRuntimeModels(root + "/input", root + "/config", {
+    credentials: {}, artifact: ${JSON.stringify(worker)},
+    spawnImpl: (...args) => {
+      child = spawn(...args)
+      child.once("close", () => { closed = true })
+      child.stdout.once("data", () => process.send({ ready: child.pid }))
+      return child
+    },
+  })
+  assert.fail("cancelled preparation succeeded")
+} catch (error) {
+  assert.equal(error.outcome?.stage, "preparation")
+  assert.equal(error.outcome?.failureClass, "hard")
+  assert.equal(closed, true)
+  assert.throws(() => process.kill(child.pid, 0), { code: "ESRCH" })
+  assert.deepEqual(signals.map((signal) => process.listenerCount(signal)), listeners)
+  assert.deepEqual(await readFile(root + "/config/opencode.jsonc"), before)
+  assert.deepEqual(await readdir(root + "/config"), ["opencode.jsonc"])
+  const result = await prepareRuntimeModels(root + "/input", root + "/config", {
+    credentials: {}, artifact: ${JSON.stringify(artifact)},
+  })
+  assert.equal(result.sourceOutcome, "live")
+  assert.deepEqual(signals.map((signal) => process.listenerCount(signal)), listeners)
+  process.send({ cleaned: true, recovered: true, exitCode: process.exitCode })
+}
+process.disconnect()
+`)
+  return parent
+}
+
+function terminateReadyParent(t, parentFile, signal) {
+  const parent = spawn(process.execPath, [parentFile], { env: {}, stdio: ["ignore", "ignore", "pipe", "ipc"] })
+  let workerPid, stderr = ""
+  const messages = []
+  t.after(() => {
+    if (parent.exitCode === null && parent.signalCode === null) parent.kill("SIGKILL")
+    if (workerPid) { try { process.kill(workerPid, "SIGKILL") } catch {} }
+  })
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { parent.kill("SIGKILL"); reject(new Error("cancellation cleanup timed out")) }, 5000)
+    parent.stderr.on("data", (chunk) => { stderr += chunk })
+    parent.on("message", (message) => {
+      messages.push(message)
+      if (message.ready) { workerPid = message.ready; parent.kill(signal) }
+    })
+    parent.once("error", (error) => { clearTimeout(timer); reject(error) })
+    parent.once("close", (code, exitSignal) => {
+      clearTimeout(timer)
+      resolve({ code, exitSignal, stderr, messages, workerPid })
+    })
+  })
+}
+
+for (const modulePath of [sourceArtifact, artifact]) {
+  for (const signal of ["SIGINT", "SIGTERM"]) {
+    test(`${path.basename(modulePath)} ${signal} reaps child, releases lock and permits a normal follow-up`, { timeout: 10000 }, async (t) => {
+      const root = await fixture(t)
+      const parent = await cancellationParent(root, modulePath)
+      const result = await terminateReadyParent(t, parent, signal)
+      assert.equal(result.exitSignal, null, result.stderr)
+      assert.equal(result.code, 1, result.stderr)
+      assert.deepEqual(result.messages.at(-1), { cleaned: true, recovered: true, exitCode: 1 }, result.stderr)
+      assert.throws(() => process.kill(result.workerPid, 0), { code: "ESRCH" })
+      await assert.rejects(readFile(path.join(root, "config/.acq-provider-config.lock")), { code: "ENOENT" })
+    })
+  }
+}
+
+test("normal and failed preparations remove only their own signal handlers", async (t) => {
+  const root = await fixture(t)
+  const signals = ["SIGINT", "SIGTERM"]
+  const existing = () => {}
+  for (const signal of signals) process.on(signal, existing)
+  t.after(() => { for (const signal of signals) process.removeListener(signal, existing) })
+  const listeners = signals.map((signal) => process.listeners(signal))
+  await prepareRuntimeModels(path.join(root, "input"), path.join(root, "config"), { artifact, credentials: {} })
+  assert.deepEqual(signals.map((signal) => process.listeners(signal)), listeners)
+  await assert.rejects(prepareRuntimeModels("relative", path.join(root, "config"), { artifact, credentials: {} }))
+  assert.deepEqual(signals.map((signal) => process.listeners(signal)), listeners)
+})
+
+async function boundaryCancellationParent(root, phase) {
+  const parent = path.join(root, "boundary-parent.mjs")
+  await writeFile(parent, `import assert from "node:assert/strict"
+import fs from "node:fs/promises"
+import { syncBuiltinESMExports } from "node:module"
+import { prepareRuntimeModels } from ${JSON.stringify(pathToFileURL(sourceArtifact).href)}
+const root = ${JSON.stringify(root)}, phase = ${JSON.stringify(phase)}
+const originalOpen = fs.open
+const originalRead = fs.readFile
+const before = await fs.readFile(root + "/config/opencode.jsonc")
+if (phase === "lock-wait") await fs.writeFile(root + "/config/.acq-provider-config.lock", "foreign-owner")
+let cancelled = false
+fs.readFile = (...args) => {
+  if (phase === "lock-wait" && String(args[0]).endsWith(".lock.recovery")) {
+    cancelled = true; process.emit("SIGTERM")
+  }
+  return originalRead(...args)
+}
+fs.open = async (...args) => {
+  const handle = await originalOpen(...args)
+  if (phase === "pre-rename" && String(args[0]).endsWith(".tmp")) {
+    const sync = handle.sync.bind(handle)
+    handle.sync = async () => { await sync(); cancelled = true; process.emit("SIGTERM") }
+  }
+  return handle
+}
+syncBuiltinESMExports()
+const attempt = prepareRuntimeModels(root + "/input", root + "/config", {
+  credentials: {}, artifact: ${JSON.stringify(artifact)},
+  ...(phase !== "pre-rename" ? { spawnImpl: () => assert.fail("spawn after cancellation") } : {}),
+})
+if (phase === "entry") { cancelled = true; process.emit("SIGTERM") }
+await assert.rejects(attempt, (error) => error.outcome?.stage === "preparation" && error.outcome.failureClass === "hard")
+assert.equal(cancelled, true)
+assert.equal(process.exitCode, 1)
+assert.equal(process.listenerCount("SIGTERM"), 0)
+assert.equal(process.listenerCount("SIGINT"), 0)
+assert.deepEqual(await fs.readFile(root + "/config/opencode.jsonc"), before)
+if (phase === "lock-wait") {
+  assert.equal(await fs.readFile(root + "/config/.acq-provider-config.lock", "utf8"), "foreign-owner")
+  await fs.unlink(root + "/config/.acq-provider-config.lock")
+}
+assert.deepEqual(await fs.readdir(root + "/config"), ["opencode.jsonc"])
+process.send({ cleaned: true, phase })
+process.disconnect()
+`)
+  return parent
+}
+
+for (const phase of ["entry", "lock-wait", "pre-rename"]) {
+  test(`cancellation at ${phase} cannot spawn or publish and removes handlers`, { timeout: 10000 }, async (t) => {
+    const root = await fixture(t)
+    const result = await terminateReadyParent(t, await boundaryCancellationParent(root, phase), "SIGTERM")
+    assert.equal(result.exitSignal, null, result.stderr)
+    assert.equal(result.code, 1, result.stderr)
+    assert.deepEqual(result.messages, [{ cleaned: true, phase }], result.stderr)
+  })
+}
 
 test("required transaction never steals a dead lock, and deadline failure is pre-rename", async (t) => {
   const root = await fixture(t)

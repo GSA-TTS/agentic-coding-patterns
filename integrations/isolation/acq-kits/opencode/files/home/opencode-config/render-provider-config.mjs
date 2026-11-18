@@ -304,11 +304,13 @@ export function renderProviderConfig(inputs) {
       delete cost?.cacheWrite
       const reasoning = optionalReasoning(model.reasoning, `reasoning for '${reference}'`)
       const inputModalities = optionalInputModalities(model.inputModalities, `input modalities for '${reference}'`)
+      // The pinned V1 compatibility schema requires both limits. Keep incomplete
+      // pairs in discovery data without inventing a value; see ADR 0007.
       models[modelId] = {
         name: model.name === undefined ? modelId : string(model.name, `model name for '${reference}'`),
         ...(reasoning === undefined ? {} : { reasoning }),
         ...(inputModalities === undefined ? {} : { modalities: { input: inputModalities } }),
-        ...(contextWindow === undefined ? {} : { limit: { context: contextWindow, ...(maxOutputTokens === undefined ? {} : { output: maxOutputTokens }) } }),
+        ...(contextWindow === undefined || maxOutputTokens === undefined ? {} : { limit: { context: contextWindow, output: maxOutputTokens } }),
         ...(cost === undefined ? {} : { cost: { ...cost, ...(model.costAbove200kContext === undefined ? {} : { context_over_200k: renameToSnakeCase(optionalCost(model.costAbove200kContext, `tiered cost for '${reference}'`)) }) } }),
       }
     }
@@ -399,6 +401,7 @@ export async function withProviderConfigLock(globalDir, callback, options = {}) 
   const release = await acquireLock(globalDir, options)
   let active = true
   try {
+    options.checkCancelled?.()
     return await callback(async (rendered, ownership) => {
       if (!active) throw new Error("provider config transaction has ended")
       object(rendered, "rendered provider config")
@@ -750,11 +753,13 @@ async function acquireLock(globalDir, options = {}) {
   const owner = JSON.stringify({ schemaVersion: "acq-opencode-provider-lock/v3", pid: process.pid, host, startTime: await startTime(process.pid), nonce: randomBytes(16).toString("hex") })
   const deadline = Date.now() + (options.lockWaitMs ?? 1000)
   while (Date.now() < deadline) {
+    options.checkCancelled?.()
     try {
       await readFile(`${lock}.recovery`, "utf8")
       await new Promise((resolve) => setTimeout(resolve, 10))
       continue
     } catch (error) { if (error?.code !== "ENOENT") throw error }
+    options.checkCancelled?.()
     try {
       await writeFile(lock, owner, { mode: 0o600, flag: "wx" })
       return async () => releaseLock(lock, owner)

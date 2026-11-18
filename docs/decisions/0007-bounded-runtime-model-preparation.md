@@ -3,7 +3,7 @@ title: "Bounded runtime model preparation"
 description: "Trusted guest discovery and atomic OpenCode preparation, separate from host launch wiring."
 status: experimental
 tier: 2
-last_updated: "2026-11-17"
+last_updated: "2026-11-18"
 ---
 
 # Bounded runtime model preparation
@@ -22,6 +22,9 @@ owned `USAI_API_KEY` credential name. It reads routes only from host-validated
 facts and accepts HTTPS, port 443, and the exact declared host. No redirects,
 provider executables, dynamic imports, or provider-supplied mapping code run.
 The runtime is a guest component, not a host-control tool or a sandbox itself.
+Requests use WHATWG URL serialization for both fetch and response identity:
+explicit `:443` and dot segments normalize before the request. A changed origin,
+port or path, or any observed redirect, still fails before status classification.
 
 ### Host projection descriptor
 
@@ -80,6 +83,21 @@ boundary. An unusable context or output value is omitted independently, without
 discarding membership or the other usable value. Unknown limits
 stay absent when upstream metadata is unavailable. Explicit nonlive snapshot
 mode preserves snapshot limits as before, without claiming them as live facts.
+
+**Renderer limitation:** independent retention above describes discovery result
+data, not all published OpenCode fields. The renderer emits the existing V1
+compatibility format. At pinned OpenCode 2.0.30, its `limit` schema requires both
+context and output; native V2 configuration makes them optional individually.
+The actual pinned binary lists a synthetic model with no limits or both limits,
+but drops it with either incomplete pair. Therefore the renderer emits `limit`
+only when both values are usable, preserving partial values and provenance in
+discovery data without fabricating their missing partner. The TLS and discovery
+tests cover both partial cases. Native V2 provider configuration migration is a
+separate consumer change, not an implicit format switch in this preparation CLI.
+
+Pinned source: OpenCode commit `f16ef9ad8878279ea2be3cfab7baeed97aef61aa`,
+`packages/core/src/v1/config/provider.ts` and
+`packages/schema/src/config/provider.ts`.
 
 ## Bounds and transaction
 
@@ -173,6 +191,24 @@ source parsing and matching, caps its output pipe before parsing, kills it with
 SIGKILL on expiry or excess output, and waits for `close` before releasing the
 lock. Credentials are in the child's minimal environment, not argv or IPC.
 
+The parent handles SIGINT and SIGTERM from entry into preparation (before any
+asynchronous artifact, lock or trust checks) through lock release. Cancellation
+stops and awaits a running child, clears its deadline, rejects with the existing
+hard `preparation/unknown` outcome, and sets process exit status 1 even if a JS
+caller catches the error. Cancellation while waiting for a lock does not steal
+or remove another owner's lock. Checks after acquisition and immediately before
+rename prevent publication after observed cancellation. Handlers are removed on
+success and failure without removing pre-existing handlers. A later preparation
+can run after cleanup; it does not clear the cancelled process's nonzero status.
+
+SIGKILL, a host crash, and a synchronously blocked parent cannot run this cleanup.
+The host must supervise and terminate the entire guest process tree, not just
+the parent, for those cases. It must confirm owner/child absence before separate
+stale-lock cleanup and must never infer successful preparation from old config.
+As with the deadline, cancellation is a pre-rename admission check: a signal
+observed after rename has been submitted cannot undo a visible commit. Such an
+attempt still fails rather than emitting a success record.
+
 ### Trusted guest CA input
 
 The trusted guest launcher may supply `NODE_EXTRA_CA_CERTS` for enterprise TLS
@@ -218,7 +254,11 @@ it qualifies those error shapes without adding a production route override.
 Tests cover bounds, non-finite numbers, descriptor
 binding, pagination refusal, exact-ID capabilities, missing inputs, invalid feeds,
 metadata failure, empty success, snapshot labeling, synchronous-child timeout,
-pipe caps, lock refusal, pre-rename failure and concurrent publication. The real
+pipe caps, lock refusal, pre-rename failure and concurrent publication. Real
+parent subprocess tests send SIGINT/SIGTERM during a spinning discovery child,
+check child reaping and lock release before rejection, preserve prior bytes,
+verify handler removal and nonzero exit, and run a normal follow-up preparation.
+The real
 loopback TLS test generates synthetic CA/server material with OpenSSL at test
 runtime and runs the generated parent and child, proving extra-root success,
 untrusted-TLS refusal, credential separation and unsafe-limit omission through

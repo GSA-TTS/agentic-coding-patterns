@@ -7,6 +7,7 @@ import { performance } from "node:perf_hooks"
 import { boundedJson, RUNTIME_LIMITS, validatedFacts, validateMetadata, upstreamModelId } from "../scripts/runtime-model-bounds.mjs"
 import { discoverRuntimeModels, METADATA_URL, requestJson } from "../scripts/runtime-model-discovery.mjs"
 import { artifactPath, buildRuntimeArtifact } from "../scripts/build-runtime-artifact.mjs"
+import { renderProviderConfig } from "../../../isolation/acq-kits/opencode/files/home/opencode-config/render-provider-config.mjs"
 
 const facts = { schemaVersion: "acq-provider-facts/v1", providerId: "usai", apiProtocol: "openai-compatible", host: "gateway.example.test", baseUrl: "https://gateway.example.test/v1", modelsUrl: "https://gateway.example.test/v1/models", keyEnv: "USAI_API_KEY" }
 const snapshot = { schemaVersion: "acq-neutral-model-catalog/v1", providerId: "usai", models: [{ id: "removed", contextWindow: 9999, reasoning: true }], recommendations: { primary: "removed", small: "gpt-5.2" } }
@@ -51,6 +52,25 @@ test("unsafe integer upstream limits are individually omitted without losing mem
     assert.equal(model.id, "gpt-5.2")
     assert.equal(model.contextWindow, Number.isSafeInteger(limit.context) ? limit.context : undefined)
     assert.equal(model.maxOutputTokens, Number.isSafeInteger(limit.output) ? limit.output : undefined)
+  }
+})
+
+test("partial discovery limits retain provenance without invalid consumer limit pairs", async (t) => {
+  const root = await fixture(t)
+  for (const limit of [{ context: 1e20, output: 64 }, { context: 1024, output: 1e20 }]) {
+  const result = await discoverRuntimeModels(root, { credentials: { USAI_API_KEY: "fixture" }, fetchImpl: async (url) => url === facts.modelsUrl
+    ? json({ data: [{ id: "gpt-5.2" }] }) : json({ azure: { models: { "gpt-5.2": { limit } } } }) })
+  const model = result.inputs[0].catalog.models[0]
+  const known = Number.isSafeInteger(limit.context) ? "contextWindow" : "maxOutputTokens"
+  const unknown = known === "contextWindow" ? "maxOutputTokens" : "contextWindow"
+  const value = known === "contextWindow" ? limit.context : limit.output
+  assert.equal(model[known], value)
+  assert.equal(model[unknown], undefined)
+  assert.equal(model.metadataProvenance[known], "models.dev-unverified")
+  assert.equal(model.metadataProvenance[unknown], undefined)
+  const rendered = renderProviderConfig(result.inputs).provider.usai.models[model.id]
+  assert.equal(rendered.limit, undefined, "incomplete pairs must not make OpenCode discard the model")
+  assert.equal(model[known], value, "rendering must not discard discovery metadata")
   }
 })
 
@@ -168,6 +188,46 @@ test("facts permit only exact declared HTTPS 443 destinations and owned credenti
     { providerId: "other" }, { keyEnv: "OTHER_SECRET" },
   ]) assert.throws(() => validatedFacts({ ...facts, ...change }))
   assert.deepEqual(validatedFacts(facts), facts)
+})
+
+test("validated equivalent HTTPS routes use canonical fetch identity for success and transient status", async (t) => {
+  const root = await fixture(t)
+  for (const modelsUrl of ["https://gateway.example.test:443/v1/models", "https://gateway.example.test/v1/./unused/../models"]) {
+    const equivalent = validatedFacts({ ...facts, modelsUrl })
+    await writeFile(path.join(root, "models/providers/usai/facts.json"), JSON.stringify(equivalent))
+    for (const status of [200, 429, 503]) {
+      const attempt = discoverRuntimeModels(root, { credentials: { USAI_API_KEY: "fixture" }, fetchImpl: async (url, options) => {
+        assert.equal(url, facts.modelsUrl)
+        assert.equal(options.redirect, "error")
+        const response = json({ data: [] }, { status })
+        Object.defineProperty(response, "url", { value: new URL(modelsUrl).href })
+        return response
+      } })
+      if (status === 200) assert.deepEqual((await attempt).inputs[0].catalog.models, [])
+      else await assert.rejects(attempt, (error) => error.outcome.failureClass === "transient" &&
+        error.outcome.reason === (status === 429 ? "provider-throttled" : "provider-unavailable"))
+    }
+  }
+})
+
+test("canonical request identity still refuses changed origin, path, port, and redirects before status", async () => {
+  for (const status of [200, 429, 503]) {
+    for (const [url, redirected] of [
+      ["https://other.example.test/v1/models", false],
+      ["https://gateway.example.test/v2/models", false],
+      ["https://gateway.example.test:444/v1/models", false],
+      [facts.modelsUrl, true],
+    ]) {
+      await assert.rejects(requestJson("https://gateway.example.test:443/v1/./models", {
+        trustedProvider: true, limit: 128, deadline: performance.now() + 1000,
+        fetchImpl: async () => {
+          const response = json({ data: [] }, { status })
+          Object.defineProperties(response, { url: { value: url }, redirected: { value: redirected } })
+          return response
+        },
+      }), (error) => error.outcome.reason === "response-identity" && error.outcome.failureClass === "hard")
+    }
+  }
 })
 
 test("live membership is authoritative; metadata follows once without auth, recommendations survive by ID", async (t) => {

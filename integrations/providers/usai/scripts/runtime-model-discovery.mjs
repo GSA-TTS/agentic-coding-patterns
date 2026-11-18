@@ -27,13 +27,43 @@ export async function readBoundedFile(filename, limit) {
   } finally { await file.close() }
 }
 
-export async function requestJson(url, { headers = {}, limit, deadline, fetchImpl = fetch, trustedProvider = false }) {
-  if (trustedProvider) {
-    try {
-      const route = new URL(url)
-      if (route.protocol !== "https:" || route.username || route.password || route.port || route.search || route.hash) throw new Error()
-    } catch { throw runtimeFailure("input", "input") }
+function canonicalRequestUrl(url, trustedProvider) {
+  try {
+    const route = new URL(url)
+    if (trustedProvider && (route.protocol !== "https:" || route.username || route.password || route.port || route.search || route.hash)) throw new Error()
+    return route.href
+  } catch { throw runtimeFailure("input", "input") }
+}
+
+async function readResponseJson(response, limit, trustedProvider, signal) {
+  const length = response.headers.get("content-length")
+  if (length !== null && (!/^\d+$/.test(length) || Number(length) > limit)) throw new Error("response byte limit")
+  const type = response.headers.get("content-type") ?? ""
+  if (!/^application\/(?:json|[a-z0-9.+-]+\+json)(?:\s*;|$)/i.test(type)) throw new Error("discovery content type")
+  if (!response.body) throw new Error("missing response body")
+  let size = 0
+  const chunks = []
+  const iterator = response.body[Symbol.asyncIterator]()
+  for (;;) {
+    let next
+    try { next = await iterator.next() }
+    catch (error) {
+      // A truncated body is integrity failure even if its final read timed out.
+      throw size || !trustedProvider ? runtimeFailure("membership", "response") : requestFailure(error, signal.aborted ? signal.reason : undefined)
+    }
+    if (next.done) break
+    const chunk = next.value
+    size += chunk.byteLength
+    if (size > limit) throw new Error("response byte limit")
+    chunks.push(chunk)
   }
+  return boundedJson(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks)), limit)
+}
+
+export async function requestJson(url, { headers = {}, limit, deadline, fetchImpl = fetch, trustedProvider = false }) {
+  // Fetch exposes WHATWG serialization, including default ports and dot paths.
+  // Compare with the same canonical request, never relax origin/path identity.
+  url = canonicalRequestUrl(url, trustedProvider)
   const remaining = deadline - performance.now()
   if (remaining <= 0) throw runtimeFailure("preparation", "deadline")
   const controller = new AbortController()
@@ -50,28 +80,7 @@ export async function requestJson(url, { headers = {}, limit, deadline, fetchImp
         : trustedProvider && Number.isInteger(response.status) && response.status >= 500 && response.status <= 599 ? "unavailable" : "http"
       throw runtimeFailure("membership", kind)
     }
-    const length = response.headers.get("content-length")
-    if (length !== null && (!/^\d+$/.test(length) || Number(length) > limit)) throw new Error("response byte limit")
-    const type = response.headers.get("content-type") ?? ""
-    if (!/^application\/(?:json|[a-z0-9.+-]+\+json)(?:\s*;|$)/i.test(type)) throw new Error("discovery content type")
-    if (!response.body) throw new Error("missing response body")
-    let size = 0
-    const chunks = []
-    const iterator = response.body[Symbol.asyncIterator]()
-    for (;;) {
-      let next
-      try { next = await iterator.next() }
-      catch (error) {
-        // A truncated body is integrity failure even if its final read timed out.
-        throw size || !trustedProvider ? runtimeFailure("membership", "response") : requestFailure(error, controller.signal.aborted ? controller.signal.reason : undefined)
-      }
-      if (next.done) break
-      const chunk = next.value
-      size += chunk.byteLength
-      if (size > limit) throw new Error("response byte limit")
-      chunks.push(chunk)
-    }
-    return boundedJson(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks)), limit)
+    return await readResponseJson(response, limit, trustedProvider, controller.signal)
   } catch (error) {
     throw preserveRuntimeFailure(error, "membership", "response")
   } finally { clearTimeout(timer); controller.abort() }
@@ -155,21 +164,9 @@ function snapshotCatalog(catalog, providerId) {
   return catalog
 }
 
-export async function discoverRuntimeModels(providerRoot, { mode = "live-required", credentials = process.env, fetchImpl = fetch, deadline = performance.now() + RUNTIME_LIMITS.totalMs } = {}) {
-  try {
-  if (!["live-required", "snapshot"].includes(mode)) throw new Error("unsupported preparation mode")
-  if (typeof providerRoot !== "string" || !path.isAbsolute(providerRoot)) throw new Error("required absolute provider root missing")
-  const inventory = path.join(providerRoot, "models", "providers")
-  if (!(await lstat(inventory)).isDirectory()) throw new Error("required provider inventory missing")
-  const entries = await readdir(inventory, { withFileTypes: true })
-  if (entries.length > RUNTIME_LIMITS.providers || entries.some((entry) => !entry.isDirectory() || entry.name !== "usai")) throw new Error("invalid provider inventory")
-  const inputs = []
-  let count = 0
-  for (const entry of entries.sort((a, b) => a.name < b.name ? -1 : 1)) {
-    if (performance.now() >= deadline) throw runtimeFailure("preparation", "deadline")
-    const directory = path.join(inventory, entry.name)
+async function discoverProvider(directory, { mode, credentials, deadline, fetchImpl }) {
     const facts = validatedFacts(boundedJson(await readBoundedFile(path.join(directory, "facts.json"), 65536), 65536))
-    if (entry.name !== facts.providerId) throw new Error("provider identity mismatch")
+    if (path.basename(directory) !== facts.providerId) throw new Error("provider identity mismatch")
     const snapshot = snapshotCatalog(boundedJson(await readBoundedFile(path.join(directory, "snapshot.json"), RUNTIME_LIMITS.resultBytes), RUNTIME_LIMITS.resultBytes), facts.providerId)
     let models
     if (mode === "snapshot") {
@@ -186,16 +183,14 @@ export async function discoverRuntimeModels(providerRoot, { mode = "live-require
       try { models = retainExactCapabilities(membershipModels(body), snapshot) }
       catch { throw runtimeFailure("membership", "response") }
     }
-    count += models.length
     const ids = new Set(models.map((model) => model.id))
     const recommendations = Object.fromEntries(Object.entries(snapshot.recommendations ?? {}).filter(([, id]) => ids.has(id)))
-    inputs.push({ facts, catalog: { schemaVersion: "acq-neutral-model-catalog/v1", providerId: facts.providerId, models, recommendations } })
-  }
-  let metadataOutcome = "not-requested"
+    return { facts, catalog: { schemaVersion: "acq-neutral-model-catalog/v1", providerId: facts.providerId, models, recommendations } }
+}
+
+async function enrichRuntimeInputs(inputs, deadline, fetchImpl) {
   // No credential-bearing request shares a headers object with public metadata.
   // Membership must succeed in full first. Metadata never restores membership.
-  if (mode === "live-required" && count > 0) {
-    metadataOutcome = "unavailable"
     try {
       // Leave a small publication margin; optional metadata must not consume
       // the entire parent deadline merely by waiting on its response body.
@@ -211,9 +206,25 @@ export async function discoverRuntimeModels(providerRoot, { mode = "live-require
           } catch { return model }
         })
       }
-      metadataOutcome = "available-unverified"
-    } catch { /* Optional metadata is unknown; membership remains authoritative. */ }
+      return "available-unverified"
+    } catch { return "unavailable" }
+}
+
+export async function discoverRuntimeModels(providerRoot, { mode = "live-required", credentials = process.env, fetchImpl = fetch, deadline = performance.now() + RUNTIME_LIMITS.totalMs } = {}) {
+  try {
+  if (!["live-required", "snapshot"].includes(mode)) throw new Error("unsupported preparation mode")
+  if (typeof providerRoot !== "string" || !path.isAbsolute(providerRoot)) throw new Error("required absolute provider root missing")
+  const inventory = path.join(providerRoot, "models", "providers")
+  if (!(await lstat(inventory)).isDirectory()) throw new Error("required provider inventory missing")
+  const entries = await readdir(inventory, { withFileTypes: true })
+  if (entries.length > RUNTIME_LIMITS.providers || entries.some((entry) => !entry.isDirectory() || entry.name !== "usai")) throw new Error("invalid provider inventory")
+  const inputs = []
+  for (const entry of entries.sort((a, b) => a.name < b.name ? -1 : 1)) {
+    if (performance.now() >= deadline) throw runtimeFailure("preparation", "deadline")
+    inputs.push(await discoverProvider(path.join(inventory, entry.name), { mode, credentials, deadline, fetchImpl }))
   }
+  const metadataOutcome = mode === "live-required" && inputs.some((input) => input.catalog.models.length)
+    ? await enrichRuntimeInputs(inputs, deadline, fetchImpl) : "not-requested"
   if (performance.now() >= deadline) throw runtimeFailure("preparation", "deadline")
   const result = { inputs, sourceOutcome: mode === "snapshot" ? "snapshot-nonlive" : "live", metadataOutcome }
   // A gateway can echo the request credential even in a syntactically valid

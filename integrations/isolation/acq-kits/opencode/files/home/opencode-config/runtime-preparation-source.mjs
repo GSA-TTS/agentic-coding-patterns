@@ -32,29 +32,69 @@ export async function discoveryChildEnvironment(environment) {
   return childEnv
 }
 
+// Install synchronously before the first await, and retain through lock release.
+// Cancellation is hard (not membership availability evidence) and remains nonzero
+// even if an embedding caller catches the rejection. SIGKILL needs host supervision.
+async function withPreparationCancellation(callback) {
+  const controller = new AbortController()
+  const cancel = () => {
+    process.exitCode = 1
+    controller.abort(runtimeFailure("preparation", "unknown"))
+  }
+  process.on("SIGINT", cancel)
+  process.on("SIGTERM", cancel)
+  try {
+    const result = await callback(controller.signal)
+    controller.signal.throwIfAborted()
+    return result
+  } finally {
+    process.removeListener("SIGINT", cancel)
+    process.removeListener("SIGTERM", cancel)
+  }
+}
+
+function validateChildResult(text, mode) {
+  const result = boundedJson(text, RUNTIME_LIMITS.resultBytes)
+  record(result)
+  if (Object.keys(result).length !== 3 || !Array.isArray(result.inputs) || result.inputs.length > RUNTIME_LIMITS.providers ||
+      result.sourceOutcome !== (mode === "snapshot" ? "snapshot-nonlive" : "live") ||
+      !["not-requested", "unavailable", "available-unverified"].includes(result.metadataOutcome)) throw new Error("invalid discovery result")
+  const providers = new Set()
+  for (const input of result.inputs) {
+    record(input)
+    if (Object.keys(input).length !== 2 || !Object.hasOwn(input, "facts") || !Object.hasOwn(input, "catalog")) throw new Error("invalid result input")
+    validatedFacts(input.facts)
+    if (providers.has(input.facts.providerId)) throw new Error("duplicate result provider")
+    providers.add(input.facts.providerId)
+    if (!Array.isArray(input.catalog?.models) || input.catalog.models.length > RUNTIME_LIMITS.models) throw new Error("invalid result models")
+  }
+  return result
+}
+
+function decodeChildResult(code, size, chunks, mode) {
+  let result, failure
+  try {
+    if (code !== 0 && (code !== 1 || size > FAILURE_BYTES)) throw new Error("invalid child exit")
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks))
+    if (code === 1) {
+      failure = parseFailure(text)
+      if (mode === "snapshot" && failure.outcome.failureClass === "transient") throw new Error("invalid snapshot failure")
+    } else result = validateChildResult(text, mode)
+  } catch { throw runtimeFailure("child", "protocol") }
+  if (failure) throw failure
+  return result
+}
+
 // Pipes rather than Node's deserializing IPC channel: cap bytes BEFORE parsing.
-// Child stdout is one result; stderr is discarded so response/credential bytes
-// cannot reach logs. Await close (not merely exit/kill) before releasing the lock.
-export async function runDiscoveryChild({ providerRoot, mode, deadline, artifact, credentials = process.env, spawnImpl = spawn }) {
-  let environment
-  try { environment = await discoveryChildEnvironment(credentials) }
-  catch { throw runtimeFailure("trust", "trust") }
+// Await close (not merely exit/kill) before rejecting and releasing the lock.
+function awaitDiscoveryChild(child, { mode, deadline }, cancellation) {
   return new Promise((resolve, reject) => {
-    const remaining = deadline - performance.now()
-    if (remaining <= 0) { reject(runtimeFailure("preparation", "deadline")); return }
-    let child
-    try { child = spawnImpl(process.execPath, [artifact, "--discovery-child", providerRoot, mode, String(remaining)], {
-      env: environment,
-      stdio: ["ignore", "pipe", "ignore"],
-    }) } catch { reject(runtimeFailure("child", "crash")); return }
-    let failure
-    let size = 0
+    let failure, size = 0
     const chunks = []
-    const terminate = (error) => {
-      failure ??= error
-      child.kill("SIGKILL")
-    }
-    const timer = setTimeout(() => terminate(runtimeFailure("preparation", "deadline")), remaining)
+    const terminate = (error) => { failure ??= error; child.kill("SIGKILL") }
+    const cancel = () => terminate(cancellation.reason)
+    const timer = setTimeout(() => terminate(runtimeFailure("preparation", "deadline")), Math.max(0, deadline - performance.now()))
+    cancellation.addEventListener("abort", cancel, { once: true })
     child.on("error", () => { failure ??= runtimeFailure("child", "crash") })
     child.stdout.on("error", () => terminate(runtimeFailure("child", "protocol")))
     child.stdout.on("data", (chunk) => {
@@ -64,40 +104,45 @@ export async function runDiscoveryChild({ providerRoot, mode, deadline, artifact
     })
     child.once("close", (code, signal) => {
       clearTimeout(timer)
-      if (failure || signal || performance.now() >= deadline) {
-        reject(failure ?? runtimeFailure(performance.now() >= deadline ? "preparation" : "child", performance.now() >= deadline ? "deadline" : "crash")); return
-      }
+      cancellation.removeEventListener("abort", cancel)
       try {
-        if (code !== 0 && (code !== 1 || size > FAILURE_BYTES)) throw runtimeFailure("child", "protocol")
-        const text = new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks))
-        if (code === 1) {
-          const error = parseFailure(text)
-          if (mode === "snapshot" && error.outcome.failureClass === "transient") throw runtimeFailure("child", "protocol")
-          if (performance.now() >= deadline) { reject(runtimeFailure("preparation", "deadline")); return }
-          reject(error); return
-        }
-        const result = boundedJson(text, RUNTIME_LIMITS.resultBytes)
-        record(result)
-        if (Object.keys(result).length !== 3 || !Array.isArray(result.inputs) || result.inputs.length > RUNTIME_LIMITS.providers ||
-            result.sourceOutcome !== (mode === "snapshot" ? "snapshot-nonlive" : "live") ||
-            !["not-requested", "unavailable", "available-unverified"].includes(result.metadataOutcome)) throw new Error("invalid discovery result")
-        const providers = new Set()
-        for (const input of result.inputs) {
-          record(input)
-          if (Object.keys(input).length !== 2 || !Object.hasOwn(input, "facts") || !Object.hasOwn(input, "catalog")) throw runtimeFailure("child", "protocol")
-          validatedFacts(input.facts)
-          if (providers.has(input.facts.providerId)) throw new Error("duplicate result provider")
-          providers.add(input.facts.providerId)
-          if (!Array.isArray(input.catalog?.models) || input.catalog.models.length > RUNTIME_LIMITS.models) throw new Error("invalid result models")
-        }
-        if (performance.now() >= deadline) { reject(runtimeFailure("preparation", "deadline")); return }
+        cancellation.throwIfAborted()
+        if (failure) throw failure
+        if (performance.now() >= deadline) throw runtimeFailure("preparation", "deadline")
+        if (signal) throw runtimeFailure("child", "crash")
+        const result = decodeChildResult(code, size, chunks, mode)
+        if (performance.now() >= deadline) throw runtimeFailure("preparation", "deadline")
         resolve(result)
-      } catch { reject(runtimeFailure("child", "protocol")) }
+      } catch (error) { reject(error) }
     })
+    // Covers cancellation delivered by a synchronous spawn seam before listeners.
+    if (cancellation.aborted) cancel()
   })
 }
 
-export async function prepareRuntimeModels(providerRoot, globalDir, options = {}) {
+async function startDiscoveryChild({ providerRoot, mode, deadline, artifact, credentials = process.env, spawnImpl = spawn }, cancellation) {
+  let environment
+  try { environment = await discoveryChildEnvironment(credentials) }
+  catch { throw runtimeFailure("trust", "trust") }
+  cancellation.throwIfAborted()
+  const remaining = deadline - performance.now()
+  if (remaining <= 0) throw runtimeFailure("preparation", "deadline")
+  let child
+  try { child = spawnImpl(process.execPath, [artifact, "--discovery-child", providerRoot, mode, String(remaining)], {
+    env: environment, stdio: ["ignore", "pipe", "ignore"],
+  }) } catch { throw runtimeFailure("child", "crash") }
+  return awaitDiscoveryChild(child, { mode, deadline }, cancellation)
+}
+
+export function runDiscoveryChild(options) {
+  return withPreparationCancellation((signal) => startDiscoveryChild(options, signal))
+}
+
+export function prepareRuntimeModels(providerRoot, globalDir, options = {}) {
+  return withPreparationCancellation((signal) => prepareTransaction(providerRoot, globalDir, options, signal))
+}
+
+async function prepareTransaction(providerRoot, globalDir, options, signal) {
   let stage = "input", kind = "input"
   try {
   const mode = options.mode ?? "live-required"
@@ -107,14 +152,16 @@ export async function prepareRuntimeModels(providerRoot, globalDir, options = {}
   const artifact = options.artifact ?? fileURLToPath(import.meta.url)
   // Missing artifacts fail even for an authoritative empty inventory.
   await readFile(artifact)
-  const transactionOptions = { baseConfig: options.baseConfig ?? {}, noLockRecovery: true, lockWaitMs: RUNTIME_LIMITS.lockMs }
+  const checkCancelled = () => signal.throwIfAborted()
+  checkCancelled()
+  const transactionOptions = { baseConfig: options.baseConfig ?? {}, noLockRecovery: true, lockWaitMs: RUNTIME_LIMITS.lockMs, checkCancelled }
   stage = "preparation"; kind = "lock"
   return await withProviderConfigLock(globalDir, async (publish) => {
     const deadline = performance.now() + RUNTIME_LIMITS.totalMs
-    const checkDeadline = () => { if (performance.now() >= deadline) throw runtimeFailure("preparation", "deadline") }
+    const checkDeadline = () => { checkCancelled(); if (performance.now() >= deadline) throw runtimeFailure("preparation", "deadline") }
     // Check immediately before atomic rename, after temporary-file flush.
     transactionOptions.checkDeadline = checkDeadline
-    const result = await runDiscoveryChild({ providerRoot, mode, deadline, artifact, credentials: options.credentials, spawnImpl: options.spawnImpl })
+    const result = await startDiscoveryChild({ providerRoot, mode, deadline, artifact, credentials: options.credentials, spawnImpl: options.spawnImpl }, signal)
     kind = "render"
     const rendered = renderProviderConfig(result.inputs)
     checkDeadline()
