@@ -1902,6 +1902,9 @@ async function withPreparationCancellation(callback) {
     const result = await callback(controller.signal)
     controller.signal.throwIfAborted()
     return result
+  } catch (error) {
+    controller.signal.throwIfAborted()
+    throw error
   } finally {
     process.removeListener("SIGINT", cancel)
     process.removeListener("SIGTERM", cancel)

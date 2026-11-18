@@ -261,6 +261,55 @@ for (const modulePath of [sourceArtifact, artifact]) {
   }
 }
 
+for (const modulePath of [sourceArtifact, artifact]) {
+  for (const signal of ["SIGINT", "SIGTERM"]) {
+    test(`${path.basename(modulePath)} ${signal} during rejected transaction release stays hard`, { timeout: 10000 }, async (t) => {
+      const root = await fixture(t)
+      const child = path.join(root, "transient-child.mjs")
+      await writeFile(child, 'process.stdout.write(JSON.stringify({schemaVersion:"acq-runtime-model-outcome/v1",outcome:"failure",stage:"membership",reason:"provider-unavailable",failureClass:"transient"})); process.exitCode=1')
+      const parentFile = path.join(root, "release-parent.mjs")
+      await writeFile(parentFile, `import assert from "node:assert/strict"
+import fs from "node:fs/promises"
+import { syncBuiltinESMExports } from "node:module"
+const root = ${JSON.stringify(root)}, signal = ${JSON.stringify(signal)}
+const filename = root + "/config/opencode.jsonc"
+const before = await fs.readFile(filename)
+const originalUnlink = fs.unlink
+let cancelled = false
+fs.unlink = async (...args) => {
+  if (String(args[0]).endsWith(".acq-provider-config.lock")) {
+    cancelled = true
+    const delivered = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("release signal not delivered")), 1000)
+      process.once(signal, () => { clearTimeout(timer); resolve() })
+    })
+    process.kill(process.pid, signal)
+    await delivered
+  }
+  return originalUnlink(...args)
+}
+syncBuiltinESMExports()
+const { prepareRuntimeModels } = await import(${JSON.stringify(pathToFileURL(modulePath).href)})
+await assert.rejects(prepareRuntimeModels(root + "/input", root + "/config", {
+  credentials: {}, artifact: ${JSON.stringify(child)},
+}), error => error.outcome?.stage === "preparation" && error.outcome.reason === "unknown" && error.outcome.failureClass === "hard")
+assert.equal(cancelled, true)
+assert.equal(process.exitCode, 1)
+assert.equal(process.listenerCount("SIGINT"), 0)
+assert.equal(process.listenerCount("SIGTERM"), 0)
+assert.deepEqual(await fs.readFile(filename), before)
+assert.deepEqual(await fs.readdir(root + "/config"), ["opencode.jsonc"])
+process.send({ cleaned: true })
+process.disconnect()
+`)
+      const result = await terminateReadyParent(t, parentFile, signal)
+      assert.equal(result.exitSignal, null, result.stderr)
+      assert.equal(result.code, 1, result.stderr)
+      assert.deepEqual(result.messages, [{ cleaned: true }], result.stderr)
+    })
+  }
+}
+
 test("normal and failed preparations remove only their own signal handlers", async (t) => {
   const root = await fixture(t)
   const signals = ["SIGINT", "SIGTERM"]
