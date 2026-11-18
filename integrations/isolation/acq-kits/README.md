@@ -83,7 +83,9 @@ vocabulary:
   `WEB_GATEWAY_URL: url`). Existing `files[]` and `commands[]` remain responsible
   for client-side software/config inside the sandbox. The goal is not broader
   sandbox egress or API keys in the agent; it is a narrow, policy-controlled
-  gateway endpoint. Local kit sources are allowed for development/private kits;
+  gateway endpoint. Gateway Compose files may use only plain Compose-managed
+  named volumes (no `driver_opts`, non-local drivers, or `external`/`name`
+  indirection) and kit-local bind sources. Local kit sources are allowed for development/private kits;
   remote service-gateway kits must come from trusted kit sources, but v1 does not
   add a machine-readable trusted-source gate to the schema or validator. The
   schema intentionally excludes host/guest IPs, DNS, VSOCK, Podman-machine,

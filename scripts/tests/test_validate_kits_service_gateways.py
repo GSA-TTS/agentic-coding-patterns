@@ -588,6 +588,140 @@ class TestServiceGatewaysValidator:
         assert errors == [], errors
 
     @pytest.mark.parametrize(
+        ("volumes_yaml", "expected"),
+        [
+            (
+                "volumes:\n  data:\n    driver: local\n    driver_opts:\n      type: none\n"
+                "      o: bind\n      device: /\n",
+                "driver_opts",
+            ),
+            ("volumes:\n  data:\n    driver_opts:\n      type: nfs\n", "driver_opts"),
+            ("volumes:\n  data:\n    driver_opts: $VOL_OPTS\n", "Compose interpolation"),
+            ("volumes:\n  data:\n    driver: local\n    driver_opts:\n      device: ${HOST_DIR}\n", "driver_opts"),
+            ("volumes:\n  data:\n    driver: ${VOL_DRIVER:-local}\n", "Compose interpolation"),
+            ("volumes:\n  data:\n    driver: some-plugin\n", "driver: 'some-plugin'"),
+            ("volumes:\n  data:\n    name: $HOST_VOLUME\n", "Compose interpolation"),
+            ("volumes:\n  data:\n    external: true\n", "external"),
+            ("volumes:\n  data: not-a-mapping\n", "must be a mapping"),
+        ],
+    )
+    def test_rejects_unsafe_named_volume_definitions(self, tmp_path, volumes_yaml, expected):
+        validate_kit = _load_validate_kit()
+        kit = _write_kit(
+            tmp_path / "volumedefs",
+            "schemaVersion: hybrid/v1\n"
+            "kind: mixin\n"
+            "name: volumedefs\n"
+            "displayName: Volume Defs\n"
+            "description: d\n"
+            "serviceGateways:\n"
+            "  - name: demo-gateway\n"
+            "    runtime:\n"
+            "      compose:\n"
+            "        files: [compose.yaml]\n"
+            "        service: gateway\n"
+            "    interface:\n"
+            "      protocol: http\n"
+            "      port: 8080\n"
+            "    expose:\n"
+            "      env:\n"
+            "        WEB_GATEWAY_URL: url\n",
+            "services:\n"
+            "  gateway:\n"
+            "    image: ghcr.io/example/gateway:1.0.0\n"
+            "    expose: [8080]\n"
+            "    volumes: ['data:/var/lib/data']\n" + volumes_yaml,
+        )
+        errors, _warnings = validate_kit(kit, _load_schema())
+        assert any(expected in e and "volume 'data'" in e for e in errors), errors
+
+    @pytest.mark.parametrize(
+        "volumes_yaml",
+        [
+            "volumes:\n  data:\n",
+            "volumes:\n  data: {}\n",
+            "volumes:\n  data:\n    driver_opts: {}\n",
+            "volumes:\n  data:\n    driver: local\n    labels:\n      purpose: gateway-state\n",
+        ],
+    )
+    def test_allows_plain_named_volume_definitions(self, tmp_path, volumes_yaml):
+        validate_kit = _load_validate_kit()
+        kit = _write_kit(
+            tmp_path / "plainvolume",
+            "schemaVersion: hybrid/v1\n"
+            "kind: mixin\n"
+            "name: plainvolume\n"
+            "displayName: Plain Volume\n"
+            "description: d\n"
+            "serviceGateways:\n"
+            "  - name: demo-gateway\n"
+            "    runtime:\n"
+            "      compose:\n"
+            "        files: [compose.yaml]\n"
+            "        service: gateway\n"
+            "    interface:\n"
+            "      protocol: http\n"
+            "      port: 8080\n"
+            "    expose:\n"
+            "      env:\n"
+            "        WEB_GATEWAY_URL: url\n",
+            "services:\n"
+            "  gateway:\n"
+            "    image: ghcr.io/example/gateway:1.0.0\n"
+            "    expose: [8080]\n"
+            "    volumes: ['data:/var/lib/data']\n" + volumes_yaml,
+        )
+        errors, _warnings = validate_kit(kit, _load_schema())
+        assert errors == [], errors
+
+    @pytest.mark.parametrize(
+        ("service_volume_yaml", "expected"),
+        [
+            (
+                "    volumes:\n      - type: volume\n        source: data\n        target: /d\n",
+                "driver_opts",
+            ),
+            (
+                "    volumes:\n      - type: bind\n        source: data/../../../..\n        target: /d\n",
+                "outside the kit",
+            ),
+            ("    volumes_from: ['container:host-root']\n", "volumes_from"),
+            (
+                "    volumes:\n      - type: npipe\n        source: //./pipe/docker_engine\n        target: /p\n",
+                "volume type 'npipe'",
+            ),
+        ],
+    )
+    def test_rejects_long_form_and_inherited_volume_bypasses(self, tmp_path, service_volume_yaml, expected):
+        validate_kit = _load_validate_kit()
+        kit = _write_kit(
+            tmp_path / "longform",
+            "schemaVersion: hybrid/v1\n"
+            "kind: mixin\n"
+            "name: longform\n"
+            "displayName: Long Form\n"
+            "description: d\n"
+            "serviceGateways:\n"
+            "  - name: demo-gateway\n"
+            "    runtime:\n"
+            "      compose:\n"
+            "        files: [compose.yaml]\n"
+            "        service: gateway\n"
+            "    interface:\n"
+            "      protocol: http\n"
+            "      port: 8080\n"
+            "    expose:\n"
+            "      env:\n"
+            "        WEB_GATEWAY_URL: url\n",
+            "services:\n"
+            "  gateway:\n"
+            "    image: ghcr.io/example/gateway:1.0.0\n"
+            "    expose: [8080]\n" + service_volume_yaml + "volumes:\n  data:\n    driver_opts:\n      o: bind\n",
+        )
+        errors, _warnings = validate_kit(kit, _load_schema())
+        assert any(expected in e for e in errors), errors
+
+    @pytest.mark.parametrize(
         ("compose_yaml", "expected"),
         [
             (

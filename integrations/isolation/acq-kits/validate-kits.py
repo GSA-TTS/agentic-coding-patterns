@@ -361,6 +361,9 @@ def _compose_escape_errors(compose_doc: object, compose_path: Path, kit_dir: Pat
             if _has_compose_interpolation(volume):
                 errors.append(f"{prefix} declares volume with Compose interpolation; validation cannot prove it safe")
                 continue
+            if isinstance(volume, dict) and volume.get("type") not in ("volume", "bind", "tmpfs"):
+                errors.append(f"{prefix} declares volume type {volume.get('type')!r}; only volume, bind, tmpfs allowed")
+                continue
             source = _volume_source(volume)
             if not source:
                 continue
@@ -370,12 +373,71 @@ def _compose_escape_errors(compose_doc: object, compose_path: Path, kit_dir: Pat
             if source.startswith("/") or source.startswith("~"):
                 errors.append(f"{prefix} declares a host path mount outside the kit: {source!r}")
                 continue
-            if source.startswith("."):
+            # Compose resolves a long-form bind source relative to the project
+            # directory even without a leading "."; a short-form source without
+            # one is a named volume.
+            is_long_bind = isinstance(volume, dict) and volume.get("type") == "bind"
+            if source.startswith(".") or is_long_bind:
                 source_path = (compose_path.parent / source).resolve()
                 try:
                     source_path.relative_to(kit_dir.resolve())
                 except ValueError:
                     errors.append(f"{prefix} declares a volume source outside the kit: {source!r}")
+        for ref in _as_list(service.get("volumes_from")):
+            if _has_compose_interpolation(ref):
+                errors.append(
+                    f"{prefix} declares volumes_from with Compose interpolation; validation cannot prove it safe"
+                )
+            elif not isinstance(ref, str) or ref.startswith("container:"):
+                errors.append(
+                    f"{prefix} declares volumes_from {ref!r}; inheriting mounts from a host container is outside "
+                    "serviceGateways v1"
+                )
+    return errors
+
+
+def _compose_volume_definition_errors(compose_doc: object) -> list[str]:
+    """Return errors for top-level Compose volume definitions that can request host storage.
+
+    A named volume using the local driver with driver_opts (type: none, o: bind,
+    device: <path>) is a bind mount in disguise, so service-level volume sources
+    alone do not bound host access. Every defined volume must be a plain
+    Compose-managed named volume: local driver, no driver_opts, and no
+    external/name indirection to a pre-existing host volume.
+    """
+    errors: list[str] = []
+    if not isinstance(compose_doc, dict):
+        return errors
+    volumes = compose_doc.get("volumes")
+    if volumes is None:
+        return errors
+    if not isinstance(volumes, dict):
+        return ["Compose top-level volumes must be a mapping"]
+    for name, definition in volumes.items():
+        prefix = f"Compose volume {name!r}"
+        if definition is None:
+            continue
+        if not isinstance(definition, dict):
+            errors.append(f"{prefix} definition must be a mapping")
+            continue
+        for key, value in definition.items():
+            if isinstance(key, str) and key.startswith("x-"):
+                continue
+            if _has_compose_interpolation(value):
+                errors.append(f"{prefix} declares {key} with Compose interpolation; validation cannot prove it safe")
+            elif key == "labels":
+                continue
+            elif key == "driver":
+                if value not in (None, "local"):
+                    errors.append(f"{prefix} declares driver: {value!r}; only the local driver is allowed")
+            elif key == "driver_opts":
+                if value:
+                    errors.append(
+                        f"{prefix} declares driver_opts; local-driver options can bind host paths and are outside "
+                        "serviceGateways v1"
+                    )
+            else:
+                errors.append(f"{prefix} declares {key}; only plain Compose-managed named volumes are allowed")
     return errors
 
 
@@ -614,6 +676,8 @@ def validate_kit(kit_dir: Path, schema: dict) -> tuple[list[str], list[str]]:
                     for detail in _compose_indirection_errors(compose_doc):
                         errors.append(f"{kit_dir.name}: serviceGateways[{i}].runtime.compose file {rel}: {detail}")
                     for detail in _compose_escape_errors(compose_doc, compose_path, kit_dir):
+                        errors.append(f"{kit_dir.name}: serviceGateways[{i}].runtime.compose file {rel}: {detail}")
+                    for detail in _compose_volume_definition_errors(compose_doc):
                         errors.append(f"{kit_dir.name}: serviceGateways[{i}].runtime.compose file {rel}: {detail}")
                     for detail in _compose_file_reference_errors(compose_doc):
                         errors.append(f"{kit_dir.name}: serviceGateways[{i}].runtime.compose file {rel}: {detail}")
