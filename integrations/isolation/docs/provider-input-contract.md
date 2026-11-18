@@ -3,7 +3,7 @@ title: "Provider Input Bundle Consumer Contract"
 description: "Versioned provider bundle paths and the backend-supplied read-only consumer root."
 status: canonical
 tier: 2
-last_updated: "2026-11-13"
+last_updated: "2026-11-17"
 ---
 
 # Provider Input Bundle Consumer Contract
@@ -131,6 +131,59 @@ python3 scripts/validate_provider_input_contract.py \
 They MUST come from the pinned Patterns release and backend-owned credential
 configuration, never from bundle contents or provider-controlled metadata. A
 provider controls only the staged manifest path(s) passed with `--bundle`.
+
+## Optional Model Release Metadata
+
+The closed `acq-neutral-model-catalog/v1` model schema accepts an optional pair:
+
+```json
+{
+  "id": "gpt_5_2_default_v2",
+  "releaseDate": "2025-12-11",
+  "releaseDateSource": {
+    "source": "models.dev",
+    "providerId": "azure",
+    "modelId": "gpt-5.2"
+  }
+}
+```
+
+This is the upstream model's reported release day, not the gateway deployment
+day, discovery time, or a quality score. `releaseDateSource` identifies the
+selected models.dev provider/model map keys. Its provider is not the catalog's
+gateway `providerId` (`usai` in this example). The source object is closed:
+`source` is exactly `models.dev`, `providerId` is a safe slug of at most 32
+characters, and `modelId` is an ASCII identifier of at most 128 characters.
+Model source IDs allow alphanumerics, dot, underscore, hyphen, slash-separated
+segments, and a terminal numeric colon revision. URLs, commands, and extra
+fields are not supported; consumers MUST NOT treat provenance as a fetch target.
+
+Both fields MUST be present together or both absent. Dates require a real
+Gregorian `YYYY-MM-DD` day (years 0001–9999), including leap-year validation.
+Producers MUST omit the pair when the selected match has missing, malformed,
+partial, or future `release_date`, or an unrepresentable source identity. They
+MUST retain the model and its other valid metadata. Never substitute
+`last_updated`, a date embedded in an ID, the current day, or a fabricated date.
+The schema enforces calendar validity even without format checking; the dynamic
+nonfuture bound requires the producer's explicit `asOf` day.
+
+The [shared enrichment core](../../providers/usai/scripts/model-catalog-core.mjs)
+supports this only through
+`enrichModelMetadata(model, catalog, { includeReleaseMetadata: true, asOf: "2026-11-17" })`.
+The option defaults off. A missing or invalid `asOf` when enabled is a caller
+error, not missing upstream metadata. The pure function never reads the clock.
+It reuses the existing precision matcher and backend preference order, stopping
+at the first precise match even if a fallback has a newer or valid date.
+Identity matching may use deployment-date tokens; release metadata never derives
+from those tokens. Existing exports, builder behavior, runtime output, and
+capability opt-in semantics remain unchanged.
+
+Older closed-schema consumers may reject this additive pair. Keep production
+emission off until each receiving validator and consumer supports it. This
+contract does not enable a renderer, plugin, ranking, or default-model change.
+It makes no UI ordering or cross-vendor quality claim. See
+[ADR 0008](../../../docs/decisions/0008-model-release-metadata.md) for the boundary
+and deferred integration.
 
 ## Consumer Requirements
 
