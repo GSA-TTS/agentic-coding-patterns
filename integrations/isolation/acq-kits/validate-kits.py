@@ -56,6 +56,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -298,8 +299,13 @@ def _compose_file_reference_errors(compose_doc: object) -> list[str]:
     return errors
 
 
-def _compose_escape_errors(compose_doc: object, compose_path: Path, kit_dir: Path) -> list[str]:
-    """Return errors for container escape primitives outside the gateway vocabulary."""
+def _compose_escape_errors(compose_doc: object, project_dir: Path, kit_dir: Path) -> list[str]:
+    """Return errors for container escape primitives outside the gateway vocabulary.
+
+    project_dir is the Compose project directory (the parent of the first Compose
+    file, unresolved), against which Compose resolves every relative bind source
+    across all merged files.
+    """
     errors: list[str] = []
     for service_name, service in _compose_services(compose_doc).items():
         if not isinstance(service, dict):
@@ -378,7 +384,7 @@ def _compose_escape_errors(compose_doc: object, compose_path: Path, kit_dir: Pat
             # one is a named volume.
             is_long_bind = isinstance(volume, dict) and volume.get("type") == "bind"
             if source.startswith(".") or is_long_bind:
-                source_path = (compose_path.parent / source).resolve()
+                source_path = (project_dir / source).resolve()
                 try:
                     source_path.relative_to(kit_dir.resolve())
                 except ValueError:
@@ -643,6 +649,11 @@ def validate_kit(kit_dir: Path, schema: dict) -> tuple[list[str], list[str]]:
                         f"{kit_dir.name}: serviceGateways[{i}].runtime.compose.files must list at least one file"
                     )
 
+                project_dir = (
+                    Path(os.path.normpath(kit_dir.resolve() / str(compose_files[0]))).parent
+                    if compose_files
+                    else kit_dir.resolve()
+                )
                 candidate_ports: set[int] = set()
                 inspected_compose = False
                 found_named_service = False
@@ -665,6 +676,15 @@ def validate_kit(kit_dir: Path, schema: dict) -> tuple[list[str], list[str]]:
                     if not compose_path.exists():
                         errors.append(f"{kit_dir.name}: serviceGateways[{i}].runtime.compose.files[] not found: {rel}")
                         continue
+                    # Compose does not resolve symlinks when choosing the project
+                    # directory, so a symlinked file or directory component would let
+                    # relative bind sources land somewhere this validator did not check.
+                    if Path(os.path.normpath(kit_dir.resolve() / rel)) != compose_path:
+                        errors.append(
+                            f"{kit_dir.name}: serviceGateways[{i}].runtime.compose.files[] must not traverse "
+                            f"symlinks (got {rel!r})"
+                        )
+                        continue
                     try:
                         compose_doc = yaml.safe_load(compose_path.read_text())
                     except yaml.YAMLError as e:
@@ -675,7 +695,7 @@ def validate_kit(kit_dir: Path, schema: dict) -> tuple[list[str], list[str]]:
                     inspected_compose = True
                     for detail in _compose_indirection_errors(compose_doc):
                         errors.append(f"{kit_dir.name}: serviceGateways[{i}].runtime.compose file {rel}: {detail}")
-                    for detail in _compose_escape_errors(compose_doc, compose_path, kit_dir):
+                    for detail in _compose_escape_errors(compose_doc, project_dir, kit_dir):
                         errors.append(f"{kit_dir.name}: serviceGateways[{i}].runtime.compose file {rel}: {detail}")
                     for detail in _compose_volume_definition_errors(compose_doc):
                         errors.append(f"{kit_dir.name}: serviceGateways[{i}].runtime.compose file {rel}: {detail}")

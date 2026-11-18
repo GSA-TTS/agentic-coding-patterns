@@ -864,3 +864,52 @@ class TestServiceGatewaysValidator:
         errors, _warnings = validate_kit(kit, _load_schema())
         assert any("expose.env: invalid env var name 'BAD-NAME'" in e for e in errors), errors
         assert any("expose.env['WEB_GATEWAY_URL']" in e and "'url'" in e for e in errors), errors
+
+    def _gateway_spec(self, files: str) -> str:
+        return (
+            "schemaVersion: hybrid/v1\n"
+            "kind: mixin\n"
+            "name: projdir\n"
+            "displayName: Proj Dir\n"
+            "description: d\n"
+            "serviceGateways:\n"
+            "  - name: demo-gateway\n"
+            "    runtime:\n"
+            "      compose:\n"
+            f"        files: {files}\n"
+            "        service: gateway\n"
+            "    interface:\n"
+            "      protocol: http\n"
+            "      port: 8080\n"
+            "    expose:\n"
+            "      env:\n"
+            "        WEB_GATEWAY_URL: url\n"
+        )
+
+    @pytest.mark.parametrize("source", ["..:/x", "../..:/x"])
+    def test_relative_bind_resolves_against_first_file_project_dir(self, tmp_path, source):
+        # Compose resolves relative sources in every merged file against the
+        # first file's directory, so ".." from a nested override file escapes
+        # the kit even though it stays inside the kit relative to that file.
+        validate_kit = _load_validate_kit()
+        kit = _write_kit(
+            tmp_path / "kits" / "projdir",
+            self._gateway_spec("[compose.yaml, sub/o.yaml]"),
+            "services:\n  gateway:\n    image: ghcr.io/example/gateway:1.0.0\n    expose: [8080]\n",
+        )
+        (kit / "sub").mkdir()
+        (kit / "sub" / "o.yaml").write_text(f"services:\n  gateway:\n    volumes: ['{source}']\n")
+        errors, _warnings = validate_kit(kit, _load_schema())
+        assert any("outside the kit" in e for e in errors), errors
+
+    def test_rejects_symlinked_compose_file(self, tmp_path):
+        validate_kit = _load_validate_kit()
+        kit = _write_kit(tmp_path / "kits" / "symkit", self._gateway_spec("[x.yaml]"))
+        (kit / "a" / "b").mkdir(parents=True)
+        (kit / "a" / "b" / "c.yaml").write_text(
+            "services:\n  gateway:\n    image: ghcr.io/example/gateway:1.0.0\n"
+            "    expose: [8080]\n    volumes: ['../..:/x']\n"
+        )
+        (kit / "x.yaml").symlink_to("a/b/c.yaml")
+        errors, _warnings = validate_kit(kit, _load_schema())
+        assert any("symlink" in e for e in errors), errors
