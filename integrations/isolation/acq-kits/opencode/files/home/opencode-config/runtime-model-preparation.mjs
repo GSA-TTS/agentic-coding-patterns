@@ -426,6 +426,16 @@ function nonChatReason(id, name = "") {
   return null
 }
 
+// Full Gregorian day only; no clock, partial dates, rollover or year zero.
+function validReleaseDate(value) {
+  if (typeof value !== "string" || !/^(?!0000)[0-9]{4}-[0-9]{2}-[0-9]{2}(?![\s\S])/.test(value)) return false
+  const date = new Date(`${value}T00:00:00.000Z`)
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value
+}
+
+// Bounded source identity, not a URL or an instruction to fetch anything.
+const RELEASE_SOURCE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*(?:\/[A-Za-z0-9][A-Za-z0-9._-]*)*(?::[0-9]+)?(?![\s\S])/
+
 /**
  * Optional metadata for ONE already validated, advertised model. Positive
  * provider limits (contextWindow/maxOutputTokens) win independently; the first
@@ -433,25 +443,40 @@ function nonChatReason(id, name = "") {
  * Missing limits stay ABSENT: only authoring callers may apply generic defaults.
  * No membership, recommendations or curated capabilities are copied here.
  * includeCapabilities opts into UNVERIFIED upstream values, not gateway facts.
+ * includeReleaseMetadata requires an explicit valid asOf day; only the selected
+ * match's release_date can supply a nonfuture date and paired source identity.
  * Inputs are not mutated. Invalid upstream cost retains the builder's throwing
  * behavior; callers own their optional-enrichment failure policy.
  */
-function enrichModelMetadata(model, modelsDevCatalog, { includeCapabilities = false } = {}) {
+function enrichModelMetadata(model, modelsDevCatalog, {
+  includeCapabilities = false, includeReleaseMetadata = false, asOf,
+} = {}) {
+  if (includeReleaseMetadata && !validReleaseDate(asOf)) {
+    throw new Error("release metadata requires a valid YYYY-MM-DD asOf day")
+  }
   let context = normalizeLimit(model.contextWindow, null)
   let output = normalizeLimit(model.maxOutputTokens, null)
   let baseCost = null
   let above = null
   let capabilities = {}
+  let releaseMetadata = {}
   let matched = false
   let matchId = null
   let capabilityWarnings = []
   let capabilityMalformed = false
   if (modelsDevCatalog) {
-    for (const { models: providerModels } of providerModelMaps(model.vendor, modelsDevCatalog)) {
+    for (const { providerId, models: providerModels } of providerModelMaps(model.vendor, modelsDevCatalog)) {
       const match = findModelsDevMatch(model.id, providerModels)
       if (match?.data) {
         matched = true
         matchId = match.id
+        if (includeReleaseMetadata && validReleaseDate(match.data.release_date) &&
+            match.data.release_date <= asOf && match.id.length <= 128 && RELEASE_SOURCE_ID.test(match.id)) {
+          releaseMetadata = {
+            releaseDate: match.data.release_date,
+            releaseDateSource: { source: "models.dev", providerId, modelId: match.id },
+          }
+        }
         if (match.data.limit) {
           const matchedContext = match.data.limit.context
           const matchedOutput = match.data.limit.output
@@ -471,7 +496,7 @@ function enrichModelMetadata(model, modelsDevCatalog, { includeCapabilities = fa
       }
     }
   }
-  const metadata = {}
+  const metadata = { ...releaseMetadata }
   const missingLimits = []
   if (context) metadata.contextWindow = context
   else missingLimits.push("context")
