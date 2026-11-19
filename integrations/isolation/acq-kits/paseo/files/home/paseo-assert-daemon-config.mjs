@@ -2,10 +2,10 @@
 // paseo-assert-daemon-config.mjs — fail closed unless config.json contains the
 // daemon settings this kit requires before launching an unauthenticated daemon.
 
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 function resolvePaseoHome(explicit) {
   if (explicit && explicit.trim()) return path.resolve(explicit.trim());
@@ -59,14 +59,27 @@ export function assertDaemonConfig({ paseoHome, listen }) {
   }
 }
 
-// Compare URL against URL so the check is portable: on Windows
-// `process.argv[1]` is a `C:\...` path, which a `file://${...}` template turns
-// into `file://C:\...`, while `import.meta.url` is `file:///C:/...`. Those never
-// match, so this script would exit 0 without checking anything.
-if (
-  process.argv[1] &&
-  import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href
-) {
+// Run the assertion only when this file is the program being run. Compare
+// canonical paths, never the strings Node hands us: `import.meta.url` names the
+// module file Node resolved, while `process.argv[1]` is the path that was typed.
+// On Windows a `C:\...` argv makes a `file://${...}` template produce
+// `file://C:\...` against `import.meta.url`'s `file:///C:/...`; a launch through
+// a symlink, a directory junction, or a differently-cased path on a
+// case-insensitive filesystem disagrees the same way. Either mismatch skips the
+// assertion and exits 0 having checked nothing, which for a guard that must fail
+// closed is the worst possible outcome — so resolve both sides first.
+function isMainModule() {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(path.resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    // An unresolvable script path (or `node -e`, which has none) means this
+    // file is being imported, not run.
+    return false;
+  }
+}
+
+if (isMainModule()) {
   try {
     assertDaemonConfig(parseArgs(process.argv.slice(2)));
   } catch (err) {
