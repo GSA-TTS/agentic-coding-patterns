@@ -21,6 +21,7 @@ PROVIDER_PATH_PREFIX = "models/providers"
 SUPPORTED_BUNDLE_SCHEMAS = {
     "acq-provider-input-bundle/v1": "acq-provider-input-bundle.schema.json",
     "acq-provider-input-bundle/v2": "acq-provider-input-bundle-v2.schema.json",
+    "acq-provider-input-bundle/v3": "acq-provider-input-bundle-v3.schema.json",
 }
 HOST_CREDENTIAL_BINDINGS = SCHEMAS / "provider-credential-bindings.json"
 
@@ -249,36 +250,42 @@ def validate_bundle(
     validate_schema(bundle, schema_name, str(bundle_path), schema_dir)
     package_root = bundle_path.parent
     resolved_package_root = package_root.resolve()
-    for field in ("factsPath", "snapshotPath", "normalizerPath"):
+    data_only = schema_version == "acq-provider-input-bundle/v3"
+    artifact_fields = ("factsPath", "snapshotPath") if data_only else ("factsPath", "snapshotPath", "normalizerPath")
+    for field in artifact_fields:
         validate_relative_path(bundle[field], f"{bundle_path}: {field}")
         reject_symlink_components(package_root, bundle[field], f"{bundle_path}: {field}")
     facts_path = package_root / bundle["factsPath"]
     snapshot_path = package_root / bundle["snapshotPath"]
-    normalizer_path = package_root / bundle["normalizerPath"]
-    for path in (facts_path, snapshot_path, normalizer_path):
+    for field in artifact_fields:
+        path = package_root / bundle[field]
         if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(resolved_package_root):
             raise ContractError(f"{bundle_path}: declared artifact paths must be regular files inside the provider kit")
-    if not facts_path.is_file() or not snapshot_path.is_file() or not normalizer_path.is_file():
-        raise ContractError(f"{bundle_path}: declared artifact paths must be regular files")
-    # POSIX expresses executability through mode bits; Windows reports no exec
-    # bits and os.access(X_OK) is trivially true there, so those checks cannot
-    # prove executability on Windows. Keep the POSIX mode-bit + X_OK checks as
-    # the executability contract there, and on Windows enforce the
-    # extension + shebang launcher contract instead (see NORMALIZER_LAUNCHERS),
-    # so a data file without a runnable association is rejected rather than
-    # materialized as trusted executable code.
-    if not _is_windows():
-        if not normalizer_path.stat().st_mode & 0o111:
-            raise ContractError(f"{bundle_path}: normalizerPath must be an executable file")
-        if not os.access(normalizer_path, os.X_OK):
-            raise ContractError(f"{bundle_path}: normalizerPath is not executable by the validator")
-    else:
-        validate_normalizer_launcher(normalizer_path, bundle_path)
+    if not data_only:
+        normalizer_path = package_root / bundle["normalizerPath"]
+        if not facts_path.is_file() or not snapshot_path.is_file() or not normalizer_path.is_file():
+            raise ContractError(f"{bundle_path}: declared artifact paths must be regular files")
+        # POSIX expresses executability through mode bits; Windows reports no exec
+        # bits and os.access(X_OK) is trivially true there, so those checks cannot
+        # prove executability on Windows. Keep the POSIX mode-bit + X_OK checks as
+        # the executability contract there, and on Windows enforce the
+        # extension + shebang launcher contract instead (see NORMALIZER_LAUNCHERS),
+        # so a data file without a runnable association is rejected rather than
+        # materialized as trusted executable code.
+        if not _is_windows():
+            if not normalizer_path.stat().st_mode & 0o111:
+                raise ContractError(f"{bundle_path}: normalizerPath must be an executable file")
+            if not os.access(normalizer_path, os.X_OK):
+                raise ContractError(f"{bundle_path}: normalizerPath is not executable by the validator")
+        else:
+            validate_normalizer_launcher(normalizer_path, bundle_path)
     facts = load_json(facts_path)
     validate_schema(facts, "acq-provider-facts.schema.json", str(facts_path), schema_dir)
     provider_id = facts["providerId"]
     if bundle["providerId"] != provider_id:
         raise ContractError(f"{bundle_path}: providerId must equal facts.providerId")
+    if data_only and bundle["discovery"]["adapter"] == "usai-openai-list/v1" and provider_id != "usai":
+        raise ContractError(f"{bundle_path}: discovery.adapter usai-openai-list/v1 requires providerId usai")
     spec_path = package_root / "spec.yaml"
     if spec_path.is_file():
         spec = yaml.safe_load(spec_path.read_text())
