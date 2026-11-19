@@ -322,3 +322,54 @@ def test_fixture_normalizer_emits_lf_only_bytes(tmp_path, fixture_name):
     snapshot = (fixture_dir / "snapshot.json").read_bytes()
     assert produced.count(b"\r") == 0, f"{fixture_name} normalizer emitted CR bytes (CRLF line endings)"
     assert produced == snapshot, f"{fixture_name} normalizer output diverged from its committed snapshot"
+
+
+# ---------------------------------------------------------------------------
+# Byte-compared snapshots must survive a core.autocrlf=true checkout
+# ---------------------------------------------------------------------------
+
+# Files whose bytes are compared with generator output (always LF) by tests or by
+# the refresh/--check drift gates. .gitattributes must pin each to `eol=lf`.
+LF_PINNED = [
+    "integrations/isolation/schemas/fixtures/usai/snapshot.json",
+    "integrations/isolation/schemas/fixtures/acme-ai/snapshot.json",
+    "integrations/isolation/acq-kits/usai-provider/files/home/usai-config/model-catalog-snapshot.json",
+    "integrations/providers/usai/catalog.json",
+    "integrations/providers/usai/tests/fixtures/refresh/artifacts/catalog.json",
+    "integrations/providers/usai/tests/fixtures/refresh/artifacts/snapshot.json",
+]
+
+
+def _git(*args: str, cwd: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(  # noqa: S603 - fixed argv, no shell
+        ["git", *args], cwd=cwd, capture_output=True, text=True, encoding="utf-8", check=True
+    )
+
+
+def test_lf_pinned_snapshots_survive_autocrlf_checkout(tmp_path):
+    """A real clone with core.autocrlf=true must leave the pinned snapshots byte-identical."""
+    if shutil.which("git") is None:
+        pytest.skip("git is not available")
+    origin = tmp_path / "origin"
+    origin.mkdir()
+    _git("init", "-q", cwd=origin)
+    _git("config", "user.email", "test@example.invalid", cwd=origin)
+    _git("config", "user.name", "test", cwd=origin)
+    _git("config", "core.autocrlf", "false", cwd=origin)
+    shutil.copyfile(ROOT / ".gitattributes", origin / ".gitattributes")
+    for rel in LF_PINNED:
+        target = origin / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((ROOT / rel).read_bytes())
+    _git("add", "-A", cwd=origin)
+    _git("commit", "-q", "-m", "snapshots", cwd=origin)
+
+    clone = tmp_path / "clone"
+    _git("-c", "core.autocrlf=true", "clone", "-q", str(origin), str(clone), cwd=tmp_path)
+
+    for rel in LF_PINNED:
+        checked_out = (clone / rel).read_bytes()
+        assert b"\r" not in checked_out, (
+            f"{rel} was converted to CRLF by an autocrlf checkout; pin it in .gitattributes"
+        )
+        assert checked_out == (origin / rel).read_bytes()

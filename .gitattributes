@@ -1,5 +1,10 @@
-# Byte-compared fixture snapshots must stay LF in the working tree. Tests compare
-# normalizer output (always LF) against these files byte for byte, so a checkout
-# with core.autocrlf=true (the Windows default in Git for Windows) would otherwise
-# rewrite them to CRLF and fail the comparison. Scope is deliberately narrow.
+# Byte-compared generated artifacts must stay LF in the working tree. Tests and
+# the refresh/--check drift gates compare generator output (always LF) against
+# these files byte for byte, so a checkout with core.autocrlf=true (the Git for
+# Windows default) would otherwise rewrite them to CRLF and fail the comparison.
+# Scope is deliberately narrow: only files that are compared as bytes or text.
 integrations/isolation/schemas/fixtures/*/snapshot.json text eol=lf
+integrations/isolation/acq-kits/usai-provider/files/home/usai-config/model-catalog-snapshot.json text eol=lf
+integrations/providers/usai/catalog.json text eol=lf
+integrations/providers/usai/tests/fixtures/refresh/artifacts/catalog.json text eol=lf
+integrations/providers/usai/tests/fixtures/refresh/artifacts/snapshot.json text eol=lf
