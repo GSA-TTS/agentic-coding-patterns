@@ -96,13 +96,14 @@ def requires_symlink_support(test):
 
 
 def _normalizer_argv(script_path: Path) -> list[str]:
-    """Return the argv that launches a normalizer the way the runtime does.
+    """Return an interpreter-driven argv for running a normalizer.
 
-    A POSIX host can execute a shebang script directly, but Windows' CreateProcess
-    cannot: it only loads PE images, so running the file itself fails with
-    ``WinError 193``. Name the interpreter explicitly instead — ``node`` for .mjs
-    and the current interpreter for .py — so the test exercises the normalizer's
-    behaviour rather than the host's script-launching support.
+    The interpreter is chosen from the file extension: ``node`` for .mjs and
+    ``sys.executable`` for .py. This deliberately does NOT exercise direct
+    shebang execution or a runtime launcher; it only checks the normalizer's
+    output contract. Naming the interpreter also avoids the host's
+    script-launching support, which differs on Windows: CreateProcess only
+    loads PE images, so running a script file itself fails with ``WinError 193``.
     """
     suffix = script_path.suffix.lower()
     if suffix == ".py":
@@ -339,7 +340,7 @@ def test_validator_cli_accepts_explicit_external_bundle(tmp_path):
     bundle_dir = tmp_path / "provider"
     shutil.copytree(FIXTURES_DIR / "acme-ai", bundle_dir)
     command = [
-        "python3",
+        sys.executable,
         str(VALIDATOR_PATH),
         "--schema-dir",
         str(SCHEMAS_DIR),
@@ -369,7 +370,7 @@ def test_validator_cli_rejects_duplicate_explicit_provider_ids(tmp_path):
     shutil.copytree(FIXTURES_DIR / "acme-ai", second)
     result = subprocess.run(
         [
-            "python3",
+            sys.executable,
             str(VALIDATOR_PATH),
             "--schema-dir",
             str(SCHEMAS_DIR),
@@ -394,7 +395,7 @@ def test_validator_cli_explicit_mode_skips_repository_discovery(tmp_path):
     shutil.copytree(FIXTURES_DIR / "acme-ai", bundle_dir)
     result = subprocess.run(
         [
-            "python3",
+            sys.executable,
             str(VALIDATOR_PATH),
             "--schema-dir",
             str(SCHEMAS_DIR),
@@ -419,7 +420,7 @@ def test_validator_cli_rejects_malformed_credential_bindings(tmp_path):
     bindings.write_text('{"providers": []}')
     result = subprocess.run(
         [
-            "python3",
+            sys.executable,
             str(VALIDATOR_PATH),
             "--schema-dir",
             str(SCHEMAS_DIR),
@@ -452,7 +453,7 @@ def test_validator_cli_discovery_mode_validates_repository():
     duplicate. Regression for the Windows path-separator bug."""
     result = subprocess.run(
         [
-            "python3",
+            sys.executable,
             str(VALIDATOR_PATH),
             "--schema-dir",
             str(SCHEMAS_DIR),
@@ -1653,8 +1654,12 @@ def test_runtime_validator_rejects_normalizer_symlink(tmp_path):
         validate_bundle(bundle_dir / "bundle.json", {"acme-ai": "ACME_AI_API_KEY"})
 
 
-def test_fixture_normalizers_are_directly_invocable(tmp_path):
-    """Fixture normalizers transform vendor-shaped source into the exact snapshot."""
+def test_fixture_normalizers_produce_exact_snapshot_via_interpreter(tmp_path):
+    """Run each fixture normalizer through an explicit interpreter (not a shebang or launcher).
+
+    Covers the output contract only: vendor-shaped source must transform into the
+    exact committed snapshot and pass catalog validation.
+    """
     for fixture_name, provider_id in [("usai", "usai"), ("acme-ai", "acme-ai")]:
         fixture_dir = FIXTURES_DIR / fixture_name
         normalizer = fixture_dir / "normalize.py"
@@ -1692,7 +1697,7 @@ def test_validator_cli_rejects_non_object_root(tmp_path, root_value):
     bundle_path.write_text(json.dumps(root_value))
     result = subprocess.run(
         [
-            "python3",
+            sys.executable,
             str(VALIDATOR_PATH),
             "--schema-dir",
             str(SCHEMAS_DIR),
@@ -1726,7 +1731,7 @@ def test_validator_cli_rejects_non_string_schema_version(tmp_path, schema_versio
     bundle_path.write_text(json.dumps({"schemaVersion": schema_version_value}))
     result = subprocess.run(
         [
-            "python3",
+            sys.executable,
             str(VALIDATOR_PATH),
             "--schema-dir",
             str(SCHEMAS_DIR),
