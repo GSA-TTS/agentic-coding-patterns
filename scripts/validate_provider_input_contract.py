@@ -27,10 +27,12 @@ HOST_CREDENTIAL_BINDINGS = SCHEMAS / "provider-credential-bindings.json"
 
 # Host-time validation checks normalizer artifacts before materialization; the
 # validator only inspects the file and its launcher metadata and never executes
-# it. The backend materializer stages the bundle, including the normalizer, for
-# the guest, and provider-shipped normalizers execute in the guest under the
-# containment contract in
-# integrations/isolation/docs/decisions/0004-neutral-model-provider-discovery.md.
+# it. Provider-shipped normalizers are staged for guest execution, never run on
+# the host next to real secrets. The containment requirements for that guest
+# execution are defined in
+# integrations/isolation/docs/decisions/0004-neutral-model-provider-discovery.md
+# and are not enforced by this validator; until an orchestrator enforces them, a
+# normalizer must be treated as trusted arbitrary code.
 # POSIX expresses a normalizer's executability through mode bits
 # (st_mode & 0o111) and os.access(X_OK). Windows reports no mode bits and
 # os.access(X_OK) is trivially true there, so those checks are a no-op and must
