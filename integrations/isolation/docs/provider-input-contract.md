@@ -3,19 +3,64 @@ title: "Provider Input Bundle Consumer Contract"
 description: "Versioned provider bundle paths and the backend-supplied read-only consumer root."
 status: canonical
 tier: 2
-last_updated: "2026-10-21"
+last_updated: "2026-11-17"
 ---
 
 # Provider Input Bundle Consumer Contract
 
-Provider input bundles let provider kits publish facts, a normalizer, and a
-vendored model snapshot without coupling a consumer to a provider or sandbox
-backend. The host validates and stages these inputs; the backend materializer
-owns the supplied root, read-only mount, and consumer wiring.
+Provider input bundles let provider kits publish facts and a vendored model
+snapshot without coupling a consumer to a sandbox backend. Versions 1 and 2
+also declare a provider normalizer; version 3 instead selects a trusted adapter
+with inline data. The host validates and stages these inputs; the backend
+materializer owns the supplied root, read-only mount, and consumer wiring.
+
+## Version 3: Data-Only Discovery
+
+`acq-provider-input-bundle/v3` is an additive contract. Its complete manifest
+shape is:
+
+```json
+{
+  "schemaVersion": "acq-provider-input-bundle/v3",
+  "providerId": "usai",
+  "factsPath": "facts.json",
+  "snapshotPath": "snapshot.json",
+  "providerPath": "models/providers/usai",
+  "credentialEnvNames": ["USAI_API_KEY"],
+  "discovery": {"adapter": "usai-openai-list/v1"}
+}
+```
+
+`discovery` is an inline object, not a file path. Its only property, `adapter`,
+is a closed enum containing `usai-openai-list/v1`. That adapter is valid only
+for `providerId: "usai"`; it is not a generic OpenAI-compatible adapter for
+other providers. No arbitrary mapping, import, command, `normalizerPath`, or
+other execution field is accepted, either at the bundle root or in `discovery`.
+The trusted runtime owns the adapter implementation, not the provider kit.
+
+Version 3 uses `acq-provider-input-bundle-v3.schema.json`. The host validator
+checks facts and snapshot as regular, contained, non-symlink JSON files, applies
+their existing schemas, cross-checks provider identity and canonical
+`providerPath`, checks credential-name ownership and declaration, and retains
+the same HTTPS/same-host checks and set-wide duplicate-provider refusal. It
+does not execute provider code, fetch a model list, or test credentials.
+
+The first planned runtime consumer is **OpenCode on MSB**. Live membership must
+be discovered, enriched using the existing matcher and models.dev tooling, and
+rendered before OpenCode launches. Required discovery failure blocks launch;
+snapshot-only operation must be explicitly selected and identified as degraded,
+never silently substituted for live discovery. A v2 executable normalizer is
+not reinterpreted as a v3 adapter. Existing v1/v2 validation behavior is unchanged.
+
+This contract does not implement that runtime or Quickstart wiring. Keep the
+production USAi manifest on v2 until both are ready and qualified. It adds no
+kit, scheduler, or runtime dependency graph and makes no Pi or SBX support claim.
+See the [approved initial-delivery amendment in ADR 0004](decisions/0004-neutral-model-provider-discovery.md#approved-initial-delivery-amendment-2026-11-13).
 
 ## Version 2
 
-New bundles use `schemaVersion: "acq-provider-input-bundle/v2"` and declare:
+Existing normalizer bundles use `schemaVersion: "acq-provider-input-bundle/v2"`
+and declare:
 
 ```json
 {
@@ -52,10 +97,12 @@ to name the released fixed location
 `/var/lib/acq/host/models/providers/<providerId>`. Existing version 1 consumers
 therefore continue working unchanged.
 
-New bundles must use version 2. Consumers supporting both versions use the v1
-fixed `projectedPath` or compose the v2 `providerPath` under the supplied root.
+Normalizer bundles use version 2; data-only discovery bundles use version 3
+once their consumers support it. Consumers use the v1 fixed `projectedPath`
+or compose the v2/v3 `providerPath` under the supplied root.
 The validation contract retains the same artifact, symlink, credential, URL,
-executable, and strict-JSON checks for both versions.
+executable, and strict-JSON checks for versions 1 and 2. Version 3 shares the
+data checks but has no executable artifact.
 
 The released `acq-provider-input-bundle.schema.json` remains the v1 schema with
 its original `$id`. Version 2 uses
@@ -85,14 +132,68 @@ They MUST come from the pinned Patterns release and backend-owned credential
 configuration, never from bundle contents or provider-controlled metadata. A
 provider controls only the staged manifest path(s) passed with `--bundle`.
 
+## Optional Model Release Metadata
+
+The closed `acq-neutral-model-catalog/v1` model schema accepts an optional pair:
+
+```json
+{
+  "id": "gpt_5_2_default_v2",
+  "releaseDate": "2025-12-11",
+  "releaseDateSource": {
+    "source": "models.dev",
+    "providerId": "azure",
+    "modelId": "gpt-5.2"
+  }
+}
+```
+
+This is the upstream model's reported release day, not the gateway deployment
+day, discovery time, or a quality score. `releaseDateSource` identifies the
+selected models.dev provider/model map keys. Its provider is not the catalog's
+gateway `providerId` (`usai` in this example). The source object is closed:
+`source` is exactly `models.dev`, `providerId` is a safe slug of at most 32
+characters, and `modelId` is an ASCII identifier of at most 128 characters.
+Model source IDs allow alphanumerics, dot, underscore, hyphen, slash-separated
+segments, and a terminal numeric colon revision. URLs, commands, and extra
+fields are not supported; consumers MUST NOT treat provenance as a fetch target.
+
+Both fields MUST be present together or both absent. Dates require a real
+Gregorian `YYYY-MM-DD` day (years 0001–9999), including leap-year validation.
+Producers MUST omit the pair when the selected match has missing, malformed,
+partial, or future `release_date`, or an unrepresentable source identity. They
+MUST retain the model and its other valid metadata. Never substitute
+`last_updated`, a date embedded in an ID, the current day, or a fabricated date.
+The schema enforces calendar validity even without format checking; the dynamic
+nonfuture bound requires the producer's explicit `asOf` day.
+
+The [shared enrichment core](../../providers/usai/scripts/model-catalog-core.mjs)
+supports this only through
+`enrichModelMetadata(model, catalog, { includeReleaseMetadata: true, asOf: "2026-11-17" })`.
+The option defaults off. A missing or invalid `asOf` when enabled is a caller
+error, not missing upstream metadata. The pure function never reads the clock.
+It reuses the existing precision matcher and backend preference order, stopping
+at the first precise match even if a fallback has a newer or valid date.
+Identity matching may use deployment-date tokens; release metadata never derives
+from those tokens. Existing exports, builder behavior, runtime output, and
+capability opt-in semantics remain unchanged.
+
+Older closed-schema consumers may reject this additive pair. Keep production
+emission off until each receiving validator and consumer supports it. This
+contract does not enable a renderer, plugin, ranking, or default-model change.
+It makes no UI ordering or cross-vendor quality claim. See
+[ADR 0008](../../../docs/decisions/0008-model-release-metadata.md) for the boundary
+and deferred integration.
+
 ## Consumer Requirements
 
 - Treat an absent required `ACQ_PROVIDER_INPUT_ROOT` or provider directory as
   **not ready**, never as an empty provider set.
 - Treat a present authoritative root with zero provider directories as a valid,
   authoritative empty provider set.
-- Treat a rejected bundle as a provisioning failure. Build an empty aggregate
-  only after successful authoritative discovery confirms zero providers.
+- Treat a rejected bundle as a provisioning failure. An empty model result is
+  valid only after successful authoritative discovery confirms it; the initial
+  v3 delivery does not require a new writable aggregate file.
 - Read provider routing and credential-name facts only from the backend's
   read-only provider directory.
 - Do not place credential values in the bundle, mount, aggregate catalog, or

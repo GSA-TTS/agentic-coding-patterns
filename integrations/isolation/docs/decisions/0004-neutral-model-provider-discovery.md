@@ -15,13 +15,92 @@ nist_controls: ["SC-7", "AC-4", "CM-7", "SI-10"]
 > bundles are versioned independently so the mechanism can preserve a stable
 > provider layout while backends supply their proven read-only guest root.
 >
-> **Proposed amendment (not in effect).** [Patterns ADR 0002](../../../../docs/decisions/0002-runtime-model-refresh-aggregation.md)
-> is a proposed record. If it is accepted, it would supersede part of this
-> record: the guest-local writable aggregate at `/var/lib/acq/models/catalog.json`,
-> the orchestrator that writes it in the guest, the in-guest placement of Layer 2
-> steps 1 to 4, and Layer 3's reading of that file. Until it is accepted, this
-> record is unchanged and remains the accepted design. The text below is
-> unchanged.
+> **Amended for the initial delivery on 2026-11-13 by explicit operator
+> approval.** The section below controls the first OpenCode-on-MSB release.
+> The original design is retained as history and longer-term context, not a
+> requirement to ship a new kit or execute provider normalizers in that release.
+> [Patterns ADR 0002](../../../../docs/decisions/0002-runtime-model-refresh-aggregation.md)
+> remains proposed; its former blanket deferral is not accepted policy.
+
+## Approved Initial-Delivery Amendment (2026-11-13)
+
+The operator explicitly approved an initial **trusted, data-only discovery
+adapter inside the VM**, live-required startup, OpenCode on MSB first, and reuse
+of the existing matcher and models.dev enrichment. This is a deliberate departure
+from the original provider-shipped executable normalizer and zero-vendor-knowledge
+orchestrator design, not an implementer relaxing its containment requirements.
+
+The additive `acq-provider-input-bundle/v3` manifest retains facts, snapshot,
+provider-relative path, and credential names. It replaces `normalizerPath` with
+inline `discovery: {"adapter": "usai-openai-list/v1"}`. That closed identifier
+selects only a trusted implementation and is valid only for provider `usai`.
+No provider-supplied executable, dynamic import, arbitrary mapping, or alternate
+normalizer path is supported. Adding another adapter needs a reviewed contract
+change; third-party provider support is not automatic in this first delivery.
+Versions 1 and 2 retain their existing validation and executable-file requirements.
+They are not silently migrated or treated as data-only adapters.
+
+For this release, the following requirements supersede the conflicting parts of
+the original Layer 1–3 design, fallback rules, flow diagram, and consequences:
+
+- The host validates static provider data only, including regular-file and path
+  containment, symlink rejection, schema checks, credential ownership, canonical
+  provider paths, unique providers, and same-host HTTPS routing. The backend
+  supplies the immutable input generation through its read-only mount. Host-side
+  provider-code execution remains prohibited.
+- A trusted in-VM helper obtains live membership from the read-only facts URL.
+  It must require HTTPS on port 443, exact authorized host, no user information
+  or fragments, no redirects, strict response validation, and no silent
+  pagination truncation. Only that authorized provider request gets credentials;
+  credentials never enter arguments, diagnostics, or output files.
+- Discovery has a 45-second total deadline. Requests have a 15-second ceiling
+  shortened to the remaining budget. Streamed response caps are 10 MiB for
+  providers and 32 MiB for metadata, including error bodies. Limit the input set
+  to eight providers, each catalog to 500 models, and serialized results to
+  4 MiB. These are runtime acceptance requirements, not claims about the host
+  validator's resource limits.
+- Reuse the existing precision matcher, provider preferences, models.dev
+  enrichment, and conservative non-chat filtering. Fetch the fixed public
+  models.dev endpoint at most once, without provider credentials. Live membership
+  controls additions, removals, and empty lists; enrichment must not restore an
+  absent model. Provider limits take precedence. Missing metadata stays absent;
+  upstream metadata is not proof of gateway capability. Keep curated capabilities
+  only for exact IDs and remove recommendations for absent models without
+  inventing rankings.
+- Live discovery is required by default. Discovery, validation, or rendering
+  failure blocks launch. Optional enrichment failure may leave valid live members
+  unenriched and must be reported. Snapshot-only mode requires explicit selection
+  and reports its degraded source. Authentication refusal or unsafe input never
+  causes silent snapshot fallback.
+- One awaited foreground preparation step must finish before the actual OpenCode
+  process starts, including on restart. Bind it to the selected immutable input
+  generation and a new invocation token. Use a per-config cooperative lock with a
+  five-second wait and no automatic lock stealing, private mode-0700 temporary
+  storage, and atomic metadata publication. Pass validated provider objects to
+  the existing renderer in memory; routing still comes separately from read-only
+  facts. A historical marker or asynchronous startup dispatch is not readiness.
+- Do not add a models orchestrator kit, daemon, scheduler, runtime dependency
+  graph, or new writable aggregate authority. This release covers OpenCode on MSB
+  only; Pi and SBX require separate implementation and qualification. Sequencing
+  and locks do not protect against hostile processes sharing the guest account.
+
+The schema and host validator are only the input-contract slice. This amendment
+does not claim that runtime discovery, launch wiring, or real-VM qualification
+has been implemented. Keep the production USAi manifest at v2 until the runtime
+and Quickstart consumer are ready. Release evidence must include offline boundary
+tests and a fresh MSB VM showing live membership, enriched metadata, effective
+OpenCode configuration, model enumeration, and a bounded request to a newly
+available model. Missing credentials or runtime support is a blocker, not a
+mocked pass. Broader arbitrary-normalizer execution remains subject to the
+original containment requirements, not authorized by this amendment.
+
+See [Provider Input Bundle Consumer Contract](../provider-input-contract.md)
+and `acq-provider-input-bundle-v3.schema.json` for the manifest contract.
+
+## Original Design and Rationale
+
+The sections below preserve the original decision. For the initial delivery,
+the approved amendment above takes precedence wherever they conflict.
 
 ## Context and Problem Statement
 
@@ -128,8 +207,7 @@ a root-owned *guest* path is not a trust boundary against a prompt-injected
 agent. The read-only host mount is. `acq` reads only **static data** from the
 kit on the host; no provider-kit code runs on the host. See
 [Security model](#security-model) and quickstart ADR-0035
-(*Host-Authoritative Sandbox Configuration*, pending —
-GSA-TTS/agentic-coding-quickstart#504), the mechanism of record.
+(*Host-Authoritative Sandbox Configuration*), the mechanism of record.
 
 `providerId` is used as a **filesystem path segment** — it names the
 materialized directory `/var/lib/acq/host/models/providers/<PROVIDER_ID>/` — so
@@ -597,7 +675,7 @@ sequenceDiagram
 - Requires no change to the `hybrid/v1` schema. The mechanism composes from the
   `caps.network.allow` union, sequential startup-phase ordering, and the
   host-authoritative read-only config mount from quickstart ADR-0035
-  (pending — GSA-TTS/agentic-coding-quickstart#504).
+  (*Host-Authoritative Sandbox Configuration*).
 
 ## Alternatives Considered
 
@@ -647,8 +725,8 @@ sequenceDiagram
   `acq-neutral-model-catalog/v1` and `acq-neutral-model-aggregate/v1` while
   `integrations/providers/usai/` already ships `usai-model-catalog/v1`. Two
   distinct neutral-catalog lineages and two host-side builders now coexist in
-  one repo. Reconciling them is tracked with the schema work in
-  GSA-TTS/agentic-coding-patterns#435; a host-side materialization design would
+  one repo. Reconciling them requires shared schema work; a host-side
+  materialization design would
   make that reconciliation a prerequisite rather than a follow-up.
 - **No discovery mechanism; hardcode one vendor per harness kit.** Excluded: a
   harness kit could not learn which provider kit(s) are present without a
@@ -683,7 +761,7 @@ sequenceDiagram
   forces
   a choice between host-executed provider code and re-centralized per-vendor
   knowledge (see *Alternatives*). It also requires reconciling the two
-  coexisting catalog schemas first (#435). Needs human/CODEOWNERS review.
+  coexisting catalog schemas first. Needs human/CODEOWNERS review.
 - **Any relaxation of the normalizer containment contract** (Layer 2, step 2):
   granting a normalizer network access, passing it a credential, or removing its
   time/output bounds. Each would move provider-shipped code back inside the
@@ -703,11 +781,12 @@ sequenceDiagram
 ## References
 
 - `integrations/isolation/docs/provider-input-contract.md` — consumer-facing
-  version 2 root discovery and version 1 migration rules.
+  version 3 data-only discovery, version 2 root discovery, and version 1 migration.
 - `integrations/isolation/schemas/acq-provider-input-bundle.schema.json`,
-  `acq-provider-input-bundle-v2.schema.json`, `acq-provider-facts.schema.json`,
-  and `acq-neutral-model-catalog.schema.json` — formal shapes for version 1 and
-  version 2 package manifests, provider facts, and the neutral catalog.
+  `acq-provider-input-bundle-v2.schema.json`,
+  `acq-provider-input-bundle-v3.schema.json`, `acq-provider-facts.schema.json`,
+  and `acq-neutral-model-catalog.schema.json` — formal shapes for version 1,
+  version 2, and version 3 package manifests, provider facts, and the neutral catalog.
 - Quickstart ADR-0035 (*Host-Authoritative Sandbox Configuration*, pending —
   GSA-TTS/agentic-coding-quickstart#504) — the general principle and the
   per-sandbox host config dir + read-only mount + trusted-startup-execution
@@ -728,15 +807,15 @@ sequenceDiagram
   check and replace a provider credential without provider-specific code. It
   deliberately adds no provider-kit executable health-check hook, because that
   would hand provider-shipped code a credential and so widen exactly the
-  boundary [Layer 2](#layer-2--the-models-orchestrator-kit-neutral) narrows.
+  boundary [Layer 2](#layer-2--models-orchestrator-kit-vendor-agnostic) narrows.
   Two notes for whoever reconciles the two shapes: the diagnostic endpoint and
   this ADR's `modelsUrl` are the same URL on the same artifact, so one should
   reference the other rather than restate it; and the credential environment
   variable is currently recorded in three places (this ADR's `keyEnv`, that
   proposal's `credential.keyEnv`, and the model catalog's `gateway.apiKeyEnv`),
   which the schema work should collapse to one authority.
-- Quickstart [issue #506](https://github.com/GSA-TTS/agentic-coding-quickstart/issues/506)
-  (closed, fixed by [PR #512](https://github.com/GSA-TTS/agentic-coding-quickstart/pull/512))
+- Quickstart [GSA-TTS/agentic-coding-quickstart#506](https://github.com/GSA-TTS/agentic-coding-quickstart/issues/506)
+  (closed, fixed by [GSA-TTS/agentic-coding-quickstart#512](https://github.com/GSA-TTS/agentic-coding-quickstart/pull/512))
   — the startup-ordering race flagged above (`acq run` did not wait
   for an in-guest `startup`-phase config write to finish before attach,
   reproduced live against `sbx` v0.43.0) that Layers 2–3's startup-phase

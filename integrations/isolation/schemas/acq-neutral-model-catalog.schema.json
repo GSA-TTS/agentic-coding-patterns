@@ -82,6 +82,10 @@
       "required": [
         "id"
       ],
+      "dependentRequired": {
+        "releaseDate": ["releaseDateSource"],
+        "releaseDateSource": ["releaseDate"]
+      },
       "properties": {
         "id": {
           "type": "string",
@@ -115,6 +119,17 @@
           "$ref": "#/$defs/cost",
           "description": "Optional tiered pricing that applies when the input context window exceeds 200 000 tokens. Same per-million-token fields as cost. Consumers that do not support tiered pricing MUST fall back to cost."
         },
+        "releaseDate": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "format": "date",
+          "pattern": "^(?!0000)(?:[0-9]{4}-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12][0-9]|3[01])|(?:04|06|09|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8]))|(?:[0-9]{2}(?:0[48]|[2468][048]|[13579][26])|(?:[02468][048]|[13579][26])00)-02-29)(?![\\s\\S])",
+          "description": "Optional upstream model release day, not gateway deployment or catalog update time. Must accompany releaseDateSource. Producers MUST omit both fields when missing, invalid, or later than their explicit asOf day; a static schema cannot enforce that clock bound. Never infer from an ID, last_updated, or discovery time. Does not establish quality, availability, capabilities, or a default."
+        },
+        "releaseDateSource": {
+          "$ref": "#/$defs/releaseDateSource"
+        },
         "reasoning": {
           "type": "boolean",
           "description": "Optional capability flag: whether the PROVIDER's gateway supports reasoning for this model. Absent means UNKNOWN (consumers MUST NOT assume either value); false means known-unsupported; true means known-supported. Producers MUST NOT infer it from the model id or name, and MUST NOT populate it from upstream-vendor data unless the gateway's behavior has been verified. The one sanctioned exception is a producer tool that copies upstream data only behind an explicit opt-in flag and labels the output's provenance as unverified; such output MUST NOT be committed or shipped until verified. It is a capability statement only: producers and the renderer emit no reasoning effort, budget, or other request setting, although a consuming harness may derive selectable options (for example OpenCode 1.x derives reasoning-effort variants from reasoning:true for openai-compatible models)."
@@ -128,6 +143,30 @@
             "enum": ["text", "image", "audio", "video", "pdf"]
           },
           "description": "Optional capability list: input modalities the PROVIDER's gateway accepts for this model. Absent means UNKNOWN (consumers MUST NOT assume text-only or image-capable); [\"text\"] means known text-only. Producers MUST NOT infer it from the model id or name, and MUST NOT populate it from upstream-vendor data unless the gateway's behavior has been verified. The one sanctioned exception is a producer tool that copies upstream data only behind an explicit opt-in flag and labels the output's provenance as unverified; such output MUST NOT be committed or shipped until verified. The enum is a closed allowlist; a new modality requires a schema change."
+        }
+      }
+    },
+    "releaseDateSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "providerId", "modelId"],
+      "description": "Identity of the exact models.dev entry selected by the shared precision matcher in backend preference order. Provider identity is the upstream map key, not the gateway providerId. Data-only provenance, not a fetch target or verification claim.",
+      "properties": {
+        "source": {
+          "type": "string",
+          "const": "models.dev"
+        },
+        "providerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "pattern": "^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?(?![\\s\\S])"
+        },
+        "modelId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*(?::[0-9]+)?(?![\\s\\S])"
         }
       }
     },
