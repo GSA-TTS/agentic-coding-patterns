@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from pathlib import Path
 
 import jsonschema
 import pytest
+import validate_provider_input_contract as validator
 from validate_provider_input_contract import ContractError, load_json, main, validate_bundle
+
+from .test_provider_input_contract import _symlink_skip_reason
 
 ROOT = Path(__file__).resolve().parents[2]
 SCHEMAS = ROOT / "integrations/isolation/schemas"
@@ -52,17 +56,40 @@ def test_v2_still_accepts_executable_normalizer(tmp_path):
     validate_bundle(make_bundle(tmp_path / "provider", "acme-ai", 2), BINDINGS)
 
 
-@pytest.mark.parametrize("version", [1, 2])
-def test_legacy_versions_still_require_executable_normalizer(tmp_path, version):
-    path = make_bundle(tmp_path / "provider", "acme-ai", 2)
+def make_legacy_bundle(directory: Path, version: int) -> tuple[Path, Path]:
+    path = make_bundle(directory, "acme-ai", 2)
     bundle = load_json(path)
     if version == 1:
         bundle["schemaVersion"] = "acq-provider-input-bundle/v1"
         bundle["projectedPath"] = "/var/lib/acq/host/models/providers/acme-ai"
         del bundle["providerPath"]
         write_json(path, bundle)
-    (path.parent / bundle["normalizerPath"]).chmod(0o644)
+    return path, path.parent / bundle["normalizerPath"]
+
+
+@pytest.mark.parametrize("version", [1, 2])
+def test_legacy_versions_still_require_executable_normalizer(tmp_path, version):
+    if os.name == "nt":
+        pytest.skip("POSIX mode bits are not reported on Windows")
+    path, normalizer = make_legacy_bundle(tmp_path / "provider", version)
+    normalizer.chmod(0o644)
     with pytest.raises(ContractError, match="executable"):
+        validate_bundle(path, BINDINGS)
+
+
+@pytest.mark.parametrize("version", [1, 2])
+def test_legacy_versions_still_require_launcher_normalizer_on_windows(tmp_path, monkeypatch, version):
+    """Windows analogue: no mode bits, so a legacy normalizer needs a launcher.
+
+    Runs on every host through the platform seam, so the Windows branch is
+    exercised on Linux CI as well as on a real Windows runner.
+    """
+    monkeypatch.setattr(validator, "_is_windows", lambda: True)
+    path, normalizer = make_legacy_bundle(tmp_path / "provider", version)
+    normalizer.chmod(0o644)
+    validate_bundle(path, BINDINGS)
+    normalizer.write_text("plain data, not a runnable normalizer\n")
+    with pytest.raises(ContractError, match="shebang"):
         validate_bundle(path, BINDINGS)
 
 
@@ -117,6 +144,8 @@ def test_v3_rejects_unsafe_artifact_paths(tmp_path, field, value):
 @pytest.mark.parametrize("field", ["factsPath", "snapshotPath"])
 @pytest.mark.parametrize("kind", ["symlink", "parent-symlink", "missing", "directory"])
 def test_v3_requires_regular_artifacts_without_symlinks(tmp_path, field, kind):
+    if kind in {"symlink", "parent-symlink"} and (reason := _symlink_skip_reason()):
+        pytest.skip(reason)
     path = make_bundle(tmp_path / "provider")
     bundle = load_json(path)
     artifact = path.parent / bundle[field]
