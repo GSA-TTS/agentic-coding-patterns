@@ -51,6 +51,86 @@ publishes **no ports**.
 
 ## Provider input rendering
 
+### Explicit bounded preparation (not yet a launch barrier)
+
+The kit also stages the standalone `runtime-model-preparation.mjs`. Its initial
+contract is plain-terminal OpenCode on MSB, after the host validates v3 inputs
+and supplies an immutable read-only provider root. It does not execute a v2
+normalizer or reinterpret a v2 manifest as v3. The production manifest and
+existing startup command remain unchanged until consumer wiring is ready.
+
+Live mode requires `models/providers/usai/discovery.json` in the host projection,
+alongside `facts.json` and `snapshot.json`. Its exact closed shape is
+`{"schemaVersion":"acq-runtime-discovery/v1","providerId":"usai","adapter":"usai-openai-list/v1"}`.
+Only the future host v3 projector may materialize this descriptor after manifest
+validation. Absence or an invalid adapter/provider binding fails before requests.
+Explicit snapshot mode accepts legacy v2 projections without this descriptor.
+
+In that guest, invoke the trusted staged artifact with Node:
+
+```text
+node /home/agent/opencode-config/runtime-model-preparation.mjs \
+  --provider-root "$ACQ_PROVIDER_INPUT_ROOT" \
+  --global-dir /home/agent/.config/opencode \
+  --base-config /home/agent/opencode-config/base-config.jsonc
+```
+
+Default mode is `live-required`; explicit `--mode snapshot` returns a
+`snapshot-nonlive` source outcome instead. Missing roots/artifacts and required
+discovery failures are nonzero failures, never authoritative empty results.
+
+Successful CLI stdout is unchanged. Failures now emit one closed
+`acq-runtime-model-outcome/v1` JSON object on **stdout**, with exactly
+`schemaVersion`, `outcome: "failure"`, `stage`, `reason`, and `failureClass`.
+Both `hard` and `transient` failures exit **1**; stderr is fixed human-readable
+text, not the machine protocol. Failure output is capped at 1,024 UTF-8 bytes
+and contains no raw exception, status, URL, header, token, digest or path.
+JS failures expose the same closed record through `error.outcome`.
+The parent validates version, field set, size, duplicate keys, allowed values and
+exit consistency before propagating child failures. Only trusted exact-origin
+provider 429/5xx, allowlisted request connection errors or an explicit request
+abort can be transient; TLS, auth, unsafe input, malformed/partial output,
+unknown errors, lock/render failures and whole-parent deadline expiry are hard.
+Hard evidence wins even when nested errors also carry transient-looking codes.
+Optional metadata unavailability remains live membership success. **There is no
+fallback or last-good reuse in this version**; a nonzero result cannot authorize
+launch with the prior config. See ADR 0007 for the closed vocabulary and future
+host binding requirements.
+Nonterminal pagination signals fail rather than silently truncating membership.
+Exact-ID curated snapshot capabilities survive live reconstruction; snapshot
+limits/prices do not, because that format cannot distinguish provider facts
+from authoring defaults. Optional models.dev limits/prices remain unverified.
+Unsafe-integer upstream limits are omitted independently rather than failing
+otherwise valid membership. Upstream IDs use their own bounded syntax so Vertex
+`@default` metadata does not invalidate the full enrichment feed.
+Success prints only source and metadata outcomes. It does not prove a host
+generation/attempt barrier, fresh OpenCode enumeration or a successful model
+request. Host launch-path integration and live MSB qualification remain required.
+
+Required preparation uses a five-second lock wait without stale-lock stealing.
+
+For enterprise TLS, the trusted guest launcher may set `NODE_EXTRA_CA_CERTS`
+to a canonical absolute, readable regular CA bundle (at most 2 MiB), without
+symlink components or group/other write bits and not writable by the preparation
+user. For example, the Zscaler kit's root-owned system trust bundle at
+`/etc/ssl/certs/ca-certificates.crt` is usable by the unprivileged guest. The
+provisioner must protect the bundle and parent directories from replacement;
+provider inputs must not select trust roots. This validated path is forwarded
+to the child, but `NODE_OPTIONS` and TLS-disable settings are not. TLS and
+hostname validation remain enabled. See the ADR for the complete trust contract.
+
+On lock failure, inspect ownership and confirm the owner has stopped before
+separately authorized manual cleanup; do not remove an active owner's lock.
+See [ADR 0007](../../../../../docs/decisions/0007-bounded-runtime-model-preparation.md)
+for deadlines, input bounds, metadata provenance and atomic-publication limits.
+
+Generate the standalone artifact in a sandbox with
+`node integrations/providers/usai/scripts/build-runtime-artifact.mjs` from the
+repository root. `make test-kits` checks generated-byte equality and exercises
+the artifact at a flat renamed path; no provider modules need guest imports.
+
+### Existing snapshot startup path
+
 This kit is the sole acq-owned writer of OpenCode's global configuration. At
 startup it reads the backend-supplied `ACQ_PROVIDER_INPUT_ROOT`; each provider
 directory is `models/providers/<providerId>/`, with `facts.json` and
@@ -186,10 +266,14 @@ for the migration record.
 
 ## Egress allow-list
 
-Deny-by-default. `registry.npmjs.org` is the only host needed because the kit
+Deny-by-default. `registry.npmjs.org` is the install host needed because the kit
 fetches the pinned `@opencode/cli-linux-<arch>` package tarball directly from
 npm's registry. It does not need `github.com`, GitHub release-asset hosts, or
 the `opencode.ai` installer endpoint.
+
+Explicit runtime preparation also permits `models.dev` for one optional public
+metadata request without credentials. Provider membership destinations and
+credential ownership come from host-validated provider facts, not this kit.
 
 ## Version pin
 

@@ -74,6 +74,8 @@ caps:
       # platform tarball directly from npm's registry. The wrapper package's
       # postinstall path is deliberately not used.
       - registry.npmjs.org
+      # Optional public enrichment; membership destinations come from provider facts.
+      - models.dev
 
 files:
   - path: /home/agent/opencode-install.sh
@@ -88,6 +90,10 @@ files:
     mode: "0644"
     source: files/home/opencode-config/base-config.jsonc
     description: Base OpenCode policy consumed only by the startup renderer
+  - path: /home/agent/opencode-config/runtime-model-preparation.mjs
+    mode: "0644"
+    source: files/home/opencode-config/runtime-model-preparation.mjs
+    description: Standalone bounded preparation CLI (not yet wired as a host launch barrier)
 
 commands:
   # INSTALL phase, as root, create-time once — matching goose-server's
