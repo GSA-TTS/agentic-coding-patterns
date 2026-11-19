@@ -100,9 +100,10 @@ def _write_json(path: Path, payload: object) -> Path:
 def _symlink_skip_reason() -> str | None:
     """Return why this host cannot create symlinks, or None when it can.
 
-    Probing beats guessing: a non-elevated Windows account without Developer Mode
-    raises ``WinError 1314`` while a Developer-Mode runner succeeds, and some
-    filesystems refuse symlinks on every platform.
+    Probing beats guessing: a non-elevated Windows account that lacks both
+    SeCreateSymbolicLinkPrivilege and Developer Mode raises ``WinError 1314``,
+    while a runner with either route succeeds, and some filesystems refuse
+    symlinks on every platform.
     """
     with tempfile.TemporaryDirectory() as directory:
         target = Path(directory, "target")
@@ -112,8 +113,9 @@ def _symlink_skip_reason() -> str | None:
             link.symlink_to(target)
         except (OSError, NotImplementedError) as error:
             return (
-                "creating symlinks requires SeCreateSymbolicLinkPrivilege on Windows "
-                "(granted by Developer Mode, an elevated shell, or policy) or a symlink-capable filesystem "
+                "creating symlinks on Windows requires either SeCreateSymbolicLinkPrivilege "
+                "(elevated shell or local policy) or Developer Mode with a tool that requests "
+                "unprivileged symlink creation, or a symlink-capable filesystem "
                 f"on this host: {error}"
             )
     return None
@@ -329,7 +331,11 @@ def test_fixture_normalizer_emits_lf_only_bytes(tmp_path, fixture_name):
 # ---------------------------------------------------------------------------
 
 # Files whose bytes are compared with generator output (always LF) by tests or by
-# the refresh/--check drift gates. .gitattributes must pin each to `eol=lf`.
+# the refresh/--check drift gates, or that build-runtime-artifact.mjs reads as
+# its generated output and closed source list. .gitattributes must pin each to `eol=lf`.
+RUNTIME_ARTIFACT_CHECK = (
+    "integrations/providers/usai/scripts/build-runtime-artifact.mjs"  # executed, not byte-read: not pinned
+)
 LF_PINNED = [
     "integrations/isolation/schemas/fixtures/usai/snapshot.json",
     "integrations/isolation/schemas/fixtures/acme-ai/snapshot.json",
@@ -337,6 +343,13 @@ LF_PINNED = [
     "integrations/providers/usai/catalog.json",
     "integrations/providers/usai/tests/fixtures/refresh/artifacts/catalog.json",
     "integrations/providers/usai/tests/fixtures/refresh/artifacts/snapshot.json",
+    "integrations/isolation/acq-kits/opencode/files/home/opencode-config/runtime-model-preparation.mjs",
+    "integrations/isolation/acq-kits/opencode/files/home/opencode-config/runtime-preparation-source.mjs",
+    "integrations/isolation/acq-kits/opencode/files/home/opencode-config/render-provider-config.mjs",
+    "integrations/providers/usai/scripts/model-catalog-core.mjs",
+    "integrations/providers/usai/scripts/runtime-model-bounds.mjs",
+    "integrations/providers/usai/scripts/runtime-model-outcome.mjs",
+    "integrations/providers/usai/scripts/runtime-model-discovery.mjs",
 ]
 
 
@@ -357,7 +370,7 @@ def test_lf_pinned_snapshots_survive_autocrlf_checkout(tmp_path):
     _git("config", "user.name", "test", cwd=origin)
     _git("config", "core.autocrlf", "false", cwd=origin)
     shutil.copyfile(ROOT / ".gitattributes", origin / ".gitattributes")
-    for rel in LF_PINNED:
+    for rel in [*LF_PINNED, RUNTIME_ARTIFACT_CHECK]:
         target = origin / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes((ROOT / rel).read_bytes())
@@ -373,3 +386,17 @@ def test_lf_pinned_snapshots_survive_autocrlf_checkout(tmp_path):
             f"{rel} was converted to CRLF by an autocrlf checkout; pin it in .gitattributes"
         )
         assert checked_out == (origin / rel).read_bytes()
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not available to run the runtime artifact generator check")
+    result = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        [node, RUNTIME_ARTIFACT_CHECK, "--check"],
+        cwd=clone,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
