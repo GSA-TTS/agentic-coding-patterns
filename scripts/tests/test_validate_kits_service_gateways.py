@@ -1099,3 +1099,129 @@ class TestComposeBypassRejections:
         kit = _write_kit(tmp_path / "suffix", _gateway_spec(), _GW_HEAD + "    expose: ['8080/tcp', 8080]\n")
         errors, _warnings = validate_kit(kit, _load_schema())
         assert errors == [], errors
+
+
+class TestComposeNetworkBoundary:
+    """Network attachment and namespace-reference allowlist, via the full validate_kit() entry point."""
+
+    @staticmethod
+    def _run(tmp_path, compose_yaml, name="net"):
+        validate_kit = _load_validate_kit()
+        kit = _write_kit(tmp_path / name, _gateway_spec(port=8080), compose_yaml)
+        return validate_kit(kit, _load_schema())[0]
+
+    @pytest.mark.parametrize(
+        "compose_yaml",
+        [
+            _GW_HEAD + "    expose: [8080]\n",
+            _GW_HEAD + "    expose: [8080]\n    networks: [backend]\nnetworks:\n  backend:\n",
+            _GW_HEAD + "    expose: [8080]\n    networks: [default]\n",
+            _GW_HEAD
+            + "    expose: [8080]\n    networks:\n      backend:\n        aliases: [gw]\n"
+            + "networks:\n  backend:\n    driver: bridge\n    internal: true\n    labels: {a: b}\n",
+            _GW_HEAD + "    expose: [8080]\n    network_mode: 'service:sidecar'\n"
+            "  sidecar:\n    image: ghcr.io/example/side:1.0.0\n",
+            _GW_HEAD + "    expose: [8080]\n    ipc: shareable\n",
+        ],
+    )
+    def test_allows_managed_bridge_and_intra_file_service_modes(self, tmp_path, compose_yaml):
+        assert self._run(tmp_path, compose_yaml) == []
+
+    def test_rejects_intra_file_service_reference_to_noncompliant_service(self, tmp_path):
+        errors = self._run(
+            tmp_path,
+            _GW_HEAD + "    expose: [8080]\n    network_mode: 'service:sidecar'\n"
+            "  sidecar:\n    image: ghcr.io/example/side:1.0.0\n    privileged: true\n",
+        )
+        assert any("'sidecar'" in e and "privileged" in e for e in errors), errors
+
+    @pytest.mark.parametrize(
+        ("snippet", "expected"),
+        [
+            ("    network_mode: 'service:missing'\n", "not a service defined in this file"),
+            ("    network_mode: 'container:abc123'\n", "network_mode"),
+            ("    network_mode: bridge\n", "network_mode"),
+            ("    network_mode: none\n", "network_mode"),
+            ("    network_mode: 'network:foo'\n", "network_mode"),
+            ("    network_mode: ['host']\n", "network_mode"),
+            ("    network_mode: 5\n", "network_mode"),
+            ("    network_mode: 'service:a b'\n", "network_mode"),
+            ("    network_mode: 'service:${SVC}'\n", "Compose interpolation"),
+            ("    pid: 'container:abc'\n", "pid"),
+            ("    pid: 'service:missing'\n", "not a service defined in this file"),
+            ("    ipc: 'container:abc'\n", "ipc"),
+            ("    ipc: 'service:missing'\n", "not a service defined in this file"),
+            ("    ipc: whatever\n", "ipc"),
+            ("    pid: [host]\n", "pid"),
+            ("    pid: {a: b}\n", "pid"),
+            ("    ipc: ['container:x']\n", "ipc"),
+            ('    network_mode: "service:gateway\\n"\n', "network_mode"),
+            ("    uts: host\n", "uts: host"),
+            ("    uts: 'container:abc'\n", "external container namespaces"),
+            ("    userns_mode: 'container:abc'\n", "external container namespaces"),
+            ("    cgroup: 'container:abc'\n", "external container namespaces"),
+            ("    external_links: [other:alias]\n", "external_links"),
+        ],
+    )
+    def test_rejects_unsupported_namespace_references(self, tmp_path, snippet, expected):
+        errors = self._run(tmp_path, _GW_HEAD + "    expose: [8080]\n" + snippet)
+        assert any(expected in e for e in errors), errors
+
+    @pytest.mark.parametrize(
+        ("snippet", "expected"),
+        [
+            ("    networks: [ghost]\n", "not defined in this file"),
+            ("    networks:\n      ghost:\n        aliases: [a]\n", "not defined in this file"),
+            ("    networks: ['${NET}']\n", "Compose interpolation"),
+            ("    networks: $NETS\n", "Compose interpolation"),
+            ("    networks: backend\n", "list or mapping"),
+            ("    networks:\n      default:\n        gw_priority: 1\n", "unsupported key"),
+            ("    networks:\n      default: [x]\n", "must be a mapping"),
+            ("    networks: [5]\n", "non-string network name"),
+            ("    networks: [[a]]\n", "non-string network name"),
+            ("    networks: [{a: b}]\n", "non-string network name"),
+        ],
+    )
+    def test_rejects_bad_service_network_attachments(self, tmp_path, snippet, expected):
+        errors = self._run(tmp_path, _GW_HEAD + "    expose: [8080]\n" + snippet)
+        assert any(expected in e for e in errors), errors
+
+    @pytest.mark.parametrize(
+        ("net_yaml", "expected"),
+        [
+            ("  backend:\n    external: true\n", "declares external"),
+            ("  backend:\n    external:\n      name: prod-net\n", "declares external"),
+            ("  backend:\n    name: prod-net\n", "declares name"),
+            ("  backend:\n    driver: host\n", "only the bridge driver"),
+            ("  backend:\n    driver: macvlan\n", "only the bridge driver"),
+            ("  backend:\n    driver: overlay\n", "only the bridge driver"),
+            ("  backend:\n    driver_opts:\n      parent: eth0\n", "declares driver_opts"),
+            ("  backend:\n    attachable: true\n", "declares attachable"),
+            ("  backend:\n    ipam:\n      driver: default\n", "declares ipam"),
+            ("  backend:\n    driver: ${NET_DRIVER}\n", "Compose interpolation"),
+            ("  backend:\n    external: ${EXT:-false}\n", "Compose interpolation"),
+            ("  backend:\n    internal: 'yes'\n", "literal boolean"),
+            ("  default:\n    external: true\n    name: host\n", "declares external"),
+            ("  backend: [x]\n", "must be a mapping"),
+        ],
+    )
+    def test_rejects_unsupported_top_level_networks(self, tmp_path, net_yaml, expected):
+        errors = self._run(tmp_path, _GW_HEAD + "    expose: [8080]\n    networks: [backend]\nnetworks:\n" + net_yaml)
+        assert any(expected in e for e in errors), errors
+
+    def test_rejects_non_mapping_top_level_networks(self, tmp_path):
+        errors = self._run(tmp_path, _GW_HEAD + "    expose: [8080]\nnetworks: [a]\n")
+        assert any("top-level networks must be a mapping" in e for e in errors), errors
+
+    def test_rejects_external_network_defined_only_in_override_file(self, tmp_path):
+        validate_kit = _load_validate_kit()
+        kit = _write_kit(
+            tmp_path / "merged-net",
+            _gateway_spec("[compose.yaml, o.yaml]", port=8080),
+            _GW_HEAD + "    expose: [8080]\n",
+        )
+        (kit / "o.yaml").write_text(
+            "services:\n  gateway:\n    networks: [prod]\nnetworks:\n  prod:\n    external: true\n"
+        )
+        errors, _warnings = validate_kit(kit, _load_schema())
+        assert any("declares external" in e for e in errors), errors

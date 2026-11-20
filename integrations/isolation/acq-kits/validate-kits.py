@@ -345,7 +345,7 @@ def _compose_escape_errors(compose_doc: object, project_dir: Path, kit_dir: Path
             )
         if "build" in service:
             errors.append(f"{prefix} declares build; service gateways must use prebuilt reviewed images")
-        for key in ("network_mode", "pid", "ipc", "userns_mode", "cgroup"):
+        for key in ("network_mode", "pid", "ipc", "userns_mode", "cgroup", "uts"):
             value = service.get(key)
             if value == "host":
                 errors.append(f"{prefix} declares {key}: host")
@@ -434,6 +434,123 @@ def _compose_escape_errors(compose_doc: object, project_dir: Path, kit_dir: Path
                     f"{prefix} declares volumes_from {ref!r}; inheriting mounts from a host container is outside "
                     "serviceGateways v1"
                 )
+    return errors
+
+
+_NAMESPACE_LOCAL_MODES = frozenset({"private", "shareable", "none"})
+_NETWORK_MODE_SERVICE_RE = re.compile(r"^service:([^\s:]+)$")
+_NETWORK_SERVICE_ATTACH_KEYS = frozenset(
+    {"aliases", "ipv4_address", "ipv6_address", "link_local_ips", "priority", "mac_address", "interface_name"}
+)
+_NETWORK_DEFINITION_KEYS = frozenset({"driver", "labels", "internal", "enable_ipv6"})
+
+
+def _is_literal_str(value: object) -> bool:
+    return isinstance(value, str) and not _has_compose_interpolation(value)
+
+
+def _compose_network_errors(compose_doc: object) -> list[str]:
+    """Return errors for network attachments and namespace references outside the allowlist.
+
+    Accepted: the implicit default network, services attached to networks defined
+    in the same file as plain Compose-managed bridge networks (no external/name/
+    driver_opts/interpolation), and network_mode/pid/ipc only as absent or
+    service:<name> naming a service defined in the same file. Each service in the
+    file is independently subject to the full inspected-service policy, so a
+    service: reference to a non-compliant service is reported on that service
+    without recursing (and so without reference cycles).
+    """
+    errors: list[str] = []
+    if not isinstance(compose_doc, dict):
+        return errors
+    services = _compose_services(compose_doc)
+    defined: dict[str, object] = {}
+    top = compose_doc.get("networks")
+    if top is not None and not isinstance(top, dict):
+        errors.append("Compose top-level networks must be a mapping")
+    elif isinstance(top, dict):
+        for name, definition in top.items():
+            prefix = f"Compose network {name!r}"
+            defined[str(name)] = definition
+            if definition is None:
+                continue
+            if not isinstance(definition, dict):
+                errors.append(f"{prefix} definition must be a mapping")
+                continue
+            for key, value in definition.items():
+                if isinstance(key, str) and key.startswith("x-"):
+                    continue
+                if _has_compose_interpolation(value):
+                    errors.append(
+                        f"{prefix} declares {key} with Compose interpolation; validation cannot prove it safe"
+                    )
+                elif key == "driver":
+                    if value not in (None, "bridge"):
+                        errors.append(f"{prefix} declares driver: {value!r}; only the bridge driver is allowed")
+                elif key in ("internal", "enable_ipv6"):
+                    if not isinstance(value, bool):
+                        errors.append(f"{prefix} {key} must be a literal boolean")
+                elif key not in _NETWORK_DEFINITION_KEYS:
+                    errors.append(
+                        f"{prefix} declares {key}; only plain Compose-managed bridge networks are allowed "
+                        "(no external, name, driver_opts, attachable, or ipam)"
+                    )
+    for service_name, service in services.items():
+        if not isinstance(service, dict):
+            continue
+        prefix = f"Compose service {service_name!r}"
+        if service.get("external_links"):
+            errors.append(f"{prefix} declares external_links; links to containers outside the file are not supported")
+        for key in ("userns_mode", "cgroup", "uts"):
+            value = service.get(key)
+            if isinstance(value, str) and value.strip().lower().startswith("container:"):
+                errors.append(f"{prefix} declares {key}: {value!r}; external container namespaces are not supported")
+        for key in ("network_mode", "pid", "ipc"):
+            value = service.get(key)
+            if value is None or value == "host" or _has_compose_interpolation(value):
+                continue  # host and interpolation are reported by the escape checks
+            match = _NETWORK_MODE_SERVICE_RE.fullmatch(value) if isinstance(value, str) else None
+            if match:
+                if match.group(1) not in services:
+                    errors.append(f"{prefix} declares {key}: {value!r}, which is not a service defined in this file")
+            elif key == "network_mode" or not isinstance(value, str) or value not in _NAMESPACE_LOCAL_MODES:
+                errors.append(
+                    f"{prefix} declares {key}: {value!r}; only absent or service:<name> of a service defined in "
+                    "this file is supported"
+                )
+        attachments = service.get("networks")
+        if attachments is None:
+            continue
+        if _has_compose_interpolation(attachments):
+            errors.append(f"{prefix} declares networks with Compose interpolation; validation cannot prove it safe")
+            continue
+        if isinstance(attachments, list):
+            entries = dict.fromkeys(name if isinstance(name, str) else repr(name) for name in attachments)
+            for name in attachments:
+                if not isinstance(name, str):
+                    errors.append(f"{prefix} attaches to a non-string network name {name!r}")
+        elif isinstance(attachments, dict):
+            entries = attachments
+        else:
+            errors.append(f"{prefix} networks must be a list or mapping of network names")
+            continue
+        for net_name, config in entries.items():
+            if not isinstance(net_name, str):
+                errors.append(f"{prefix} attaches to a non-string network name {net_name!r}")
+                continue
+            if net_name != "default" and net_name not in defined:
+                errors.append(
+                    f"{prefix} attaches to network {net_name!r}, which is not defined in this file's top-level "
+                    "networks (pre-existing networks are not supported)"
+                )
+            if config is None:
+                continue
+            if not isinstance(config, dict):
+                errors.append(f"{prefix} network {net_name!r} attachment must be a mapping")
+                continue
+            for key in config:
+                if not (isinstance(key, str) and (key in _NETWORK_SERVICE_ATTACH_KEYS or key.startswith("x-"))):
+                    errors.append(f"{prefix} network {net_name!r} attachment declares unsupported key {key!r}")
     return errors
 
 
@@ -732,6 +849,8 @@ def validate_kit(kit_dir: Path, schema: dict) -> tuple[list[str], list[str]]:
                     for detail in _compose_indirection_errors(compose_doc):
                         errors.append(f"{kit_dir.name}: serviceGateways[{i}].runtime.compose file {rel}: {detail}")
                     for detail in _compose_escape_errors(compose_doc, project_dir, kit_dir):
+                        errors.append(f"{kit_dir.name}: serviceGateways[{i}].runtime.compose file {rel}: {detail}")
+                    for detail in _compose_network_errors(compose_doc):
                         errors.append(f"{kit_dir.name}: serviceGateways[{i}].runtime.compose file {rel}: {detail}")
                     for detail in _compose_volume_definition_errors(compose_doc):
                         errors.append(f"{kit_dir.name}: serviceGateways[{i}].runtime.compose file {rel}: {detail}")
