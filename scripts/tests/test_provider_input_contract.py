@@ -24,6 +24,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -92,6 +93,28 @@ def requires_symlink_support(test):
     if reason is None:
         return test
     return pytest.mark.skip(reason=reason)(test)
+
+
+def _normalizer_argv(script_path: Path) -> list[str]:
+    """Return an interpreter-driven argv for running a normalizer.
+
+    The interpreter is chosen from the file extension: ``node`` for .mjs and
+    ``sys.executable`` for .py. This deliberately does NOT exercise direct
+    shebang execution or a runtime launcher; it only checks the normalizer's
+    output contract. Naming the interpreter also avoids the host's
+    script-launching support, which differs on Windows: CreateProcess only
+    loads PE images, so running a script file itself fails with ``WinError 193``.
+    """
+    suffix = script_path.suffix.lower()
+    if suffix == ".py":
+        interpreter = sys.executable
+    elif suffix == ".mjs":
+        interpreter = shutil.which("node")
+        if interpreter is None:
+            pytest.skip("node is not installed, so .mjs normalizers cannot be launched")
+    else:
+        raise AssertionError(f"no interpreter is known for normalizer suffix {suffix!r}")
+    return [interpreter, str(script_path)]
 
 
 def _bundle(relative: str) -> dict:
@@ -317,7 +340,7 @@ def test_validator_cli_accepts_explicit_external_bundle(tmp_path):
     bundle_dir = tmp_path / "provider"
     shutil.copytree(FIXTURES_DIR / "acme-ai", bundle_dir)
     command = [
-        "python3",
+        sys.executable,
         str(VALIDATOR_PATH),
         "--schema-dir",
         str(SCHEMAS_DIR),
@@ -347,7 +370,7 @@ def test_validator_cli_rejects_duplicate_explicit_provider_ids(tmp_path):
     shutil.copytree(FIXTURES_DIR / "acme-ai", second)
     result = subprocess.run(
         [
-            "python3",
+            sys.executable,
             str(VALIDATOR_PATH),
             "--schema-dir",
             str(SCHEMAS_DIR),
@@ -372,7 +395,7 @@ def test_validator_cli_explicit_mode_skips_repository_discovery(tmp_path):
     shutil.copytree(FIXTURES_DIR / "acme-ai", bundle_dir)
     result = subprocess.run(
         [
-            "python3",
+            sys.executable,
             str(VALIDATOR_PATH),
             "--schema-dir",
             str(SCHEMAS_DIR),
@@ -397,7 +420,7 @@ def test_validator_cli_rejects_malformed_credential_bindings(tmp_path):
     bindings.write_text('{"providers": []}')
     result = subprocess.run(
         [
-            "python3",
+            sys.executable,
             str(VALIDATOR_PATH),
             "--schema-dir",
             str(SCHEMAS_DIR),
@@ -430,7 +453,7 @@ def test_validator_cli_discovery_mode_validates_repository():
     duplicate. Regression for the Windows path-separator bug."""
     result = subprocess.run(
         [
-            "python3",
+            sys.executable,
             str(VALIDATOR_PATH),
             "--schema-dir",
             str(SCHEMAS_DIR),
@@ -1249,7 +1272,7 @@ def test_usai_normalizer_output_satisfies_runtime_contract(tmp_path):
     script_path = ROOT / "integrations/isolation/acq-kits/usai-provider/scripts/normalize-catalog.mjs"
     source_path = ROOT / "integrations/providers/usai/catalog.json"
     subprocess.run(
-        [str(script_path), "--source", str(source_path), "--out", str(output_path)],
+        [*_normalizer_argv(script_path), "--source", str(source_path), "--out", str(output_path)],
         check=True,
         capture_output=True,
         text=True,
@@ -1281,6 +1304,7 @@ def test_runtime_validator_rejects_undeclared_credential_name(tmp_path):
         validate_bundle(bundle_dir / "bundle.json", {"acme-ai": "ACME_AI_API_KEY"})
 
 
+@requires_symlink_support
 def test_runtime_validator_rejects_artifact_symlink(tmp_path):
     """Package-relative artifact names cannot escape through a symlink."""
     bundle_dir = tmp_path / "provider"
@@ -1617,6 +1641,7 @@ def test_windows_contract_keeps_symlink_and_inside_root_checks(tmp_path):
         validate_bundle(bundle_dir / "bundle.json", {"acme-ai": "ACME_AI_API_KEY"})
 
 
+@requires_symlink_support
 def test_runtime_validator_rejects_normalizer_symlink(tmp_path):
     """normalizerPath that is a symlink (even to an executable) must be rejected."""
     bundle_dir = tmp_path / "provider"
@@ -1629,14 +1654,18 @@ def test_runtime_validator_rejects_normalizer_symlink(tmp_path):
         validate_bundle(bundle_dir / "bundle.json", {"acme-ai": "ACME_AI_API_KEY"})
 
 
-def test_fixture_normalizers_are_directly_invocable(tmp_path):
-    """Fixture normalizers transform vendor-shaped source into the exact snapshot."""
+def test_fixture_normalizers_produce_exact_snapshot_via_interpreter(tmp_path):
+    """Run each fixture normalizer through an explicit interpreter (not a shebang or launcher).
+
+    Covers the output contract only: vendor-shaped source must transform into the
+    exact committed snapshot and pass catalog validation.
+    """
     for fixture_name, provider_id in [("usai", "usai"), ("acme-ai", "acme-ai")]:
         fixture_dir = FIXTURES_DIR / fixture_name
         normalizer = fixture_dir / "normalize.py"
         out = tmp_path / f"{fixture_name}-catalog.json"
         result = subprocess.run(
-            [str(normalizer), "--source", str(fixture_dir / "source.json"), "--out", str(out)],
+            [*_normalizer_argv(normalizer), "--source", str(fixture_dir / "source.json"), "--out", str(out)],
             check=True,
             capture_output=True,
             text=True,
@@ -1668,7 +1697,7 @@ def test_validator_cli_rejects_non_object_root(tmp_path, root_value):
     bundle_path.write_text(json.dumps(root_value))
     result = subprocess.run(
         [
-            "python3",
+            sys.executable,
             str(VALIDATOR_PATH),
             "--schema-dir",
             str(SCHEMAS_DIR),
@@ -1702,7 +1731,7 @@ def test_validator_cli_rejects_non_string_schema_version(tmp_path, schema_versio
     bundle_path.write_text(json.dumps({"schemaVersion": schema_version_value}))
     result = subprocess.run(
         [
-            "python3",
+            sys.executable,
             str(VALIDATOR_PATH),
             "--schema-dir",
             str(SCHEMAS_DIR),
