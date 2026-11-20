@@ -22,7 +22,7 @@ export async function buildRuntimeArtifact() {
   for (const [index, source] of sources.entries()) {
     let text = await readFile(new URL(source, root), "utf8")
     if (source.endsWith("render-provider-config.mjs")) {
-      const marker = "// Compare URL against URL so the check is portable:"
+      const marker = "// Run main() only when this file is the program being run."
       if (!text.includes(marker)) throw new Error("renderer entrypoint boundary changed")
       text = text.slice(0, text.indexOf(marker))
     }

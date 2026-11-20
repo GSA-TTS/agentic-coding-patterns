@@ -2,18 +2,19 @@
 import * as builtin0 from "node:fs/promises"
 import * as builtin1 from "node:path"
 import * as builtin2 from "node:perf_hooks"
-import * as builtin3 from "node:fs/promises"
-import * as builtin4 from "node:crypto"
-import * as builtin5 from "node:os"
-import * as builtin6 from "node:path"
-import * as builtin7 from "node:process"
-import * as builtin8 from "node:url"
-import * as builtin9 from "node:child_process"
-import * as builtin10 from "node:fs/promises"
-import * as builtin11 from "node:fs"
-import * as builtin12 from "node:path"
-import * as builtin13 from "node:url"
-import * as builtin14 from "node:perf_hooks"
+import * as builtin3 from "node:fs"
+import * as builtin4 from "node:fs/promises"
+import * as builtin5 from "node:crypto"
+import * as builtin6 from "node:os"
+import * as builtin7 from "node:path"
+import * as builtin8 from "node:process"
+import * as builtin9 from "node:url"
+import * as builtin10 from "node:child_process"
+import * as builtin11 from "node:fs/promises"
+import * as builtin12 from "node:fs"
+import * as builtin13 from "node:path"
+import * as builtin14 from "node:url"
+import * as builtin15 from "node:perf_hooks"
 
 // Source: integrations/providers/usai/scripts/model-catalog-core.mjs
 const module0 = await (async () => {
@@ -1018,12 +1019,13 @@ const module4 = await (async () => {
 // Render host-projected, provider-neutral inputs into OpenCode's global config.
 // This is the only kit that writes OpenCode configuration for provider inputs.
 
-const { mkdir, open, readdir, readFile, rename, rm, unlink, writeFile } = builtin3
-const { createHash, randomBytes } = builtin4
-const os = builtin5.default
-const path = builtin6.default
-const process = builtin7.default
-const { pathToFileURL } = builtin8
+const { realpathSync } = builtin3
+const { mkdir, open, readdir, readFile, rename, rm, unlink, writeFile } = builtin4
+const { createHash, randomBytes } = builtin5
+const os = builtin6.default
+const path = builtin7.default
+const process = builtin8.default
+const { fileURLToPath } = builtin9
 
 const GLOBAL_FILENAMES = ["config.json", "opencode.json", "opencode.jsonc"]
 const CANONICAL_FILENAME = "opencode.jsonc"
@@ -1879,12 +1881,12 @@ return { INPUT_MODALITIES, stripJsonc, parseJsonc, deepMerge, renderProviderConf
 // Source: integrations/isolation/acq-kits/opencode/files/home/opencode-config/runtime-preparation-source.mjs
 const module5 = await (async () => {
 // Source for the standalone guest artifact; do not stage this module itself.
-const { spawn } = builtin9
-const { readFile, lstat, realpath, access } = builtin10
-const { constants } = builtin11
-const path = builtin12.default
-const { pathToFileURL, fileURLToPath } = builtin13
-const { performance } = builtin14
+const { spawn } = builtin10
+const { readFile, lstat, realpath, access } = builtin11
+const { constants } = builtin12
+const path = builtin13.default
+const { pathToFileURL, fileURLToPath } = builtin14
+const { performance } = builtin15
 const { discoverRuntimeModels } = module3
 const { boundedJson, RUNTIME_LIMITS, record, validatedFacts } = module1
 const { runtimeFailure, failureOutcome, preserveRuntimeFailure, parseFailure, FAILURE_BYTES } = module2

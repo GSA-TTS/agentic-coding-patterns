@@ -108,6 +108,16 @@ make ci    # Runs all pre-commit checks, tests, and validation
 
 This gives you the same safety net as installing hooks, without requiring hook installation inside your container.
 
+### Working on Windows
+
+Linux and macOS are the primary development platforms. Windows checkouts work, with a few facts worth knowing before you file a bug against your own copy:
+
+- Creating a symlink on Windows normally requires the `SeCreateSymbolicLinkPrivilege` privilege, which an elevated shell or a local security policy grant provides. Developer Mode is a separate route: it does not grant that privilege, but lets tools that request unprivileged symlink creation (for example Git for Windows with symbolic links enabled) create symlinks without it.
+- Git decides whether to use symlinks when a clone is created: `git clone` and `git init` probe the filesystem and record `core.symlinks=false` in the clone's `.git/config` if they cannot create one. With `core.symlinks=false`, the tracked `skills` symlink is checked out as a plain 14-byte file containing its target (`.agents/skills`), so `skills/` does not materialise as a directory. That partial checkout is expected and is not a repository defect.
+- Granting the privilege after you cloned does not repair an existing clone, because the persisted `false` still applies. Check it with `git config --show-origin --get core.symlinks`. If it reports `false` from `.git/config`, either re-clone with the privilege in place, or run `git config core.symlinks true` and then restore the entry with `git checkout -- skills`. If the `false` comes from your global or system git config instead (for example the Git for Windows installer's symbolic-links option), fix it there; a re-clone alone will not help.
+- Run Node scripts through the interpreter (`node path/to/script.mjs`) rather than exec'ing them directly: Windows does not honour `#!/usr/bin/env node` shebangs.
+- `bash` on `PATH` is often WSL, not Git Bash. Use `C:\Program Files\Git\bin\bash.exe` when you need POSIX shell behaviour.
+
 ## Content Types
 
 | Type | Directory | Use For |
