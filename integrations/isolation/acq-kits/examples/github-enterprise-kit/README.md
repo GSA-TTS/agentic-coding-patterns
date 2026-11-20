@@ -23,7 +23,7 @@ injected token, and `GH_HOST` for `gh`. The token itself is never in the kit.
 | Claim | Status |
 |-------|--------|
 | `spec.yaml` is valid `hybrid/v1`; `validate-kits.py --strict` and `acq kit validate` pass | Verified offline. |
-| The startup step rewrites `git@HOST:` and `ssh://git@HOST/` remotes to HTTPS, leaves other hosts alone, and is idempotent | Verified offline in a scratch `HOME` (`scripts/verify`, section 4). |
+| The startup step rewrites `git@HOST:` and `ssh://git@HOST/` remotes to HTTPS, leaves other hosts alone, and is idempotent | Verified offline under an isolated Git environment (`scripts/verify`, section 4; see "Verifying" for what that isolation is not). |
 | The credential helper prints `username=x-access-token` and `password=<value of GH_ENTERPRISE_TOKEN>`, expanded when git runs it, and the value is never written to git config | Verified offline (`scripts/verify`, section 4). |
 | One GHES hostname serves git, REST (`/api/v3`), and uploads (`/api/uploads`), so one egress entry is enough | From GitHub's GHES documentation, not tested against a live instance. With subdomain isolation enabled, GHES also serves some content from subdomains such as `raw.`, `codeload.`, `uploads.`, and `media.`; `git` over HTTPS and `gh api` calls on the main host do not need them. Add a subdomain to `caps.network.allow` only if a feature you use fails (downloading a release asset or an archive, for example). |
 | On msb, the proxy swaps the placeholder into git's `Authorization: Basic` header for the bound host | Documented for `github.com` in the quickstart repo's ADR 0011 and confirmed live there with a private-repo `git ls-remote`. **Not tested against a GHES host.** |
@@ -138,15 +138,37 @@ network. With a real host, a stored secret, and a sandbox-capable machine:
 GHE_VERIFY=1 GHE_HOST=ghe.corp.example GHE_REPO=owner/private-repo ./scripts/verify
 ```
 
-`GHE_HOST` must equal the host in `spec.yaml`. `GHE_REPO` should be a **private**
-repository your token can read: a repository readable without credentials is
-reported as SKIP, because it would prove nothing about the token. The live section creates a
+`GHE_HOST` must be a plain hostname and equal the host in `spec.yaml`; `GHE_REPO`
+must be `OWNER/REPO`. Anything else is rejected before a sandbox is touched. They
+reach the sandbox only as arguments to fixed shell code, never as shell source.
+`GHE_REPO` should be a **private** repository with at least one branch that your
+token can read. The authenticated and anonymous probes run the same full
+`git ls-remote`, so only the credential differs. The check passes only when the
+credentialed query lists refs and the anonymous one is refused. A repository
+readable without credentials, an empty one, or a failure that is not an
+authorization denial (DNS, TLS, proxy) is reported as UNVERIFIED, never PASS.
+The live section creates a
 throwaway sandbox with the kit applied, then checks `GH_HOST`, that the token
 variable is set (it never prints it), the SSH-to-HTTPS rewrite, egress, `git
 ls-remote` with only the placeholder, and `gh api user`. Without `GHE_VERIFY=1`
 and `GHE_HOST` it prints SKIP, never PASS. Run it on each backend you use;
 `ACQ_BACKEND` selects one. Set `GHE_SECRET_SERVICE` if you used a service name
 other than `github-enterprise`.
+
+Exit status: `0` all executed checks passed (and at least one ran), `1` a check
+failed, `3` nothing failed but a check could not be performed (UNVERIFIED). SKIP
+means not applicable in this configuration and does not change the status.
+
+**Isolation boundary.** Section 4 runs the `spec.yaml` startup step **on your
+machine**, as you. It uses a scratch `HOME`, an environment built from nothing
+(`env -i`) with pinned Git config, no system config, no prompts, empty askpass
+variables, and a working directory outside any repository, so repository-local
+or inherited Git credential routing cannot reach it. Canary helpers and askpass
+programs confirm this, and confirm they would fire without it. That is Git
+configuration hygiene, **not a sandbox**: the step can still read and write other
+files, use the network, and run anything on `PATH`. Read the spec before you
+verify it, or run `scripts/verify` in a disposable VM or container. If a host in
+the spec is not a plain hostname, the step is not run at all.
 
 ## Backend parity
 
