@@ -362,27 +362,74 @@ def _run_live_verify(tmp_path: Path, backend: str | None):
     return res, (log.read_text() if log.exists() else "")
 
 
-def test_live_verify_requires_explicit_backend_before_any_secret_check(tmp_path):
+def test_live_verify_without_backend_uses_acq_default_and_checks_only_acq_secret(tmp_path):
     res, calls = _run_live_verify(tmp_path, None)
-    assert res.returncode == 2
-    assert "ACQ_BACKEND" in res.stderr
-    assert "secret" not in calls and "create" not in calls
-
-
-def test_live_verify_sbx_checks_the_sbx_store_not_acq(tmp_path):
-    res, calls = _run_live_verify(tmp_path, "sbx")
     assert res.returncode != 0
-    assert "sbx secret ls" in calls
-    assert "acq secret has" not in calls
-    assert "sbx secret set-custom" in res.stderr
-
-
-def test_live_verify_msb_checks_the_acq_store_not_sbx(tmp_path):
-    res, calls = _run_live_verify(tmp_path, "msb")
-    assert res.returncode != 0
-    assert "acq secret has" in calls
-    assert "sbx " not in calls
+    assert "acq secret has -g cloud-gov" in calls
+    assert "create" not in calls
+    assert "--backend" not in calls
     assert "acq secret set" in res.stderr
+    assert "requires ACQ_BACKEND" not in res.stderr
+
+
+@pytest.mark.parametrize("backend", ["sbx", "msb", "future-backend"])
+def test_live_verify_never_calls_a_backend_secret_store_directly(tmp_path, backend):
+    res, calls = _run_live_verify(tmp_path, backend)
+    assert res.returncode != 0
+    assert "acq secret has -g cloud-gov" in calls
+    assert not re.search(r"^sbx ", calls, re.M) and not re.search(r"^msb ", calls, re.M), calls
+    assert "set-custom" not in res.stderr and "sbx secret" not in res.stderr
+    assert "acq secret set" in res.stderr
+
+
+@pytest.mark.parametrize("bad", ["--evil", "a b", "UPPER", "x;y", "$(id)"])
+def test_live_verify_rejects_a_malformed_backend_name(tmp_path, bad):
+    res, calls = _run_live_verify(tmp_path, bad)
+    assert res.returncode == 2
+    assert calls == ""
+
+
+def test_verify_passes_the_requested_backend_to_acq(tmp_path):
+    bindir, log = _verify_stubs(tmp_path, "api endpoint:   https://api.fr.cloud.gov")
+    _stub(bindir / "acq", f'echo "acq $*" >> "{log}"\nexit 0\n')
+    env = {
+        "PATH": f"{bindir}:{SYSTEM_PATH}:/usr/local/bin",
+        "HOME": str(tmp_path),
+        "TMPDIR": str(tmp_path),
+        "RUN_ACQ": "1",
+        "ACQ_BACKEND": "somebackend",
+    }
+    subprocess.run([BASH, str(VERIFY)], env=env, capture_output=True, text=True, timeout=120)
+    lines = log.read_text().splitlines()
+    assert any(re.match(r"acq --backend somebackend create ", c) for c in lines)
+    assert not [c for c in lines if re.match(r"(sbx|msb) ", c)]
+
+
+def test_verify_sandbox_name_override_is_validated_and_used(tmp_path):
+    bindir, log = _verify_stubs(tmp_path, "api endpoint:   https://api.fr.cloud.gov")
+    _stub(bindir / "acq", f'echo "acq $*" >> "{log}"\nexit 0\n')
+    base = {
+        "PATH": f"{bindir}:{SYSTEM_PATH}:/usr/local/bin",
+        "HOME": str(tmp_path),
+        "TMPDIR": str(tmp_path),
+        "RUN_ACQ": "1",
+    }
+    bad = subprocess.run(
+        [BASH, str(VERIFY)], env={**base, "CLOUD_GOV_VERIFY_SANDBOX": "-rf"}, capture_output=True, text=True, timeout=60
+    )
+    assert bad.returncode == 2
+    ok = subprocess.run(
+        [BASH, str(VERIFY)],
+        env={**base, "CLOUD_GOV_VERIFY_SANDBOX": "my-box"},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    calls = log.read_text().splitlines()
+    assert any(re.match(r"acq create --name my-box ", c) for c in calls), calls
+    assert not any("secret has" in c for c in calls), "scoped binding must not be pre-checked with the global query"
+    assert "my-box" in ok.stdout
+    assert not [c for c in calls if re.match(r"(sbx|msb) ", c)]
 
 
 def test_verify_script_is_executable():
@@ -555,3 +602,63 @@ def test_sigterm_during_create_removes_nothing_and_names_the_sandbox(tmp_path):
     calls = log.read_text().splitlines()
     assert _rm_calls(calls) == [], calls
     assert _created_name(calls) in err, err
+
+
+FORBIDDEN_BACKEND_TEXT = re.compile(r"sbx secret|set-custom|msb secret|custom secret|custom-secret", re.I)
+# Prose that records what was observed earlier with raw backend commands is allowed in exactly these two
+# documents, inside a block that is labelled historical; nowhere else may the kit name a backend secret tool.
+HISTORICAL_ALLOWED = {"README.md", "docs/decisions/cloud-gov-cli-and-auth.md"}
+
+
+def test_kit_never_instructs_raw_backend_secret_commands():
+    offenders = []
+    for path in sorted(KIT.rglob("*")):
+        if not path.is_file() or "__pycache__" in path.parts:
+            continue
+        rel = path.relative_to(KIT).as_posix()
+        text = path.read_text(errors="replace")
+        hits = [m.group(0) for m in FORBIDDEN_BACKEND_TEXT.finditer(text)]
+        if not hits:
+            continue
+        if rel in HISTORICAL_ALLOWED:
+            assert re.search(r"historical", text, re.I), f"{rel} names a backend secret tool outside a historical note"
+            assert "```" not in "".join(
+                block for block in re.findall(r"```.*?```", text, re.S) if FORBIDDEN_BACKEND_TEXT.search(block)
+            ), f"{rel} has a code block with a raw backend secret command"
+            continue
+        offenders.append((rel, hits))
+    assert not offenders, offenders
+
+
+def _sandbox_override_run(tmp_path: Path, ls_out: str, ls_rc: int = 0):
+    bindir, log = _verify_stubs(tmp_path, "api endpoint:   https://api.fr.cloud.gov")
+    _stub(
+        bindir / "acq",
+        f'echo "acq $*" >> "{log}"\n'
+        f'case "$*" in *" ls"*|"ls"*) printf "%s\\n" "{ls_out}"; exit {ls_rc} ;; esac\n'
+        "exit 0\n",
+    )
+    _stub(bindir / "sbx", f'echo "sbx $*" >> "{log}"; exit 97\n')
+    env = {
+        "PATH": f"{bindir}:{SYSTEM_PATH}:/usr/local/bin",
+        "HOME": str(tmp_path),
+        "TMPDIR": str(tmp_path),
+        "RUN_ACQ": "1",
+        "CLOUD_GOV_VERIFY_SANDBOX": "my-box",
+    }
+    res = subprocess.run([BASH, str(VERIFY)], env=env, capture_output=True, text=True, timeout=60)
+    return res, log.read_text().splitlines()
+
+
+def test_override_name_that_already_exists_is_never_created_or_removed(tmp_path):
+    res, calls = _sandbox_override_run(tmp_path, "other-box\nmy-box")
+    assert res.returncode == 2
+    assert "already exists" in res.stdout
+    assert not [c for c in calls if " create " in c or re.match(r"acq (--backend \w+ )?rm ", c)], calls
+    assert not [c for c in calls if c.startswith("sbx ")]
+
+
+def test_override_name_with_an_unreadable_listing_fails_closed(tmp_path):
+    res, calls = _sandbox_override_run(tmp_path, "boom", ls_rc=1)
+    assert res.returncode == 2
+    assert not [c for c in calls if " create " in c or re.match(r"acq (--backend \w+ )?rm ", c)], calls

@@ -60,50 +60,40 @@ or no current user.
   revoked, or may lack the scope or authorization the endpoint needs (check
   `cf target`, then run `cf login`); an accepted control with a rejected sandbox
   request means the backend did not substitute the placeholder or holds a stale
-  secret, which re-minting the token will not fix. A `class=unset` result on sbx
-  most likely means sbx's proxy has no `CF_OAUTH_TOKEN` custom secret for this
-  sandbox (see the sbx bullet below); it can also mean the secret was registered
-  after the sandbox was created, is scoped to another sandbox, or the exec session
-  does not carry the variable. To refresh from a host shell where you are logged in to cloud.gov:
+  secret, which re-minting the token will not fix. A `class=unset` result
+  most likely means acq has no `CF_OAUTH_TOKEN` secret for this sandbox's scope;
+  it can also mean the secret was set after the sandbox was created, is scoped to
+  another sandbox, or the exec session does not carry the variable. To refresh
+  from a host shell where you are logged in to cloud.gov (not re-verified on a
+  live backend), then create a new sandbox:
 
   ```bash
-  # msb
   cf oauth-token | acq secret set -g cloud-gov --host api.fr.cloud.gov --env CF_OAUTH_TOKEN
-  # sbx: registers a command source, so the token is resolved by sbx and not stored here
-  sbx secret set-custom --host api.fr.cloud.gov --env CF_OAUTH_TOKEN \
-    --command "$(command -v cf) oauth-token"
   ```
 
-- **sbx: `CF_OAUTH_TOKEN` is unset in the sandbox.** `acq secret set` cannot feed
-  sbx's proxy for this host (sbx's `set-custom` has no stdin input), so a secret
-  stored only through acq never reaches the sandbox. Run `sbx secret ls` and look
-  for `CF_OAUTH_TOKEN` under CUSTOM SECRETS; if it is absent, register it with the
-  `sbx secret set-custom` command above and create a new sandbox.
-- **sbx: `verify command failed (exit_status)` when registering.** sbx ran the
-  `--command` when you registered it and it exited non-zero. Run it the way the
-  daemon does: from a temporary directory with a minimal environment
-  (`cd "$(mktemp -d)" && env -i HOME="$HOME" PATH=/usr/bin:/bin "$(command -v cf)" oauth-token`).
-  Use `--show-error` for sbx's own message, and upgrade sbx (registration failed on
-  0.48.0 and worked on 0.50.1).
+- **`CF_OAUTH_TOKEN` is unset in the sandbox even though you ran `acq secret
+  set`.** Check that the scope you set matches the sandbox (global with `-g`, or
+  the sandbox name), that you created the sandbox after setting it, and that acq
+  was pointed at the backend you are running on. If acq accepted the secret but
+  the placeholder still never reaches the sandbox on your backend, that is an acq
+  or backend issue to report; do not work around it with the backend's own secret
+  tools, which this kit does not document.
 
 - **Wrong scope.** If the sandbox has a sandbox-scoped secret, update that one
-  instead of the global one:
+  instead of the global one (not re-verified on a live backend; acq may refuse to
+  overwrite an existing secret and tell you how to remove it first):
 
   ```bash
-  # msb
   cf oauth-token | acq secret set <sandbox-name> cloud-gov --host api.fr.cloud.gov --env CF_OAUTH_TOKEN
-  # sbx (see `sbx secret ls` for the scope of each CF_OAUTH_TOKEN entry)
-  sbx secret set-custom --sandbox <sandbox-name> --host api.fr.cloud.gov --env CF_OAUTH_TOKEN \
-    --command "$(command -v cf) oauth-token"
   ```
 
 - **Service-account path: `403 access_denied`, "Your current password has
   expired".** cloud.gov documents this for service-account passwords, which
   expire every 90 days. Re-run `scripts/setup-service-account` with the same
-  flags plus `--rotate`. That script is untested against cloud.gov; this symptom
+  flags plus `--rotate`. For an expired token alone, re-run it with `--refresh`. That script is untested against cloud.gov; this symptom
   is as cloud.gov documents it, not something this kit reproduced.
 - **Unexpected token value in the sandbox.** The startup script only accepts
-  recognized backend placeholders in `CF_OAUTH_TOKEN`, including sbx/acq forms
+  recognized placeholders in `CF_OAUTH_TOKEN`, including acq forms
   and the documented msb guest-secret placeholder prefix.
   If a raw `bearer ...` token, a JWT-looking value, or a value with control
   characters appears in the sandbox, the auth script refuses to continue, before it

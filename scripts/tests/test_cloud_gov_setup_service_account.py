@@ -1,13 +1,14 @@
 """Offline tests for the cloud-gov kit's `scripts/setup-service-account`.
 
-Nothing here contacts cloud.gov, sbx, or acq. A stub `cf` (stateful, in a temp
-dir), `acq`, and `sbx` sit first on PATH and record argv, the NAMES of CF_*
+Nothing here contacts cloud.gov or acq. A stub `cf` (stateful, in a temp
+dir) and `acq` sit first on PATH, with failing `sbx` and `msb` stubs that must
+never be called, and record argv, the NAMES of CF_*
 environment variables, and the CF_HOME value. The stub holds a canary service-key
 username/password and a canary token. After every run the tests scan stdout,
 stderr, every recorded argv, and every file the script wrote (HOME, the working
 directory, TMPDIR) for the canaries in raw, base64, and hex forms.
 
-What they do NOT prove: that real `cf`/`sbx`/`acq` behave like the stubs. The
+What they do NOT prove: that real `cf`/`acq` behave like the stubs. The
 script is documented as untested against the real services; the stubs encode the
 same assumptions the script labels untested (service-key JSON shape, `cf auth`
 reading CF_USERNAME/CF_PASSWORD from the environment, CF_HOME isolation).
@@ -119,13 +120,21 @@ if cmd == "oauth-token":
 print("unexpected cf command: " + " ".join(args), file=sys.stderr); sys.exit(9)
 """
 
-BACKEND_STUB = r"""#!/bin/sh
-echo "NAME $*" >> "$STUB_DIR/backend.log"
+ACQ_STUB = r"""#!/bin/sh
+echo "acq $*" >> "$STUB_DIR/acq.log"
 case "$*" in
-  *"secret set "*) cat > "$STUB_DIR/backend.stdin" ;;
+  "secret set "*) cat > "$STUB_DIR/acq.stdin" ;;
 esac
-[ -n "${STUB_BACKEND_FAIL:-}" ] && exit 1
+if [ -n "${STUB_ACQ_FAIL:-}" ]; then
+  echo "acq: simulated failure from the selected backend" >&2
+  exit 1
+fi
 exit 0
+"""
+
+FORBIDDEN_STUB = r"""#!/bin/sh
+echo "FORBIDDEN NAME $*" >> "$STUB_DIR/forbidden.log"
+exit 97
 """
 
 
@@ -142,9 +151,12 @@ class Env:
         cf = self.bin / "cf"
         cf.write_text(CF_STUB)
         cf.chmod(0o755)
-        for name in ("acq", "sbx"):
+        p = self.bin / "acq"
+        p.write_text(ACQ_STUB)
+        p.chmod(0o755)
+        for name in ("sbx", "msb"):
             p = self.bin / name
-            p.write_text(BACKEND_STUB.replace("NAME", name))
+            p.write_text(FORBIDDEN_STUB.replace("NAME", name))
             p.chmod(0o755)
         self.cf_home = self.home / ".cf-cloud-gov-agent" / "cloud-gov-agent-box1-auditor"
 
@@ -184,8 +196,12 @@ class Env:
     def cf_verbs(self) -> list[str]:
         return [c["argv"][1] for c in self.cf_calls() if len(c["argv"]) > 1]
 
-    def backend_calls(self) -> list[str]:
-        p = self.stub / "backend.log"
+    def acq_calls(self) -> list[str]:
+        p = self.stub / "acq.log"
+        return p.read_text().splitlines() if p.exists() else []
+
+    def forbidden_calls(self) -> list[str]:
+        p = self.stub / "forbidden.log"
         return p.read_text().splitlines() if p.exists() else []
 
     def seed_instance(self, name: str, offering: str = "cloud-gov-service-account", plan: str = "space-auditor"):
@@ -217,14 +233,14 @@ def _written_files(env: Env) -> list[Path]:
     return out
 
 
-def assert_no_credentials(env: Env, res: subprocess.CompletedProcess, *, token_allowed_in_backend_stdin=True):
+def assert_no_credentials(env: Env, res: subprocess.CompletedProcess, *, token_allowed_in_acq_stdin=True):
     """No canary (raw/base64/hex) in output, in any recorded argv, or in any file the script wrote."""
     secrets = [CANARY_USER, CANARY_PASS, CANARY_TOKEN, OWN_TOKEN]
     streams = {"stdout": res.stdout, "stderr": res.stderr}
     for i, c in enumerate(env.cf_calls()):
         streams[f"cf argv {i}"] = " ".join(c["argv"])
-    for line in env.backend_calls():
-        streams["backend argv"] = streams.get("backend argv", "") + line + "\n"
+    for line in env.acq_calls():
+        streams["acq argv"] = streams.get("acq argv", "") + line + "\n"
     for p in _written_files(env):
         try:
             streams[f"file {p}"] = p.read_bytes().decode("latin-1")
@@ -234,24 +250,25 @@ def assert_no_credentials(env: Env, res: subprocess.CompletedProcess, *, token_a
         for secret in secrets:
             for form in _forms(secret):
                 assert form not in text, f"{secret!r} ({form!r}) leaked into {name}"
-    # The only sanctioned place for the token: the backend's stdin (msb) - never the password.
-    stdin = env.stub / "backend.stdin"
+    assert env.forbidden_calls() == [], "no sbx or msb command may ever run"
+    # The only sanctioned place for the token: acq's stdin - never the password.
+    stdin = env.stub / "acq.stdin"
     if stdin.exists():
         body = stdin.read_text()
         assert CANARY_PASS not in body and CANARY_USER not in body
-        if token_allowed_in_backend_stdin:
+        if token_allowed_in_acq_stdin:
             assert body.strip() == "bearer " + CANARY_TOKEN
 
 
-BASE = ("--backend", "msb", "--sandbox", "box1", "--yes")
+BASE = ("--sandbox", "box1", "--yes")
 
 
-def test_msb_scoped_happy_path_binds_token_from_stdin_with_no_leaks(env):
+def test_scoped_happy_path_gives_token_to_acq_on_stdin_with_no_leaks(env):
     res = env.run(*BASE)
     assert res.returncode == 0, res.stderr
     assert_no_credentials(env, res)
-    assert env.backend_calls() == ["acq secret set box1 cloud-gov --host api.fr.cloud.gov --env CF_OAUTH_TOKEN"]
-    assert (env.stub / "backend.stdin").read_text().strip() == "bearer " + CANARY_TOKEN
+    assert env.acq_calls() == ["acq secret set box1 cloud-gov --host api.fr.cloud.gov --env CF_OAUTH_TOKEN"]
+    assert (env.stub / "acq.stdin").read_text().strip() == "bearer " + CANARY_TOKEN
     assert env.key_files("cloud-gov-agent-box1-auditor") == ["cloud-gov-agent-box1-auditor-key"]
     assert "cloud-gov-agent-box1-auditor" in res.stdout and str(env.cf_home) in res.stdout
     assert "CLOUD_GOV_VERIFY_CF_HOME=" in res.stdout and "--rotate" in res.stdout
@@ -310,7 +327,7 @@ def test_all_auth_and_token_calls_use_the_private_cf_home_never_the_users_sessio
         if verb in ("login", "logout"):
             raise AssertionError(f"script must not touch the user's login: {c}")
     # The user's token is never what gets bound.
-    assert OWN_TOKEN not in (env.stub / "backend.stdin").read_text()
+    assert OWN_TOKEN not in (env.stub / "acq.stdin").read_text()
 
 
 def test_password_reaches_cf_auth_only_through_its_environment(env):
@@ -335,22 +352,30 @@ def test_cf_trace_in_the_callers_environment_is_not_passed_on(env):
             assert "CF_PASSWORD" not in c["env"]
 
 
-def test_sbx_wrapper_contains_no_credential_and_is_private(env):
-    res = env.run("--backend", "sbx", "--sandbox", "box1", "--yes")
-    assert res.returncode == 0, res.stderr
-    wrapper = env.cf_home / "oauth-token-wrapper"
-    assert wrapper.is_file()
-    assert stat.S_IMODE(wrapper.stat().st_mode) == 0o700
-    text = wrapper.read_text()
-    assert str(env.cf_home.resolve()) in text and "oauth-token" in text
-    assert os.path.isabs(re.search(r"exec '([^']+)'", text).group(1))
-    assert_no_credentials(env, res, token_allowed_in_backend_stdin=False)
-    assert env.backend_calls() == [
-        "sbx secret set-custom --sandbox box1 --host api.fr.cloud.gov --env CF_OAUTH_TOKEN "
-        f"--command {wrapper.resolve()}"
-    ]
-    assert not (env.stub / "backend.stdin").exists()
-    assert not list(env.cf_home.glob(".wrapper.*"))
+def test_no_sbx_or_msb_command_and_no_wrapper_file_ever(env):
+    for args in (BASE, ("--global", "--yes"), (*BASE, "--rotate"), (*BASE, "--refresh"), (*BASE, "--dry-run")):
+        env.run(*args)
+    assert env.forbidden_calls() == []
+    assert not list(env.cf_home.glob("*wrapper*")) if env.cf_home.exists() else True
+    assert not list(env.cf_home.glob(".wrapper.*")) if env.cf_home.exists() else True
+    for line in env.acq_calls():
+        assert line.startswith("acq secret set "), line
+
+
+def test_backend_flag_and_env_are_gone(env):
+    assert env.run("--backend", "msb", *BASE).returncode == 2
+    res = env.run(*BASE, extra_env={"ACQ_BACKEND": "sbx"})
+    assert res.returncode == 0
+    assert env.forbidden_calls() == []
+    assert "--backend" not in " ".join(env.acq_calls())
+    assert "--backend" not in env.run("--help").stdout.split("Options:")[1].split("Exit codes")[0]
+
+
+def test_token_reaches_acq_on_stdin_only_not_argv_or_env(env):
+    res = env.run(*BASE)
+    assert res.returncode == 0
+    assert (env.stub / "acq.stdin").read_text().strip() == "bearer " + CANARY_TOKEN
+    assert env.acq_calls() == ["acq secret set box1 cloud-gov --host api.fr.cloud.gov --env CF_OAUTH_TOKEN"]
 
 
 def test_dry_run_runs_nothing_mutating(env):
@@ -358,7 +383,7 @@ def test_dry_run_runs_nothing_mutating(env):
     assert res.returncode == 0
     assert "Dry run" in res.stdout
     assert set(env.cf_verbs()) <= {"api", "target", "service", "service-keys"}
-    assert env.backend_calls() == []
+    assert env.acq_calls() == []
     assert not env.cf_home.exists()
     assert_no_credentials(env, res)
 
@@ -380,13 +405,13 @@ def test_rerun_without_rotate_creates_no_second_key(env):
 def test_rotate_deletes_then_recreates_then_rebinds(env):
     assert env.run(*BASE).returncode == 0
     (env.stub / "calls.jsonl").unlink()
-    (env.stub / "backend.log").unlink()
+    (env.stub / "acq.log").unlink()
     res = env.run(*BASE, "--rotate")
     assert res.returncode == 0, res.stderr
     verbs = env.cf_verbs()
     assert verbs.index("delete-service-key") < verbs.index("create-service-key") < verbs.index("auth")
     assert verbs.count("delete-service-key") == 1 and verbs.count("create-service-key") == 1
-    assert len(env.backend_calls()) == 1
+    assert len(env.acq_calls()) == 1
     assert env.key_files("cloud-gov-agent-box1-auditor") == ["cloud-gov-agent-box1-auditor-key"]
     assert_no_credentials(env, res)
 
@@ -401,7 +426,7 @@ def test_existing_instance_of_the_wrong_service_or_plan_stops(env, offering, pla
     assert res.returncode == 3
     assert "choose another --name" in res.stderr
     assert not {"create-service", "create-service-key", "delete-service-key", "auth"} & set(env.cf_verbs())
-    assert env.backend_calls() == []
+    assert env.acq_calls() == []
 
 
 def test_existing_instance_of_the_right_service_and_plan_is_reused(env):
@@ -413,47 +438,33 @@ def test_existing_instance_of_the_right_service_and_plan_is_reused(env):
 
 
 def test_global_requires_the_explicit_flag_and_prints_the_warning(env):
-    res = env.run("--backend", "msb", "--yes")
+    res = env.run("--yes")
     assert res.returncode == 2 and "--global" in res.stderr
-    assert env.cf_calls() == [] and env.backend_calls() == []
+    assert env.cf_calls() == [] and env.acq_calls() == []
 
-    res = env.run("--backend", "msb", "--global", "--yes", extra_env={})
+    res = env.run("--global", "--yes")
     assert res.returncode == 0, res.stderr
     assert "WARNING" in res.stdout and "EVERY sandbox" in res.stdout
-    assert env.backend_calls() == ["acq secret set -g cloud-gov --host api.fr.cloud.gov --env CF_OAUTH_TOKEN"]
+    assert env.acq_calls() == ["acq secret set -g cloud-gov --host api.fr.cloud.gov --env CF_OAUTH_TOKEN"]
 
 
 def test_global_and_sandbox_together_is_a_usage_error(env):
-    res = env.run("--backend", "msb", "--global", "--sandbox", "box1", "--yes")
+    res = env.run("--global", "--sandbox", "box1", "--yes")
     assert res.returncode == 2
     assert env.cf_calls() == []
 
 
-def test_sandbox_scope_reaches_the_backend_command(env):
-    res = env.run("--backend", "sbx", "--sandbox", "my-box", "--yes")
+def test_sandbox_scope_maps_to_acq_sandbox_scope(env):
+    res = env.run("--sandbox", "my-box", "--yes")
     assert res.returncode == 0, res.stderr
-    assert "--sandbox my-box" in env.backend_calls()[0]
-
-
-@pytest.mark.parametrize("backend", ["docker", "SBX", ""])
-def test_unsupported_or_missing_backend_fails_closed(env, backend):
-    args = ["--sandbox", "box1", "--yes"] + (["--backend", backend] if backend else [])
-    res = env.run(*args)
-    assert res.returncode == 2
-    assert env.cf_calls() == [] and env.backend_calls() == []
-
-
-def test_backend_can_come_from_acq_backend_env(env):
-    res = env.run("--sandbox", "box1", "--yes", extra_env={"ACQ_BACKEND": "msb"})
-    assert res.returncode == 0, res.stderr
-    assert env.backend_calls()[0].startswith("acq secret set box1")
+    assert env.acq_calls() == ["acq secret set my-box cloud-gov --host api.fr.cloud.gov --env CF_OAUTH_TOKEN"]
 
 
 def test_failed_cf_auth_leaves_no_state_and_binds_nothing(env):
     res = env.run(*BASE, extra_env={"STUB_AUTH_FAIL": "1"})
     assert res.returncode == 5
     assert "nothing bound" in res.stderr
-    assert env.backend_calls() == []
+    assert env.acq_calls() == []
     assert not env.cf_home.exists()
     assert env.key_files("cloud-gov-agent-box1-auditor") == []
     assert "oauth-token" not in env.cf_verbs()
@@ -469,11 +480,16 @@ def test_failed_cf_auth_does_not_remove_a_preexisting_cf_home_or_key(env):
     assert env.key_files("cloud-gov-agent-box1-auditor") == ["cloud-gov-agent-box1-auditor-key"]
 
 
-def test_backend_bind_failure_reports_what_exists_and_keeps_no_secret(env):
-    res = env.run(*BASE, extra_env={"STUB_BACKEND_FAIL": "1"})
+def test_failed_acq_secret_set_reports_acq_message_leaves_no_half_state_and_tries_nothing_else(env):
+    res = env.run(*BASE, extra_env={"STUB_ACQ_FAIL": "1"})
     assert res.returncode == 5
+    assert "simulated failure from the selected backend" in res.stderr, "acq's own message must be shown"
     assert "nothing is bound" in res.stderr
-    assert_no_credentials(env, res, token_allowed_in_backend_stdin=False)
+    assert env.forbidden_calls() == []
+    assert len(env.acq_calls()) == 1
+    assert not env.cf_home.exists(), "a CF_HOME this run created must be removed when the bind fails"
+    assert env.key_files("cloud-gov-agent-box1-auditor") == [], "a key this run created must be deleted"
+    assert_no_credentials(env, res, token_allowed_in_acq_stdin=False)
 
 
 def test_unreadable_service_key_shape_fails_without_echoing_it(env, monkeypatch):
@@ -490,10 +506,10 @@ def test_unreadable_service_key_shape_fails_without_echoing_it(env, monkeypatch)
 
 
 def test_requires_confirmation_without_yes_and_a_terminal(env):
-    res = env.run("--backend", "msb", "--sandbox", "box1")
+    res = env.run("--sandbox", "box1")
     assert res.returncode == 4
     assert "create-service" not in env.cf_verbs()
-    assert env.backend_calls() == []
+    assert env.acq_calls() == []
 
 
 def test_wrong_cloud_foundry_endpoint_is_refused(env):
@@ -526,17 +542,17 @@ def test_existing_cf_home_with_loose_mode_is_refused(env):
 
 
 def test_no_temp_files_left_behind(env):
-    for args in (BASE, (*BASE, "--dry-run"), ("--backend", "sbx", "--sandbox", "box1", "--yes")):
+    for args in (BASE, (*BASE, "--dry-run"), (*BASE, "--refresh")):
         assert env.run(*args).returncode == 0
     assert list(env.tmpdir.iterdir()) == []
-    assert not list(env.cf_home.glob(".wrapper.*"))
 
 
 def test_help_documents_exit_codes_and_untested_claims_without_running_anything(env):
     res = env.run("--help")
     assert res.returncode == 0
-    for needle in ("Exit codes", "UNTESTED", "CF_USERNAME", "ISSO", "--rotate", "--dry-run", "--global"):
+    for needle in ("Exit codes", "UNTESTED", "CF_USERNAME", "ISSO", "--rotate", "--refresh", "--dry-run", "--global"):
         assert needle in res.stdout
+    assert not re.search(r"sbx secret|set-custom|msb secret|wrapper|--backend", res.stdout)
     assert env.cf_calls() == []
 
 
@@ -623,4 +639,63 @@ def test_failure_creating_cf_home_still_deletes_the_key_this_run_created(env):
         env.cf_home.parent.chmod(0o700)
     assert res.returncode != 0
     assert env.key_files("cloud-gov-agent-box1-auditor") == []
-    assert env.backend_calls() == []
+    assert env.acq_calls() == []
+
+
+# ---- --refresh ------------------------------------------------------------------------------
+
+
+def test_refresh_rebinds_without_touching_key_instance_or_password(env):
+    assert env.run(*BASE).returncode == 0
+    (env.stub / "calls.jsonl").unlink()
+    (env.stub / "acq.log").unlink()
+    (env.stub / "acq.stdin").unlink()
+    res = env.run(*BASE, "--refresh")
+    assert res.returncode == 0, res.stderr
+    assert not {"create-service", "create-service-key", "delete-service-key", "service-key", "auth"} & set(
+        env.cf_verbs()
+    )
+    assert "login" not in env.cf_verbs()
+    assert env.acq_calls() == ["acq secret set box1 cloud-gov --host api.fr.cloud.gov --env CF_OAUTH_TOKEN"]
+    assert (env.stub / "acq.stdin").read_text().strip() == "bearer " + CANARY_TOKEN
+    for c in env.cf_calls():
+        assert c["cf_home"] == str(env.cf_home.resolve())
+        assert "CF_PASSWORD" not in c["env"]
+    assert_no_credentials(env, res)
+
+
+def test_refresh_without_an_existing_script_made_cf_home_is_refused(env):
+    res = env.run(*BASE, "--refresh")
+    assert res.returncode == 3
+    assert env.acq_calls() == []
+    assert not env.cf_home.exists()
+
+
+def test_refresh_and_rotate_together_is_a_usage_error(env):
+    assert env.run(*BASE, "--refresh", "--rotate").returncode == 2
+
+
+def test_refresh_dry_run_reads_and_binds_nothing(env):
+    assert env.run(*BASE).returncode == 0
+    (env.stub / "acq.log").unlink()
+    (env.stub / "calls.jsonl").unlink()
+    res = env.run(*BASE, "--refresh", "--dry-run")
+    assert res.returncode == 0
+    assert env.acq_calls() == []
+    assert "oauth-token" not in env.cf_verbs()
+
+
+def test_refresh_failed_acq_leaves_the_cf_home_and_key_alone(env):
+    assert env.run(*BASE).returncode == 0
+    res = env.run(*BASE, "--refresh", extra_env={"STUB_ACQ_FAIL": "1"})
+    assert res.returncode == 5
+    assert "simulated failure" in res.stderr
+    assert env.cf_home.is_dir()
+    assert env.key_files("cloud-gov-agent-box1-auditor") == ["cloud-gov-agent-box1-auditor-key"]
+
+
+def test_refresh_with_a_loose_cf_home_mode_is_refused(env):
+    assert env.run(*BASE).returncode == 0
+    env.cf_home.chmod(0o755)
+    res = env.run(*BASE, "--refresh")
+    assert res.returncode == 3 and "0700" in res.stderr

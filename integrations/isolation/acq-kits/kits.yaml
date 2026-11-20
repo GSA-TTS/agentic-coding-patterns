@@ -53,10 +53,10 @@ kits:
       failed download does not fail sandbox start), startup auth placeholder
       format check, and exact cloud.gov/control-plane/docs allow-list.
       The shared kit avoids wildcard egress so sbx and msb receive concrete host
-      allow rules. Cloud Foundry authorization is a custom secret binding for
-      api.fr.cloud.gov, seeded from a host-side `cf oauth-token` (acq secret set
-      on msb; on sbx register it with `sbx secret set-custom ... --command`,
-      since acq cannot feed sbx's proxy for an arbitrary host); the token is not stored in the kit or exposed as a readable
+      allow rules. Cloud Foundry authorization is a secret binding for
+      api.fr.cloud.gov, seeded from a host-side `cf oauth-token` handed to
+      `acq secret set` on stdin (acq is intended to decide how each backend stores and
+      injects it; not re-verified on a live backend); the token is not stored in the kit or exposed as a readable
       credential file.
 
   zscaler-ca-certificate:

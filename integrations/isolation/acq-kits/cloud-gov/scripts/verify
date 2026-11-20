@@ -14,10 +14,16 @@
 #
 # The CA-before-fetch failure is specific to the sbx file-drop path: msb trusts
 # host CAs natively (--trust-host-cas), so an msb run cannot reproduce it. Set
-# ACQ_BACKEND=sbx (or msb) to pass `--backend` to acq for the sandbox create,
-# exec, and rm calls without changing your persisted default backend. It is
-# required with RUN_ACQ=1 so the token precondition is checked against the
-# backend that will actually run.
+# ACQ_BACKEND=<backend> (optional) to pass `--backend` to acq for the sandbox
+# create, exec, and rm calls without changing your persisted default backend.
+# Unset, acq uses its own default and the backend named in the create log is
+# reported. This script never touches a backend's secret store directly: the
+# token binding is made and checked only through `acq secret`.
+#
+# CLOUD_GOV_VERIFY_SANDBOX=<name> (optional) names the throwaway sandbox, for a
+# token binding scoped to that sandbox name (see README). It must not already
+# exist (checked against `acq ls`, refusing if unreadable); only a sandbox this
+# run created is ever removed.
 
 # Tests source this file for the helpers below without running any checks. Run as
 # a script, the variable is refused rather than treated as a pass.
@@ -102,20 +108,24 @@ RUN_ACQ="${RUN_ACQ:-0}"
 CA_KIT="${CA_KIT:-}"
 ACQ_BACKEND="${ACQ_BACKEND:-}"
 ACQ_BACKEND_ARGS=()
-case "$ACQ_BACKEND" in
-  "") ;;
-  sbx|msb) ACQ_BACKEND_ARGS=(--backend "$ACQ_BACKEND") ;;
-  *)
-    printf 'ACQ_BACKEND must be sbx or msb (got: %s)\n' "$ACQ_BACKEND" >&2
-    exit 2
-    ;;
-esac
-if [ "${RUN_ACQ:-0}" = "1" ] && [ -z "$ACQ_BACKEND" ]; then
-  # The token binding differs by backend (sbx custom secret vs acq store), and
-  # the backend acq would pick is not known before create, so a precondition
-  # checked against the wrong store gives wrong setup advice.
-  printf 'RUN_ACQ=1 requires ACQ_BACKEND=sbx or ACQ_BACKEND=msb\n' >&2
-  exit 2
+if [ -n "$ACQ_BACKEND" ]; then
+  case "$ACQ_BACKEND" in
+    *[!a-z0-9-]* | -*)
+      printf 'ACQ_BACKEND must be a backend name acq knows (lowercase letters, digits, hyphen; got: %s)\n' "$ACQ_BACKEND" >&2
+      exit 2
+      ;;
+  esac
+  ACQ_BACKEND_ARGS=(--backend "$ACQ_BACKEND")
+fi
+VERIFY_SANDBOX="${CLOUD_GOV_VERIFY_SANDBOX:-}"
+if [ -n "$VERIFY_SANDBOX" ]; then
+  case "$VERIFY_SANDBOX" in
+    *[!A-Za-z0-9_.-]* | [!A-Za-z0-9]*)
+      printf 'CLOUD_GOV_VERIFY_SANDBOX must start with a letter or digit and use only letters, digits, . _ - (got: %s)\n' "$VERIFY_SANDBOX" >&2
+      exit 2
+      ;;
+  esac
+  SBX_NAME="$VERIFY_SANDBOX"
 fi
 # Bash 3.2 (macOS) treats an empty array as unset under `set -u`; the +"..."
 # form expands to nothing when no backend was requested.
@@ -333,34 +343,22 @@ if ! command -v acq >/dev/null 2>&1; then
 fi
 ok "acq on PATH"
 
-SBX_BIND_HINT='sbx secret set-custom --host api.fr.cloud.gov --env CF_OAUTH_TOKEN --command "$(command -v cf) oauth-token"'
 ACQ_BIND_HINT='cf oauth-token | acq secret set -g cloud-gov --host api.fr.cloud.gov --env CF_OAUTH_TOKEN'
-if [ "$ACQ_BACKEND" = "sbx" ]; then
-  # acq cannot feed sbx's proxy for an arbitrary host (sbx set-custom takes no
-  # stdin), so the acq store is not the source of truth on sbx: sbx must hold the
-  # custom secret itself.
-  if ! command -v sbx >/dev/null 2>&1; then
-    bad "ACQ_BACKEND=sbx but sbx is not on PATH"
-    exit 1
-  fi
-  sbx_ls="$(sbx secret ls 2>/dev/null || true)"
-  if printf '%s\n' "$sbx_ls" | grep 'CF_OAUTH_TOKEN' | grep -q 'api.fr.cloud.gov'; then
-    ok "sbx has a CF_OAUTH_TOKEN custom secret for api.fr.cloud.gov (scope not checked; step 8 proves it reaches this sandbox)"
-  else
-    bad "RUN_ACQ=1 with ACQ_BACKEND=sbx requires a CF_OAUTH_TOKEN custom secret in sbx"
-    printf '  Register it from a host shell with: %s\n' "$SBX_BIND_HINT" >&2
-    exit 1
-  fi
+if [ -n "$VERIFY_SANDBOX" ]; then
+  # A binding scoped to a sandbox name cannot be checked with the global-scope
+  # query; step 8 proves whether the placeholder reaches this sandbox.
+  skip "token binding scoped to $VERIFY_SANDBOX is not pre-checked (step 8 proves it reaches this sandbox)"
 elif acq secret has -g cloud-gov >/dev/null 2>&1; then
   ok "global cloud-gov secret is set"
 else
   bad "RUN_ACQ=1 requires a global cloud-gov secret for authenticated verification"
   printf '  Set it from a host shell with: %s\n' "$ACQ_BIND_HINT" >&2
+  printf '  (or use CLOUD_GOV_VERIFY_SANDBOX with a binding scoped to that sandbox name)\n' >&2
   exit 1
 fi
 
 info "5. Create sandbox with the kit"
-printf '  creating %s (workspace %s, backend %s)...\n' "$SBX_NAME" "$WORK" "$ACQ_BACKEND"
+printf '  creating %s (workspace %s, backend %s)...\n' "$SBX_NAME" "$WORK" "${ACQ_BACKEND:-<acq default>}"
 # ACQ_EXTRA_KITS bypasses acq's interactive configured-kit picker. It is
 # whitespace-separated and ordered: the CA kit (if any) must come first so its
 # startup step trusts the intercepting CA before this kit fetches the CF CLI.
@@ -369,15 +367,28 @@ if [ -n "$CA_KIT" ]; then
   EXTRA_KITS="$CA_KIT $KIT_DIR"
   printf '  CA kit first: %s\n' "$CA_KIT"
 fi
+if [ -n "$VERIFY_SANDBOX" ]; then
+  # A name the user chose may already be theirs. Refuse rather than rely on acq's
+  # create to reject a duplicate: only a sandbox this run created may be removed.
+  # If the listing cannot be read, fail closed.
+  if ! existing="$(acq_b ls 2>/dev/null </dev/null)"; then
+    bad "cannot list sandboxes with 'acq ls', so cannot confirm $VERIFY_SANDBOX is unused; not creating it"
+    exit 2
+  fi
+  if printf '%s\n' "$existing" | grep -Fqw -- "$VERIFY_SANDBOX"; then
+    bad "a sandbox named $VERIFY_SANDBOX already exists (or the name appears in 'acq ls'); choose an unused name. Nothing was created or removed."
+    exit 2
+  fi
+fi
 CREATE_ATTEMPTED=1
 if ACQ_EXTRA_KITS="$EXTRA_KITS" acq_b create --name "$SBX_NAME" opencode "$WORK" >"$CREATE_LOG" 2>&1; then
   CREATED=1
   ok "sandbox created with cloud-gov kit"
   # acq names the backend that actually ran (for example `acq(msb): ...`); show it
   # so a run is never cited as sbx evidence when it ran on msb.
-  used="$(grep -oE 'acq\((sbx|msb)\)' "$CREATE_LOG" | head -1)"
+  used="$(grep -oE 'acq\([a-z0-9-]+\)' "$CREATE_LOG" | head -1)"
   printf '  backend in create log: %s\n' "${used:-<not stated>}"
-  if [ "$used" != "acq($ACQ_BACKEND)" ]; then
+  if [ -n "$ACQ_BACKEND" ] && [ "$used" != "acq($ACQ_BACKEND)" ]; then
     bad "requested backend $ACQ_BACKEND but create log reports ${used:-no backend}"
   fi
 else
@@ -450,7 +461,6 @@ auth_detail="$(probe_field detail)"
 printf '  sandbox: CF_OAUTH_TOKEN class=%s, authenticated /v3/organizations -> %s %s\n' \
   "${probe_class:-<none>}" "${auth_status:-<none>}" "$auth_detail"
 refresh_hint="$ACQ_BIND_HINT"
-if [ "$ACQ_BACKEND" = "sbx" ]; then refresh_hint="$SBX_BIND_HINT"; fi
 case "$auth_status" in
   2*)
     case "$probe_class" in
@@ -464,7 +474,7 @@ case "$auth_status" in
     printf '  control: %s -> %s\n' "$([ -n "${CLOUD_GOV_VERIFY_CF_HOME:-}" ] && echo 'host token from CLOUD_GOV_VERIFY_CF_HOME' || echo 'host token')" "${host_status:-<unavailable: cf not logged in, not targeting api.fr.cloud.gov, or not on PATH>}"
     case "$probe_class" in
       unset)
-        bad "CF_OAUTH_TOKEN is not set in the sandbox exec environment (binding did not reach it, or exec does not carry it); on sbx check 'sbx secret ls' for a CF_OAUTH_TOKEN custom secret and create a new sandbox: $refresh_hint"
+        bad "CF_OAUTH_TOKEN is not set in the sandbox exec environment (the binding did not reach it, or exec does not carry it); confirm the acq secret exists for this sandbox's scope, then create a new sandbox: $refresh_hint"
         ;;
       raw-token-shape)
         bad "sandbox CF_OAUTH_TOKEN has a raw-token shape, not a backend placeholder"

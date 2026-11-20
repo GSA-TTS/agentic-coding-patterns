@@ -24,30 +24,22 @@ Create a neutral `cloud-gov` acq mixin kit for sbx and msb that:
    "Install phase" below for why this is not a create-time install.
 2. Allow-lists exact cloud.gov control-plane/documentation hosts and Cloud
    Foundry docs domains, without wildcard semantics.
-3. Uses the backend's custom secret binding for a host-side token from
-   `cf oauth-token`. On msb, acq feeds it from its secret store:
+3. Takes the token from the user's host `cf oauth-token` and hands it to acq on
+   stdin, so it is never on argv, in history, or in a file; acq decides how the
+   configured backend stores and injects it:
 
    ```sh
    cf oauth-token | acq secret set -g cloud-gov --host api.fr.cloud.gov --env CF_OAUTH_TOKEN
    ```
 
-   On sbx the same command is not enough: `sbx secret set-custom` takes no stdin
-   input, so acq stores the value but sbx's proxy never receives it and the
-   sandbox sees no `CF_OAUTH_TOKEN`. The sbx binding is registered with sbx
-   directly, as a dynamic command source so the token stays off argv:
-
-   ```sh
-   sbx secret set-custom --host api.fr.cloud.gov --env CF_OAUTH_TOKEN \
-     --command "$(command -v cf) oauth-token"
-   ```
-
-   Observed working on sbx 0.50.1 (the registration failed on 0.48.0 with a
-   `verify command failed` error whose cause was not determined). Docker's sbx
-   credentials documentation (checked 2026-10-31) marks custom secrets
-   experimental, so the flags and placeholder format may change. The claims that
-   `acq secret set` cannot feed sbx's proxy for this host and that
-   `sbx secret set-custom` takes no stdin hold for the versions tested; re-check
-   them when either tool changes.
+   The kit does not document backend-specific secret commands, so it relies on
+   acq's abstraction. **Not re-verified on a live backend** by the change that
+   made this the only documented path. Historical note: an earlier revision
+   documented raw backend commands. On sbx 0.50.1 a custom-secret registration
+   with a dynamic command source was observed working and the same registration
+   failed on 0.48.0 with a `verify command failed` error (cause not determined);
+   at the time `acq secret set` alone did not reach sbx's proxy for this host.
+   Those observations were about the raw commands, not the `acq secret set` path.
 
 4. Checks any injected `CF_OAUTH_TOKEN` value against known backend placeholder
    prefixes, including the documented msb guest-secret placeholder prefix, and
@@ -58,8 +50,7 @@ Create a neutral `cloud-gov` acq mixin kit for sbx and msb that:
 
 The kit does not store the real Cloud Foundry OAuth token in `spec.yaml`, files,
 or repository docs. The token remains outside the sandbox: in acq's host-side
-secret store (msb) or resolved by the sbx daemon from the host `cf` session (sbx
-`--command`), and in the active backend's proxy. The kit does not write a placeholder to
+secret store and the active backend's proxy, as acq is intended to arrange it (not re-verified on a live backend). The kit does not write a placeholder to
 `~/.cf/config.json`; authenticated `cf` command support requires a separately
 live-tested path because the stock CLI may parse cached tokens locally.
 
@@ -101,12 +92,11 @@ recorded; the pin check above covers both architectures.
 Post-install integrity is not claimed. The SHA-256 check covers the downloaded
 archive only; `~/.local/bin/cf` is agent-writable by design.
 
-Authority note for the sbx `--command` binding: unless scoped with `--sandbox`,
-it is global, and while the host `cf` session is valid any sandbox's request to
-`api.fr.cloud.gov` may be authorized as the user (refresh behavior was not
-measured). This is potentially a wider and longer-lived grant than a pasted
-short-lived token. Scope it to a
-sandbox where possible and remove it when done.
+Authority note for the token binding: with `acq secret set -g` it is global, and
+while the token is valid any sandbox's request to `api.fr.cloud.gov` may be
+authorized as the user (expiry and refresh behavior were not measured). This is
+potentially a wider grant than intended. Scope it to a sandbox where possible and
+remove it when done.
 
 ## Consequences
 
@@ -131,10 +121,12 @@ sandbox where possible and remove it when done.
   or a project-specific vetted artifact source. Public app routes, route
   services, and custom domains are intentionally not included because they are
   project-specific and should be added as exact host rules after review.
-- Live verification with `RUN_ACQ=1` requires the token binding for the backend
-  under test and must exercise raw authenticated CF API access through the
-  backend placeholder. On sbx (0.50.1, Zscaler-intercepted network) the full
-  `scripts/verify` run, including that authenticated probe, passed 38 of 38.
+- Live verification with `RUN_ACQ=1` requires the token binding (made through
+  `acq secret set`) and must exercise raw authenticated CF API access through the
+  placeholder. Historical note: on sbx 0.50.1 (Zscaler-intercepted network), with
+  the raw-backend-command binding this kit used before it relied on `acq secret
+  set`, the full `scripts/verify` run, including that authenticated probe, passed
+  38 of 38. That run did not exercise the `acq secret set` binding.
   Offline verification remains useful for schema/shell checks and auth guard
   tests, but it is not evidence that cloud.gov auth wiring works end to end.
 
