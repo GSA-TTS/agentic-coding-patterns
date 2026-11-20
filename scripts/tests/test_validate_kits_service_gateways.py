@@ -934,3 +934,168 @@ class TestServiceGatewaysValidator:
         (kit / "link").symlink_to("deep/a/b")
         errors, _warnings = validate_kit(kit, _load_schema())
         assert any("outside the kit" in e for e in errors), errors
+
+
+def _gateway_spec(files: str = "[compose.yaml]", port: int | None = None) -> str:
+    port_line = f"      port: {port}\n" if port is not None else ""
+    return (
+        "schemaVersion: hybrid/v1\n"
+        "kind: mixin\n"
+        "name: bypass\n"
+        "displayName: Bypass\n"
+        "description: d\n"
+        "serviceGateways:\n"
+        "  - name: demo-gateway\n"
+        "    runtime:\n"
+        "      compose:\n"
+        f"        files: {files}\n"
+        "        service: gateway\n"
+        "    interface:\n"
+        "      protocol: http\n"
+        f"{port_line}"
+        "    expose:\n"
+        "      env:\n"
+        "        WEB_GATEWAY_URL: url\n"
+    )
+
+
+_GW_HEAD = "services:\n  gateway:\n    image: ghcr.io/example/gateway:1.0.0\n"
+
+
+class TestComposeBypassRejections:
+    """Reviewer-reported bypasses, exercised through the full validate_kit() entry point."""
+
+    @pytest.mark.parametrize("value", ["true", "'true'", "'${USE_SOCK:-true}'", "$USE_SOCK", "'false'", "null"])
+    def test_rejects_use_api_socket_unless_literal_false(self, tmp_path, value):
+        validate_kit = _load_validate_kit()
+        kit = _write_kit(
+            tmp_path / "apisock",
+            _gateway_spec(port=8080),
+            _GW_HEAD + f"    expose: [8080]\n    use_api_socket: {value}\n",
+        )
+        errors, _warnings = validate_kit(kit, _load_schema())
+        assert any("use_api_socket" in e for e in errors), errors
+
+    def test_allows_use_api_socket_literal_false(self, tmp_path):
+        validate_kit = _load_validate_kit()
+        kit = _write_kit(
+            tmp_path / "apisock-ok",
+            _gateway_spec(port=8080),
+            _GW_HEAD + "    expose: [8080]\n    use_api_socket: false\n",
+        )
+        errors, _warnings = validate_kit(kit, _load_schema())
+        assert errors == [], errors
+
+    @pytest.mark.parametrize(
+        "volumes_yaml",
+        [
+            "    volumes: ['./$$link:/m']\n",
+            "    volumes:\n      - type: bind\n        source: ./$$link\n        target: /m\n",
+            "    volumes:\n      - type: bind\n        source: $$link\n        target: /m\n",
+        ],
+    )
+    def test_rejects_dollar_bearing_bind_source_resolving_outside_kit(self, tmp_path, volumes_yaml):
+        # Compose decodes "$$" to "$", so ./$$link selects the entry named
+        # "$link"; the validator must not check a different filesystem entry.
+        validate_kit = _load_validate_kit()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        kit = _write_kit(
+            tmp_path / "kits" / "dollar", _gateway_spec(port=8080), _GW_HEAD + "    expose: [8080]\n" + volumes_yaml
+        )
+        (kit / "$link").symlink_to(outside)
+        errors, _warnings = validate_kit(kit, _load_schema())
+        assert any("'$'" in e and "bind" in e for e in errors), errors
+
+    def test_allows_kit_local_bind_source_without_dollar(self, tmp_path):
+        validate_kit = _load_validate_kit()
+        kit = _write_kit(
+            tmp_path / "kits" / "local",
+            _gateway_spec(port=8080),
+            _GW_HEAD + "    expose: [8080]\n    volumes: ['./data:/m']\n",
+        )
+        (kit / "data").mkdir()
+        errors, _warnings = validate_kit(kit, _load_schema())
+        assert errors == [], errors
+
+    @pytest.mark.parametrize(
+        "volumes_yaml",
+        [
+            "    volumes: ['C:\\outside:/mnt:ro']\n",
+            "    volumes: ['C:/outside:/mnt:ro']\n",
+            "    volumes: ['\\\\server\\share:/mnt:ro']\n",
+            "    volumes: ['.\\..\\x:/mnt:ro']\n",
+            "    volumes:\n      - type: bind\n        source: 'C:\\outside'\n        target: /mnt\n",
+            "    volumes:\n      - type: bind\n        source: 'C:/outside'\n        target: /mnt\n",
+            "    volumes:\n      - type: bind\n        source: '\\\\server\\share'\n        target: /mnt\n",
+            "    volumes:\n      - type: volume\n        source: 'C:\\outside'\n        target: /mnt\n",
+        ],
+    )
+    def test_rejects_windows_drive_and_unc_volume_sources(self, tmp_path, volumes_yaml):
+        validate_kit = _load_validate_kit()
+        kit = _write_kit(
+            tmp_path / "kits" / "winpath", _gateway_spec(port=8080), _GW_HEAD + "    expose: [8080]\n" + volumes_yaml
+        )
+        errors, _warnings = validate_kit(kit, _load_schema())
+        assert any("Windows" in e for e in errors), errors
+
+    def test_allows_plain_named_volume(self, tmp_path):
+        validate_kit = _load_validate_kit()
+        kit = _write_kit(
+            tmp_path / "kits" / "named",
+            _gateway_spec(port=8080),
+            _GW_HEAD + "    expose: [8080]\n    volumes: ['data:/var/lib/data']\nvolumes:\n  data:\n",
+        )
+        errors, _warnings = validate_kit(kit, _load_schema())
+        assert errors == [], errors
+
+    @pytest.mark.parametrize(
+        "expose_yaml",
+        [
+            "    expose: [8080, '9000-9002']\n",
+            "    expose: [8080, '${PORT}']\n",
+            "    expose: [8080, '$PORT']\n",
+            "    expose: [8080, '9090/tcp:extra']\n",
+            "    expose: '${PORT}'\n",
+            "    expose: {a: 8080}\n",
+        ],
+    )
+    def test_unparseable_expose_entry_requires_explicit_port(self, tmp_path, expose_yaml):
+        validate_kit = _load_validate_kit()
+        kit = _write_kit(tmp_path / "unparsed", _gateway_spec(), _GW_HEAD + expose_yaml)
+        errors, _warnings = validate_kit(kit, _load_schema())
+        assert any("interface.port is required" in e for e in errors), errors
+
+    def test_inherited_expose_via_extends_requires_explicit_port(self, tmp_path):
+        validate_kit = _load_validate_kit()
+        compose = (
+            "services:\n"
+            "  base:\n    image: ghcr.io/example/base:1.0.0\n    expose: [9090]\n"
+            "  gateway:\n    image: ghcr.io/example/gateway:1.0.0\n    expose: [8080]\n"
+            "    extends:\n      service: base\n"
+        )
+        kit = _write_kit(tmp_path / "extends", _gateway_spec(), compose)
+        errors, _warnings = validate_kit(kit, _load_schema())
+        assert any("interface.port is required" in e for e in errors), errors
+
+    def test_merged_override_with_unparseable_expose_requires_explicit_port(self, tmp_path):
+        validate_kit = _load_validate_kit()
+        kit = _write_kit(
+            tmp_path / "merged", _gateway_spec("[compose.yaml, o.yaml]"), _GW_HEAD + "    expose: [8080]\n"
+        )
+        (kit / "o.yaml").write_text("services:\n  gateway:\n    expose: ['${PORT}']\n")
+        errors, _warnings = validate_kit(kit, _load_schema())
+        assert any("interface.port is required" in e for e in errors), errors
+
+    @pytest.mark.parametrize("expose_yaml", ["    expose: [8080, '9000-9002']\n", "    expose: [8080, '${PORT}']\n"])
+    def test_explicit_port_allows_unparseable_expose(self, tmp_path, expose_yaml):
+        validate_kit = _load_validate_kit()
+        kit = _write_kit(tmp_path / "explicit", _gateway_spec(port=8080), _GW_HEAD + expose_yaml)
+        errors, _warnings = validate_kit(kit, _load_schema())
+        assert errors == [], errors
+
+    def test_single_port_with_protocol_suffix_still_unambiguous(self, tmp_path):
+        validate_kit = _load_validate_kit()
+        kit = _write_kit(tmp_path / "suffix", _gateway_spec(), _GW_HEAD + "    expose: ['8080/tcp', 8080]\n")
+        errors, _warnings = validate_kit(kit, _load_schema())
+        assert errors == [], errors

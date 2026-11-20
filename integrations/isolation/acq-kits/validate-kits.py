@@ -141,6 +141,7 @@ _GATEWAY_PROTOCOLS = {"http", "https", "tcp"}
 # boolean. Treat every truthy spelling as privileged rather than relying on
 # PyYAML's representation of the source value.
 _COMPOSE_TRUE = frozenset({"true", "yes", "on", "y"})
+_WINDOWS_SOURCE_RE = re.compile(r"^[A-Za-z]:")
 _COMPOSE_VAR_RE = re.compile(r"\$[A-Za-z_][A-Za-z0-9_]*")
 
 # Docker/OCI image references without an explicit tag or digest, or with the
@@ -186,22 +187,33 @@ def _compose_services(compose_doc: object) -> dict:
     return services if isinstance(services, dict) else {}
 
 
-def _compose_service_candidate_ports(compose_doc: object, service_name: str) -> set[int]:
-    """Return internal service ports exposed by one named Compose service."""
+def _compose_service_candidate_ports(compose_doc: object, service_name: str) -> tuple[set[int], bool]:
+    """Return (internal ports, provable) for one named Compose service's expose list.
+
+    provable is False when any entry cannot be resolved to exactly one literal
+    port (range, interpolation, unknown shape) or the service inherits
+    configuration via extends, so the parsed set cannot prove which port is
+    the only one.
+    """
     service = _compose_services(compose_doc).get(service_name)
     if not isinstance(service, dict):
-        return set()
+        return set(), True
     ports: set[int] = set()
-    values = service.get("expose") or []
-    if isinstance(values, (str, int)):
+    provable = "extends" not in service
+    values = service.get("expose")
+    if values is None:
+        return ports, provable
+    if isinstance(values, (str, int)) and not isinstance(values, bool):
         values = [values]
     if not isinstance(values, list):
-        return ports
+        return ports, False
     for value in values:
         port = _parse_compose_port(value)
-        if port is not None:
+        if port is None:
+            provable = False
+        else:
             ports.add(port)
-    return ports
+    return ports, provable
 
 
 def _compose_published_port_errors(compose_doc: object) -> list[str]:
@@ -326,6 +338,11 @@ def _compose_escape_errors(compose_doc: object, project_dir: Path, kit_dir: Path
                     errors.append(
                         f"{hook_prefix} declares privileged with Compose interpolation; validation cannot prove it safe"
                     )
+        if "use_api_socket" in service and service["use_api_socket"] is not False:
+            errors.append(
+                f"{prefix} declares use_api_socket; it mounts the container engine API socket and must be absent "
+                "or the literal false"
+            )
         if "build" in service:
             errors.append(f"{prefix} declares build; service gateways must use prebuilt reviewed images")
         for key in ("network_mode", "pid", "ipc", "userns_mode", "cgroup"):
@@ -370,6 +387,13 @@ def _compose_escape_errors(compose_doc: object, project_dir: Path, kit_dir: Path
             if isinstance(volume, dict) and volume.get("type") not in ("volume", "bind", "tmpfs"):
                 errors.append(f"{prefix} declares volume type {volume.get('type')!r}; only volume, bind, tmpfs allowed")
                 continue
+            raw_source = volume if isinstance(volume, str) else _volume_source(volume)
+            if isinstance(raw_source, str) and (_WINDOWS_SOURCE_RE.match(raw_source) or "\\" in raw_source):
+                errors.append(
+                    f"{prefix} declares a Windows drive-qualified, UNC, or backslash volume source: {raw_source!r}; "
+                    "only POSIX kit-local paths are supported"
+                )
+                continue
             source = _volume_source(volume)
             if not source:
                 continue
@@ -383,6 +407,12 @@ def _compose_escape_errors(compose_doc: object, project_dir: Path, kit_dir: Path
             # directory even without a leading "."; a short-form source without
             # one is a named volume.
             is_long_bind = isinstance(volume, dict) and volume.get("type") == "bind"
+            if (source.startswith(".") or is_long_bind) and "$" in source:
+                errors.append(
+                    f"{prefix} declares a bind source containing '$': {source!r}; Compose decodes '$$' to '$' so "
+                    "the path checked here would differ from the one mounted"
+                )
+                continue
             if source.startswith(".") or is_long_bind:
                 # Compose normalizes ".." lexically (never through symlinks) while
                 # the daemon follows symlinks at mount time, so the source must stay
@@ -660,6 +690,7 @@ def validate_kit(kit_dir: Path, schema: dict) -> tuple[list[str], list[str]]:
                     else kit_dir.resolve()
                 )
                 candidate_ports: set[int] = set()
+                ports_provable = True
                 inspected_compose = False
                 found_named_service = False
                 for rel in compose_files:
@@ -710,7 +741,9 @@ def validate_kit(kit_dir: Path, schema: dict) -> tuple[list[str], list[str]]:
                         errors.append(f"{kit_dir.name}: serviceGateways[{i}].runtime.compose file {rel}: {detail}")
                     if compose_service and compose_service in _compose_services(compose_doc):
                         found_named_service = True
-                        candidate_ports.update(_compose_service_candidate_ports(compose_doc, compose_service))
+                        service_ports, service_provable = _compose_service_candidate_ports(compose_doc, compose_service)
+                        candidate_ports.update(service_ports)
+                        ports_provable = ports_provable and service_provable
                     for image in _service_images(compose_doc):
                         if _uses_floating_image(image):
                             warnings.append(
@@ -723,10 +756,15 @@ def validate_kit(kit_dir: Path, schema: dict) -> tuple[list[str], list[str]]:
                         f"{kit_dir.name}: serviceGateways[{i}].runtime.compose.service {compose_service!r} "
                         "was not found in any referenced Compose file"
                     )
-                if found_named_service and "port" not in interface and len(candidate_ports) != 1:
+                if (
+                    found_named_service
+                    and "port" not in interface
+                    and (len(candidate_ports) != 1 or not ports_provable)
+                ):
+                    unproven = "" if ports_provable else " (some expose entries are ranges, interpolated, or inherited)"
                     errors.append(
                         f"{kit_dir.name}: serviceGateways[{i}].interface.port is required when Compose service "
-                        f"{compose_service!r} exposes {len(candidate_ports)} candidate ports"
+                        f"{compose_service!r} exposes {len(candidate_ports)} candidate ports{unproven}"
                     )
 
                 expose = gateway.get("expose") or {}
