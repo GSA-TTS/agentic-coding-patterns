@@ -66,14 +66,19 @@ if cmd == "api":
 if cmd == "target":
     if os.environ.get("STUB_NO_TARGET"):
         print("FAILED"); sys.exit(1)
-    print("api endpoint:   https://api.fr.cloud.gov\nuser:           someone@example.gov\norg:            demo-org\nspace:          demo-space")
+    print("api endpoint:   https://api.fr.cloud.gov")
+    print("user:           someone@example.gov")
+    print("org:            demo-org")
+    print("space:          demo-space")
     sys.exit(0)
 if cmd == "service":
     p = inst_path(args[1])
     if not os.path.exists(p):
         print("Service instance %s not found" % args[1]); sys.exit(1)
     off, plan = open(p).read().split()
-    print("name:            %s\ntype:            managed\noffering:        %s\nplan:            %s" % (args[1], off, plan))
+    print("name:            " + args[1])
+    print("offering:        " + off)
+    print("plan:            " + plan)
     sys.exit(0)
 if cmd == "create-service":
     open(inst_path(args[3]), "w").write(args[1] + " " + args[2])
@@ -341,7 +346,8 @@ def test_sbx_wrapper_contains_no_credential_and_is_private(env):
     assert os.path.isabs(re.search(r"exec '([^']+)'", text).group(1))
     assert_no_credentials(env, res, token_allowed_in_backend_stdin=False)
     assert env.backend_calls() == [
-        f"sbx secret set-custom --sandbox box1 --host api.fr.cloud.gov --env CF_OAUTH_TOKEN --command {wrapper.resolve()}"
+        "sbx secret set-custom --sandbox box1 --host api.fr.cloud.gov --env CF_OAUTH_TOKEN "
+        f"--command {wrapper.resolve()}"
     ]
     assert not (env.stub / "backend.stdin").exists()
     assert not list(env.cf_home.glob(".wrapper.*"))
@@ -591,10 +597,9 @@ def test_verify_host_control_with_a_bad_cf_home_sends_nothing(tmp_path, bad):
 
 @pytest.mark.parametrize("mode", ["bash -x", "SHELLOPTS=xtrace"])
 def test_xtrace_cannot_print_the_token_or_password(env, mode):
-    if mode == "bash -x":
-        res = env.run(*BASE, bash_flags=("-x",))
-    else:
-        res = env.run(*BASE, extra_env={"SHELLOPTS": "xtrace"})
+    flags = ("-x",) if mode == "bash -x" else ()
+    extra = {} if mode == "bash -x" else {"SHELLOPTS": "xtrace"}
+    res = env.run(*BASE, bash_flags=flags, extra_env=extra)
     assert res.returncode == 0, res.stderr
     assert_no_credentials(env, res)
 
@@ -605,7 +610,7 @@ def test_rerun_adopts_an_existing_empty_private_cf_home_and_never_deletes_it(env
     assert env.run(*BASE).returncode == 0
     assert (env.cf_home / ".cloud-gov-acq-kit-service-account").exists()
     assert env.run(*BASE, "--rotate").returncode == 0
-    res = env.run(*BASE, extra_env={"STUB_AUTH_FAIL": "1"}, stdin="")
+    assert env.run(*BASE, extra_env={"STUB_AUTH_FAIL": "1"}).returncode == 5
     assert env.cf_home.is_dir()
 
 
