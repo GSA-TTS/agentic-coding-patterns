@@ -2,12 +2,13 @@
 // Render host-projected, provider-neutral inputs into OpenCode's global config.
 // This is the only kit that writes OpenCode configuration for provider inputs.
 
+import { realpathSync } from "node:fs"
 import { mkdir, open, readdir, readFile, rename, rm, unlink, writeFile } from "node:fs/promises"
 import { createHash, randomBytes } from "node:crypto"
 import os from "node:os"
 import path from "node:path"
 import process from "node:process"
-import { pathToFileURL } from "node:url"
+import { fileURLToPath } from "node:url"
 
 const GLOBAL_FILENAMES = ["config.json", "opencode.json", "opencode.jsonc"]
 const CANONICAL_FILENAME = "opencode.jsonc"
@@ -304,11 +305,13 @@ export function renderProviderConfig(inputs) {
       delete cost?.cacheWrite
       const reasoning = optionalReasoning(model.reasoning, `reasoning for '${reference}'`)
       const inputModalities = optionalInputModalities(model.inputModalities, `input modalities for '${reference}'`)
+      // The pinned V1 compatibility schema requires both limits. Keep incomplete
+      // pairs in discovery data without inventing a value; see ADR 0007.
       models[modelId] = {
         name: model.name === undefined ? modelId : string(model.name, `model name for '${reference}'`),
         ...(reasoning === undefined ? {} : { reasoning }),
         ...(inputModalities === undefined ? {} : { modalities: { input: inputModalities } }),
-        ...(contextWindow === undefined ? {} : { limit: { context: contextWindow, ...(maxOutputTokens === undefined ? {} : { output: maxOutputTokens }) } }),
+        ...(contextWindow === undefined || maxOutputTokens === undefined ? {} : { limit: { context: contextWindow, output: maxOutputTokens } }),
         ...(cost === undefined ? {} : { cost: { ...cost, ...(model.costAbove200kContext === undefined ? {} : { context_over_200k: renameToSnakeCase(optionalCost(model.costAbove200kContext, `tiered cost for '${reference}'`)) }) } }),
       }
     }
@@ -389,9 +392,27 @@ async function existingConfig(globalDir) {
 export async function writeConfigAtomically(globalDir, rendered, ownership = { providers: {}, roles: {} }, options = {}) {
   object(rendered, "rendered provider config")
   validateOwnership(ownership)
+  return withProviderConfigLock(globalDir, (publish) => publish(rendered, ownership), options)
+}
+
+// The preparation parent owns this lock across discovery AND publication. The
+// scoped publisher does not reacquire it; legacy callers use the same primitive.
+export async function withProviderConfigLock(globalDir, callback, options = {}) {
   await mkdir(globalDir, { recursive: true })
   const release = await acquireLock(globalDir, options)
+  let active = true
   try {
+    options.checkCancelled?.()
+    return await callback(async (rendered, ownership) => {
+      if (!active) throw new Error("provider config transaction has ended")
+      object(rendered, "rendered provider config")
+      validateOwnership(ownership)
+      return publishConfigLocked(globalDir, rendered, ownership, options)
+    })
+  } finally { active = false; await release() }
+}
+
+async function publishConfigLocked(globalDir, rendered, ownership, options) {
     for (let attempt = 0; attempt < MAX_WRITE_RETRIES; attempt++) {
       const current = await existingConfig(globalDir)
       const state = readEmbeddedState(current.canonicalText, current.config, current.canonicalConfig, ownership)
@@ -411,7 +432,6 @@ export async function writeConfigAtomically(globalDir, rendered, ownership = { p
       return
     }
     throw new Error("OpenCode config changed during every replacement attempt")
-  } finally { await release() }
 }
 
 function mergeManagedConfig(existing, rendered, state, ownership, canonicalConfig = undefined) {
@@ -717,6 +737,7 @@ async function replaceAtomically(globalDir, filename, text, options = {}) {
     const file = await open(temporary, "wx", 0o600)
     try { await file.writeFile(text); await file.sync() } finally { await file.close() }
     await options.beforeRename?.()
+    options.checkDeadline?.()
     await rename(temporary, path.join(globalDir, filename))
     const directory = await open(globalDir, "r")
     try { await directory.sync() } finally { await directory.close() }
@@ -731,19 +752,26 @@ async function acquireLock(globalDir, options = {}) {
   const host = options.hostname ?? os.hostname()
   const startTime = options.processStartTime ?? processStartTime
   const owner = JSON.stringify({ schemaVersion: "acq-opencode-provider-lock/v3", pid: process.pid, host, startTime: await startTime(process.pid), nonce: randomBytes(16).toString("hex") })
-  for (let attempt = 0; attempt < 100; attempt++) {
+  const deadline = Date.now() + (options.lockWaitMs ?? 1000)
+  while (Date.now() < deadline) {
+    options.checkCancelled?.()
     try {
       await readFile(`${lock}.recovery`, "utf8")
       await new Promise((resolve) => setTimeout(resolve, 10))
       continue
     } catch (error) { if (error?.code !== "ENOENT") throw error }
+    options.checkCancelled?.()
     try {
       await writeFile(lock, owner, { mode: 0o600, flag: "wx" })
       return async () => releaseLock(lock, owner)
     } catch (error) {
       if (error?.code !== "EEXIST") throw error
-      const stale = await staleLock(lock, host, { ...options, processStartTime: startTime })
-      if (stale) continue
+      // Required runtime preparation never steals even a provably dead lock.
+      // Legacy snapshot callers retain their existing recovery behavior.
+      if (!options.noLockRecovery) {
+        const stale = await staleLock(lock, host, { ...options, processStartTime: startTime })
+        if (stale) continue
+      }
       await new Promise((resolve) => setTimeout(resolve, 10))
     }
   }
@@ -829,14 +857,26 @@ function argument(name, fallback) {
   return index === -1 ? fallback : process.argv[index + 1]
 }
 
-// Compare URL against URL so the check is portable: on Windows
-// `process.argv[1]` is a `C:\...` path, which a `file://${...}` template turns
-// into `file://C:\...`, while `import.meta.url` is `file:///C:/...`. Those never
-// match, so this script would exit 0 without doing anything.
-if (
-  process.argv[1] &&
-  import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href
-) {
+// Run main() only when this file is the program being run. Compare canonical
+// paths, never the strings Node hands us: `import.meta.url` names the module
+// file Node resolved, while `process.argv[1]` is the path that was typed. On
+// Windows a `C:\...` argv makes a `file://${...}` template produce
+// `file://C:\...` against `import.meta.url`'s `file:///C:/...`; a launch through
+// a symlink, a directory junction, or a differently-cased path on a
+// case-insensitive filesystem disagrees the same way. Either mismatch skips
+// main() and exits 0 having done nothing, so resolve both sides first.
+function isMainModule() {
+  if (!process.argv[1]) return false
+  try {
+    return realpathSync(path.resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    // An unresolvable script path (or `node -e`, which has none) means this
+    // file is being imported, not run.
+    return false
+  }
+}
+
+if (isMainModule()) {
   const providerRoot = argument("--provider-root", process.env.ACQ_PROVIDER_INPUT_ROOT ?? "/var/lib/acq/provider-input")
   const globalDir = argument("--global-dir", path.join(process.env.HOME ?? "/home/agent", ".config/opencode"))
   const baseConfigPath = argument("--base-config", "/home/agent/opencode-config/base-config.jsonc")

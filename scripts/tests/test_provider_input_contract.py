@@ -18,16 +18,23 @@ Verifies:
 
 from __future__ import annotations
 
+import errno
+import functools
 import json
+import os
 import shutil
 import subprocess
+import sys
+import tempfile
 from pathlib import Path
 
 import jsonschema
 import pytest
+import validate_provider_input_contract as validator
 from validate_provider_input_contract import (
     ContractError,
     load_json,
+    split_discovered_bundles,
     validate_bundle,
     validate_catalog,
 )
@@ -41,6 +48,73 @@ CATALOG_SCHEMA_PATH = SCHEMAS_DIR / "acq-neutral-model-catalog.schema.json"
 BUNDLE_SCHEMA_PATH = SCHEMAS_DIR / "acq-provider-input-bundle.schema.json"
 BUNDLE_V2_SCHEMA_PATH = SCHEMAS_DIR / "acq-provider-input-bundle-v2.schema.json"
 VALIDATOR_PATH = ROOT / "scripts" / "validate_provider_input_contract.py"
+
+
+@functools.cache
+def _symlink_skip_reason() -> str | None:
+    """Return None if this host can create symlinks, else the reason it cannot.
+
+    Probed once by attempting a real symlink in a temporary directory: the
+    unprivileged Windows default is ``WinError 1314``, and a filesystem without
+    symlink support raises NotImplementedError. Any other failure is a genuine
+    problem and is re-raised rather than silently turning into a skip.
+    """
+    with tempfile.TemporaryDirectory() as probe_dir:
+        target = Path(probe_dir) / "target"
+        link = Path(probe_dir) / "link"
+        target.write_text("symlink capability probe\n")
+        try:
+            link.symlink_to(target)
+        except NotImplementedError as error:
+            return f"this platform cannot create symlinks: {error}"
+        except OSError as error:
+            privilege_missing = getattr(error, "winerror", None) == 1314
+            unsupported = error.errno in {errno.EPERM, errno.EACCES, errno.ENOSYS, errno.ENOTSUP}
+            if not (privilege_missing or unsupported):
+                raise
+            return (
+                "creating symlinks requires SeCreateSymbolicLinkPrivilege on Windows "
+                "(enable Developer Mode or run elevated) or a symlink-capable filesystem "
+                f"on this host: {error}"
+            )
+        if not link.is_symlink():
+            return "this host reported success but did not create a symlink"
+    return None
+
+
+def requires_symlink_support(test):
+    """Skip a test only when the OS/account genuinely cannot create symlinks.
+
+    The symlink tests assert a real containment boundary, so they must run
+    wherever a link can be made — including a Windows CI runner with Developer
+    Mode enabled — rather than being skipped by platform name.
+    """
+    reason = _symlink_skip_reason()
+    if reason is None:
+        return test
+    return pytest.mark.skip(reason=reason)(test)
+
+
+def _normalizer_argv(script_path: Path) -> list[str]:
+    """Return an interpreter-driven argv for running a normalizer.
+
+    The interpreter is chosen from the file extension: ``node`` for .mjs and
+    ``sys.executable`` for .py. This deliberately does NOT exercise direct
+    shebang execution or a runtime launcher; it only checks the normalizer's
+    output contract. Naming the interpreter also avoids the host's
+    script-launching support, which differs on Windows: CreateProcess only
+    loads PE images, so running a script file itself fails with ``WinError 193``.
+    """
+    suffix = script_path.suffix.lower()
+    if suffix == ".py":
+        interpreter = sys.executable
+    elif suffix == ".mjs":
+        interpreter = shutil.which("node")
+        if interpreter is None:
+            pytest.skip("node is not installed, so .mjs normalizers cannot be launched")
+    else:
+        raise AssertionError(f"no interpreter is known for normalizer suffix {suffix!r}")
+    return [interpreter, str(script_path)]
 
 
 def _bundle(relative: str) -> dict:
@@ -255,7 +329,7 @@ def test_runtime_validator_rejects_unknown_bundle_version(tmp_path):
     shutil.copytree(FIXTURES_DIR / "acme-ai", bundle_dir)
     bundle_path = bundle_dir / "bundle.json"
     bundle = json.loads(bundle_path.read_text())
-    bundle["schemaVersion"] = "acq-provider-input-bundle/v3"
+    bundle["schemaVersion"] = "acq-provider-input-bundle/v999"
     bundle_path.write_text(json.dumps(bundle))
     with pytest.raises(ContractError, match="unsupported bundle schemaVersion"):
         validate_bundle(bundle_path, {"acme-ai": "ACME_AI_API_KEY"})
@@ -266,7 +340,7 @@ def test_validator_cli_accepts_explicit_external_bundle(tmp_path):
     bundle_dir = tmp_path / "provider"
     shutil.copytree(FIXTURES_DIR / "acme-ai", bundle_dir)
     command = [
-        "python3",
+        sys.executable,
         str(VALIDATOR_PATH),
         "--schema-dir",
         str(SCHEMAS_DIR),
@@ -296,7 +370,7 @@ def test_validator_cli_rejects_duplicate_explicit_provider_ids(tmp_path):
     shutil.copytree(FIXTURES_DIR / "acme-ai", second)
     result = subprocess.run(
         [
-            "python3",
+            sys.executable,
             str(VALIDATOR_PATH),
             "--schema-dir",
             str(SCHEMAS_DIR),
@@ -321,7 +395,7 @@ def test_validator_cli_explicit_mode_skips_repository_discovery(tmp_path):
     shutil.copytree(FIXTURES_DIR / "acme-ai", bundle_dir)
     result = subprocess.run(
         [
-            "python3",
+            sys.executable,
             str(VALIDATOR_PATH),
             "--schema-dir",
             str(SCHEMAS_DIR),
@@ -346,7 +420,7 @@ def test_validator_cli_rejects_malformed_credential_bindings(tmp_path):
     bindings.write_text('{"providers": []}')
     result = subprocess.run(
         [
-            "python3",
+            sys.executable,
             str(VALIDATOR_PATH),
             "--schema-dir",
             str(SCHEMAS_DIR),
@@ -362,6 +436,36 @@ def test_validator_cli_rejects_malformed_credential_bindings(tmp_path):
     assert result.returncode == 1
     assert "providers must be an object" in result.stderr
     assert "Traceback" not in result.stderr
+
+
+def test_split_discovered_bundles_classifies_fixtures_vs_kits():
+    """Discovery classification is path-based, not separator-string-based."""
+    fixture = FIXTURES_DIR / "usai" / "bundle.json"
+    kit = ROOT / "integrations" / "isolation" / "acq-kits" / "usai-provider" / "provider-input.json"
+    fixture_bundles, kit_bundles = split_discovered_bundles([fixture, kit])
+    assert fixture_bundles == [fixture]
+    assert kit_bundles == [kit]
+
+
+def test_validator_cli_discovery_mode_validates_repository():
+    """Discovery mode (no --bundle) separates fixtures from kits, so the shared
+    `usai` providerId across the fixture and the usai-provider kit is not a
+    duplicate. Regression for the Windows path-separator bug."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(VALIDATOR_PATH),
+            "--schema-dir",
+            str(SCHEMAS_DIR),
+            "--credential-bindings",
+            str(SCHEMAS_DIR / "provider-credential-bindings.json"),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "duplicate providerId" not in result.stderr
 
 
 # ---------------------------------------------------------------------------
@@ -1168,7 +1272,7 @@ def test_usai_normalizer_output_satisfies_runtime_contract(tmp_path):
     script_path = ROOT / "integrations/isolation/acq-kits/usai-provider/scripts/normalize-catalog.mjs"
     source_path = ROOT / "integrations/providers/usai/catalog.json"
     subprocess.run(
-        [str(script_path), "--source", str(source_path), "--out", str(output_path)],
+        [*_normalizer_argv(script_path), "--source", str(source_path), "--out", str(output_path)],
         check=True,
         capture_output=True,
         text=True,
@@ -1200,6 +1304,7 @@ def test_runtime_validator_rejects_undeclared_credential_name(tmp_path):
         validate_bundle(bundle_dir / "bundle.json", {"acme-ai": "ACME_AI_API_KEY"})
 
 
+@requires_symlink_support
 def test_runtime_validator_rejects_artifact_symlink(tmp_path):
     """Package-relative artifact names cannot escape through a symlink."""
     bundle_dir = tmp_path / "provider"
@@ -1306,21 +1411,237 @@ def test_runtime_validator_accepts_keyenv_among_multiple_credentials(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# normalizerPath — must be an executable regular file, not a symlink or mode 0644
+# normalizerPath — executable regular file: POSIX mode bits / Windows launcher
 # ---------------------------------------------------------------------------
 
 
-def test_runtime_validator_rejects_non_executable_normalizer(tmp_path):
-    """normalizerPath pointing at a non-executable file (mode 0644) must be rejected."""
+def _make_bundle_with_normalizer(tmp_path, name, text):
+    """Copy the acme-ai fixture and point its bundle at a normalizer named ``name``."""
     bundle_dir = tmp_path / "provider"
     shutil.copytree(FIXTURES_DIR / "acme-ai", bundle_dir)
-    normalizer_path = bundle_dir / "normalize.py"
-    # Strip all execute bits to simulate the pre-fix 0644 state.
-    normalizer_path.chmod(0o644)
+    (bundle_dir / "normalize.py").unlink()
+    (bundle_dir / name).write_text(text)
+    bundle_path = bundle_dir / "bundle.json"
+    bundle = json.loads(bundle_path.read_text())
+    bundle["normalizerPath"] = name
+    bundle_path.write_text(json.dumps(bundle))
+    return bundle_path
+
+
+@pytest.fixture
+def windows_platform(monkeypatch):
+    """Exercise the Windows launcher branch on any host through the platform seam."""
+    monkeypatch.setattr(validator, "_is_windows", lambda: True)
+
+
+def test_runtime_validator_rejects_non_executable_normalizer_on_posix(tmp_path):
+    """On POSIX, stripping every execute bit (0644) from the normalizer is rejected."""
+    if os.name == "nt":
+        pytest.skip("POSIX mode bits are not reported on Windows")
+    bundle_dir = tmp_path / "provider"
+    shutil.copytree(FIXTURES_DIR / "acme-ai", bundle_dir)
+    (bundle_dir / "normalize.py").chmod(0o644)
     with pytest.raises(ContractError, match="executable"):
         validate_bundle(bundle_dir / "bundle.json", {"acme-ai": "ACME_AI_API_KEY"})
 
 
+def test_runtime_validator_ignores_shebang_when_posix_mode_bits_missing(tmp_path):
+    """POSIX behavior is unchanged: a valid shebang does not substitute for the exec bit."""
+    if os.name == "nt":
+        pytest.skip("POSIX mode bits are not reported on Windows")
+    bundle_path = _make_bundle_with_normalizer(tmp_path, "normalize.py", "#!/usr/bin/env python3\n")
+    (bundle_path.parent / "normalize.py").chmod(0o644)
+    with pytest.raises(ContractError, match="executable"):
+        validate_bundle(bundle_path, {"acme-ai": "ACME_AI_API_KEY"})
+
+
+@pytest.mark.usefixtures("windows_platform")
+def test_windows_contract_rejects_regular_file_without_shebang(tmp_path):
+    """A regular data file with a runnable extension but no shebang is not a normalizer."""
+    bundle_path = _make_bundle_with_normalizer(tmp_path, "normalize.py", "plain data, not a runnable normalizer\n")
+    with pytest.raises(ContractError, match="shebang"):
+        validate_bundle(bundle_path, {"acme-ai": "ACME_AI_API_KEY"})
+
+
+@pytest.mark.usefixtures("windows_platform")
+def test_windows_contract_rejects_unrecognized_normalizer_extension(tmp_path):
+    """A regular file whose extension has no runnable association is rejected."""
+    bundle_path = _make_bundle_with_normalizer(tmp_path, "normalize.txt", "#!/usr/bin/env python3\nprint('x')\n")
+    with pytest.raises(ContractError, match="supported launcher extension"):
+        validate_bundle(bundle_path, {"acme-ai": "ACME_AI_API_KEY"})
+
+
+@pytest.mark.usefixtures("windows_platform")
+@pytest.mark.parametrize(
+    "suffix,shebang",
+    [
+        (".py", "#!/usr/bin/env python3\n"),
+        (".PY", "#!/usr/bin/env python3\n"),
+        (".py", "#!/usr/bin/env\tpython3\n"),
+        (".py", "#!/usr/bin/env python3\r\n"),
+        (".py", "#!/usr/bin/python\n"),
+        (".py", "#!/usr/bin/env py\n"),
+        (".py", "#!/usr/bin/env python.exe\n"),
+        (".py", "#!/usr/bin/env PYTHON3.EXE\n"),
+        (".mjs", "#!/usr/bin/env node\n"),
+        (".mjs", "#!/usr/bin/node\n"),
+        (".mjs", "#!/usr/bin/env node.exe\n"),
+        (".py", "#!/usr/local/bin/python3\n"),
+        (".py", "#!python3\n"),
+        (".MJS", "#!/usr/bin/env node\n"),
+    ],
+)
+def test_windows_contract_accepts_supported_normalizer(tmp_path, suffix, shebang):
+    """An allowed extension with an exactly matching interpreter satisfies the contract."""
+    bundle_path = _make_bundle_with_normalizer(tmp_path, f"normalize{suffix}", shebang + "content\n")
+    validate_bundle(bundle_path, {"acme-ai": "ACME_AI_API_KEY"})
+
+
+@pytest.mark.usefixtures("windows_platform")
+@pytest.mark.parametrize(
+    "suffix,shebang",
+    [
+        (".py", "#!/usr/bin/env python-evil\n"),
+        (".py", "#!/usr/bin/env python3-evil\n"),
+        (".py", "#!/usr/bin/env pythonw\n"),
+        (".py", "#!/usr/bin/env python.exe.evil\n"),
+        (".py", "#!/usr/bin/env python.exe.exe\n"),
+        (".py", "#!/usr/bin/env pyevil\n"),
+        (".py", "#!/usr/bin/env node\n"),
+        (".py", "#!/usr/bin/evil/python3-evil\n"),
+        (".py", "#!/usr/bin/env python3.12\n"),
+        (".py", "#!/tmp/evil/python3\n"),
+        (".py", "#!/tmp/evil/env python3\n"),
+        (".py", "#!C:\\evil\\python3\n"),
+        (".py", "#!/usr/bin/env -S python3\n"),
+        (".py", "#!/usr/bin/env python3 -u\n"),
+        (".py", "#!/usr/bin/env python3 extra\n"),
+        (".py", "#!/usr/bin/env FOO=bar python3\n"),
+        (".py", "#!/usr/bin/python3 -u\n"),
+        (".mjs", "#!/usr/bin/env node --no-warnings\n"),
+        (".mjs", "#!/usr/bin/node --no-warnings\n"),
+        (".py", "#!/usr/bin/env evil python3\n"),
+        (".py", "#!/usr/bin/env\n"),
+        (".py", "#!/python3\n"),
+        (".py", "#!/env python3\n"),
+        (".py", "#!/usr/bin/env /python3\n"),
+        (".py", "#!/usr/bin/ENV python3\n"),
+        (".py", " #!/usr/bin/env python3\n"),
+        (".py", "\t#!/usr/bin/env python3\n"),
+        (".py", "#!/usr/bin/env\u00a0python3\n"),
+        (".mjs", "#!/node\n"),
+        (".mjs", "#!/usr/bin/env nodeevil\n"),
+        (".mjs", "#!/usr/bin/env node.exe.evil\n"),
+        (".mjs", "#!/usr/bin/env node-evil\n"),
+        (".mjs", "#!/usr/bin/env nodejs\n"),
+        (".mjs", "#!/usr/bin/env python3\n"),
+        (".mjs", "#!/usr/bin/env evil node\n"),
+        (".mjs", "#!/usr/bin/env FOO=bar node\n"),
+        (".mjs", "#!/usr/bin/nodeevil\n"),
+        (".mjs", "#!/opt/evil/node\n"),
+    ],
+)
+def test_windows_contract_rejects_lookalike_interpreters(tmp_path, suffix, shebang):
+    """Prefix, suffix, wrong-language, and indirection spellings are not accepted."""
+    bundle_path = _make_bundle_with_normalizer(tmp_path, f"normalize{suffix}", shebang + "content\n")
+    with pytest.raises(ContractError, match="shebang"):
+        validate_bundle(bundle_path, {"acme-ai": "ACME_AI_API_KEY"})
+
+
+@pytest.mark.usefixtures("windows_platform")
+def test_windows_contract_rejects_first_line_beyond_shebang_read_limit(tmp_path):
+    """An over-limit first line is refused, so an interpreter past the cutoff is never seen."""
+    padded = "#!/usr/bin/env " + " " * 8192 + "python3\n"
+    bundle_path = _make_bundle_with_normalizer(tmp_path, "normalize.py", padded)
+    with pytest.raises(ContractError, match="shebang"):
+        validate_bundle(bundle_path, {"acme-ai": "ACME_AI_API_KEY"})
+
+
+def _padded_shebang(prefix, suffix="", *, extra=0):
+    """Return a first line of exactly ``MAX_SHEBANG_BYTES + extra`` bytes, newline included.
+
+    ``extra=0`` sits exactly at the read limit and is complete; ``extra > 0`` is
+    over it, so the parser cannot see the whole line.
+    """
+    pad = validator.MAX_SHEBANG_BYTES + extra - len(prefix) - len(suffix) - 1
+    return (prefix + " " * pad + suffix).encode() + b"\n"
+
+
+def _write_normalizer(bundle_path, name, raw):
+    """Replace the bundle's normalizer with byte-exact content (no newline translation)."""
+    (bundle_path.parent / name).write_bytes(raw)
+
+
+@pytest.mark.usefixtures("windows_platform")
+def test_windows_contract_accepts_complete_first_line_at_shebang_read_limit(tmp_path):
+    """A line that ends exactly at the limit is complete and still accepted."""
+    bundle_path = _make_bundle_with_normalizer(tmp_path, "normalize.py", "")
+    raw = _padded_shebang("#!/usr/bin/env python3")
+    assert len(raw) == validator.MAX_SHEBANG_BYTES
+    _write_normalizer(bundle_path, "normalize.py", raw)
+
+    validate_bundle(bundle_path, {"acme-ai": "ACME_AI_API_KEY"})
+
+
+@pytest.mark.usefixtures("windows_platform")
+def test_windows_contract_rejects_first_line_one_byte_over_shebang_read_limit(tmp_path):
+    """One byte past the limit is already unparseable, even with an allowlisted interpreter."""
+    bundle_path = _make_bundle_with_normalizer(tmp_path, "normalize.py", "")
+    raw = _padded_shebang("#!/usr/bin/env python3", extra=1)
+    assert len(raw) == validator.MAX_SHEBANG_BYTES + 1
+    _write_normalizer(bundle_path, "normalize.py", raw)
+
+    with pytest.raises(ContractError, match="shebang"):
+        validate_bundle(bundle_path, {"acme-ai": "ACME_AI_API_KEY"})
+
+
+@pytest.mark.usefixtures("windows_platform")
+@pytest.mark.parametrize(
+    "suffix,shebang",
+    [
+        (".py", "#!/usr/bin/env python3"),
+        (".py", "#!/usr/bin/python3"),
+        (".mjs", "#!/usr/bin/env node"),
+        (".mjs", "#!/usr/bin/node"),
+    ],
+)
+def test_windows_contract_rejects_trailing_token_beyond_shebang_read_limit(tmp_path, suffix, shebang):
+    """An allowlisted interpreter before the cutoff must not vouch for a token after it."""
+    name = f"normalize{suffix}"
+    bundle_path = _make_bundle_with_normalizer(tmp_path, name, "")
+    # Padding pushes the forbidden argument well past the read window, so a
+    # truncating parser sees only "shebang <interpreter>" and accepts it.
+    raw = _padded_shebang(shebang, " -u", extra=64)
+    _write_normalizer(bundle_path, name, raw)
+
+    with pytest.raises(ContractError, match="shebang"):
+        validate_bundle(bundle_path, {"acme-ai": "ACME_AI_API_KEY"})
+
+
+@pytest.mark.usefixtures("windows_platform")
+def test_windows_contract_accepts_every_shipped_bundle():
+    """Real fixtures and kit bundles satisfy the Windows launcher contract as shipped."""
+    bundles = validator.discovered_bundles()
+    assert bundles
+    for bundle in bundles:
+        validate_bundle(bundle, None)
+
+
+@pytest.mark.usefixtures("windows_platform")
+@requires_symlink_support
+def test_windows_contract_keeps_symlink_and_inside_root_checks(tmp_path):
+    """Windows branch does not relax the symlink and inside-root checks that precede it."""
+    bundle_dir = tmp_path / "provider"
+    shutil.copytree(FIXTURES_DIR / "acme-ai", bundle_dir)
+    normalizer_path = bundle_dir / "normalize.py"
+    real_path = bundle_dir / "normalize_real.py"
+    normalizer_path.rename(real_path)
+    normalizer_path.symlink_to(real_path)
+    with pytest.raises(ContractError, match="path components must not be symlinks"):
+        validate_bundle(bundle_dir / "bundle.json", {"acme-ai": "ACME_AI_API_KEY"})
+
+
+@requires_symlink_support
 def test_runtime_validator_rejects_normalizer_symlink(tmp_path):
     """normalizerPath that is a symlink (even to an executable) must be rejected."""
     bundle_dir = tmp_path / "provider"
@@ -1333,14 +1654,18 @@ def test_runtime_validator_rejects_normalizer_symlink(tmp_path):
         validate_bundle(bundle_dir / "bundle.json", {"acme-ai": "ACME_AI_API_KEY"})
 
 
-def test_fixture_normalizers_are_directly_invocable(tmp_path):
-    """Fixture normalizers transform vendor-shaped source into the exact snapshot."""
+def test_fixture_normalizers_produce_exact_snapshot_via_interpreter(tmp_path):
+    """Run each fixture normalizer through an explicit interpreter (not a shebang or launcher).
+
+    Covers the output contract only: vendor-shaped source must transform into the
+    exact committed snapshot and pass catalog validation.
+    """
     for fixture_name, provider_id in [("usai", "usai"), ("acme-ai", "acme-ai")]:
         fixture_dir = FIXTURES_DIR / fixture_name
         normalizer = fixture_dir / "normalize.py"
         out = tmp_path / f"{fixture_name}-catalog.json"
         result = subprocess.run(
-            [str(normalizer), "--source", str(fixture_dir / "source.json"), "--out", str(out)],
+            [*_normalizer_argv(normalizer), "--source", str(fixture_dir / "source.json"), "--out", str(out)],
             check=True,
             capture_output=True,
             text=True,
@@ -1372,7 +1697,7 @@ def test_validator_cli_rejects_non_object_root(tmp_path, root_value):
     bundle_path.write_text(json.dumps(root_value))
     result = subprocess.run(
         [
-            "python3",
+            sys.executable,
             str(VALIDATOR_PATH),
             "--schema-dir",
             str(SCHEMAS_DIR),
@@ -1406,7 +1731,7 @@ def test_validator_cli_rejects_non_string_schema_version(tmp_path, schema_versio
     bundle_path.write_text(json.dumps({"schemaVersion": schema_version_value}))
     result = subprocess.run(
         [
-            "python3",
+            sys.executable,
             str(VALIDATOR_PATH),
             "--schema-dir",
             str(SCHEMAS_DIR),
