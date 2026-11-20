@@ -1,5 +1,31 @@
 # Changelog
 
+## [2.0.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.19.0...v2.0.0) (2026-11-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* **integrations:** the Prime Agent kit path and emitter export are removed. Select OpenCode or Pi explicitly; no automatic fallback or configuration conversion. Pi is still CLI-install-only with USAi configuration deferred; this change claims no operational parity.
+
+### Features
+
+* **catalog:** add opt-in model release metadata ([#603](https://github.com/GSA-TTS/agentic-coding-patterns/issues/603)) ([d8fdfaf](https://github.com/GSA-TTS/agentic-coding-patterns/commit/d8fdfaf0a4b28fa65a238c2ea4f34e20ceb7b0ad))
+* **integrations:** retire Prime Agent reference harness ([#585](https://github.com/GSA-TTS/agentic-coding-patterns/issues/585)) ([60e411e](https://github.com/GSA-TTS/agentic-coding-patterns/commit/60e411e0954e06ad3e725080c00b06b05161acb5))
+* **models:** add bounded guest model preparation ([#602](https://github.com/GSA-TTS/agentic-coding-patterns/issues/602)) ([4bc66f7](https://github.com/GSA-TTS/agentic-coding-patterns/commit/4bc66f74e5cc93afc76973056f3a39763085c4c6))
+* **oci-engine:** add opt-in volatile metadata runtime ([#589](https://github.com/GSA-TTS/agentic-coding-patterns/issues/589)) ([a945b56](https://github.com/GSA-TTS/agentic-coding-patterns/commit/a945b56f81c44b9292b4ceddfb530a9cefe0631f))
+* **paseo:** bump pinned CLI to 0.16.2 ([#612](https://github.com/GSA-TTS/agentic-coding-patterns/issues/612)) ([48ff174](https://github.com/GSA-TTS/agentic-coding-patterns/commit/48ff17464e7278005a776f6bb05de5a11428b454))
+* **paseo:** bump pinned Paseo CLI to 0.15.4 ([#592](https://github.com/GSA-TTS/agentic-coding-patterns/issues/592)) ([1ff65ef](https://github.com/GSA-TTS/agentic-coding-patterns/commit/1ff65efd684655304864aae502ab7e88fae16973))
+* **providers:** add data-only discovery bundle v3 ([#595](https://github.com/GSA-TTS/agentic-coding-patterns/issues/595)) ([395319f](https://github.com/GSA-TTS/agentic-coding-patterns/commit/395319f2a22a004a6fedb12196b33fab6a2b5995))
+* **usai-catalog:** legacy renderer disposition, offline drift report and refresh runbook ([#582](https://github.com/GSA-TTS/agentic-coding-patterns/issues/582)) ([abd854b](https://github.com/GSA-TTS/agentic-coding-patterns/commit/abd854b7ca05c3abc8e67be22ba25bda4df5bb57))
+
+
+### Bug Fixes
+
+* **lint:** print the --count-only number without color escapes ([#606](https://github.com/GSA-TTS/agentic-coding-patterns/issues/606)) ([956f448](https://github.com/GSA-TTS/agentic-coding-patterns/commit/956f448b8b4a2415722531e697e7d3871542aa51))
+* **models:** regenerate runtime model preparation artifact ([#607](https://github.com/GSA-TTS/agentic-coding-patterns/issues/607)) ([b11ae8f](https://github.com/GSA-TTS/agentic-coding-patterns/commit/b11ae8f662190438d2e290e94ed217742175cbed))
+* **validator:** make normalizer exec-bit check Windows-aware ([#547](https://github.com/GSA-TTS/agentic-coding-patterns/issues/547)) ([2fe9641](https://github.com/GSA-TTS/agentic-coding-patterns/commit/2fe9641da0578a958f15f130479728ad95d3da48))
+* **validator:** validate Git executable modes ([#596](https://github.com/GSA-TTS/agentic-coding-patterns/issues/596)) ([af0271a](https://github.com/GSA-TTS/agentic-coding-patterns/commit/af0271a14cb52ce6109a11420fcf43ce3f7b03f2))
+
 ## [1.19.0](https://github.com/GSA-TTS/agentic-coding-patterns/compare/v1.18.0...v1.19.0) (2026-11-05)
 
 
