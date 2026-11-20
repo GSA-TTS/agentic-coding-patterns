@@ -32,6 +32,7 @@ DIRECT_KIT_SCRIPT_NAMES = frozenset(
         "investigate-shell-autostop",
         "paseo-probe3",
         "paseo-verify-identity",
+        "setup-service-account",
     }
 )
 
