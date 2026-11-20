@@ -142,3 +142,15 @@ sandbox where possible and remove it when done.
 
 - `../../README.md` - operator usage and troubleshooting entry points.
 - `../../spec.yaml` - authoritative kit behavior.
+
+### Alternative credential: service account
+
+The README also documents, as an alternative to the `cf oauth-token` binding, a
+cloud.gov service account authenticated into a separate `CF_HOME` on the host,
+with the same placeholder binding reading a token from that `CF_HOME`. Reason: the
+default binds the user's own full-scope token, and the playbook says an agent
+SHOULD use a distinct service account or token. The service account's
+username/password stay on the host and never enter the sandbox. This path is
+documentation only and **untested**; the README lists each untested claim, and
+whether an agent acting through a service account is acceptable is a question for
+the user's ISSO, not a decision recorded here.

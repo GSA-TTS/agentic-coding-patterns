@@ -120,6 +120,10 @@ agentContext: |
   sbx secret set-custom --host api.fr.cloud.gov --env CF_OAUTH_TOKEN --command "$(command -v cf) oauth-token"
   ```
 
+  The kit README also describes an alternative, untested path that binds a
+  token from a cloud.gov service account; it needs the user's ISSO review, so
+  mention it only if asked. Never ask for the account's password either.
+
   If `CF_OAUTH_TOKEN` is unset or an authenticated call returns 401, say so and
   point the user to the kit's TROUBLESHOOTING.md instead of retrying.
 

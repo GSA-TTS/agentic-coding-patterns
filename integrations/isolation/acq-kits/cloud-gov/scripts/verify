@@ -66,8 +66,20 @@ fi
 
 KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 REPO_ROOT="$(cd "$KIT_DIR/../../../.." && pwd)"
-SBX_NAME="cloud-gov-verify-$$"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/cloud-gov-verify.XXXXXX")"
+# pid + the random suffix mktemp chose, so a concurrent run, a recycled pid, or a
+# sandbox someone else already named cloud-gov-verify-<pid> cannot share this name.
+SBX_NAME="cloud-gov-verify-$$-$(printf '%s' "${WORK##*.}" | tr 'A-Z' 'a-z')"
+# Cleanup removes a sandbox only when this invocation's own `acq create` of
+# $SBX_NAME succeeded (CREATED=1). A create that never ran, or that failed or was
+# interrupted, leaves nothing for cleanup to remove: after a failed create we
+# cannot tell a half-built sandbox of ours from one we have no claim to, so the
+# script reports the name and leaves any removal to the user.
+CREATE_ATTEMPTED=0
+CREATED=0
+# The real stderr, kept so cleanup notes still reach the user when a signal
+# interrupts a command whose own stderr is redirected into a log.
+exec 3>&2
 CREATE_LOG="$WORK/create.log"
 KEEP="${KEEP:-0}"
 RUN_ACQ="${RUN_ACQ:-0}"
@@ -102,13 +114,24 @@ info() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 
 cleanup() {
   if [ "$KEEP" = "1" ]; then
-    printf '\nKEEP=1 set; leaving sandbox %s and %s in place.\n' "$SBX_NAME" "$WORK" >&2
-    return
+    if [ "$CREATED" = "1" ]; then
+      printf '\nKEEP=1 set; leaving sandbox %s and %s in place.\n' "$SBX_NAME" "$WORK" >&3
+    else
+      printf '\nKEEP=1 set; leaving %s in place.\n' "$WORK" >&3
+    fi
+  else
+    if [ "$CREATED" = "1" ]; then
+      acq_b rm "$SBX_NAME" >/dev/null 2>&1 || true
+    fi
+    rm -rf "$WORK" >/dev/null 2>&1 || true
   fi
-  acq_b rm "$SBX_NAME" >/dev/null 2>&1 || true
-  rm -rf "$WORK" >/dev/null 2>&1 || true
+  if [ "$CREATE_ATTEMPTED" = "1" ] && [ "$CREATED" != "1" ]; then
+    printf 'note: acq create %s did not complete; verify removed no sandbox. If a partial sandbox exists, inspect it with `acq ls` and remove it yourself.\n' "$SBX_NAME" >&3
+  fi
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 in_acq() { acq_b exec "$SBX_NAME" -- sh -c "$1" </dev/null 2>/dev/null || true; }
 
@@ -330,7 +353,9 @@ if [ -n "$CA_KIT" ]; then
   EXTRA_KITS="$CA_KIT $KIT_DIR"
   printf '  CA kit first: %s\n' "$CA_KIT"
 fi
+CREATE_ATTEMPTED=1
 if ACQ_EXTRA_KITS="$EXTRA_KITS" acq_b create --name "$SBX_NAME" opencode "$WORK" >"$CREATE_LOG" 2>&1; then
+  CREATED=1
   ok "sandbox created with cloud-gov kit"
   # acq names the backend that actually ran (for example `acq(msb): ...`); show it
   # so a run is never cited as sbx evidence when it ran on msb.

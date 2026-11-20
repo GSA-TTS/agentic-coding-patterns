@@ -398,3 +398,160 @@ def test_lib_only_env_is_refused_when_executed(tmp_path):
         timeout=30,
     )
     assert res.returncode == 2
+
+
+def _ownership_run(tmp_path: Path, *, run_acq: bool, create_rc: int = 0, extra_env: dict | None = None):
+    """Run the real scripts/verify with an acq stub that logs every call.
+
+    The stub's `create` exits $STUB_CREATE_RC; every other subcommand exits 0. No
+    network and no real backend are involved.
+    """
+    bindir = tmp_path / "bin"
+    bindir.mkdir(exist_ok=True)
+    log = tmp_path / "calls.log"
+    _stub(
+        bindir / "acq",
+        f'echo "acq $*" >> "{log}"\n'
+        'for a in "$@"; do [ "$a" = create ] && exit "${STUB_CREATE_RC:-0}"; done\n'
+        "exit 0\n",
+    )
+    env = {
+        "PATH": f"{bindir}:{SYSTEM_PATH}:/usr/local/bin",
+        "HOME": str(tmp_path),
+        "TMPDIR": str(tmp_path),
+        "STUB_CREATE_RC": str(create_rc),
+    }
+    if run_acq:
+        env.update({"RUN_ACQ": "1", "ACQ_BACKEND": "msb"})
+    env.update(extra_env or {})
+    res = subprocess.run([BASH, str(VERIFY)], env=env, capture_output=True, text=True, timeout=120)
+    calls = log.read_text().splitlines() if log.exists() else []
+    return res, calls
+
+
+def _rm_calls(calls: list[str]) -> list[str]:
+    return [c for c in calls if re.match(r"acq (--backend \w+ )?rm ", c)]
+
+
+def _created_name(calls: list[str]) -> str:
+    creates = [c for c in calls if re.match(r"acq (--backend \w+ )?create ", c)]
+    assert len(creates) == 1, calls
+    return creates[0].split("--name ")[1].split()[0]
+
+
+def test_offline_run_never_touches_the_backend(tmp_path):
+    """The default (skipped live section) must not create, remove, or even call acq."""
+    res, calls = _ownership_run(tmp_path, run_acq=False)
+    assert "RUN_ACQ=1 not set" in res.stdout
+    assert calls == [], calls
+
+
+def test_failed_create_does_not_remove_anything(tmp_path):
+    """A create that fails (for example the name already exists) is not ours to remove."""
+    res, calls = _ownership_run(tmp_path, run_acq=True, create_rc=1)
+    assert res.returncode != 0
+    assert any(" create " in c for c in calls)
+    assert _rm_calls(calls) == [], calls
+    name = _created_name(calls)
+    assert name in res.stderr, "a failed create must tell the user which sandbox name to check"
+
+
+def test_pre_existing_sandbox_of_the_same_name_is_never_removed(tmp_path):
+    """Collision: the backend already holds a sandbox of the chosen name.
+
+    The stub keeps a registry file and cannot know the name in advance, so on
+    `create` it records the requested name as already existing (someone else's) and
+    refuses; `rm` deletes a name from the registry. Unlike the failed-create test,
+    which reads the call log, this asserts the surviving backend state: the
+    pre-existing sandbox must still be in the registry after the run.
+    """
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    registry = tmp_path / "registry"
+    registry.write_text("")
+    log = tmp_path / "calls.log"
+    _stub(
+        bindir / "acq",
+        f'echo "acq $*" >> "{log}"\n'
+        'case "$*" in\n'
+        f'  *" create "*) n="${{*#*--name }}"; n="${{n%% *}}"; echo "$n" >> "{registry}"; exit 1 ;;\n'
+        f'  *" rm "*) n="${{*#* rm }}"; n="${{n%% *}}"; '
+        f'grep -vx -- "$n" "{registry}" > "{registry}.new"; mv "{registry}.new" "{registry}"; exit 0 ;;\n'
+        "esac\n"
+        "exit 0\n",
+    )
+    env = {
+        "PATH": f"{bindir}:{SYSTEM_PATH}:/usr/local/bin",
+        "HOME": str(tmp_path),
+        "TMPDIR": str(tmp_path),
+        "RUN_ACQ": "1",
+        "ACQ_BACKEND": "msb",
+    }
+    res = subprocess.run([BASH, str(VERIFY)], env=env, capture_output=True, text=True, timeout=120)
+    assert res.returncode != 0
+    name = _created_name(log.read_text().splitlines())
+    assert registry.read_text().split() == [name], "verify removed a sandbox it did not create"
+
+
+def test_successful_create_removes_exactly_the_sandbox_it_created(tmp_path):
+    res, calls = _ownership_run(tmp_path, run_acq=True, create_rc=0)
+    name = _created_name(calls)
+    rms = _rm_calls(calls)
+    assert len(rms) == 1, calls
+    assert rms[0].split()[-1] == name
+    assert "did not complete" not in res.stderr
+
+
+def test_keep_leaves_the_owned_sandbox_in_place(tmp_path):
+    res, calls = _ownership_run(tmp_path, run_acq=True, extra_env={"KEEP": "1"})
+    assert _rm_calls(calls) == [], calls
+    assert _created_name(calls) in res.stderr
+
+
+def test_sandbox_names_are_collision_resistant(tmp_path):
+    names = set()
+    for i in range(5):
+        sub = tmp_path / str(i)
+        sub.mkdir()
+        _, calls = _ownership_run(sub, run_acq=True)
+        names.add(_created_name(calls))
+    assert len(names) == 5, names
+    for n in names:
+        assert re.fullmatch(r"cloud-gov-verify-[0-9]+-[a-z0-9]{6,}", n), n
+
+
+def test_sigterm_during_create_removes_nothing_and_names_the_sandbox(tmp_path):
+    """An interrupted create is not owned; the note must reach the real stderr."""
+    import signal
+    import time
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    log = tmp_path / "calls.log"
+    started = tmp_path / "started"
+    _stub(
+        bindir / "acq",
+        f'echo "acq $*" >> "{log}"\ncase "$*" in *" create "*) : > "{started}"; sleep 30 ;; esac\nexit 0\n',
+    )
+    env = {
+        "PATH": f"{bindir}:{SYSTEM_PATH}:/usr/local/bin",
+        "HOME": str(tmp_path),
+        "TMPDIR": str(tmp_path),
+        "RUN_ACQ": "1",
+        "ACQ_BACKEND": "msb",
+    }
+    proc = subprocess.Popen(
+        [BASH, str(VERIFY)], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True
+    )
+    for _ in range(100):
+        if started.exists():
+            break
+        time.sleep(0.1)
+    assert started.exists(), "create stub never started"
+    # A terminal Ctrl-C/TERM reaches the whole foreground group; bash defers its trap
+    # until the running child exits, so signal the group as a terminal would.
+    os.killpg(proc.pid, signal.SIGTERM)
+    _, err = proc.communicate(timeout=60)
+    calls = log.read_text().splitlines()
+    assert _rm_calls(calls) == [], calls
+    assert _created_name(calls) in err, err

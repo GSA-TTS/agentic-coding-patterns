@@ -97,6 +97,12 @@ or no current user.
     --command "$(command -v cf) oauth-token"
   ```
 
+- **Service-account path: `403 access_denied`, "Your current password has
+  expired".** cloud.gov documents this for service-account passwords, which
+  expire every 90 days. Delete and recreate the service key and repeat the
+  authentication and binding steps in the README's service-account section. That
+  section is untested; this symptom is as cloud.gov documents it, not something
+  this kit reproduced.
 - **Unexpected token value in the sandbox.** The startup script only accepts
   recognized backend placeholders in `CF_OAUTH_TOKEN`, including sbx/acq forms
   and the documented msb guest-secret placeholder prefix.
