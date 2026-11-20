@@ -55,6 +55,7 @@ they are exempt from — and must stay out of — the `kits.yaml` registry. See
 |----------|---------|
 | [`examples/team-kit/`](examples/team-kit/) | A team's scope-layer mixin: conventions and agent settings through the OpenCode config tier, applied via `ACQ_EXTRA_KITS` after the global kits. Pattern and composition rules: [`../docs/scope-layers.md`](../docs/scope-layers.md). |
 | [`examples/personal-kit/`](examples/personal-kit/) | A person's own mixin, stacked last: shell drop-ins, git preferences, and an OpenCode TUI theme. Its verify proves the global, team, and personal stack. |
+| [`examples/github-enterprise-kit/`](examples/github-enterprise-kit/) | Lets `git` and `gh` in a sandbox authenticate to a GitHub Enterprise Server host: egress, SSH-to-HTTPS rewrites, a credential helper, and `GH_HOST`. The token stays on the host (`acq secret set --host --env`). Replace the example host in three places. |
 
 ## What is a hybrid/v1 kit?
 
