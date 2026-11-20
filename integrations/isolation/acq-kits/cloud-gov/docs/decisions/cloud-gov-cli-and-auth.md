@@ -145,12 +145,13 @@ sandbox where possible and remove it when done.
 
 ### Alternative credential: service account
 
-The README also documents, as an alternative to the `cf oauth-token` binding, a
-cloud.gov service account authenticated into a separate `CF_HOME` on the host,
-with the same placeholder binding reading a token from that `CF_HOME`. Reason: the
+The kit also ships `scripts/setup-service-account`, an alternative to the
+`cf oauth-token` binding: it creates a cloud.gov service account, authenticates
+it into a separate `CF_HOME` on the host, and makes the same placeholder binding
+read a token from that `CF_HOME`. Reason: the
 default binds the user's own full-scope token, and the playbook says an agent
 SHOULD use a distinct service account or token. The service account's
-username/password stay on the host and never enter the sandbox. This path is
-documentation only and **untested**; the README lists each untested claim, and
+username/password stay on the host and never enter the sandbox. The script
+is **untested** against cloud.gov, sbx, and acq (its tests use stubs); the README lists each untested claim, and
 whether an agent acting through a service account is acceptable is a question for
 the user's ISSO, not a decision recorded here.

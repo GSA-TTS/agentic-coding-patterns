@@ -33,9 +33,21 @@ CLOUD_GOV_API="https://api.fr.cloud.gov"
 # Succeeds only when `cf api` exits 0 and prints exactly one `api endpoint:` line
 # whose value is exactly $CLOUD_GOV_API. A substring or regex match would also
 # accept lookalikes such as https://api.fr.cloud.gov.example.net.
+# CLOUD_GOV_VERIFY_CF_HOME points the host-side control at another cf session, for
+# example the service-account CF_HOME that scripts/setup-service-account made, so
+# the control sends the token the sandbox is bound to and not your own. It must be
+# an absolute path to an existing directory; anything else disables the control.
+host_cf() {
+  if [ -n "${CLOUD_GOV_VERIFY_CF_HOME:-}" ]; then
+    CF_HOME="$CLOUD_GOV_VERIFY_CF_HOME" cf "$@"
+  else
+    cf "$@"
+  fi
+}
+
 host_cf_targets_cloud_gov() {
   local out endpoint
-  out="$(cf api 2>/dev/null)" || return 1
+  out="$(host_cf api 2>/dev/null)" || return 1
   [ "$(printf '%s\n' "$out" | grep -c '^api endpoint:')" -eq 1 ] || return 1
   endpoint="$(printf '%s\n' "$out" | sed -n 's/^api endpoint:[[:space:]]*//p' | sed 's/[[:space:]]*$//')"
   [ "$endpoint" = "$CLOUD_GOV_API" ]
@@ -48,9 +60,13 @@ host_control() {
   # here. Needs curl >= 7.55 (-H @-); an older curl sends no header and would read
   # as "expired".
   command -v cf >/dev/null 2>&1 && command -v curl >/dev/null 2>&1 || return 0
+  if [ -n "${CLOUD_GOV_VERIFY_CF_HOME:-}" ]; then
+    case "$CLOUD_GOV_VERIFY_CF_HOME" in /*) ;; *) return 0 ;; esac
+    [ -d "$CLOUD_GOV_VERIFY_CF_HOME" ] || return 0
+  fi
   host_cf_targets_cloud_gov || return 0
   local host_token
-  host_token="$(cf oauth-token 2>/dev/null || true)"
+  host_token="$(host_cf oauth-token 2>/dev/null || true)"
   case "$host_token" in
     [Bb]earer\ ?*)
       host_status="$(printf 'Authorization: %s\n' "$host_token" \
@@ -445,7 +461,7 @@ case "$auth_status" in
     ;;
   401|403)
     host_control
-    printf '  control: host token -> %s\n' "${host_status:-<unavailable: cf not logged in, not targeting api.fr.cloud.gov, or not on PATH>}"
+    printf '  control: %s -> %s\n' "$([ -n "${CLOUD_GOV_VERIFY_CF_HOME:-}" ] && echo 'host token from CLOUD_GOV_VERIFY_CF_HOME' || echo 'host token')" "${host_status:-<unavailable: cf not logged in, not targeting api.fr.cloud.gov, or not on PATH>}"
     case "$probe_class" in
       unset)
         bad "CF_OAUTH_TOKEN is not set in the sandbox exec environment (binding did not reach it, or exec does not carry it); on sbx check 'sbx secret ls' for a CF_OAUTH_TOKEN custom secret and create a new sandbox: $refresh_hint"

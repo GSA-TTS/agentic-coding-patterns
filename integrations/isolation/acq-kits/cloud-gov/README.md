@@ -160,145 +160,80 @@ verification.
 
 ## Alternative credential: cloud.gov service account
 
-The Prerequisites path above binds **your own** `cf oauth-token`. That token has
-your full scope, the global binding (no `--sandbox`) applies to every sandbox,
-it is tied to your host `cf` session (whether requests get a fresh or a cached
-token was not measured; see Authority above), and what the agent does is
-indistinguishable from what you do. The playbook's guidance is that an agent
-SHOULD use a distinct service account or token. This section is an alternative
-to, not a replacement for, the `cf oauth-token` path; either one fills the same
-`CF_OAUTH_TOKEN` binding.
+The Prerequisites path binds **your own** `cf oauth-token`: your full scope, a
+global binding unless you pass `--sandbox`, tied to your host `cf` session
+(whether requests get a fresh or a cached token was not measured; see Authority
+above), and indistinguishable from you. The playbook says an agent SHOULD use a
+distinct service account or token. This section is an alternative to that path,
+not a replacement; both fill the same `CF_OAUTH_TOKEN` binding.
 
-> **Status of this section: written from cloud.gov's documentation, not run.**
-> Nothing here was executed against cloud.gov, `sbx`, or `acq`, so every command
-> and behavior below is **untested**, and no line says otherwise. The
-> "Untested" list at the end of the section names the specific assumptions. Do
-> not read a command here as verified. Facts about the service itself come from the
-> cloud.gov service-account page
+> **Status: written from documentation, not run.** The script below was never
+> run against cloud.gov, `sbx`, or `acq`; its tests use stub `cf`, `acq`, and
+> `sbx`. Every command and behavior here is **untested** except what the stubs
+> check about the script's own logic. Facts about the service come from
+> cloud.gov's page
 > (<https://github.com/cloud-gov/cg-site/blob/main/_docs/services/cloud-gov-service-account.md>,
-> read 2026-11-20, which labels the service Beta); check it for changes.
+> read 2026-11-20, which labels the service Beta).
 
 **Policy first.** cloud.gov says not to use service-account credentials to log in
-to cloud.gov as a human; agency policy usually requires people to use their own
-accounts. Whether an AI agent acting through a service account is acceptable
-under your agency's policy is **not settled by this kit or by cloud.gov's page**.
-Ask your ISSO before using it. This document does not claim any approval.
+as a human, and agency policy usually requires people to use their own accounts.
+Whether an AI agent acting through a service account is acceptable under your
+agency's policy is **not settled by this kit or by cloud.gov's page**. Ask your
+ISSO before using it. Nothing here claims approval.
 
-**Which plan.** Default to `space-auditor` (SpaceAuditor: read-only, one space).
-Use `space-deployer` (SpaceDeveloper in one space) only when the agent must
-deploy, and say so when you ask your ISSO. Scope the binding to one sandbox
-(`--sandbox <name>` on sbx; a per-sandbox binding on msb) rather than the global
-binding, so the account's reach is that sandbox's reach.
+**How to use it** (on the host, never in the sandbox):
 
-**Where the password goes.** The service key's username and password never enter
-the sandbox, the workspace, the spec, argv, or shell history. They live on the
-host only, used to authenticate `cf` into a **separate `CF_HOME`** so your own
-`cf` session is untouched. The backend then reads a token from that `CF_HOME`
-the same way it does for the `cf oauth-token` path, and the sandbox only ever
-sees the backend placeholder.
+```bash
+cf login -a https://api.fr.cloud.gov --sso
+cf target -o <org> -s <space>
+./scripts/setup-service-account --backend msb --sandbox <sandbox-name>   # or --backend sbx
+CLOUD_GOV_VERIFY_CF_HOME=<the CF_HOME it prints> RUN_ACQ=1 ACQ_BACKEND=<backend> ./scripts/verify
+```
 
-1. **Create the account** from your own `cf` session, targeted at the one space
-   it should reach (cloud.gov's documented commands):
+`scripts/setup-service-account` uses your logged-in session to create the
+service account for the targeted space, authenticates it into a separate private
+`CF_HOME` (mode 0700, outside any project) so your own `cf` session is untouched,
+and binds a token from that session in the backend, so the sandbox only ever
+sees the backend placeholder. The service key's username and password stay on
+the host: the script reads them in-process and hands them to `cf auth` through
+its environment only, never argv. It never prints the token, username, or
+password. Run it with `--help` for every step, the safety properties, the exit
+codes, and the untested list.
 
-   ```bash
-   cf create-service cloud-gov-service-account space-auditor <instance-name>
-   cf create-service-key <instance-name> <key-name>
-   cf service-key <instance-name> <key-name>   # prints the username/password
-   ```
+Flags that matter:
 
-   `cf service-key` prints the credentials to your terminal. Read them from
-   there; do not copy them into chat, a file in the workspace, or a command line.
+- `--sandbox NAME` (scoped) or `--global` (every sandbox; one is required, and
+  `--global` prints the authority warning).
+- `--plan space-auditor` (default, read-only) or `space-deployer` (only when the
+  agent must deploy).
+- `--name`, `--key-name`, `--cf-home`: override the generated names and path.
+- `--dry-run` shows the plan and changes nothing; `--yes` skips the prompt.
+- `--rotate` deletes and recreates the key, re-authenticates, and rebinds. A
+  re-run without it never creates a second key. Revocation is deleting the key
+  and the backend binding; the script prints the exact commands. Passwords
+  expire after 90 days (cloud.gov documents a `403 access_denied` "Your current
+  password has expired" error), so rotate on that schedule.
 
-2. **Authenticate into a separate `CF_HOME`** from a host shell. This reads the
-   credentials from a prompt into environment variables of a subshell, so they
-   are not on argv or in history. It relies on `cf auth` reading
-   `CF_USERNAME`/`CF_PASSWORD` when given no arguments, and on `CF_HOME`
-   relocating the CLI's config directory: **both are untested here**.
-
-   ```bash
-   (
-     umask 077
-     export CF_HOME="$HOME/.cf-cloud-gov-agent"
-     mkdir -p "$CF_HOME"
-     printf 'service-key username: '; IFS= read -r CF_USERNAME
-     printf 'service-key password: '; IFS= read -rs CF_PASSWORD; echo
-     export CF_USERNAME CF_PASSWORD
-     cf api https://api.fr.cloud.gov
-     cf auth
-   )
-   ```
-
-   Run it in `bash`. Do not use `cf auth <username> <password>`: that puts the
-   password on argv. The `CF_HOME` directory holds that session's token on
-   disk; keep it outside any workspace and mode 0700.
-
-3. **Bind a token from that `CF_HOME`** instead of your own session. Replace
-   `<sandbox-name>`; the `CF_HOME` path must be absolute.
-
-   **msb** (the same pipe as the Prerequisites path, with `CF_HOME` set for
-   that one command; the form of `acq secret set` with a sandbox name is the
-   one already shown in `TROUBLESHOOTING.md`, and whether it can be set before
-   the sandbox exists is untested):
-
-   ```bash
-   CF_HOME="$HOME/.cf-cloud-gov-agent" cf oauth-token \
-     | acq secret set <sandbox-name> cloud-gov --host api.fr.cloud.gov --env CF_OAUTH_TOKEN
-   ```
-
-   **sbx** (a command source, as in Prerequisites; absolute paths because the
-   sbx daemon's `PATH` and environment may differ from your shell). That sbx
-   accepts this `env CF_HOME=... cf oauth-token` form as the `--command` is
-   **untested**; if it does not, put those two words in a mode-0700 wrapper
-   script at an absolute path outside any workspace and give that path as the
-   `--command`:
-
-   ```bash
-   sbx secret set-custom --sandbox <sandbox-name> --host api.fr.cloud.gov --env CF_OAUTH_TOKEN \
-     --command "$(command -v env) CF_HOME=$HOME/.cf-cloud-gov-agent $(command -v cf) oauth-token"
-   ```
-
-   Create the sandbox after registering, as on the other path. To make
-   `scripts/verify`'s host control read this session, run it with the same
-   `CF_HOME` in its environment (that this makes its `cf` calls use that
-   session is untested). Without it, the control would send **your**
-   token, which is not the one the sandbox holds.
-
-4. **Rotate and revoke.** Rotation is deleting the service key and creating a new
-   one (`cf delete-service-key <instance-name> <key-name>`, then
-   `cf create-service-key`), re-running step 2 with the new credentials, and
-   re-binding on msb (on sbx the command source reads the `CF_HOME` session, so
-   re-authenticating is enough; untested). The password expires after 90 days:
-   cloud.gov documents a `403 access_denied` "Your current password has
-   expired" error when it does. Revocation is deleting the service key; also
-   remove the backend binding (`sbx secret rm` on sbx; see `acq secret --help`
-   on msb) and delete the `CF_HOME` directory. A token already issued may stay
-   valid until it expires; whether it stops at key deletion is untested.
-
-5. **Identity in logs.** Each service key is a separate account, and cloud.gov
-   documents that its actions show as `service-account@cloud.gov` in event logs,
-   so they are distinguishable from yours. cloud.gov's page does not say that the
-   string tells one key from another; do not rely on it to.
-
-**Untested (everything above; named so none is read as verified):**
+**Untested (named so none is read as verified):**
 
 - `cf auth` with no arguments reading `CF_USERNAME` and `CF_PASSWORD` from the
-  environment, and keeping the password off argv that way.
-- `CF_HOME` relocating the CLI config as step 2 assumes, leaving your default
-  `cf` session unchanged.
-- `cf oauth-token` refreshing (or failing cleanly) for a service-account
-  session, and how long its token lasts. On msb the token is read once at
-  sandbox creation (as for the other path), so a short-lived token needs a
-  re-bind and a new sandbox.
-- The sbx `--command` source working with an `env CF_HOME=...` prefix (and
-  how sbx splits that string), or with a wrapper script.
-- A per-sandbox binding (`--sandbox <name>` on sbx, a sandbox-named secret on msb)
-  being settable before that sandbox exists; if not, bind after creating it and
-  update the sandbox as the Prerequisites authority paragraph describes.
-- Whether a `space-auditor` token is accepted by the `/v3/organizations` probe
-  in `scripts/verify` step 8; a rejection could be role scope, not injection.
-- That a token already issued stops working when the key is deleted.
-- That the cloud.gov page is still current, and that `cf service-key` prints
-  what step 1 says.
+  environment, which is what keeps the password off argv.
+- `CF_HOME` relocating the CLI config and leaving your own `cf` session unchanged.
+- The shape of `cf service-key` output (header lines, then JSON with `username`
+  and `password`), and the output of `cf service`, `cf service-keys`, and
+  `cf target` that the script parses.
+- The service name `cloud-gov-service-account` and plan names `space-auditor`
+  and `space-deployer` exactly as the script passes them.
+- `cf oauth-token` working, and refreshing, for a service-account session.
+- sbx accepting a private wrapper script as the `--command` source, and a
+  `--sandbox` scoped binding being settable before that sandbox exists; likewise
+  `acq secret set <sandbox> cloud-gov ...` before the sandbox exists.
+- `scripts/verify` step 8 passing for a `space-auditor` token; a rejection could
+  be role scope rather than injection. `CLOUD_GOV_VERIFY_CF_HOME` only changes
+  which host `cf` session the control reads; that this selects the service
+  account's session is untested.
+- That a token already issued stops working when its key is deleted.
+- That the cloud.gov page above is still current.
 
 ## Network Allow-List
 
@@ -365,7 +300,7 @@ command. Set `RUN_ACQ=1` to create a throwaway sandbox and
 verify that `cf` is installed, cloud.gov/docs endpoints are reachable, and the
 injected placeholder reaches the CF API through a direct HTTPS request. If
 that last probe is rejected, `verify` also sends the host's own `cf oauth-token`
-to the same endpoint and reports the sandbox variable's class (never its value),
+to the same endpoint (or the session in `CLOUD_GOV_VERIFY_CF_HOME`, when set) and reports the sandbox variable's class (never its value),
 so a host-token problem (expiry, revocation, or scope) and a failed placeholder
 injection are told apart. The host token is only read and sent when `cf api`
 reports exactly `https://api.fr.cloud.gov`.
