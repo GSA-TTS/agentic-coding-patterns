@@ -1,0 +1,67 @@
+# spec.yaml — github-enterprise-kit: a TEMPLATE for authenticating git and gh
+# against a GitHub Enterprise Server (GHES) host from an acq sandbox (hybrid/v1).
+#
+# Not applied by acq. Copy this directory into a repo your team owns, rename
+# BOTH the directory and `name:` below, and replace the host in the THREE
+# places marked REPLACE (egress entry, GHE_HOST in the startup step, GH_HOST in
+# environment). `hybrid/v1` has no parameters, so one host cannot be written
+# once; scripts/verify asserts the three stay equal. The token never goes in
+# this file: store it on the host with `acq secret set` (see README.md).
+#
+# Two parser rules for this whole file (pattern doc, "Check against your acq"):
+# never put a comment after a value in a command or a top-level field (put it
+# on its own line), and avoid `#` in environment values.
+schemaVersion: "hybrid/v1"
+kind: mixin
+# REPLACE name (kebab-case, equal to the directory name), displayName, and
+# description.
+name: github-enterprise-kit
+displayName: GitHub Enterprise kit (template)
+description: >
+  Starting point for a kit that lets git and gh authenticate to a GitHub
+  Enterprise Server host: egress for the host, git rewrites and a credential
+  helper that read the token placeholder acq injects, and GH_HOST for gh.
+
+# --- Egress ------------------------------------------------------------------
+# GHES serves git, REST (/api/v3), GraphQL (/api/graphql), and uploads
+# (/api/uploads) on the one hostname, so one entry covers git and gh. Egress is
+# fixed at sandbox creation, so recreate after changing it.
+caps:
+  network:
+    allow:
+      # REPLACE with your GHES hostname. The live value is an IANA-reserved
+      # example domain that no global kit allows.
+      - ghe.example.org
+
+# --- Commands ----------------------------------------------------------------
+# One idempotent startup step. SSH remotes do not work through msb's egress, so
+# both SSH forms (`git@HOST:` and `ssh://git@HOST/`) are rewritten to HTTPS.
+# They are two values of ONE insteadOf key: --replace-all resets the key to the
+# first, --add appends the second, so a re-run never accumulates duplicates. The
+# trailing slash on the ssh:// form keeps it from matching another host that
+# merely starts with HOST, and an ssh:// URL with a port is left alone.
+# The credential helper is single-quoted so the shell leaves
+# ${GH_ENTERPRISE_TOKEN} alone here: git runs the helper later and expands it
+# then, so the config file never holds the value, only the variable name.
+# REPLACE GHE_HOST with your GHES hostname.
+commands:
+  - phase: startup
+    user: "1000"
+    description: Route git to the GitHub Enterprise host over HTTPS with the injected token
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        GHE_HOST=ghe.example.org
+        git config --global --replace-all url."https://${GHE_HOST}/".insteadOf "git@${GHE_HOST}:"
+        git config --global --add url."https://${GHE_HOST}/".insteadOf "ssh://git@${GHE_HOST}/"
+        git config --global credential."https://${GHE_HOST}".helper '!f() { echo username=x-access-token; echo "password=${GH_ENTERPRISE_TOKEN:-}"; }; f'
+
+# --- Environment -------------------------------------------------------------
+# GH_HOST points gh at the enterprise host. gh reads GH_ENTERPRISE_TOKEN for a
+# non-github.com host; acq sets that variable (to a placeholder) from the
+# secret you store, so it is deliberately absent here. LAST WINS by name across
+# kits. REPLACE with your GHES hostname.
+environment:
+  GH_HOST: ghe.example.org

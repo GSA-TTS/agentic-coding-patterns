@@ -1,0 +1,482 @@
+#!/usr/bin/env bash
+#
+# verify — host-side check for the github-enterprise-kit TEMPLATE, and for any
+# copy of it. Backend-neutral: only `acq` verbs (kit validate, secret has,
+# create, exec, rm).
+#
+# Offline checks (always run; need no sandbox and no network):
+#   1. `acq kit validate` passes (SKIP when acq is not found).
+#   2. spec.yaml holds no token-looking value and no literal password.
+#   3. The same GHES host appears in all three places that carry it
+#      (caps.network.allow, GHE_HOST in the startup step, GH_HOST).
+#   4. The startup step, run with an isolated Git environment (see "Isolation
+#      boundary" below), rewrites SSH-form remotes to HTTPS, is idempotent,
+#      registers a credential helper that reads GH_ENTERPRISE_TOKEN when git
+#      runs it, and never writes a token value into git config. Canary helpers
+#      and askpass programs prove the isolation holds (and would fire without it).
+#
+# Live checks (opt-in; need a real GHES host, a stored secret, and a sandbox):
+#   GHE_VERIFY=1 GHE_HOST=ghe.corp.example GHE_REPO=owner/repo scripts/verify
+# They create a throwaway sandbox through `acq` with this kit applied via
+# ACQ_EXTRA_KITS and check, using only the placeholder the guest holds, that
+# the egress, git rewrite, `git ls-remote`, and `gh api user` work. GHE_HOST
+# must equal the host in spec.yaml (verify the copy you edited). Without
+# GHE_VERIFY=1 and GHE_HOST the live section is skipped, never passed.
+#
+# Isolation boundary (section 4). The startup step comes from the spec.yaml
+# you are verifying, and it is EXECUTED ON THIS HOST, as you, with no filesystem
+# or network confinement. The isolation below is Git-configuration hygiene, not
+# a sandbox: the step runs under `env -i` with a scratch HOME, an explicit
+# GIT_CONFIG_GLOBAL, GIT_CONFIG_NOSYSTEM, empty askpass variables, no prompts,
+# and a working directory that is not inside any repository (so no
+# repository-local config or inherited GIT_DIR can route it). A scratch HOME
+# does NOT stop a step from reading or writing files elsewhere, using the
+# network, or running anything on PATH. Only verify a spec you have read, or run
+# this script in a disposable VM or container.
+#
+# Exit status: 0 = every check that ran passed and at least one ran; 1 = a check
+# failed; 3 = nothing failed but a check could not be performed (UNVERIFIED, not
+# a pass). SKIP means "not applicable in this configuration" and does not
+# degrade the result.
+#
+# Nothing here prints a secret value. The sandbox is named
+# "<kit>-verify-<pid>" and removed at the end (and on interrupt).
+#
+# Usage (from anywhere):
+#   path/to/github-enterprise-kit/scripts/verify
+#   KEEP=1 …/scripts/verify                 # keep the sandbox + work dir
+#   ACQ_DIR=/path/to/quickstart …/verify    # acq not on PATH: use this checkout
+#   GHE_SECRET_SERVICE=name …/verify        # service name given to `acq secret set`
+#
+# set -e is omitted on purpose: accumulate pass/fail rather than abort.
+# Targets bash 3.2 and BSD userland (macOS): no arrays, no GNU-only flags.
+
+# Fixed guest code is single-quoted on purpose: the guest shell expands $1, $2.
+# shellcheck disable=SC2016
+set -uo pipefail
+
+KIT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+KIT_NAME="$(basename "$KIT_DIR")"
+SPEC="$KIT_DIR/spec.yaml"
+SBX_NAME="${KIT_NAME}-verify-$$"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/${KIT_NAME}-verify.XXXXXX")"
+WORKSPACE="$WORK/workspace"
+CREATE_LOG="$WORK/acq-create.log"
+CREATED=0
+KEEP="${KEEP:-0}"
+GHE_VERIFY="${GHE_VERIFY:-0}"
+GHE_HOST="${GHE_HOST:-}"
+GHE_REPO="${GHE_REPO:-}"
+GHE_SECRET_SERVICE="${GHE_SECRET_SERVICE:-github-enterprise}"
+
+if [ -n "${ACQ_DIR:-}" ]; then ACQ="$ACQ_DIR/acq"; else ACQ="$(command -v acq || true)"; fi
+
+pass=0
+fail=0
+skipped=0
+unverified=0
+ok()    { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass+1)); }
+bad()   { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail+1)); }
+skip()  { printf '  \033[2mSKIP\033[0m %s\n' "$1"; skipped=$((skipped+1)); }
+# A check that could not be performed or proved. Not a pass: it degrades the
+# exit status (3), unlike SKIP, which marks "not applicable here".
+unver() { printf '  \033[35mUNVERIFIED\033[0m %s\n' "$1"; unverified=$((unverified+1)); }
+info()  { printf '\n\033[1m%s\033[0m\n' "$1"; }
+# check CONDITION_RESULT PASS_MSG FAIL_MSG: avoids `A && ok || bad`.
+check() { if [ "$1" = 0 ]; then ok "$2"; else bad "$3"; fi; }
+
+cleanup() {
+  if [ "$KEEP" = "1" ]; then
+    printf '\nKEEP=1 set; leaving sandbox %s and %s in place.\n' "$SBX_NAME" "$WORK" >&2
+    return
+  fi
+  if [ "$CREATED" = 1 ] && [ -n "$ACQ" ] && [ -x "$ACQ" ]; then "$ACQ" rm "$SBX_NAME" </dev/null >/dev/null 2>&1 || true; fi
+  rm -rf "$WORK" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM
+
+# Run FIXED guest shell code in the sandbox. The code ($1) is a constant in this
+# script and is never built from input; values reach it only as positional
+# parameters ($1, $2, ... inside the code), passed as separate arguments.
+# Sets SBX_OUT (stdout), SBX_RC (the exit status, preserved) and leaves stderr in
+# $SBX_ERR (never printed: it can name hosts and paths). A failed command is
+# not turned into empty output; callers decide what a status means.
+SBX_ERR="$WORK/sbx.err"
+SBX_OUT=""
+SBX_RC=0
+sbx_run() {
+  _code="$1"; shift
+  SBX_OUT="$("$ACQ" exec "$SBX_NAME" -- sh -c "$_code" sh "$@" </dev/null 2>"$SBX_ERR")"
+  SBX_RC=$?
+}
+
+# A hostname only: dot-separated labels of letters, digits and hyphens, none
+# starting or ending with a hyphen, at most 63 characters each and 253 in all.
+# No scheme, port, path, userinfo, whitespace or newline.
+valid_host() {
+  case "$1" in
+    ""|*[!A-Za-z0-9.-]*) return 1 ;;
+  esac
+  [ "${#1}" -le 253 ] || return 1
+  printf '%s\n' "$1" | grep -Eq '^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$'
+}
+
+# owner/repo: exactly two segments of letters, digits, '.', '_' and '-'; neither
+# segment may be '.' or '..' or contain '..'. A trailing .git is allowed.
+valid_repo() {
+  case "$1" in
+    ""|*[!A-Za-z0-9._/-]*|*..*|/*|*/|*//*) return 1 ;;
+  esac
+  printf '%s\n' "$1" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9_][A-Za-z0-9._-]*$'
+}
+
+# HTTP status seen from the sandbox for https://HOST/ ("000" = no connection,
+# "" = the probe itself could not run). curl's own exit status is not the datum
+# here (it is non-zero for exactly the "000" case), so the code is the output.
+probe_host() {
+  sbx_run 'curl -sS -o /dev/null -m 20 -w "%{http_code}" "https://$1/" 2>/dev/null; exit 0' "$1"
+  case "$SBX_RC:$SBX_OUT" in
+    0:[0-9][0-9][0-9]) printf '%s' "$SBX_OUT" ;;
+    *) printf '' ;;
+  esac
+}
+
+# Classify a failed `git ls-remote` from its stderr: auth (credentials missing or
+# refused), notfound (the server says the repository does not exist or is hidden
+# from this caller; GHES answers 404 for a private repo), or transport (anything
+# else: DNS, TLS, connect, proxy, a missing git).
+classify_git_failure() {
+  if grep -Eqi 'returned error: (401|403)|authentication failed|access denied|could not read (username|password)|terminal prompts disabled|invalid (username|credentials)' "$SBX_ERR"; then
+    echo auth
+  elif grep -Eqi "returned error: 404|repository '[^']*' not found" "$SBX_ERR"; then
+    echo notfound
+  else
+    echo transport
+  fi
+}
+
+# One full `git ls-remote` of https://$1/$2 in the guest, for both probes alike
+# (no ref patterns, so the answer cannot differ by which refs were asked for).
+# $3 = auth: the configured credential helper may answer.
+# $3 = anon: `-c credential.helper=` clears every helper, GIT_ASKPASS is empty and
+# prompting is off in both, so only the missing credential differs.
+# Sets PROBE_KIND to refs | empty | auth | notfound | transport.
+ls_probe() {
+  case "$3" in
+    auth) sbx_run 'GIT_TERMINAL_PROMPT=0 GIT_ASKPASS= LC_ALL=C git ls-remote "https://$1/$2"' "$1" "$2" ;;
+    anon) sbx_run 'GIT_TERMINAL_PROMPT=0 GIT_ASKPASS= LC_ALL=C git -c credential.helper= ls-remote "https://$1/$2"' "$1" "$2" ;;
+  esac
+  if [ "$SBX_RC" -eq 0 ]; then
+    if [ -n "$SBX_OUT" ]; then PROBE_KIND=refs; else PROBE_KIND=empty; fi
+  else
+    PROBE_KIND="$(classify_git_failure)"
+  fi
+}
+
+[ -f "$SPEC" ] || { echo "  spec.yaml missing in $KIT_DIR" >&2; exit 1; }
+
+info "1. Kit validates (hybrid/v1)"
+if [ -z "$ACQ" ] || [ ! -x "$ACQ" ]; then
+  skip "acq not found (put acq on PATH, or set ACQ_DIR to a quickstart checkout)"
+elif "$ACQ" kit validate "$KIT_DIR" >/dev/null 2>&1; then
+  ok "kit validates"
+else
+  bad "kit failed validation — run: $ACQ kit validate $KIT_DIR"
+fi
+
+info "2. No credential in the spec"
+if grep -Eq '(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|[0-9a-f]{40}' "$SPEC"; then
+  bad "spec.yaml contains a token-looking value (a kit carries no secrets)"
+else
+  ok "no token-looking value in spec.yaml"
+fi
+if grep -Ev '^[[:space:]]*#' "$SPEC" | grep -Eq 'password=[^$"]|^[[:space:]]*(GH_ENTERPRISE_TOKEN|GITHUB_ENTERPRISE_TOKEN|GH_TOKEN|GITHUB_TOKEN):'; then
+  bad "spec.yaml sets a password or a token variable literally"
+else
+  ok "no literal password or token variable"
+fi
+
+info "3. One host in all three places"
+allow_host="$(awk '/^caps:/{c=1} c && /^[[:space:]]+- [A-Za-z0-9]/{print $2; exit}' "$SPEC")"
+step_host="$(sed -n 's/^[[:space:]]*GHE_HOST=\([^[:space:]]*\)$/\1/p' "$SPEC" | head -n1)"
+env_host="$(sed -n 's/^[[:space:]]*GH_HOST:[[:space:]]*\([^[:space:]]*\)$/\1/p' "$SPEC" | head -n1)"
+if [ -n "$allow_host" ] && [ "$allow_host" = "$step_host" ] && [ "$allow_host" = "$env_host" ]; then
+  ok "caps.network.allow, GHE_HOST, and GH_HOST all name $allow_host"
+else
+  bad "host differs: allow='${allow_host:-?}' GHE_HOST='${step_host:-?}' GH_HOST='${env_host:-?}'"
+fi
+for hh in "$allow_host" "$step_host" "$env_host"; do
+  case "$hh" in
+    github.com|*.github.com) bad "host '$hh' is github.com; this kit is for a GitHub Enterprise Server host" ;;
+  esac
+done
+# All three must be plain hostnames before the startup step is run (section 4):
+# GHE_HOST is interpolated into shell by the step itself.
+HOST_VALID=1
+for hh in "$allow_host" "$step_host" "$env_host"; do
+  valid_host "$hh" || HOST_VALID=0
+done
+if [ "$HOST_VALID" = 1 ]; then
+  ok "the host is a plain hostname in all three places (no scheme, port, path, or whitespace)"
+else
+  bad "a spec host is not a plain hostname (letters, digits, '-' and '.' only): allow='${allow_host:-?}' GHE_HOST='${step_host:-?}' GH_HOST='${env_host:-?}'"
+fi
+
+info "4. Startup step, run with an isolated Git environment (offline)"
+# Extract the `- |` block of the first command: its lines are indented 8 spaces.
+STEP="$WORK/step.sh"
+awk '
+  /^      - \|[[:space:]]*$/ && !done { inb=1; next }
+  inb { if ($0 ~ /^        /) { sub(/^        /, ""); print } else if ($0 ~ /^[[:space:]]*$/) { print "" } else { inb=0; done=1 } }
+' "$SPEC" > "$STEP"
+if [ ! -s "$STEP" ]; then
+  bad "could not extract the startup step from spec.yaml (expected a '- |' block under commands)"
+elif [ "$HOST_VALID" != 1 ]; then
+  unver "startup step not run: a spec host is not a plain hostname, and the step interpolates it into shell"
+else
+  # Canonical paths: GIT_CEILING_DIRECTORIES compares them literally (macOS TMPDIR
+  # is a symlink).
+  WORK_REAL="$(cd "$WORK" && pwd -P)"
+  SCRATCH="$WORK_REAL/home"
+  DECOY="$WORK_REAL/decoy"
+  ISO_CWD="$DECOY/run"
+  CANARY_LOG="$WORK_REAL/canary.log"
+  mkdir -p "$SCRATCH" "$ISO_CWD"
+  : > "$WORK_REAL/empty.gitconfig"
+
+  # iso_at DIR [VAR=value ...] COMMAND [ARG ...]
+  # Run COMMAND with a Git environment built from nothing (`env -i`): no inherited
+  # GIT_DIR, GIT_CONFIG_PARAMETERS, GIT_CONFIG_COUNT/KEY_n/VALUE_n, GIT_ASKPASS,
+  # SSH_ASKPASS, credential variables, proxies or tokens; only PATH is carried
+  # over. The global file is pinned, system config is off, prompts are off, askpass
+  # is empty, and GIT_CEILING_DIRECTORIES stops repository discovery at DECOY, so a
+  # repository-local config in or above DIR (the decoy, or the repository you ran
+  # this from) is never read. This is Git-configuration isolation only; see
+  # "Isolation boundary" in the header for what it is not.
+  iso_at() {
+    _dir="$1"; shift
+    ( cd "$_dir" && env -i PATH="$PATH" HOME="$SCRATCH" XDG_CONFIG_HOME="$SCRATCH/.config" \
+        GIT_CONFIG_GLOBAL="$SCRATCH/.gitconfig" GIT_CONFIG_NOSYSTEM=1 \
+        GIT_CEILING_DIRECTORIES="$DECOY" \
+        GIT_TERMINAL_PROMPT=0 GIT_ASKPASS= SSH_ASKPASS= GCM_INTERACTIVE=never LC_ALL=C "$@" )
+  }
+  iso() { iso_at "$ISO_CWD" "$@"; }
+  g() { iso git "$@"; }
+
+  # Canaries: programs that record that they ran. They stand where a repository-
+  # local credential helper and askpass program, and the same set through inherited
+  # environment variables, would stand. None may run; the controls below prove each
+  # one would run if the isolation were absent.
+  mk_canary() { # NAME TAG
+    printf '#!/bin/sh\nprintf "%%s\\n" "%s" >> "%s"\nexit 1\n' "$2" "$CANARY_LOG" > "$WORK_REAL/$1"
+    chmod 700 "$WORK_REAL/$1"
+  }
+  mk_canary canary-local-helper local-helper
+  mk_canary canary-local-ask local-askpass
+  mk_canary canary-env-helper env-helper
+  mk_canary canary-env-ask env-askpass
+  # The decoy is a real repository whose LOCAL config routes credentials to the
+  # canaries. ISO_CWD sits inside it.
+  iso_at "$WORK_REAL" git init -q "$DECOY" >/dev/null 2>&1
+  iso_at "$DECOY" git config --local credential.helper "!\"$WORK_REAL/canary-local-helper\""
+  iso_at "$DECOY" git config --local core.askPass "$WORK_REAL/canary-local-ask"
+  CRED_IN="$(printf 'protocol=https\nhost=%s\n\n' "$allow_host")"
+
+  # Controls (not isolated): same decoy, same canaries, ordinary Git environment.
+  # If a canary cannot fire here, the "never ran" results below prove nothing.
+  rm -f "$CANARY_LOG"
+  ( cd "$ISO_CWD" && printf '%s\n' "$CRED_IN" | env -i PATH="$PATH" HOME="$SCRATCH" GIT_CONFIG_NOSYSTEM=1 \
+      GIT_CONFIG_GLOBAL="$WORK_REAL/empty.gitconfig" GIT_TERMINAL_PROMPT=0 git credential fill ) >/dev/null 2>&1
+  ( cd "$WORK_REAL" && printf '%s\n' "$CRED_IN" | env -i PATH="$PATH" HOME="$SCRATCH" GIT_CONFIG_NOSYSTEM=1 \
+      GIT_CONFIG_GLOBAL="$WORK_REAL/empty.gitconfig" GIT_CEILING_DIRECTORIES="$WORK_REAL" GIT_TERMINAL_PROMPT=0 \
+      GIT_ASKPASS="$WORK_REAL/canary-env-ask" GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper \
+      GIT_CONFIG_VALUE_0="!\"$WORK_REAL/canary-env-helper\"" git credential fill ) >/dev/null 2>&1
+  controls_fire=1
+  for tag in local-helper local-askpass env-helper env-askpass; do
+    grep -qx "$tag" "$CANARY_LOG" 2>/dev/null || controls_fire=0
+  done
+  if [ "$controls_fire" = 1 ]; then
+    ok "canary controls fire without isolation (local helper/askpass, env helper/askpass)"
+  else
+    unver "canary controls did not all fire without isolation; the isolation results below cannot be trusted (this Git does not honor the routing the canaries test)"
+  fi
+  rm -f "$CANARY_LOG"
+
+  # Hostile inherited environment, applied to the whole isolated run below. env -i
+  # must discard all of it.
+  export GIT_ASKPASS="$WORK_REAL/canary-env-ask" SSH_ASKPASS="$WORK_REAL/canary-env-ask"
+  export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0="!\"$WORK_REAL/canary-env-helper\""
+  export GIT_CONFIG_PARAMETERS="'credential.helper=!\"$WORK_REAL/canary-env-helper\"'"
+
+  if iso git rev-parse --git-dir >/dev/null 2>&1; then
+    bad "the isolated working directory is inside a Git repository; refusing to run the startup step"
+  else
+    ok "the isolated working directory is not inside any Git repository"
+    FAKE="placeholder-not-a-real-token-$$"
+    if ! iso sh "$STEP" >/dev/null 2>"$WORK/step.err" || ! iso sh "$STEP" >/dev/null 2>>"$WORK/step.err"; then
+      bad "startup step failed in the isolated environment"; sed 's/^/    | /' "$WORK/step.err" >&2
+    else
+      ok "startup step runs (twice)"
+      h="$allow_host"
+      if [ "$(g ls-remote --get-url "git@$h:own/repo.git")" = "https://$h/own/repo.git" ]; then ok "git@$h:own/repo.git -> https://$h/own/repo.git"; else bad "scp-style remote not rewritten to HTTPS"; fi
+      if [ "$(g ls-remote --get-url "ssh://git@$h/own/repo.git")" = "https://$h/own/repo.git" ]; then ok "ssh://git@$h/own/repo.git -> https://$h/own/repo.git"; else bad "ssh:// remote not rewritten to HTTPS"; fi
+      if [ "$(g ls-remote --get-url "git@github.com:own/repo.git")" = "git@github.com:own/repo.git" ]; then ok "other hosts are not rewritten"; else bad "a github.com remote was rewritten"; fi
+      if [ "$(g ls-remote --get-url "ssh://git@$h.evil.test/o/r.git")" = "ssh://git@$h.evil.test/o/r.git" ]; then ok "a host that merely starts with $h is not rewritten"; else bad "a look-alike host was rewritten"; fi
+      n="$(g config --global --get-all "url.https://$h/.insteadOf" | wc -l | tr -d ' ')"
+      if [ "$n" = 2 ]; then ok "idempotent: two insteadOf values (scp, ssh://) after two runs"; else bad "insteadOf has $n values after two runs (expected 2)"; fi
+      cred="$(printf '%s\n' "$CRED_IN" | iso GH_ENTERPRISE_TOKEN="$FAKE" git credential fill 2>/dev/null)"
+      printf '%s\n' "$cred" | grep -qx 'username=x-access-token'; check $? "helper emits username=x-access-token" "helper did not emit the username"
+      printf '%s\n' "$cred" | grep -qx "password=$FAKE"; check $? "helper emits the env value, read when git runs it" "helper did not emit GH_ENTERPRISE_TOKEN"
+      ! grep -qF "$FAKE" "$SCRATCH/.gitconfig"; check $? "git config holds the variable name, never the value" "the token value was written into git config"
+      cred2="$(printf '%s\n' "$CRED_IN" | iso GH_ENTERPRISE_TOKEN="${FAKE}-2" git credential fill 2>/dev/null)"
+      printf '%s\n' "$cred2" | grep -qx "password=${FAKE}-2"; check $? "a changed variable changes the password (expanded at run time)" "helper did not pick up a changed variable"
+      other="$(printf 'protocol=https\nhost=github.com\n\n' | iso GH_ENTERPRISE_TOKEN="$FAKE" git credential fill 2>/dev/null)"
+      ! printf '%s' "$other" | grep -qF "$FAKE"; check $? "the helper does not answer for github.com" "the helper handed the enterprise token to github.com"
+    fi
+    # The github.com query above has no helper of its own: it falls through to
+    # whatever routing is left. Nothing left may run.
+    if [ ! -e "$CANARY_LOG" ]; then
+      ok "no repository-local or inherited credential helper or askpass program ran"
+    else
+      bad "a canary credential helper or askpass program ran during the isolated run: $(tr '\n' ' ' < "$CANARY_LOG")"
+    fi
+  fi
+  unset GIT_ASKPASS SSH_ASKPASS GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0 GIT_CONFIG_PARAMETERS
+fi
+
+info "5. Live (real GHES host, stored secret, throwaway sandbox)"
+# Inputs are validated first and reach the guest only as arguments to fixed code
+# (sbx_run). The accepted character sets contain nothing a shell treats
+# specially, so they stay inert even if a backend re-joins argv into one string.
+LIVE_OK=1
+if [ "$GHE_VERIFY" = 1 ] && [ -n "$GHE_HOST" ] && ! valid_host "$GHE_HOST"; then
+  bad "GHE_HOST is not a plain hostname (letters, digits, '-' and '.'; no scheme, port, path, or whitespace); live checks not run"
+  LIVE_OK=0
+fi
+if [ "$GHE_VERIFY" = 1 ] && [ -n "$GHE_REPO" ] && ! valid_repo "$GHE_REPO"; then
+  bad "GHE_REPO is not OWNER/REPO (two segments of letters, digits, '.', '_' and '-'); live checks not run"
+  LIVE_OK=0
+fi
+if [ "$LIVE_OK" != 1 ]; then
+  :
+elif [ "$GHE_VERIFY" != 1 ] || [ -z "$GHE_HOST" ]; then
+  skip "set GHE_VERIFY=1 and GHE_HOST=<your host> to run the live checks"
+elif [ -z "$ACQ" ] || [ ! -x "$ACQ" ]; then
+  bad "live checks need acq (put it on PATH, or set ACQ_DIR)"
+elif [ "$GHE_HOST" != "$allow_host" ]; then
+  bad "GHE_HOST ($GHE_HOST) differs from the spec host ($allow_host): edit the spec, then verify"
+elif case "$GHE_SECRET_SERVICE" in ""|-*|*[!A-Za-z0-9_-]*) true ;; *) false ;; esac; then
+  bad "GHE_SECRET_SERVICE must be letters, digits, '_' and '-' only, and not start with '-'"
+elif ! "$ACQ" secret has -g "$GHE_SECRET_SERVICE" </dev/null >/dev/null 2>&1; then
+  bad "no global '$GHE_SECRET_SERVICE' secret: run  acq secret set -g $GHE_SECRET_SERVICE --host $GHE_HOST --env GH_ENTERPRISE_TOKEN  (msb binds it at create)"
+else
+  case "$WORK$KIT_DIR" in
+    *[[:space:]]*) bad "work dir or kit path contains whitespace; ACQ_EXTRA_KITS is whitespace-separated"; GHE_SKIP_LIVE=1 ;;
+  esac
+  if [ -z "${GHE_SKIP_LIVE:-}" ]; then
+    mkdir -p "$WORKSPACE" && git init -q "$WORKSPACE"
+    echo "  creating $SBX_NAME..."
+    CREATED=1
+    ACQ_EXTRA_KITS="$KIT_DIR" ACQ_UPDATE_CHECK=0 \
+      "$ACQ" create opencode --name "$SBX_NAME" "$WORKSPACE" </dev/null >"$CREATE_LOG" 2>&1
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+      bad "acq create failed (exit $rc)"; sed 's/^/  | /' "$CREATE_LOG" >&2
+    else
+      ok "sandbox created with the kit applied"
+      printf '  waiting for startup steps to settle'
+      for _ in $(seq 1 60); do
+        sbx_run 'git config --global --get-all "credential.https://$1.helper"' "$GHE_HOST"
+        [ "$SBX_RC" -eq 0 ] && [ -n "$SBX_OUT" ] && break
+        printf '.'; sleep 1
+      done
+      printf '\n'
+      # Single quotes on purpose: the guest shell expands these, not this one.
+      # shellcheck disable=SC2016
+      sbx_run 'printf "%s" "${GH_HOST:-}"'
+      if [ "$SBX_RC" -ne 0 ]; then unver "GH_HOST in the guest: the probe command failed (exit $SBX_RC)"
+      elif [ "$SBX_OUT" = "$GHE_HOST" ]; then ok "GH_HOST=$GHE_HOST in the guest"
+      else bad "GH_HOST is not $GHE_HOST in the guest"; fi
+      # shellcheck disable=SC2016
+      sbx_run 'printf "%s" "${GH_ENTERPRISE_TOKEN:-}"'
+      if [ "$SBX_RC" -ne 0 ]; then unver "GH_ENTERPRISE_TOKEN in the guest: the probe command failed (exit $SBX_RC)"
+      elif [ -n "$SBX_OUT" ]; then ok "GH_ENTERPRISE_TOKEN is set (a placeholder; value not shown)"
+      else bad "GH_ENTERPRISE_TOKEN is empty: the secret was not bound at create"; fi
+      sbx_run 'git ls-remote --get-url "git@$1:o/r.git"' "$GHE_HOST"
+      if [ "$SBX_RC" -ne 0 ]; then unver "SSH-form rewrite in the guest: the probe command failed (exit $SBX_RC)"
+      elif [ "$SBX_OUT" = "https://$GHE_HOST/o/r.git" ]; then ok "SSH-form remote rewritten to HTTPS in the guest"
+      else bad "SSH-form remote not rewritten in the guest"; fi
+      # curl 000 (msb) or 403 (sbx proxy) is a deny. The control host, listed by
+      # no kit, must get one of those, or "admitted" proves nothing.
+      code_denied="$(probe_host example.net)"
+      code="$(probe_host "$GHE_HOST")"
+      case "$code_denied" in
+        000|403) ok "unlisted control host denied (example.net -> $code_denied)" ;;
+        "") unver "unlisted control host: the probe could not run, so the egress check below is not meaningful" ;;
+        *) bad "unlisted control host answered '$code_denied', not a deny code (000/403): the egress check below is not meaningful" ;;
+      esac
+      case "$code" in
+        000|403) bad "egress to $GHE_HOST denied or unreachable (code $code); a TLS or CA failure also shows as 000, see TROUBLESHOOTING.md" ;;
+        "") unver "egress to $GHE_HOST: the probe could not run" ;;
+        *) ok "egress to $GHE_HOST admitted (HTTP $code)" ;;
+      esac
+      # Authenticated and anonymous probes run the SAME query (a full ls-remote,
+      # no ref patterns), so the only difference between them is the credential.
+      # Proof that the placeholder authenticates needs BOTH: refs with the helper,
+      # and an authorization denial without it. Anything else is not proof.
+      if [ -z "$GHE_REPO" ]; then
+        skip "git ls-remote (set GHE_REPO=owner/repo, a PRIVATE repo your token can read)"
+      else
+        ls_probe "$GHE_HOST" "$GHE_REPO" auth; auth_kind="$PROBE_KIND"
+        ls_probe "$GHE_HOST" "$GHE_REPO" anon; anon_kind="$PROBE_KIND"
+        case "$auth_kind:$anon_kind" in
+          refs:auth|refs:notfound)
+            ok "git ls-remote https://$GHE_HOST/$GHE_REPO listed refs with only the placeholder; the same query without credentials was denied ($anon_kind)" ;;
+          refs:refs)
+            unver "git ls-remote: $GHE_REPO is readable without credentials, so it proves nothing about the token; pick a private repo" ;;
+          refs:empty)
+            unver "git ls-remote: the credentialed query listed refs but the identical anonymous query succeeded with none; the repository's visibility is ambiguous, so authentication is not proven" ;;
+          refs:transport)
+            unver "git ls-remote: the anonymous query failed for a non-authorization reason (transport, DNS, TLS, or proxy), so authentication is not proven" ;;
+          empty:*)
+            unver "git ls-remote: the credentialed query succeeded but listed no refs (empty repository?), so it proves nothing about the token; pick a repository with at least one branch" ;;
+          auth:*)
+            bad "git ls-remote https://$GHE_HOST/$GHE_REPO was refused for lack of valid credentials: the placeholder was not accepted (see TROUBLESHOOTING.md)" ;;
+          notfound:*)
+            bad "git ls-remote https://$GHE_HOST/$GHE_REPO: not found, or hidden from this token (GHES answers 404 for a private repository the token cannot read)" ;;
+          transport:*)
+            unver "git ls-remote https://$GHE_HOST/$GHE_REPO: the credentialed query failed for a non-authorization reason (transport, DNS, TLS, or proxy); see TROUBLESHOOTING.md" ;;
+        esac
+      fi
+      sbx_run 'command -v gh'
+      if [ "$SBX_RC" -eq 1 ]; then
+        skip "gh api user (gh is not in the image)"
+      elif [ "$SBX_RC" -ne 0 ]; then
+        unver "gh api user: could not tell whether gh is installed (probe exit $SBX_RC)"
+      else
+        sbx_run 'gh api user -q .login'
+        if [ "$SBX_RC" -eq 0 ] && [ -n "$SBX_OUT" ]; then
+          ok "gh api user succeeded against $GHE_HOST"
+        else
+          bad "gh api user failed against $GHE_HOST (exit $SBX_RC; see TROUBLESHOOTING.md)"
+        fi
+      fi
+    fi
+  fi
+fi
+
+info "Summary"
+printf '  %d passed, %d failed, %d unverified, %d skipped\n' "$pass" "$fail" "$unverified" "$skipped"
+if [ "$fail" -gt 0 ]; then
+  printf '  \033[31mSome checks failed — see notes above.\033[0m\n'
+  exit 1
+elif [ "$pass" -eq 0 ]; then
+  printf '  \033[35mUNVERIFIED — no check ran, so nothing was proven.\033[0m\n'
+  exit 3
+elif [ "$unverified" -gt 0 ]; then
+  printf '  \033[35mUNVERIFIED — %d check(s) could not be performed; this is not a pass.\033[0m\n' "$unverified"
+  exit 3
+fi
+printf '  \033[32mAll executed checks passed.\033[0m\n'
+exit 0
